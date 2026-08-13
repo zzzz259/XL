@@ -1,0 +1,10 @@
+
+		 ---@return ActivityDungeon1006_MiniStart_Line2-3
+function GetActivityDungeon1006_MiniStart_Line2-3Uis(ui)
+		 ---@class ActivityDungeon1006_MiniStart_Line2-3
+         ---@field public root FairyGUI.GComponent
+
+		 local uis ={}
+		 uis.root=ui;
+		 return uis
+end

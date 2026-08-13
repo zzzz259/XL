@@ -1,0 +1,14 @@
+
+		 ---@return ActivityDungeon1022_MiniStart_Line2-4
+function GetActivityDungeon1022_MiniStart_Line2-4Uis(ui)
+		 ---@class ActivityDungeon1022_MiniStart_Line2-4
+         ---@field public colorCtr FairyGUI.Controller
+         ---@field public c1Ctr FairyGUI.Controller
+         ---@field public root FairyGUI.GComponent
+
+		 local uis ={}
+		 uis.colorCtr = ui:GetController("color");
+		 uis.c1Ctr = ui:GetController("c1");
+		 uis.root=ui;
+		 return uis
+end

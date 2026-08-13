@@ -1,0 +1,28 @@
+﻿{
+    "WindowLeft": 162.66666666666666,
+    "WindowTop": 484,
+    "WindowWidth": 1279.3333333333333,
+    "WindowHeight": 780.6666666666666,
+    "WindowState": 0,
+    "RootGridCol0Folded": false,
+    "RootGridCol0Width": 425.05316433412736,
+    "RootGridCol2Width": 1278.6135023325392,
+    "ModelListRow0Height": 1,
+    "ModelListRow2Height": 1,
+    "ExplorerGridRow0Height": 524.7133333333334,
+    "ExplorerGridRow2Height": 126.71333333333325,
+    "RightPanelGridRow0Height": 488.8817204301071,
+    "RightPanelGridRow2Height": 225.21161290322613,
+    "ExploringDirectory": "C:\\Users\\Administrator\\Desktop\\新建文件夹",
+    "ResolutionX": 256,
+    "ResolutionY": 160,
+    "Speed": 1,
+    "ShowAxis": true,
+    "BackgroundColor": {
+        "R": 105,
+        "G": 105,
+        "B": 105,
+        "A": 255
+    },
+    "BackgroundImageMode": 2
+}

@@ -1,0 +1,16 @@
+
+		 ---@return ActivityDungeon1010_MiniStart_Column6-1
+function GetActivityDungeon1010_MiniStart_Column6-1Uis(ui)
+		 ---@class ActivityDungeon1010_MiniStart_Column6-1
+         ---@field public Effect1Holder FairyGUI.GGraph
+         ---@field public Effect2Holder FairyGUI.GGraph
+         ---@field public Effect3Holder FairyGUI.GGraph
+         ---@field public root FairyGUI.GComponent
+
+		 local uis ={}
+		 uis.Effect1Holder = ui:GetChild("Effect1Holder")
+		 uis.Effect2Holder = ui:GetChild("Effect2Holder")
+		 uis.Effect3Holder = ui:GetChild("Effect3Holder")
+		 uis.root=ui;
+		 return uis
+end

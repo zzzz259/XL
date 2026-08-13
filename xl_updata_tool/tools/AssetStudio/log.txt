@@ -1,0 +1,2 @@
+[8/1/2026 1:33:40 AM][Info] Target Game type is UnityCN
+[8/1/2026 1:33:40 AM][Info] [UnityCN] Selected Key is 星落(Elpis) (79756E67756968616F77616E31323334)
