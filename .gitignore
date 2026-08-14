@@ -1,0 +1,38 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 运行时数据（数据库、下载的 bundle、临时文件）
+xl_updata_tool/data/
+xl_updata_tool/app/data/
+xl_updata_tool/output/
+logs/
+*_as_temp/
+_tmp/
+tmp/
+scratch/
+
+# 数据库文件
+*.db
+*.db-wal
+*.db-shm
+
+# 测试输入文件
+xl_updata_tool/tools/epic7_debank_v1_0/input/
+xl_updata_tool/tools/epic7_debank_v1_0/_tempo/
+
+# 工具运行时数据
+xl_updata_tool/tools/SpineViewer/data/
+
+# 日志
+*.log
+
+# PyInstaller 构建产物
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
