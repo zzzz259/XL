@@ -24,6 +24,9 @@ def get_data_dir():
     return os.path.join(get_base_dir(), "data")
 
 
+DATA_DIR = get_data_dir()
+
+
 def get_tools_dir():
     """工具目录（打包后从临时解压目录读取，开发时从项目目录读取）"""
     if getattr(sys, 'frozen', False):

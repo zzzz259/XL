@@ -1,3 +1,4 @@
+THUMB_SIZE = 150
 ACCENT = "#8b5cf6"
 ACCENT_HOVER = "#a78bfa"
 BG_DARK = "#0f0f1a"
