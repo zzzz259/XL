@@ -20,6 +20,7 @@ scratch/
 
 # 测试输入文件
 xl_updata_tool/tools/epic7_debank_v1_0/input/
+xl_updata_tool/tools/epic7_debank_v1_0/_tempo/
 
 # 工具运行时数据
 xl_updata_tool/tools/SpineViewer/data/
