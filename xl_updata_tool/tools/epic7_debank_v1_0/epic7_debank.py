@@ -1,6 +1,19 @@
 import os, pathlib, codecs, shutil, subprocess, argparse, sys
 import psutil
 
+try:
+    from app.core.logger import logger
+except ImportError:
+    logger = None
+
+
+def _log(msg):
+    """模块被导入时走 app 日志，独立运行时回退 print"""
+    if logger is not None:
+        logger.info(msg)
+    else:
+        print(msg)
+
 '''
   Epic7 Bank File Decryptor (v2.1)
   支持命令行参数指定输入/输出目录，递归扫描 .bank 文件。
@@ -78,7 +91,7 @@ def execute_quickbms_single(bank_path, folder4subcontractors_, bank_temp, folder
     os.makedirs(bank_temp, exist_ok=True)
 
     try:
-        subprocess.run([
+        proc = subprocess.run([
             folder4subcontractors_ + "/quickbms.exe", "-Y", "-K", "-d",
             "-F", '{}.bank',
             '-S', python_exe_ + ' "' + folder_cur_ + '/_epic7_defsb.py" #INPUT# "' + folder_cur_ + '"',
@@ -86,19 +99,22 @@ def execute_quickbms_single(bank_path, folder4subcontractors_, bank_temp, folder
             bank_path,
             bank_temp
         ], check=False)
+        if proc.returncode != 0:
+            _log(f"  [警告] quickbms 退出码 {proc.returncode}: {bank_name}")
         return True
     except Exception as e:
-        print(f"  [警告] 解包失败: {bank_name}: {e}")
+        _log(f"  [警告] 解包失败: {bank_name}: {e}")
         return False
 
 
-def run(input_dir, output_dir, folder_cur=None):
+def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_fn=None):
     """核心逻辑：解密 .bank 文件（支持模块化调用）
 
     Args:
         input_dir: 输入目录（递归扫描 .bank 文件）
         output_dir: 输出目录（提取的音频文件）
         folder_cur: 脚本所在目录（自动检测，通常无需传入）
+        progress_callback: 可选，每处理一个 bank 回调 (current, total)
     """
     if folder_cur is None:
         folder_cur = os.path.dirname(os.path.abspath(__file__))
@@ -121,16 +137,17 @@ def run(input_dir, output_dir, folder_cur=None):
     input_root = os.path.abspath(input_dir)
     output_root = os.path.abspath(output_dir)
 
-    print(f"输入目录: {input_root}")
-    print(f"输出目录: {output_root}")
+    _log(f"输入目录: {input_root}")
+    _log(f"输出目录: {output_root}")
+    _log(f"自定义输出子目录: {'启用' if subdir_fn else '关闭（保留原目录结构）'}")
 
     # 递归收集所有 .bank 文件
     bank_files = collect_bank_files(input_root)
     if not bank_files:
-        print("未找到 .bank 文件")
+        _log("未找到 .bank 文件")
         return
 
-    print(f"共找到 {len(bank_files)} 个 .bank 文件")
+    _log(f"共找到 {len(bank_files)} 个 .bank 文件")
 
     # 准备临时目录和结果目录
     shutil.rmtree(folder4tempo, ignore_errors=True)
@@ -144,13 +161,17 @@ def run(input_dir, output_dir, folder_cur=None):
     for i, bank_path in enumerate(bank_files):
         bank_name = os.path.basename(bank_path)
         print(f"[{i+1}/{len(bank_files)}] 处理: {bank_name}")
+        if progress_callback:
+            progress_callback(i + 1, len(bank_files))
 
-        # 获取相对于输入目录的路径，用于保留目录结构
+        # 获取相对于输入目录的路径
         rel_path = os.path.relpath(bank_path, input_root)
         rel_dir = os.path.dirname(rel_path)
+        bank_stem = os.path.splitext(bank_name)[0]
 
-        # 构建输出子目录（保持与输入相同的目录结构）
-        output_subdir = os.path.join(output_root, rel_dir) if rel_dir else output_root
+        # 构建输出子目录（可用 subdir_fn 自定义分类，否则保持原目录结构）
+        out_rel = subdir_fn(rel_path, bank_stem) if subdir_fn else rel_dir
+        output_subdir = os.path.join(output_root, out_rel) if out_rel else output_root
         try:
             os.makedirs(output_subdir, exist_ok=True)
         except Exception as e:
@@ -158,7 +179,6 @@ def run(input_dir, output_dir, folder_cur=None):
             continue
 
         # 为每个 bank 文件创建独立的临时子目录
-        bank_stem = os.path.splitext(bank_name)[0]
         bank_temp = os.path.join(folder4tempo, bank_stem)
 
         # 解包当前 bank 文件
@@ -195,14 +215,14 @@ def run(input_dir, output_dir, folder_cur=None):
         shutil.rmtree(folder4result, ignore_errors=True)
         pathlib.Path(folder4result).mkdir(parents=True, exist_ok=True)
 
-    print(f"\n处理完成: 已复制 {total_copied} 个, 跳过 {total_skipped} 个, 失败 {total_failed} 个")
-    print(f"输出目录: {output_root}")
+    _log(f"处理完成: 已复制 {total_copied} 个, 跳过 {total_skipped} 个, 失败 {total_failed} 个")
+    _log(f"输出目录: {output_root}")
 
     # 清理临时目录
     shutil.rmtree(folder4tempo, ignore_errors=True)
     shutil.rmtree(folder4result, ignore_errors=True)
 
-    print("完成!")
+    _log("完成!")
 
 
 def main():

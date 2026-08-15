@@ -1298,6 +1298,8 @@ def load_character_data(lua_dir, progress_callback=None):
             skill_part = uid // 1000
             if skill_part not in skill_to_upgrade:
                 skill_to_upgrade[skill_part] = uid
+    else:
+        logger.warning(f"BaseSkill.lua 或 BaseSkillLevelUp.lua 缺失，技能数据为空（sk={os.path.isfile(sk_path)}, slu={os.path.isfile(slu_path)}）")
 
     logger.info(f"BaseSkill 解析: {len(skill_name_map)} 个技能名称, {len(skill_desc_map)} 条描述")
 

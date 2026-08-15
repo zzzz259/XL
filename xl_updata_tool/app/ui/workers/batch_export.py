@@ -44,6 +44,8 @@ class BatchExportWorker(QThread):
         scale = self.settings["scale"]
         pma = self.settings.get("pma", False)
 
+        logger.info(f"批量导出开始：{total} 个文件，格式={fmt}, 动画={animation}, 时长={duration}s, 帧率={fps}, 缩放={scale}, 预乘={pma}")
+
         ext = ".mp4" if fmt == "mp4" else ".gif"
         output_dir = os.path.join(
             self.project_root,
@@ -112,4 +114,5 @@ class BatchExportWorker(QThread):
                 logger.error(f"批量导出异常 [{skel_base}]: {e}")
                 self.one_finished.emit(skel_path, False)
 
+        logger.info(f"批量导出完成：成功 {success}，失败 {fail}")
         self.all_finished.emit(success, fail)

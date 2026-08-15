@@ -4,6 +4,8 @@ import os
 import threading
 from datetime import datetime
 
+from .logger import logger
+
 DB_PATH = None
 
 
@@ -78,6 +80,7 @@ def init_db(path):
     """)
     conn.commit()
     conn.close()
+    logger.info(f"数据库初始化完成: {path}")
     return path
 
 
@@ -113,6 +116,7 @@ def save_version(timestamp, updateinfo, versions_data, is_current=True):
         """, (item["name"], item["hash"], item["size"], item["ver"], timestamp))
     conn.commit()
     conn.close()
+    logger.info(f"保存版本 {timestamp}，{len(versions_data.get('data', []))} 个分类包")
 
 
 def _extract_ver(data, name):
@@ -226,6 +230,7 @@ def record_changes(from_ts, to_ts):
             """, (from_ts, to_ts, name, new_ver, new_hash, new_size))
     conn.commit()
     conn.close()
+    logger.info(f"记录版本变更 {from_ts} -> {to_ts}，{len(new_bundles)} 个 bundle")
 
 
 def get_version_changes(from_ts, to_ts):
@@ -273,6 +278,7 @@ def save_sub_bundles(version_ts, hashes):
         """, (h, version_ts))
     conn.commit()
     conn.close()
+    logger.info(f"保存版本 {version_ts} 的 {len(hashes)} 个 sub_bundle")
 
 
 def get_sub_bundles(version_ts):
@@ -305,6 +311,7 @@ def save_delta(from_ts, to_ts, added, removed, common_count):
     """, (from_ts, to_ts, f"[SUMMARY] added={len(added)} removed={len(removed)} common={common_count}", 0))
     conn.commit()
     conn.close()
+    logger.info(f"保存 delta {from_ts} -> {to_ts}：新增 {len(added)}，移除 {len(removed)}，未变 {common_count}")
 
 
 def get_stats():

@@ -4,7 +4,7 @@
 import os
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtGui import QPixmap, Qt
+from PySide6.QtGui import QPixmap, QPainter, Qt
 
 from app.core.logger import logger
 from app.ui.theme import THUMB_SIZE
@@ -30,17 +30,25 @@ class ImageLoadWorker(QThread):
             self.finished_loading.emit([])
             return
 
-        png_files = sorted([f for f in os.listdir(self.image_dir) if f.lower().endswith(".png")])
+        # 递归扫描（角色图现在按编号分子目录）
+        png_files = []
+        for root, _dirs, files in os.walk(self.image_dir):
+            for f in files:
+                if f.lower().endswith(".png"):
+                    png_files.append(os.path.join(root, f))
+        png_files.sort()
         total = len(png_files)
         if total == 0:
+            logger.info(f"图片目录无 PNG: {self.image_dir}")
             self.finished_loading.emit([])
             return
+        logger.info(f"加载图片缩略图：{self.image_dir} 共 {total} 张")
 
         loaded_paths = []
-        for i, fname in enumerate(png_files):
+        for i, fpath in enumerate(png_files):
             if self._cancelled:
                 break
-            fpath = os.path.join(self.image_dir, fname)
+            fname = os.path.basename(fpath)
             try:
                 pixmap = QPixmap(fpath)
                 if not pixmap.isNull():
@@ -51,11 +59,17 @@ class ImageLoadWorker(QThread):
                 logger.error(f"加载图片失败 {fname}: {e}")
             self.progress.emit(i + 1, total)
 
+        logger.info(f"加载图片完成：{len(loaded_paths)}/{total} 张")
         self.finished_loading.emit(loaded_paths)
 
     def _create_thumbnail(self, pixmap, size):
-        """缩放并居中裁剪为正方形缩略图"""
-        scaled = pixmap.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        x = (scaled.width() - size) // 2
-        y = (scaled.height() - size) // 2
-        return scaled.copy(x, y, size, size)
+        """缩放为缩略图（保持宽高比，不裁剪，居中放在透明画布上）"""
+        scaled = pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        result = QPixmap(size, size)
+        result.fill(Qt.transparent)
+        painter = QPainter(result)
+        x = (size - scaled.width()) // 2
+        y = (size - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
+        painter.end()
+        return result

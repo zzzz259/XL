@@ -72,6 +72,11 @@ QToolButton:hover {{
 QToolButton:pressed {{
     background-color: {ACCENT};
 }}
+QToolButton:checked {{
+    background-color: {ACCENT};
+    color: white;
+    font-weight: 600;
+}}
 QToolButton[accent="true"] {{
     background-color: {ACCENT};
     color: white;
@@ -270,7 +275,7 @@ QStatusBar {{
     border-top: 1px solid {BORDER};
     padding: 4px 12px;
     color: {TEXT_SECONDARY};
-    font-size: 12px;
+    font-size: 14px;
 }}
 QToolTip {{
     background-color: {BG_ELEVATED};
