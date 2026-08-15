@@ -75,6 +75,11 @@ class MainWindow(QMainWindow):
         self._image_worker = None
         self._import_worker = None
         self._lua_worker = None
+        # 音频播放器相关属性（避免首次访问 AttributeError）
+        self._audio_player = None
+        self._audio_output = None
+        self._audio_files = []
+        self._audio_current_path = None
         self._show_character = False
         self._character_data_loaded = False
         self._character_loading = False
