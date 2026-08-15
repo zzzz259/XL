@@ -210,21 +210,24 @@ class _MapWorker(QThread):
                 return
             md = os.path.join(self._bd, "_map")
             os.makedirs(md, exist_ok=True)
+            total_bundles = sum(1 for f in os.listdir(self._bd) if f.lower().endswith(".bundle")) if os.path.isdir(self._bd) else 0
+            logger.info(f"[资源浏览器] 解析资源，{total_bundles} 个 bundle")
             proc = subprocess.Popen(
                 [AS_CLI, self._bd, md, "--game", "UnityCN", "--key_index", "23",
-                 "--map_op", "Both", "--map_type", "JSON", "--silent"],
+                 "--map_op", "Both", "--map_type", "JSON"],
                 cwd=os.path.dirname(AS_CLI), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, bufsize=1,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+            loaded = 0
             for line in proc.stdout:
-                if "Processed" in line:
-                    try:
-                        p = line.split()
-                        c = int(p[0].split("/")[0].lstrip("["))
-                        t = int(p[0].split("/")[1])
-                        self.progress.emit(c, t)
-                    except:
-                        pass
+                line = line.strip()
+                if not line:
+                    continue
+                if "Loading" in line and ".bundle" in line:
+                    loaded += 1
+                    self.progress.emit(loaded, total_bundles)
+                else:
+                    logger.debug(f"[资源浏览器] CLI: {line}")
             proc.wait()
             mf = os.path.join(md, "assets_map.json")
             if os.path.exists(mf) and os.path.getsize(mf) > 100:

@@ -315,11 +315,13 @@ class LuaDecryptWorker(QThread):
 
     def run(self):
         try:
+            logger.info(f"Lua 反编译线程开始：{self.lua_dir}")
             success, fail = decompile_lua_dir(
                 self.lua_dir, self.unluac_path, self.opmap_path,
                 progress_cb=self.progress.emit,
                 file_done_cb=self.file_done.emit,
                 cancel_check=lambda: self._cancelled)
+            logger.info(f"Lua 反编译完成：成功 {success}，失败 {fail}")
             self.finished.emit(success, fail)
         except Exception as e:
             logger.error(f"Lua 解密线程异常: {e}", exc_info=True)

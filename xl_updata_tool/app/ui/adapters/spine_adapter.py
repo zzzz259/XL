@@ -26,6 +26,12 @@ from app.core.logger import logger
 from app.core.path_utils import get_tools_dir, get_base_dir
 
 
+def extract_character_id(base_name):
+    """从 skel base 名提取角色编号（如 cardspine_10080_4 → 10080）；找不到则返回原 base 名"""
+    m = re.search(r'(\d{5})', base_name)
+    return m.group(1) if m else base_name
+
+
 # ---------------------------------------------------------------------------
 # 配对识别
 # ---------------------------------------------------------------------------
@@ -63,6 +69,7 @@ def find_paired_files(skel_files):
         if base not in used_bg:
             unpaired.append(bg_path)
 
+    logger.info(f"配对识别完成：{len(pairs)} 组配对，{len(unpaired)} 个未配对")
     return pairs, unpaired
 
 
