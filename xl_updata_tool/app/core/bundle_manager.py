@@ -4,6 +4,8 @@ import struct
 import hashlib
 from pathlib import Path
 
+from .logger import logger
+
 UNITYFS_MAGIC = b"UnityFS"
 
 
@@ -35,6 +37,7 @@ class BundleManager:
                         "unity_ver": "",
                         "bundled_files": 0,
                     })
+        logger.info(f"扫描本地 bundle：{len(result)} 个文件")
         return result
 
     def _parse_bundle(self, path):
@@ -43,6 +46,7 @@ class BundleManager:
                 header = f.read(200)
             idx = header.find(UNITYFS_MAGIC)
             if idx < 0:
+                logger.debug(f"bundle 无 UnityFS 魔数: {path}")
                 return {"unity_version": "", "files": 0}
             ver_start = idx + 8
             ver_end = header.find(b"\x00", ver_start)
@@ -50,7 +54,8 @@ class BundleManager:
             if ver_end > ver_start:
                 version = header[ver_start:ver_end].decode("ascii", errors="ignore")
             return {"unity_version": version, "files": 0}
-        except Exception:
+        except Exception as e:
+            logger.debug(f"解析 bundle 失败: {path}: {e}")
             return {"unity_version": "", "files": 0}
 
     def extract_file_list(self, path):

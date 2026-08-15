@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "PsdWriter/0.16.18": {
+        "runtime": {
+          "PsdWriter.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "PsdWriter/0.16.18": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

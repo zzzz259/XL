@@ -9,6 +9,7 @@ from urllib.error import URLError, HTTPError
 from PySide6.QtCore import QThread, Signal
 
 from .bundle_parser import extract_manifest_hashes, fix_bundle_inplace, compute_delta
+from .logger import logger
 
 CDN_BASE = "https://elpis.17995cdn.com"
 UPDATE_INFO_URL = f"{CDN_BASE}/Android/UpdateInfo/updateinfo.json"
@@ -59,6 +60,7 @@ class CheckUpdateThread(QThread):
 
     def run(self):
         try:
+            logger.info(f"检查更新线程开始：已有 {len(self.old_hashes) if self.old_hashes else 0} 个旧 hash")
             info, versions = check_update()
             ts = versions["timestamp"]
             os.makedirs(self.output_dir, exist_ok=True)
@@ -74,6 +76,9 @@ class CheckUpdateThread(QThread):
                     data = http_get(url)
                     with open(out, "wb") as f:
                         f.write(data)
+                    logger.debug(f"下载分类包: {fname} ({len(data)} 字节)")
+                else:
+                    logger.debug(f"分类包已缓存: {fname}")
                 categories[name] = out
 
             # 从 category 包提取完整的 bundle hash 清单
@@ -81,15 +86,18 @@ class CheckUpdateThread(QThread):
             for cat_name, cat_path in categories.items():
                 hashes = extract_manifest_hashes(cat_path)
                 new_hashes |= hashes
+            logger.info(f"提取到 {len(new_hashes)} 个 bundle hash")
 
             # 计算 delta
             delta = compute_delta(
                 self.old_hashes if self.old_hashes else [], new_hashes
             )
+            logger.info(f"检查更新完成：新增 {len(delta['added'])}，移除 {len(delta['removed'])}，未变 {delta['common']}")
 
             self.finished.emit(info, versions, sorted(new_hashes), delta)
 
         except Exception as e:
+            logger.error(f"检查更新异常: {e}", exc_info=True)
             self.error.emit(str(e))
 
 
@@ -112,7 +120,10 @@ class DownloadWorker(QThread):
 
     def run(self):
         os.makedirs(self.output_dir, exist_ok=True)
+        logger.info(f"下载线程开始：{len(self.hashes)} 个文件 → {self.output_dir}")
         done = 0
+        skipped = 0
+        failed = 0
         for h in self.hashes:
             if self._stop:
                 break
@@ -123,6 +134,7 @@ class DownloadWorker(QThread):
             # check if already downloaded (skip if file exists and has reasonable size)
             if os.path.exists(out) and os.path.getsize(out) > 100:
                 done += 1
+                skipped += 1
                 self.progress.emit(h, done, len(self.hashes))
                 self.item_skip.emit(h, fname)
                 continue
@@ -161,14 +173,19 @@ class DownloadWorker(QThread):
                 self.progress.emit(h, done, len(self.hashes))
                 self.item_done.emit(h, fname, out)
             else:
+                failed += 1
                 self.item_fail.emit(h, f"Failed after 3 attempts")
 
+        logger.info(f"下载线程结束：共 {len(self.hashes)} 个，成功 {done - skipped}，跳过 {skipped}，失败 {failed}")
         self.all_done.emit()
 
 
 def verify_bundle(filepath, expected_hash):
     """验证下载的文件 MD5 是否匹配"""
     if not os.path.exists(filepath):
+        logger.warning(f"MD5 校验：文件不存在 {filepath}")
         return False
     actual = hashlib.md5(open(filepath, "rb").read()).hexdigest()
-    return actual.lower() == expected_hash.lower()
+    match = actual.lower() == expected_hash.lower()
+    logger.debug(f"MD5 校验 {'通过' if match else '失败'}: {os.path.basename(filepath)}")
+    return match

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QToolButton, QHeaderView,
-    QListWidgetItem, QFileDialog, QCheckBox, QMenu,
+    QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMimeData, QUrl
 from PySide6.QtGui import QColor, QPixmap
@@ -22,7 +22,7 @@ from .theme import (
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
 from app.core.downloader import CheckUpdateThread, DownloadWorker
-from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace
+from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace, compute_delta
 from app.core import database as db
 from app.core.logger import logger
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -41,7 +41,6 @@ from .views.audio_view import create_audio_view
 from .views.character_view import create_character_view
 from .features.export_controller import (
     export_composite_video,
-    export_composite_video_with_params,
     export_with_dialog,
     batch_export_with_dialog,
     on_composite_progress,
@@ -59,8 +58,9 @@ BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, debug_mode=False):
         super().__init__()
+        self.debug_mode = debug_mode
         self.setWindowTitle("XL 更新管理工具")
         self.resize(1200, 700)
         self.setMinimumSize(900, 500)
@@ -70,6 +70,8 @@ class MainWindow(QMainWindow):
         # 后台工作线程实例（避免 AttributeError）
         self._preview_worker = None
         self._audio_worker = None
+        self._audio_player = None
+        self._audio_output = None
         self._batch_worker = None
         self._composite_worker = None
         self._image_worker = None
@@ -105,7 +107,20 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._toolbar())
+        root.addWidget(self._view_toolbar())
+        if self.debug_mode:
+            root.addWidget(self._debug_toolbar())
+
+        # 主体：侧边功能工具栏 + 内容区
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self._action_toolbar())
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
 
         self.table = QTableWidget()
         self.table.setColumnCount(7)
@@ -139,22 +154,25 @@ class MainWindow(QMainWindow):
                 font-weight:600; color:{TEXT_SECONDARY}; }}
         """)
         self.table.currentItemChanged.connect(self._on_row_select)
-        root.addWidget(self.table, 1)
+        content_layout.addWidget(self.table, 1)
 
         # 预览视图容器（默认隐藏）
         self.preview_container, self.preview_controls = create_preview_view(self)
         self.preview_container.setVisible(False)
-        root.addWidget(self.preview_container, 1)
+        content_layout.addWidget(self.preview_container, 1)
 
         # 音频管理器视图容器（默认隐藏）
         self.audio_container, self.audio_controls = create_audio_view(self)
         self.audio_container.setVisible(False)
-        root.addWidget(self.audio_container, 1)
+        content_layout.addWidget(self.audio_container, 1)
 
         # 角色视图容器（默认隐藏）
         self.character_container, self.character_controls = create_character_view(self)
         self.character_container.setVisible(False)
-        root.addWidget(self.character_container, 1)
+        content_layout.addWidget(self.character_container, 1)
+
+        body.addWidget(content, 1)
+        root.addLayout(body, 1)
 
         # 暴露预览控件引用（供其他方法使用）
         self.preview_title = self.preview_controls["preview_title"]
@@ -187,36 +205,33 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet(f"""
             QStatusBar {{ background-color:{BG_SURFACE}; border-top:1px solid {BORDER};
-                         padding:4px 12px; color:{TEXT_SECONDARY}; font-size:12px; }}
+                         padding:4px 12px; color:{TEXT_SECONDARY}; font-size:14px; }}
         """)
         self.setStatusBar(self.status_bar)
         self._anim_timer = QTimer()
         self._anim_dots = 0
 
-    def _toolbar(self):
+    def _view_toolbar(self):
+        """顶部视图切换工具栏（版本列表 / 图片预览 / 音频 / 角色）"""
         bar = QToolBar(); bar.setMovable(False)
         bar.addWidget(self._lbl("XL 1.0.1", 16, ACCENT, True))
         bar.addSeparator()
-        self.btn_check = self._tbtn("检查更新", True)
-        self.btn_check.clicked.connect(self._check_update)
-        bar.addWidget(self.btn_check)
-        self.btn_browse = self._tbtn("导入AS")
-        self.btn_browse.clicked.connect(self._import_selected)
-        bar.addWidget(self.btn_browse)
-        bar.addSeparator()
+        self.btn_home = self._tbtn("版本列表")
+        self.btn_home.setCheckable(True)
+        self.btn_home.clicked.connect(self._load_data)
+        bar.addWidget(self.btn_home)
         self.btn_image_preview = self._tbtn("图片预览")
+        self.btn_image_preview.setCheckable(True)
         self.btn_image_preview.clicked.connect(lambda: self._toggle_preview_mode(True))
         bar.addWidget(self.btn_image_preview)
         self.btn_audio = self._tbtn("音频")
+        self.btn_audio.setCheckable(True)
         self.btn_audio.clicked.connect(lambda: self._toggle_audio_mode(True))
         bar.addWidget(self.btn_audio)
         self.btn_lua = self._tbtn("角色")
+        self.btn_lua.setCheckable(True)
         self.btn_lua.clicked.connect(self._start_lua_decrypt)
         bar.addWidget(self.btn_lua)
-        r = self._tbtn("刷新"); r.clicked.connect(self._load_data); bar.addWidget(r)
-        self.btn_author = self._tbtn("作者")
-        self.btn_author.clicked.connect(self._show_author_info)
-        bar.addWidget(self.btn_author)
         bar.addSeparator()
         self.dl_progress = QProgressBar()
         self.dl_progress.setFixedHeight(28); self.dl_progress.setFixedWidth(260)
@@ -229,6 +244,50 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.dl_progress)
         return bar
 
+    def _action_toolbar(self):
+        """侧边功能工具栏（检查更新 / 导入AS / 刷新 / 作者 + 导出配置），竖排"""
+        bar = QToolBar(); bar.setMovable(False)
+        bar.setOrientation(Qt.Vertical)
+        self.btn_check = self._tbtn("检查更新")
+        self.btn_check.clicked.connect(self._check_update)
+        bar.addWidget(self.btn_check)
+        self.btn_browse = self._tbtn("导入AS")
+        self.btn_browse.clicked.connect(self._import_selected)
+        bar.addWidget(self.btn_browse)
+        self.btn_refresh = self._tbtn("刷新")
+        self.btn_refresh.clicked.connect(self._load_data)
+        bar.addWidget(self.btn_refresh)
+        self.btn_author = self._tbtn("作者")
+        self.btn_author.clicked.connect(self._show_author_info)
+        bar.addWidget(self.btn_author)
+        bar.addSeparator()
+        bar.addWidget(self._lbl("导出配置", 12, TEXT_SECONDARY, True))
+        self.cb_export_lua = QCheckBox("lua")
+        self.cb_export_lua.setChecked(True)
+        self.cb_export_character = QCheckBox("角色立绘")
+        self.cb_export_character.setChecked(True)
+        self.cb_export_fgui = QCheckBox("FGUI图集")
+        self.cb_export_fgui.setChecked(True)
+        self.cb_export_audio = QCheckBox("音频")
+        self.cb_export_audio.setChecked(True)
+        for cb in (self.cb_export_lua, self.cb_export_character,
+                   self.cb_export_fgui, self.cb_export_audio):
+            bar.addWidget(cb)
+        return bar
+
+    def _get_export_categories(self):
+        """返回勾选的导出分类集合（lua/character/fgui/audio）"""
+        cats = set()
+        if self.cb_export_lua.isChecked():
+            cats.add("lua")
+        if self.cb_export_character.isChecked():
+            cats.add("character")
+        if self.cb_export_fgui.isChecked():
+            cats.add("fgui")
+        if self.cb_export_audio.isChecked():
+            cats.add("audio")
+        return cats
+
     def _lbl(self, t, s=12, c=TEXT_PRIMARY, b=False):
         l = QLabel(t); l.setStyleSheet(f"color:{c};font-size:{s}px;font-weight:{'bold' if b else 'normal'};padding:4px 8px;background:transparent;border:none;"); return l
 
@@ -236,6 +295,65 @@ class MainWindow(QMainWindow):
         b = QToolButton(); b.setText(t)
         if accent: b.setProperty("accent","true"); b.setStyleSheet(b.styleSheet())
         return b
+
+    def _debug_toolbar(self):
+        """调试模式专属工具栏：选择性导出 + 清空各数据区域"""
+        bar = QToolBar()
+        bar.setMovable(False)
+        bar.addWidget(self._lbl("调试模式", 12, ACCENT, True))
+        bar.addSeparator()
+        bar.addWidget(self._lbl("导出范围:", 12))
+        self.debug_export_scope = QComboBox()
+        self.debug_export_scope.addItem("全量导出", None)
+        self.debug_export_scope.addItem("只导出 Lua", ["TextAsset"])
+        self.debug_export_scope.addItem("只导出贴图", ["Texture2D"])
+        self.debug_export_scope.setFixedWidth(130)
+        bar.addWidget(self.debug_export_scope)
+        bar.addSeparator()
+        output_dir = os.path.join(get_base_dir(), "output")
+        self._add_clear_btn(bar, "清空ab包", BUNDLES_DIR)
+        self._add_clear_btn(bar, "清空AS导出", os.path.join(DATA_DIR, "material"))
+        self._add_clear_btn(bar, "清空立绘", os.path.join(output_dir, "character"))
+        self._add_clear_btn(bar, "清空图鉴", os.path.join(DATA_DIR, "material", "assets", "lua"))
+        self._add_clear_btn(bar, "清空音频", os.path.join(output_dir, "audio"))
+        return bar
+
+    def _add_clear_btn(self, bar, text, target_dir):
+        btn = self._tbtn(text)
+        btn.clicked.connect(lambda: self._clear_dir(target_dir))
+        bar.addWidget(btn)
+
+    def _clear_dir(self, target_dir):
+        """确认后清空目录（rmtree + 重建）"""
+        if not os.path.isdir(target_dir):
+            QMessageBox.information(self, "清空", f"目录不存在:\n{target_dir}")
+            return
+        ret = QMessageBox.question(self, "确认清空",
+                                   f"确定要清空此目录？\n{target_dir}",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        try:
+            shutil.rmtree(target_dir)
+            os.makedirs(target_dir, exist_ok=True)
+            logger.info(f"[调试] 已清空目录: {target_dir}")
+            # 清空 ab 包后同步清数据库下载状态并刷新版本列表
+            if target_dir == BUNDLES_DIR:
+                c = db.get_conn()
+                c.execute("UPDATE sub_bundles SET local_path=NULL, downloadable=0 WHERE local_path IS NOT NULL")
+                c.commit()
+                c.close()
+                self._load_data()
+            QMessageBox.information(self, "清空", f"已清空:\n{target_dir}")
+        except Exception as e:
+            logger.error(f"[调试] 清空失败 {target_dir}: {e}")
+            QMessageBox.warning(self, "清空失败", str(e))
+
+    def _get_export_filter(self):
+        """调试模式的选择性导出类型（None = 全量）"""
+        if self.debug_mode:
+            return self.debug_export_scope.currentData()
+        return None
 
     def _row_btn(self, text, color, tooltip=""):
         b = QPushButton(text)
@@ -252,6 +370,43 @@ class MainWindow(QMainWindow):
 
     # ========== DATA ==========
 
+    def _sync_local_bundles(self, ts=None):
+        """扫描磁盘实际 .bundle 文件，同步 DB 下载状态（local_path/downloadable）
+
+        磁盘是事实来源：磁盘有但 DB 未记录 → 标记已下载；DB 有记录但磁盘无 → 清除。
+        ts 非空时只同步该版本，否则同步全部版本。
+        """
+        for v in db.get_all_versions():
+            vts = v[0]
+            if ts is not None and vts != ts:
+                continue
+            bundle_dir = os.path.join(BUNDLES_DIR, str(vts))
+            if not os.path.isdir(bundle_dir):
+                continue
+            on_disk = {}
+            for f in os.listdir(bundle_dir):
+                if f.lower().endswith(".bundle"):
+                    on_disk[f[:-len(".bundle")]] = os.path.join(bundle_dir, f)
+            sub = db.get_sub_bundles(vts) or []
+            conn = db.get_conn()
+            changed = 0
+            for h, downloadable, local_path in sub:
+                if h in on_disk:
+                    if not local_path:
+                        conn.execute(
+                            "UPDATE sub_bundles SET local_path=?, downloadable=1 WHERE hash=? AND version_timestamp=?",
+                            (on_disk[h], h, vts))
+                        changed += 1
+                elif local_path:
+                    conn.execute(
+                        "UPDATE sub_bundles SET local_path=NULL, downloadable=0 WHERE hash=? AND version_timestamp=?",
+                        (h, vts))
+                    changed += 1
+            conn.commit()
+            conn.close()
+            if changed:
+                logger.info(f"[同步] 版本 {vts} 下载状态：{changed} 条变更")
+
     def _load_data(self):
         # 确保版本列表可见（隐藏图片预览、音频和角色视图）
         self.table.setVisible(True)
@@ -259,9 +414,12 @@ class MainWindow(QMainWindow):
         self.audio_container.setVisible(False)
         self.character_container.setVisible(False)
         self._show_character = False
+        self._set_active_view_btn(self.btn_home)
         prev = getattr(self, '_sel_ts', None)
+        self._sync_local_bundles()
         versions = self.version_mgr.refresh()
-        self._populate_table(versions)
+        delta_map = self._compute_version_deltas(versions)
+        self._populate_table(versions, delta_map)
         if prev:
             self._sel_ts = prev
             for i in range(self.table.rowCount()):
@@ -269,7 +427,22 @@ class MainWindow(QMainWindow):
                     self.table.selectRow(i); break
         self.status_bar.showMessage(f"已追踪 {len(versions)} 个版本")
 
-    def _populate_table(self, versions):
+    def _compute_version_deltas(self, versions):
+        """计算每个版本相对上一版本的 bundle 差异，返回 {ts: (added, removed, common)}"""
+        delta_map = {}
+        sorted_versions = sorted(versions, key=lambda v: v[0])
+        prev_hashes = None
+        for v in sorted_versions:
+            ts = v[0]
+            sub = db.get_sub_bundles(ts)
+            hashes = [r[0] for r in sub] if sub else []
+            if prev_hashes is not None:
+                d = compute_delta(prev_hashes, hashes)
+                delta_map[ts] = (len(d["added"]), len(d["removed"]), d["common"])
+            prev_hashes = hashes
+        return delta_map
+
+    def _populate_table(self, versions, delta_map=None):
         self.table.setSortingEnabled(False)
         # fully clear old widgets and rows
         self.table.clearContents()
@@ -295,7 +468,13 @@ class MainWindow(QMainWindow):
             else: si.setForeground(QColor(TEXT_MUTED))
             self.table.setItem(i, 1, si)
             self.table.setItem(i, 2, QTableWidgetItem(f"{total:,}" if total else "-"))
-            self.table.setItem(i, 3, QTableWidgetItem(notes or ""))
+            # 备注：优先显示相对上一版本的增量/删除
+            if delta_map and ts in delta_map:
+                added, removed, common = delta_map[ts]
+                display_notes = f"新增 {added} | 移除 {removed} | 未变 {common}"
+            else:
+                display_notes = notes or ""
+            self.table.setItem(i, 3, QTableWidgetItem(display_notes))
             # per-row buttons: delta, full, delete
             for col, (txt, clr, cb) in enumerate([
                 ("增量下载", SUCCESS, lambda c, t=ts: self._download_version(t, True)),
@@ -345,6 +524,7 @@ class MainWindow(QMainWindow):
         pv = self.version_mgr.get_current(); oh = []
         if pv:
             or_ = db.get_sub_bundles(pv[0]); oh = [r[0] for r in or_] if or_ else []
+        logger.info(f"开始检查更新：当前版本 {pv[0] if pv else '无'}，已有 {len(oh)} 个 hash")
         out_dir = os.path.join(BUNDLES_DIR, "current")
         self.thread = CheckUpdateThread(out_dir, oh)
         self.thread.finished.connect(self._on_update_checked)
@@ -362,9 +542,11 @@ class MainWindow(QMainWindow):
             notes = f"新增 {len(delta['added'])} | 移除 {len(delta['removed'])} | 未变 {delta['common']}"
             db.add_notes(ts, notes)
             cnt = len(delta['added'])
+            logger.info(f"检查更新：发现新版本 {ts}，新增 {cnt} 个 bundle（移除 {len(delta['removed'])}，未变 {delta['common']}）")
             self.status_bar.showMessage(f"发现新版本! 新增 {cnt} 个 bundle.")
             QMessageBox.information(self, "更新完成", f"发现新版本!\n\n{notes}")
         else:
+            logger.info(f"检查更新：版本 {ts} 已存在，无需更新")
             self.status_bar.showMessage("已是最新版本.")
             QMessageBox.information(self, "已是最新", "当前已是最新版本，无需更新。")
         self._load_data()
@@ -413,7 +595,7 @@ class MainWindow(QMainWindow):
         self.dl_progress.setMaximum(len(missing)); self.dl_progress.setValue(0)
         self.dl_progress.setFormat(f"{label}: 0/{len(missing)}")
         self.status_bar.showMessage(f"{label}: 准备下载 {len(missing)} 个文件...")
-        logger.info(f"开始下载版本 {ts}，共 {len(missing)} 个文件")
+        logger.info(f"开始{label}版本 {ts}：待下载 {len(missing)} 个文件（已下载 {len(ds)} 个）")
 
         out_dir = os.path.join(BUNDLES_DIR, str(ts))
         self.dl_worker = DownloadWorker(missing, out_dir)
@@ -470,7 +652,8 @@ class MainWindow(QMainWindow):
         ts = self._get_selected_ts()
         if not ts: QMessageBox.warning(self, "未选择", "请先选中一个版本."); return
 
-        # 获取该版本所有 Bundle 的本地路径
+        # 同步该版本磁盘实际状态（磁盘为准），再取已下载的本地路径
+        self._sync_local_bundles(ts)
         sub = db.get_sub_bundles(ts)
         fs = [r[2] for r in sub if r[2] and os.path.exists(r[2])] if sub else []
         if not fs:
@@ -499,24 +682,48 @@ class MainWindow(QMainWindow):
         self.dl_progress.setValue(0)
         self.dl_progress.setFormat("修复文件头: 0/0")
         self.status_bar.showMessage("正在导入AS: 修复文件头...")
-        logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件")
 
         # 启动后台工作线程
-        self._import_worker = ImportASWorker(fs, bundle_dir, material_dir, as_cli, self)
+        export_categories = self._get_export_categories()
+        if not export_categories:
+            QMessageBox.warning(self, "提示", "请至少勾选一类要导出的资源")
+            self.btn_browse.setEnabled(True)
+            self.dl_progress.setVisible(False)
+            return
+        logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件，勾选导出分类 {sorted(export_categories)}")
+        self._import_worker = ImportASWorker(fs, bundle_dir, material_dir, as_cli, self, export_categories=export_categories)
         self._import_worker.progress_stage.connect(self._on_import_progress)
         self._import_worker.stage_finished.connect(self._on_import_stage_finished)
         self._import_worker.all_finished.connect(self._on_import_all_finished)
         self._import_worker.start()
 
+        # 进度弹窗（非模态，可取消）
+        self._import_progress_dialog = QProgressDialog("正在导入 AS...", "取消", 0, 100, self)
+        self._import_progress_dialog.setWindowTitle("导入 AS")
+        self._import_progress_dialog.setWindowModality(Qt.NonModal)
+        self._import_progress_dialog.setMinimumDuration(0)
+        self._import_progress_dialog.setAutoClose(False)
+        self._import_progress_dialog.setAutoReset(False)
+        self._import_progress_dialog.canceled.connect(self._import_worker.cancel)
+        self._import_progress_dialog.show()
+
     def _on_import_progress(self, stage_name, current, total):
         """导入AS进度更新"""
+        if getattr(self, "_import_progress_dialog", None):
+            if total > 0:
+                self._import_progress_dialog.setLabelText(f"{stage_name}: {current}/{total}")
+                self._import_progress_dialog.setRange(0, total)
+                self._import_progress_dialog.setValue(current)
+            else:
+                self._import_progress_dialog.setLabelText(f"{stage_name}: 处理中...")
+                self._import_progress_dialog.setRange(0, 0)
         if total > 0:
             self.dl_progress.setMaximum(total)
             self.dl_progress.setValue(current)
             self.dl_progress.setFormat(f"{stage_name}: {current}/{total}")
         else:
-            self.dl_progress.setFormat(f"{stage_name}...")
-        self.status_bar.showMessage(f"导入AS: {stage_name} {current}/{total}")
+            self.dl_progress.setFormat(f"{stage_name}: 处理中...")
+        self.status_bar.showMessage(f"导入AS: {stage_name} {current}/{total}" if total > 0 else f"导入AS: {stage_name} 处理中...")
 
     def _on_import_stage_finished(self, stage_name):
         """导入AS阶段完成"""
@@ -527,6 +734,9 @@ class MainWindow(QMainWindow):
         """导入AS全部完成"""
         self.btn_browse.setEnabled(True)
         self.dl_progress.setVisible(False)
+        if getattr(self, "_import_progress_dialog", None):
+            self._import_progress_dialog.close()
+            self._import_progress_dialog = None
         if success:
             self.status_bar.showMessage("导入AS: 文件已分类完成")
             QMessageBox.information(self, "完成", message)
@@ -590,8 +800,10 @@ class MainWindow(QMainWindow):
 
         os.makedirs(output_dir, exist_ok=True)
 
-        # 检查已有图片
-        existing_pngs = [f for f in os.listdir(output_dir) if f.lower().endswith(".png")]
+        # 检查已有图片（递归：角色图按编号分目录）
+        existing_pngs = []
+        for root, _dirs, files in os.walk(output_dir):
+            existing_pngs.extend(f for f in files if f.lower().endswith(".png"))
 
         if existing_pngs:
             # 情况 A：已有图片，直接加载
@@ -658,9 +870,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "preview_progress") and self.preview_progress:
             self.preview_progress.setVisible(False)
         self.status_bar.showMessage("导出完成" if success else "导出失败")
-        QMessageBox.information(self, "导出完成", summary)
-        # 重新加载预览图片
-        self._load_preview_images()
+        if self.preview_container.isVisible():
+            # 视图可见才弹窗 + 立即刷新；切走时不打扰（返回预览会自动 _load_preview_images）
+            QMessageBox.information(self, "导出完成", summary)
+            self._load_preview_images()
 
     def _on_preview_export_error(self, err_msg):
         """预览导出错误回调"""
@@ -679,39 +892,36 @@ class MainWindow(QMainWindow):
 
     # ========== IMAGE GALLERY PREVIEW ==========
 
+    def _set_active_view_btn(self, active_btn):
+        """高亮当前激活的视图按钮（取消其他）"""
+        for btn in (self.btn_home, self.btn_image_preview, self.btn_audio, self.btn_lua):
+            btn.setChecked(btn is active_btn)
+
     def _toggle_preview_mode(self, show_preview):
         """切换预览视图/版本列表"""
+        self._set_active_view_btn(self.btn_image_preview if show_preview else self.btn_home)
         self.table.setVisible(not show_preview)
         self.preview_container.setVisible(show_preview)
         self.character_container.setVisible(False)
         self._show_character = False
         if show_preview:
             self.audio_container.setVisible(False)
-            # 切换到预览时取消音频解密线程
-            self._cancel_audio_worker()
             self._load_preview_images()
-        else:
-            # 离开预览时取消导出线程
-            self._cancel_preview_worker()
 
     # ==================== 音频管理器 ====================
 
     def _toggle_audio_mode(self, show_audio):
         """切换音频管理器视图"""
+        self._set_active_view_btn(self.btn_audio if show_audio else self.btn_home)
         self.table.setVisible(not show_audio)
         self.preview_container.setVisible(False)
         self.character_container.setVisible(False)
         self._show_character = False
         self.audio_container.setVisible(show_audio)
         if show_audio:
-            # 切换到音频时取消预览导出线程
-            self._cancel_preview_worker()
             self._init_audio_player()
             # 启动后台线程：转换 .bytes → 解密 .bank → 完成后加载列表
             self._start_audio_decrypt(force=False)
-        else:
-            # 离开音频时取消解密线程
-            self._cancel_audio_worker()
 
     def _cancel_preview_worker(self):
         """取消预览导出线程"""
@@ -743,16 +953,37 @@ class MainWindow(QMainWindow):
             force=force, parent=self
         )
         self._audio_worker.progress.connect(self._on_audio_decrypt_progress)
+        self._audio_worker.progress_value.connect(self._on_audio_decrypt_progress_value)
         self._audio_worker.finished_decrypt.connect(self._on_audio_decrypt_finished)
         self._audio_worker.error.connect(self._on_audio_decrypt_error)
         self._audio_worker.start()
+
+        # 进度弹窗（非模态，无取消按钮）
+        self._audio_progress_dialog = QProgressDialog("正在处理音频...", "", 0, 100, self)
+        self._audio_progress_dialog.setWindowTitle("音频解密")
+        self._audio_progress_dialog.setWindowModality(Qt.NonModal)
+        self._audio_progress_dialog.setMinimumDuration(0)
+        self._audio_progress_dialog.setAutoClose(False)
+        self._audio_progress_dialog.setAutoReset(False)
+        self._audio_progress_dialog.show()
 
     def _on_audio_decrypt_progress(self, msg):
         """音频解密进度更新"""
         self.status_bar.showMessage(msg)
 
+    def _on_audio_decrypt_progress_value(self, current, total, msg):
+        """音频解密数值进度"""
+        if getattr(self, "_audio_progress_dialog", None):
+            self._audio_progress_dialog.setLabelText(msg)
+            self._audio_progress_dialog.setRange(0, total)
+            self._audio_progress_dialog.setValue(current)
+        self.status_bar.showMessage(msg)
+
     def _on_audio_decrypt_finished(self):
         """音频解密完成回调，自动加载音频列表"""
+        if getattr(self, "_audio_progress_dialog", None):
+            self._audio_progress_dialog.close()
+            self._audio_progress_dialog = None
         self.status_bar.showMessage("音频处理完成")
         self._load_audio_list()
 
@@ -844,15 +1075,13 @@ class MainWindow(QMainWindow):
 
     def _toggle_character_mode(self, show_character):
         """切换角色视图显示/隐藏"""
+        self._set_active_view_btn(self.btn_lua if show_character else self.btn_home)
         self.table.setVisible(not show_character)
         self.preview_container.setVisible(False)
         self.audio_container.setVisible(False)
         self.character_container.setVisible(show_character)
         self._show_character = show_character
         if show_character:
-            # 隐藏其他视图时取消相关线程
-            self._cancel_audio_worker()
-            self._cancel_preview_worker()
             # 检查是否有待刷新的数据
             if self._pending_refresh:
                 self._pending_refresh = False
@@ -1253,6 +1482,11 @@ class MainWindow(QMainWindow):
 
         # 计算路径
         lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
+        # 导入 AS 时已顺带反编译，.lua 就绪则直接加载角色数据
+        if self._lua_decompiled(lua_dir):
+            logger.info("Lua 已反编译，直接加载角色数据")
+            self._load_character_data()
+            return
         tools_dir = get_tools_dir()
         unluac_path = os.path.join(tools_dir, "lua", "unluac.jar")
         opmap_path = os.path.join(tools_dir, "lua", "opmap")
@@ -1296,6 +1530,19 @@ class MainWindow(QMainWindow):
         self._lua_worker.error.connect(self._on_lua_decrypt_error)
         self._lua_worker.file_done.connect(self._on_lua_file_done)
         self._lua_worker.start()
+
+    def _lua_decompiled(self, lua_dir):
+        """检查 lua 目录是否已反编译完成（有 .lua 且无 .lua.bytes/.lua.bank 残留）"""
+        if not os.path.isdir(lua_dir):
+            return False
+        has_lua = False
+        for root, _dirs, files in os.walk(lua_dir):
+            for f in files:
+                if f.endswith('.lua.bytes') or f.endswith('.lua.bank'):
+                    return False
+                if f.endswith('.lua'):
+                    has_lua = True
+        return has_lua
 
     def _on_lua_decrypt_progress(self, msg):
         """Lua 解密进度更新"""
@@ -1366,6 +1613,7 @@ class MainWindow(QMainWindow):
         if not dst_dir:
             return
 
+        logger.info(f"导出音频：选中 {len(selected)} 个文件 → {dst_dir}")
         success = 0
         for info in selected:
             try:
@@ -1736,9 +1984,6 @@ class MainWindow(QMainWindow):
                 act_copy = menu.addAction("📋 复制文件")
 
             action = menu.exec(self.image_list.mapToGlobal(position))
-            if has_skel and (action == act_batch_gif or action == act_batch_video):
-                pass  # 需要在下面判断
-            # 判断具体点击的 action
             if has_skel and action == act_batch_gif:
                 batch_export_with_dialog(self, entries, "GIF")
             elif has_skel and action == act_batch_video:
@@ -1762,11 +2007,11 @@ class MainWindow(QMainWindow):
                 skel_path, atlas_path, _ = entries[0]
                 is_composite = is_composite_png(png_path)
                 if is_composite:
-                    act_export_gif = menu.addAction("🎞️ 合成 GIF 预览")
-                    act_export_video = menu.addAction("🎬 合成视频")
+                    act_export_gif = menu.addAction("🎞️ 导出合成 GIF")
+                    act_export_video = menu.addAction("🎬 导出合成视频")
                 else:
-                    act_export_gif = menu.addAction("🎞️ 导出 GIF 预览")
-                    act_export_video = menu.addAction("🎬 导出为视频")
+                    act_export_gif = menu.addAction("🎞️ 导出 GIF")
+                    act_export_video = menu.addAction("🎬 导出视频")
 
             action = menu.exec(self.image_list.mapToGlobal(position))
             if action == act_open:
@@ -1853,6 +2098,7 @@ class MainWindow(QMainWindow):
         if down == 0: QMessageBox.information(self, "无文件", "没有已下载的 bundle."); return
         rp = QMessageBox.question(self, "确认删除", f"删除此版本 {down} 个文件?", QMessageBox.Yes|QMessageBox.No, QMessageBox.No)
         if rp != QMessageBox.Yes: return
+        logger.info(f"删除版本 {ts}：共 {down} 个已下载文件")
         c = db.get_conn()
         for r in sub:
             if r[2]:
@@ -1861,6 +2107,7 @@ class MainWindow(QMainWindow):
                 c.execute("UPDATE sub_bundles SET local_path=NULL, downloadable=0 WHERE hash=? AND version_timestamp=?",(r[0],ts))
         c.commit(); c.close()
         self._load_data()
+        logger.info(f"已删除版本 {ts} 的 {down} 个文件，并清空数据库下载状态")
         self.status_bar.showMessage(f"已删除 {down} 个文件.")
         QMessageBox.information(self, "完成", f"已删除 {down} 个文件.")
 
@@ -1868,6 +2115,7 @@ class MainWindow(QMainWindow):
 
     def _seed_bundled_version(self):
         existing = {r[0] for r in db.get_all_versions()}
+        logger.info(f"写入种子版本：已存在 {len(existing)} 个版本")
         ctx = ssl.create_default_context()
         CDN_DIR = os.path.join(BUNDLES_DIR, "seeds")
         HD = {"User-Agent": "UnityPlayer/2021.3.45f2c1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)","X-Unity-Version": "2021.3.45f2c1"}
@@ -1879,7 +2127,9 @@ class MainWindow(QMainWindow):
                 with open(fp,"wb")as f:f.write(d)
             return fp
         def seed(ts,info,vd,notes,cats,ic=False):
-            if ts in existing:return
+            if ts in existing:
+                logger.debug(f"种子版本 {ts} 已存在，跳过")
+                return
             self.version_mgr.register_version(ts,info,vd,is_current=ic)
             db.add_notes(ts,notes)
             ah=set()
@@ -1887,6 +2137,7 @@ class MainWindow(QMainWindow):
                 try: ah|=extract_manifest_hashes(dcat(n,h))
                 except: pass
             if ah: db.save_sub_bundles(ts,list(ah))
+            logger.info(f"种子版本 {ts}：注册完成，{len(ah)} 个 bundle")
         seed(134091181056097516,{"timestamp":134091181056097516,"file":"versions_vA137.D342.O142.V6_134091181056097516.json","hash":"","size":0,"downloadURL":"https://elpis.17995cdn.com/Android/Bundles","playerURL":"https://xl.haoplay.com.cn/dl","latestVersion":"1.0","minVersion":"1.0"},{"timestamp":134091181056097516,"data":[{"name":"Arts","hash":"80d80e718768bdd7b35f5b9406d624ed","size":781708,"ver":137},{"name":"Data","hash":"48002d6e908b3fce2c4b61d8c34b9393","size":158685,"ver":342},{"name":"Other","hash":"fdf0f3b9cad9498a25f542c4c9ce0f8b","size":129635,"ver":142},{"name":"Video","hash":"a7fd12e3f78b95bcfb6c63be49247b5f","size":2738,"ver":6}]},"APK内置版本, 2025年12月",[("Arts","80d80e718768bdd7b35f5b9406d624ed"),("Data","48002d6e908b3fce2c4b61d8c34b9393"),("Other","fdf0f3b9cad9498a25f542c4c9ce0f8b")])
         seed(134239138473475084,{"timestamp":134239138473475084,"file":"versions_vA145.D378.O152.V6_134239138473475084.json","hash":"","size":0,"downloadURL":"https://elpis.17995cdn.com/Android/Bundles","playerURL":"https://xl.haoplay.com.cn/dl","latestVersion":"1.1","minVersion":"1.1"},{"timestamp":134239138473475084,"data":[{"name":"Arts","hash":"a1c72aae7f79b72bc763e63803362d01","size":836280,"ver":145},{"name":"Data","hash":"7bbfa67db42e024cb7124dddb8b91d2b","size":180385,"ver":378},{"name":"Other","hash":"d3632702f53de4ba0457b5e518aaf0f3","size":139791,"ver":152},{"name":"Video","hash":"01fe1717b1979689c37f26f6312ea23b","size":2738,"ver":6}]},"完整版本, 2026年5月26日",[("Arts","a1c72aae7f79b72bc763e63803362d01"),("Data","7bbfa67db42e024cb7124dddb8b91d2b"),("Other","d3632702f53de4ba0457b5e518aaf0f3")])
         seed(134272123703055311,{"timestamp":134272123703055311,"file":"versions_vA152.D386.O156.V6_134272123703055311.json","hash":"bb7d22dab4acab771f336ce53f6af261","size":367,"downloadURL":"https://elpis.17995cdn.com/Android/Bundles","playerURL":"https://xl.haoplay.com.cn/dl","latestVersion":"1.2","minVersion":"1.2"},{"timestamp":134272123703055311,"data":[{"name":"Arts","hash":"30ed8244781b44cacc3c5d1ea10a976e","size":844382,"ver":152},{"name":"Data","hash":"5d2c794364dfe22100547764f60689fe","size":185983,"ver":386},{"name":"Other","hash":"dd50845a464e1eda86b027103d2cce43","size":146765,"ver":156},{"name":"Video","hash":"ac0fb4b1842c88408eee708a5f394a8b","size":2744,"ver":6}]},"在线版本, 2026年6月29日",[("Arts","30ed8244781b44cacc3c5d1ea10a976e"),("Data","5d2c794364dfe22100547764f60689fe"),("Other","dd50845a464e1eda86b027103d2cce43")])

@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "SpineRuntime21/2.1.25": {
+        "runtime": {
+          "SpineRuntime21.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "SpineRuntime21/2.1.25": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

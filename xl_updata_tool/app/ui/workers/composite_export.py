@@ -47,6 +47,7 @@ class CompositeExportWorker(QThread):
         total = len(self.composite_pngs)
         success = 0
         fail = 0
+        logger.info(f"批量合成导出开始：{total} 个合成图")
 
         for i, png_path in enumerate(self.composite_pngs):
             if self._cancelled:
@@ -63,6 +64,7 @@ class CompositeExportWorker(QThread):
                 fail += 1
                 self.one_finished.emit(png_path, False)
 
+        logger.info(f"批量合成导出完成：成功 {success}，失败 {fail}")
         self.all_finished.emit(success, fail)
 
     def _export_one(self, png_path, skin_name=None):

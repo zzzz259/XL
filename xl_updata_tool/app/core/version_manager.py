@@ -1,4 +1,5 @@
 from . import database as db
+from .logger import logger
 
 
 class VersionManager:
@@ -10,7 +11,10 @@ class VersionManager:
         if is_current:
             prev = self._get_prev_version(timestamp)
             if prev:
+                logger.info(f"注册版本 {timestamp}：找到上一版本 {prev}，记录变更")
                 db.record_changes(prev, timestamp)
+            else:
+                logger.info(f"注册版本 {timestamp}：无上一版本，跳过变更记录")
         self._cache.pop("versions", None)
 
     def get_versions(self):
@@ -49,6 +53,7 @@ class VersionManager:
                 changed.append({"name": name, "old": v1_bundles[name], "new": v2_bundles[name]})
             else:
                 unchanged.append({"name": name, "info": v1_bundles[name]})
+        logger.info(f"比较版本 {ts1} vs {ts2}：新增 {len(added)}，移除 {len(removed)}，变更 {len(changed)}，未变 {len(unchanged)}")
         return {"added": added, "removed": removed, "changed": changed, "unchanged": unchanged}
 
     def update_notes(self, timestamp, notes):

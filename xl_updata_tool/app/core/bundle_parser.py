@@ -77,19 +77,24 @@ def extract_manifest_hashes(category_path):
     if not _check_as_cli():
         return set()
 
+    logger.debug(f"提取 manifest hash: {os.path.basename(category_path)}")
     out_dir = tempfile.mkdtemp()
     try:
-        subprocess.run([
+        proc = subprocess.run([
             AS_CLI, category_path, out_dir,
             "--game", "UnityCN", "--key_index", "23",
             "--group_assets", "ByType",
             "--export_type", "Convert",
             "--silent",
         ], cwd=os.path.dirname(AS_CLI),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             timeout=300,
         )
+        if proc.returncode != 0:
+            logger.error(f"AssetStudio CLI 失败 (退出码 {proc.returncode}): {proc.stderr[:500]}")
+        elif proc.stderr:
+            logger.debug(f"AssetStudio CLI stderr: {proc.stderr[:500]}")
         for root, dirs, files in os.walk(out_dir):
             for fname in files:
                 if fname.endswith(".json"):
@@ -99,9 +104,12 @@ def extract_manifest_hashes(category_path):
                             data = json.load(fp)
                         bundles = data.get("bundles", [])
                         if bundles:
-                            return set(b["hash"] for b in bundles if b.get("hash"))
+                            hashes = set(b["hash"] for b in bundles if b.get("hash"))
+                            logger.debug(f"{os.path.basename(category_path)} 提取 {len(hashes)} 个 hash")
+                            return hashes
                     except (json.JSONDecodeError, KeyError):
                         continue
+        logger.warning(f"{os.path.basename(category_path)} 未提取到 hash")
         return set()
     except subprocess.TimeoutExpired:
         logger.error(f"AssetStudio CLI 执行超时 (300s): {category_path}")
@@ -125,20 +133,25 @@ def extract_manifest_from_dir(category_dir, log_cb=None):
     if not _check_as_cli():
         return {}
 
+    logger.debug(f"提取 manifest（目录）: {category_dir}")
     out_dir = tempfile.mkdtemp()
     result = {}
     try:
-        subprocess.run([
+        proc = subprocess.run([
             AS_CLI, category_dir, out_dir,
             "--game", "UnityCN", "--key_index", "23",
             "--group_assets", "ByType",
             "--export_type", "Convert",
             "--silent",
         ], cwd=os.path.dirname(AS_CLI),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             timeout=300,
         )
+        if proc.returncode != 0:
+            logger.error(f"AssetStudio CLI 失败 (退出码 {proc.returncode}): {proc.stderr[:500]}")
+        elif proc.stderr:
+            logger.debug(f"AssetStudio CLI stderr: {proc.stderr[:500]}")
         for root, dirs, files in os.walk(out_dir):
             for fname in files:
                 if fname.endswith(".json"):
@@ -156,6 +169,7 @@ def extract_manifest_from_dir(category_dir, log_cb=None):
                                 }
                     except (json.JSONDecodeError, KeyError):
                         continue
+        logger.debug(f"提取 manifest（目录）: {len(result)} 个 bundle")
         return result
     except subprocess.TimeoutExpired:
         logger.error(f"AssetStudio CLI 执行超时 (300s): {category_dir}")

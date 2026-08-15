@@ -7,6 +7,8 @@ import struct
 from enum import Enum
 from PIL import Image
 
+from app.core.logger import logger
+
 
 class PackageItemType(Enum):
     Image = 0
@@ -365,6 +367,7 @@ class UIPackageTool:
         base_name = os.path.splitext(os.path.basename(byte_file))[0]
         out_path = os.path.join(export_dir, base_name)
         os.makedirs(out_path, exist_ok=True)
+        logger.info(f"FGUI 图集切割: {byte_file} -> {out_path}")
         info_output_file = os.path.join(out_path, f"{base_name}_cut_info.json")
         cut_info = []
         with open(byte_file, 'rb') as f:
@@ -410,7 +413,7 @@ class UIPackageTool:
             height = int(rect.height)
             atlas_width, atlas_height = atlas_img.size
             if x < 0 or y < 0 or x + width > atlas_width or y + height > atlas_height:
-                print(f"Warning: Sprite {name} out of atlas bounds")
+                logger.warning(f"FGUI 精灵越界: {name}")
                 continue
             sub_image = atlas_img.crop((x, y, x + width, y + height))
             if rotated:
@@ -427,3 +430,4 @@ class UIPackageTool:
             })
         with open(info_output_file, 'w', encoding='utf-8') as f:
             json.dump(cut_info, f, indent=4, ensure_ascii=False)
+        logger.info(f"FGUI 图集切割完成: {base_name}，{len(cut_info)} 个精灵")
