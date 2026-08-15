@@ -11,7 +11,8 @@ from app.core.path_utils import get_base_dir
 
 
 def main():
-    logger.info("XL Update Tool 启动")
+    debug_mode = '--debug' in sys.argv
+    logger.info("XL Update Tool 启动（调试模式）" if debug_mode else "XL Update Tool 启动")
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("XL Update Tool")
@@ -25,7 +26,7 @@ def main():
                 QFontDatabase.addApplicationFont(font_path)
         except Exception as e:
             logger.warning(f"字体加载失败: {e}")
-        window = MainWindow()
+        window = MainWindow(debug_mode=debug_mode)
         window.show()
         sys.exit(app.exec())
     except Exception as e:

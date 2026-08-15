@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QToolButton, QHeaderView,
-    QListWidgetItem, QFileDialog, QCheckBox, QMenu,
+    QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox,
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMimeData, QUrl
 from PySide6.QtGui import QColor, QPixmap
@@ -59,8 +59,9 @@ BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, debug_mode=False):
         super().__init__()
+        self.debug_mode = debug_mode
         self.setWindowTitle("XL 更新管理工具")
         self.resize(1200, 700)
         self.setMinimumSize(900, 500)
@@ -101,6 +102,8 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._toolbar())
+        if self.debug_mode:
+            root.addWidget(self._debug_toolbar())
 
         self.table = QTableWidget()
         self.table.setColumnCount(7)
@@ -231,6 +234,58 @@ class MainWindow(QMainWindow):
         b = QToolButton(); b.setText(t)
         if accent: b.setProperty("accent","true"); b.setStyleSheet(b.styleSheet())
         return b
+
+    def _debug_toolbar(self):
+        """调试模式专属工具栏：选择性导出 + 清空各数据区域"""
+        bar = QToolBar()
+        bar.setMovable(False)
+        bar.addWidget(self._lbl("调试模式", 12, ACCENT, True))
+        bar.addSeparator()
+        bar.addWidget(self._lbl("导出范围:", 12))
+        self.debug_export_scope = QComboBox()
+        self.debug_export_scope.addItem("全量导出", None)
+        self.debug_export_scope.addItem("只导出 Lua", ["TextAsset"])
+        self.debug_export_scope.addItem("只导出贴图", ["Texture2D"])
+        self.debug_export_scope.setFixedWidth(130)
+        bar.addWidget(self.debug_export_scope)
+        bar.addSeparator()
+        output_dir = os.path.join(get_base_dir(), "output")
+        self._add_clear_btn(bar, "清空ab包", BUNDLES_DIR)
+        self._add_clear_btn(bar, "清空AS导出", os.path.join(DATA_DIR, "material"))
+        self._add_clear_btn(bar, "清空立绘", os.path.join(output_dir, "character"))
+        self._add_clear_btn(bar, "清空图鉴", os.path.join(DATA_DIR, "material", "assets", "lua"))
+        self._add_clear_btn(bar, "清空音频", os.path.join(output_dir, "audio"))
+        return bar
+
+    def _add_clear_btn(self, bar, text, target_dir):
+        btn = self._tbtn(text)
+        btn.clicked.connect(lambda: self._clear_dir(target_dir))
+        bar.addWidget(btn)
+
+    def _clear_dir(self, target_dir):
+        """确认后清空目录（rmtree + 重建）"""
+        if not os.path.isdir(target_dir):
+            QMessageBox.information(self, "清空", f"目录不存在:\n{target_dir}")
+            return
+        ret = QMessageBox.question(self, "确认清空",
+                                   f"确定要清空此目录？\n{target_dir}",
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        try:
+            shutil.rmtree(target_dir)
+            os.makedirs(target_dir, exist_ok=True)
+            logger.info(f"[调试] 已清空目录: {target_dir}")
+            QMessageBox.information(self, "清空", f"已清空:\n{target_dir}")
+        except Exception as e:
+            logger.error(f"[调试] 清空失败 {target_dir}: {e}")
+            QMessageBox.warning(self, "清空失败", str(e))
+
+    def _get_export_filter(self):
+        """调试模式的选择性导出类型（None = 全量）"""
+        if self.debug_mode:
+            return self.debug_export_scope.currentData()
+        return None
 
     def _row_btn(self, text, color, tooltip=""):
         b = QPushButton(text)
@@ -497,7 +552,8 @@ class MainWindow(QMainWindow):
         logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件")
 
         # 启动后台工作线程
-        self._import_worker = ImportASWorker(fs, bundle_dir, material_dir, as_cli, self)
+        export_types = self._get_export_filter()
+        self._import_worker = ImportASWorker(fs, bundle_dir, material_dir, as_cli, self, export_types=export_types)
         self._import_worker.progress_stage.connect(self._on_import_progress)
         self._import_worker.stage_finished.connect(self._on_import_stage_finished)
         self._import_worker.all_finished.connect(self._on_import_all_finished)
@@ -1248,6 +1304,11 @@ class MainWindow(QMainWindow):
 
         # 计算路径
         lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
+        # 导入 AS 时已顺带反编译，.lua 就绪则直接加载角色数据
+        if self._lua_decompiled(lua_dir):
+            logger.info("Lua 已反编译，直接加载角色数据")
+            self._load_character_data()
+            return
         tools_dir = get_tools_dir()
         unluac_path = os.path.join(tools_dir, "lua", "unluac.jar")
         opmap_path = os.path.join(tools_dir, "lua", "opmap")
@@ -1291,6 +1352,19 @@ class MainWindow(QMainWindow):
         self._lua_worker.error.connect(self._on_lua_decrypt_error)
         self._lua_worker.file_done.connect(self._on_lua_file_done)
         self._lua_worker.start()
+
+    def _lua_decompiled(self, lua_dir):
+        """检查 lua 目录是否已反编译完成（有 .lua 且无 .lua.bytes/.lua.bank 残留）"""
+        if not os.path.isdir(lua_dir):
+            return False
+        has_lua = False
+        for root, _dirs, files in os.walk(lua_dir):
+            for f in files:
+                if f.endswith('.lua.bytes') or f.endswith('.lua.bank'):
+                    return False
+                if f.endswith('.lua'):
+                    has_lua = True
+        return has_lua
 
     def _on_lua_decrypt_progress(self, msg):
         """Lua 解密进度更新"""
