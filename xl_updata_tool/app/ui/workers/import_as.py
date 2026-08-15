@@ -14,6 +14,7 @@ from PySide6.QtCore import QThread, Signal
 from app.core.logger import logger
 from app.core.path_utils import DATA_DIR, get_base_dir, get_tools_dir
 from app.core.bundle_parser import fix_bundle_inplace
+from app.ui.workers.lua_decrypt import decompile_lua_dir
 
 
 class ImportASWorker(QThread):
@@ -27,12 +28,13 @@ class ImportASWorker(QThread):
     stage_finished = Signal(str)            # stage_name
     all_finished = Signal(bool, str)        # success, message
 
-    def __init__(self, bundle_paths, bundle_dir, material_dir, as_cli, parent=None):
+    def __init__(self, bundle_paths, bundle_dir, material_dir, as_cli, parent=None, export_types=None):
         super().__init__(parent)
         self.bundle_paths = bundle_paths
         self.bundle_dir = bundle_dir
         self.material_dir = material_dir
         self.as_cli = as_cli
+        self.export_types = export_types
         self._cancelled = False
 
     def cancel(self):
@@ -153,6 +155,8 @@ class ImportASWorker(QThread):
         os.makedirs(self.material_dir, exist_ok=True)
 
         all_types = sorted(set(a.get("Type", "") for a in assets if a.get("Type")))
+        if self.export_types:
+            all_types = [t for t in all_types if t in self.export_types]
         total_types = len(all_types)
         logger.info(f"[导入AS] 待导出类型（共 {total_types} 种）: {all_types}")
 
@@ -179,12 +183,36 @@ class ImportASWorker(QThread):
             except Exception as e:
                 logger.error(f"[导入AS] 类型 {tp} 导出异常: {e}")
 
+            # TextAsset 导出后立即反编译 .lua.bytes → .lua（角色数据加载免等待）
+            if tp == "TextAsset":
+                self._decompile_lua()
+
         # 统计导出文件数
         total_files = self._count_files(self.material_dir)
         # 清理 .prefab 后缀（AssetStudio CLI 可能错误添加）
         self._cleanup_prefab_suffix(self.material_dir)
         logger.info(f"[导入AS] 阶段3完成: 共导出 {total_files} 个文件")
         return total_files, ""
+
+    def _decompile_lua(self):
+        """TextAsset 导出后，反编译 data/material/assets/lua/ 下的 .lua.bytes → .lua"""
+        lua_dir = os.path.join(self.material_dir, "assets", "lua")
+        if not os.path.isdir(lua_dir):
+            return
+        tools_dir = get_tools_dir()
+        unluac_path = os.path.join(tools_dir, "lua", "unluac.jar")
+        opmap_path = os.path.join(tools_dir, "lua", "opmap")
+        if not os.path.isfile(unluac_path):
+            logger.warning("[导入AS] unluac.jar 不存在，跳过 Lua 反编译")
+            return
+        logger.info("[导入AS] 开始反编译 Lua")
+        self.progress_stage.emit("反编译 Lua", 0, 1)
+        success, fail = decompile_lua_dir(
+            lua_dir, unluac_path, opmap_path,
+            progress_cb=lambda msg: logger.info(f"[导入AS] {msg}"),
+            cancel_check=lambda: self._cancelled)
+        self.progress_stage.emit("反编译 Lua", 1, 1)
+        logger.info(f"[导入AS] Lua 反编译完成: 成功 {success}, 失败 {fail}")
 
     @staticmethod
     def _count_files(directory):

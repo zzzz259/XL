@@ -24,6 +24,7 @@ xl_updata_tool/tools/epic7_debank_v1_0/_tempo/
 
 # 工具运行时数据
 xl_updata_tool/tools/SpineViewer/data/
+xl_updata_tool/tools/AssetStudio/Maps/
 
 # 日志
 *.log
