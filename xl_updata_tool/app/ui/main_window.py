@@ -7,8 +7,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
     QGridLayout, QDialog, QTreeWidgetItem, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMimeData, QUrl, QSettings
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMimeData, QUrl, QSettings, QEvent
+from PySide6.QtGui import QColor, QPixmap, QBrush
 
 try:
     from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -26,7 +26,7 @@ except ImportError:
 from .theme import (
     BASE_STYLESHEET, ACCENT, BG_SURFACE, BG_DARK, BG_ELEVATED, BORDER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
-    apply_theme,
+    apply_theme, get_color,
 )
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
@@ -42,7 +42,6 @@ from .widgets.drag_list import DragListWidget
 from .workers.image_loader import ImageLoadWorker
 from .workers.preview_export import PreviewExportWorker
 from .workers.audio_decrypt import AudioDecryptWorker
-from .workers.lua_decrypt import LuaDecryptWorker
 from .workers.import_as import ImportASWorker
 from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
 from .views.preview_view import create_preview_view
@@ -64,6 +63,14 @@ from app.core.character_loader import load_character_data
 
 DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
+LUA_OUTPUT_DIR = os.path.join(get_base_dir(), "output", "lua")
+CHARACTER_DATA_DIR = os.path.join(get_base_dir(), "output", "character_data")
+# 角色数据解析依赖的源文件（用于缓存失效判断）
+CHARACTER_SOURCE_FILES = [
+    "BaseWord_cn.lua", "BaseCvNameCn.lua", "BaseCardLevelUp.lua",
+    "BaseCardQualityUp.lua", "BaseSkill.lua", "BaseSkillLevelUp.lua",
+    "BaseBadgeSuitGroup.lua", "BaseItem.lua", "BaseCard.lua",
+]
 
 
 class MainWindow(QMainWindow):
@@ -87,7 +94,6 @@ class MainWindow(QMainWindow):
         self._composite_worker = None
         self._image_worker = None
         self._import_worker = None
-        self._lua_worker = None
         # 音频播放器相关属性（避免首次访问 AttributeError）
         self._audio_player = None
         self._audio_output = None
@@ -99,6 +105,7 @@ class MainWindow(QMainWindow):
         self._pending_refresh = False
         self.character_base = []      # 角色基础信息：{raw_id, name, display_index}
         self.characters = []           # 角色完整数据：{name, element_type, max_hp, atk, def, skills, raw_text}
+        self.characters_full = {}      # 角色完整数据字典：char_id -> 完整数据
         self.word_map = {}            # BaseWord_cn.lua 中的文本映射：id->文本
         self._skel_map = {}
         self._init_db()
@@ -148,28 +155,34 @@ class MainWindow(QMainWindow):
         hdr.setSectionResizeMode(5, QHeaderView.Fixed)
         hdr.setSectionResizeMode(6, QHeaderView.Fixed)
         hdr.setSectionResizeMode(7, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 40)
+        self.table.setColumnWidth(0, 60)
         self.table.setColumnWidth(1, 180)
         self.table.setColumnWidth(2, 140)
-        self.table.setColumnWidth(5, 108)
-        self.table.setColumnWidth(6, 108)
-        self.table.setColumnWidth(7, 108)
+        self.table.setColumnWidth(5, 116)
+        self.table.setColumnWidth(6, 116)
+        self.table.setColumnWidth(7, 116)
         self.table.setAlternatingRowColors(True)
-        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
+        self.table.setShowGrid(True)
         self.table.verticalHeader().setDefaultSectionSize(52)
+        self.table.setMouseTracking(True)
+        self.table.viewport().setMouseTracking(True)
+        self.table.viewport().installEventFilter(self)
         self.table.setStyleSheet(f"""
-            QTableWidget {{ background-color:{BG_DARK}; border:none; gridline-color:transparent; }}
+            QTableWidget {{ background-color:{get_color('BG_DARK')}; border:none; gridline-color:{get_color('BORDER')}; }}
             QTableWidget::item {{ padding:14px 12px; font-size:14px; }}
-            QTableWidget::item:selected {{ background-color:{ACCENT}; color:#fff; }}
-            QHeaderView::section {{ background-color:{BG_SURFACE}; padding:12px 14px;
-                border:none; border-bottom:2px solid {BORDER}; font-size:13px;
-                font-weight:600; color:{TEXT_SECONDARY}; }}
+            QHeaderView::section {{ background-color:{get_color('BG_SURFACE')}; padding:12px 14px;
+                border:none; border-right:1px solid {get_color('BORDER')}; border-bottom:2px solid {get_color('BORDER')}; font-size:13px;
+                font-weight:600; color:{get_color('TEXT_SECONDARY')}; }}
         """)
         self.table.currentItemChanged.connect(self._on_row_select)
+        self.table.cellClicked.connect(self._on_cell_clicked)
+        self._hover_row = -1
+        self._checkbox_containers = {}
+        self._checked_ts = set()
         content_layout.addWidget(self.table, 1)
 
         # 预览视图容器（默认隐藏）
@@ -220,8 +233,8 @@ class MainWindow(QMainWindow):
 
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet(f"""
-            QStatusBar {{ background-color:{BG_SURFACE}; border-top:1px solid {BORDER};
-                         padding:4px 12px; color:{TEXT_SECONDARY}; font-size:14px; }}
+            QStatusBar {{ background-color:{get_color('BG_SURFACE')}; border-top:1px solid {get_color('BORDER')};
+                         padding:4px 12px; color:{get_color('TEXT_SECONDARY')}; font-size:14px; }}
         """)
         self.setStatusBar(self.status_bar)
         self._anim_timer = QTimer()
@@ -253,9 +266,9 @@ class MainWindow(QMainWindow):
         self.dl_progress.setFixedHeight(28); self.dl_progress.setFixedWidth(260)
         self.dl_progress.setVisible(False)
         self.dl_progress.setStyleSheet(f"""
-            QProgressBar {{ background-color:{BG_ELEVATED}; border:none; border-radius:4px;
-                           text-align:center; color:{TEXT_PRIMARY}; font-size:12px; }}
-            QProgressBar::chunk {{ background-color:{SUCCESS}; border-radius:4px; }}
+            QProgressBar {{ background-color:{get_color('BG_ELEVATED')}; border:none; border-radius:4px;
+                           text-align:center; color:{get_color('TEXT_PRIMARY')}; font-size:12px; }}
+            QProgressBar::chunk {{ background-color:{get_color('SUCCESS')}; border-radius:4px; }}
         """)
         bar.addWidget(self.dl_progress)
         return bar
@@ -264,7 +277,8 @@ class MainWindow(QMainWindow):
         """侧边功能工具栏：检查更新/导入AS + 导出配置 + 主题（设置区）+ 刷新/作者（底部），竖排"""
         bar = QWidget()
         bar.setFixedWidth(190)
-        bar.setStyleSheet(f"background-color:{BG_SURFACE}; border-right:1px solid {BORDER};")
+        bar.setObjectName("sideToolbar")
+        bar.setStyleSheet(f"QWidget#sideToolbar {{ background-color:{get_color('BG_SURFACE')}; border-right:1px solid {get_color('BORDER')}; }}")
         layout = QVBoxLayout(bar)
         layout.setContentsMargins(6, 10, 6, 10)
         layout.setSpacing(6)
@@ -318,11 +332,13 @@ class MainWindow(QMainWindow):
         return bar
 
     def _on_theme_changed(self):
-        """主题切换（旧主题 / Dracula 新主题），立即生效并保存偏好"""
+        """主题切换（旧主题 / 蓝灰 / 浅色），立即生效并保存偏好"""
         name = self.theme_selector.currentData()
         apply_theme(self, name)
         QSettings("XL", "xl_updata_tool").setValue("theme", name)
         logger.info(f"切换主题: {name}")
+        # 全局 QSS 即时切换；各视图容器的局部背景色重启后完全生效（构建时读 get_color）
+        QMessageBox.information(self, "主题切换", "全局样式已切换。\n\n各视图（图片预览/音频/角色）的局部背景色需重启后完全生效。")
 
     def _get_export_categories(self):
         """返回勾选的导出分类集合（lua/character/fgui/audio）"""
@@ -481,16 +497,10 @@ class MainWindow(QMainWindow):
         self._show_character = False
         self._set_active_view_btn(self.btn_home)
         self._set_toolbars_visible(True)
-        prev = getattr(self, '_sel_ts', None)
         self._sync_local_bundles()
         versions = self.version_mgr.refresh()
         delta_map = self._compute_version_deltas(versions)
         self._populate_table(versions, delta_map)
-        if prev:
-            self._sel_ts = prev
-            for i in range(self.table.rowCount()):
-                if self.table.item(i, 1) and self.table.item(i, 1).data(Qt.UserRole) == prev:
-                    self.table.selectRow(i); break
         self.status_bar.showMessage(f"已追踪 {len(versions)} 个版本")
 
     def _compute_version_deltas(self, versions):
@@ -510,23 +520,31 @@ class MainWindow(QMainWindow):
 
     def _populate_table(self, versions, delta_map=None):
         self.table.setSortingEnabled(False)
+        # 捕获当前勾选态（刷新后恢复，保持用户选择不丢失）
+        self._checked_ts = {ts for _r, (ts, cb) in getattr(self, "_version_checkboxes", {}).items() if cb.isChecked()}
         # fully clear old widgets and rows
         self.table.clearContents()
         self.table.setRowCount(0)
         self.table.setRowCount(len(versions))
         self._version_checkboxes = {}  # row -> (ts, checkbox)
+        self._checkbox_containers = {}
+        self._hover_row = -1
         for i, v in enumerate(versions):
             ts, arts, data, other, video, apk, manifest, is_cur, dl, created, notes = v
-            # checkbox 列（第 0 列，打勾选中）
+            # checkbox 列（第 0 列，打勾选中；单选冲突，Ctrl 多选）
             cb = QCheckBox()
             cb.setStyleSheet("background:transparent; border:none;")
+            cb.setChecked(ts in self._checked_ts)
+            cb.clicked.connect(lambda checked, r=i: self._set_version_checked(r, checked))
             cb_widget = QWidget()
+            cb_widget.setAttribute(Qt.WA_StyledBackground, True)
             cb_layout = QHBoxLayout(cb_widget)
             cb_layout.addWidget(cb)
             cb_layout.setAlignment(Qt.AlignCenter)
             cb_layout.setContentsMargins(0, 0, 0, 0)
             self.table.setCellWidget(i, 0, cb_widget)
             self._version_checkboxes[i] = (ts, cb)
+            self._checkbox_containers[i] = cb_widget
             # 版本列（第 1 列）
             dt = ticks_to_date(ts); date_str = dt.strftime("%Y-%m-%d")
             label = date_str
@@ -570,6 +588,72 @@ class MainWindow(QMainWindow):
             if cb.isChecked():
                 return ts
         return None
+
+    def _set_version_checked(self, row, checked):
+        """设置某行勾选态；默认单选冲突（点一个取消另一个），按住 Ctrl 多选"""
+        if row not in self._version_checkboxes:
+            return
+        ts, cb = self._version_checkboxes[row]
+        ctrl = bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
+        if checked and not ctrl:
+            for r, (_t, other) in self._version_checkboxes.items():
+                if r != row and other.isChecked():
+                    other.blockSignals(True)
+                    other.setChecked(False)
+                    other.blockSignals(False)
+        cb.blockSignals(True)
+        cb.setChecked(checked)
+        cb.blockSignals(False)
+        if checked:
+            self._checked_ts.add(ts)
+        else:
+            self._checked_ts.discard(ts)
+
+    def _on_cell_clicked(self, row, col):
+        """点击整行任意位置（除勾选列/按钮列）→ 翻转该行勾选"""
+        if col == 0:
+            return  # 勾选框自己处理
+        if row in self._version_checkboxes:
+            _ts, cb = self._version_checkboxes[row]
+            self._set_version_checked(row, not cb.isChecked())
+
+    def _clear_row_hover(self):
+        """清掉上一悬停行的背景，恢复交替行色"""
+        r = self._hover_row
+        if r < 0:
+            return
+        for c in range(self.table.columnCount()):
+            it = self.table.item(r, c)
+            if it is not None:
+                it.setBackground(QBrush())
+        if r in self._checkbox_containers:
+            self._checkbox_containers[r].setStyleSheet("")
+
+    def _highlight_row(self, row):
+        """整行悬停高亮（中性色，非蓝非单格）；row=-1 时清除"""
+        if row == self._hover_row:
+            return
+        self._clear_row_hover()
+        self._hover_row = row
+        hover = get_color('BG_HOVER')
+        for c in range(self.table.columnCount()):
+            it = self.table.item(row, c)
+            if it is not None:
+                it.setBackground(QColor(hover))
+        if row in self._checkbox_containers:
+            self._checkbox_containers[row].setStyleSheet(f"background-color:{hover};")
+
+    def eventFilter(self, obj, event):
+        """viewport 上跟踪鼠标：MouseMove 高亮整行，Leave 清除"""
+        if obj is self.table.viewport():
+            if event.type() == QEvent.MouseMove:
+                pos = event.position().toPoint()
+                idx = self.table.indexAt(pos)
+                self._highlight_row(idx.row() if idx.isValid() else -1)
+            elif event.type() == QEvent.Leave:
+                self._clear_row_hover()
+                self._hover_row = -1
+        return super().eventFilter(obj, event)
 
     def _on_row_select(self, current, prev):
         if current:
@@ -1272,16 +1356,22 @@ class MainWindow(QMainWindow):
 
     @timed("角色数据加载")
     def _load_character_data(self):
-        """从解密后的 Lua 文件中加载角色数据（UI 协调层）"""
-        lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
-        # 先读本地缓存（lua 已反编译且缓存有效时直接加载，不重新解析）
-        cache = self._load_character_cache(lua_dir)
-        if cache:
-            self.characters = cache
+        """从 output/lua 加载角色数据（UI 协调层），解析后缓存完整数据到 output/character_data"""
+        lua_dir = LUA_OUTPUT_DIR
+        if not self._has_character_source():
+            self.status_bar.showMessage("未找到角色 Lua 数据，请先点击【导入AS】")
+            self._character_loading = False
+            return
+
+        # 先读缓存（完整数据）；缓存有效直接还原，避免重复解析
+        characters_full = self._load_character_cache()
+        if characters_full:
+            self.characters_full = characters_full
+            self.characters = self._derive_character_index(characters_full)
             self._populate_character_table()
             self._character_data_loaded = True
             self._character_loading = False
-            self.status_bar.showMessage(f"角色数据从缓存加载: {len(cache)} 个角色")
+            self.status_bar.showMessage(f"角色数据从缓存加载: {len(self.characters)} 个角色")
             return
 
         self._character_loading = True
@@ -1316,31 +1406,74 @@ class MainWindow(QMainWindow):
         else:
             self.status_bar.showMessage("角色数据加载完成: 无匹配角色")
 
-        # 留存角色数据到 output/character_data/characters.json
+        # 留存完整数据（含 source_mtime 供失效判断）
+        self._save_character_cache(characters_full)
+
+    def _has_character_source(self):
+        """检查 output/lua 是否已有解析所需的源文件"""
+        return (os.path.isfile(os.path.join(LUA_OUTPUT_DIR, "BaseCard.lua"))
+                and os.path.isfile(os.path.join(LUA_OUTPUT_DIR, "BaseWord_cn.lua")))
+
+    def _character_source_mtime(self):
+        """返回角色源文件的最大 mtime（用于缓存失效）；缺失返回 0"""
+        m = 0
+        for f in CHARACTER_SOURCE_FILES:
+            p = os.path.join(LUA_OUTPUT_DIR, f)
+            if os.path.isfile(p):
+                try:
+                    m = max(m, os.path.getmtime(p))
+                except OSError:
+                    pass
+        return m
+
+    def _derive_character_index(self, characters_full):
+        """从完整角色数据派生表格索引列表（复用 load_character_data 的过滤逻辑）"""
+        characters = []
+        for char_id, info in sorted(characters_full.items(), key=lambda x: x[1].get("raw_id", 0)):
+            raw_id = info.get("raw_id", 0)
+            if 80100001 <= raw_id <= 80101999:
+                characters.append({
+                    "name": str(info.get("name", "未知")).split('/')[0],
+                    "char_id": char_id,
+                    "raw_id": raw_id,
+                    "display_index": raw_id,
+                })
+        return characters
+
+    def _save_character_cache(self, characters_full):
+        """留存完整角色数据到 output/character_data/characters_full.json"""
         try:
             import json as _json
-            out_data_dir = os.path.join(get_base_dir(), "output", "character_data")
-            os.makedirs(out_data_dir, exist_ok=True)
-            out_json = os.path.join(out_data_dir, "characters.json")
+            os.makedirs(CHARACTER_DATA_DIR, exist_ok=True)
+            out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
+            payload = {
+                "source_mtime": self._character_source_mtime(),
+                "characters_full": characters_full,
+            }
             with open(out_json, "w", encoding="utf-8") as f:
-                _json.dump(self.characters, f, ensure_ascii=False, indent=2, default=str)
-            logger.info(f"已留存 {len(self.characters)} 个角色数据到 {out_json}")
+                _json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+            logger.info(f"已留存完整角色数据到 {out_json}")
         except Exception as e:
             logger.warning(f"留存角色数据失败: {e}")
 
-    def _load_character_cache(self, lua_dir):
-        """读本地角色数据缓存；lua 未反编译完（有 .lua.bytes 残留）时返回 None 走解析"""
-        if not self._lua_decompiled(lua_dir):
-            return None
-        out_json = os.path.join(get_base_dir(), "output", "character_data", "characters.json")
+    def _load_character_cache(self):
+        """读完整角色数据缓存；源文件 mtime 变化时返回 None 触发重解析"""
+        out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
         if not os.path.isfile(out_json):
             return None
         try:
             import json as _json
             with open(out_json, encoding="utf-8") as f:
-                data = _json.load(f)
-            if isinstance(data, list) and data:
-                return data
+                payload = _json.load(f)
+            if not isinstance(payload, dict):
+                return None
+            stored_mtime = payload.get("source_mtime", 0)
+            if stored_mtime != self._character_source_mtime():
+                logger.info("角色源 lua 有更新，缓存失效，重新解析")
+                return None
+            full = payload.get("characters_full")
+            if isinstance(full, dict) and full:
+                return full
         except Exception as e:
             logger.warning(f"读取角色缓存失败: {e}")
         return None
@@ -1693,132 +1826,22 @@ class MainWindow(QMainWindow):
         if self._character_data_loaded:
             self._populate_character_table()
             return
-        # lua 已反编译（或已有缓存）→ 自动加载（内部先读缓存）；未反编译 → 等手动「开始解析」
-        lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
-        if self._lua_decompiled(lua_dir):
+        # 读 output/lua（AS 导入已反编译到此处）；无则等手动「开始解析」提示导入
+        if self._has_character_source():
             self._load_character_data()
 
     def _manual_load_character(self):
-        """手动开始：反编译 lua（若未反编译）+ 加载角色数据"""
+        """手动开始：读 output/lua 并加载角色数据（AS 导入已反编译）"""
         if self._character_loading:
             return
         if self._character_data_loaded:
             self._populate_character_table()
             return
-
-        lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
-        # 导入 AS 时已顺带反编译，.lua 就绪则直接加载角色数据
-        if self._lua_decompiled(lua_dir):
-            logger.info("Lua 已反编译，直接加载角色数据")
-            self._load_character_data()
+        if not self._has_character_source():
+            QMessageBox.information(self, "提示", "未找到角色 Lua 数据。\n\n请先点击侧边栏【导入AS】导出并反编译 Lua 后再解析。")
+            self.status_bar.showMessage("请先导入AS")
             return
-        tools_dir = get_tools_dir()
-        unluac_path = os.path.join(tools_dir, "lua", "unluac.jar")
-        opmap_path = os.path.join(tools_dir, "lua", "opmap")
-
-        # 依赖检查
-        if not os.path.isfile(unluac_path):
-            logger.error(f"unluac.jar 不存在: {unluac_path}")
-            QMessageBox.warning(self, "错误", f"unluac.jar 不存在:\n{unluac_path}")
-            return
-        if not os.path.isfile(opmap_path):
-            logger.error(f"opmap 文件不存在: {opmap_path}")
-            QMessageBox.warning(self, "错误", f"opmap 文件不存在:\n{opmap_path}")
-            return
-
-        if not os.path.isdir(lua_dir):
-            logger.info(f"Lua 目录不存在: {lua_dir}")
-            self.status_bar.showMessage("Lua 目录不存在，请先导入资源")
-            return
-
-        # 取消已有线程
-        if self._lua_worker is not None:
-            self._lua_worker.cancel()
-            self._lua_worker.wait(2000)
-
-        # 标记加载中
-        self._character_loading = True
-        self._character_data_loaded = False
-
-        # 禁用按钮，显示进度
-        self.btn_lua.setEnabled(False)
-        self.dl_progress.setVisible(True)
-        self.dl_progress.setValue(0)
-        self.dl_progress.setFormat("Lua 解密准备中...")
-        self.status_bar.showMessage("正在解密中...")
-        logger.info(f"开始 Lua 解密: 目录 {lua_dir}")
-
-        # 启动后台线程
-        self._lua_worker = LuaDecryptWorker(lua_dir, unluac_path, opmap_path, self)
-        self._lua_worker.progress.connect(self._on_lua_decrypt_progress)
-        self._lua_worker.finished.connect(self._on_lua_decrypt_finished)
-        self._lua_worker.error.connect(self._on_lua_decrypt_error)
-        self._lua_worker.file_done.connect(self._on_lua_file_done)
-        self._lua_worker.start()
-
-    def _lua_decompiled(self, lua_dir):
-        """检查 lua 目录是否已反编译完成（有 .lua 且无 .lua.bytes/.lua.bank 残留）"""
-        if not os.path.isdir(lua_dir):
-            return False
-        has_lua = False
-        for root, _dirs, files in os.walk(lua_dir):
-            for f in files:
-                if f.endswith('.lua.bytes') or f.endswith('.lua.bank'):
-                    return False
-                if f.endswith('.lua'):
-                    has_lua = True
-        return has_lua
-
-    def _on_lua_decrypt_progress(self, msg):
-        """Lua 解密进度更新"""
-        self.status_bar.showMessage(msg)
-        # 尝试从消息中解析进度数值
-        m = re.search(r'(\d+)/(\d+)', msg)
-        if m:
-            self.dl_progress.setMaximum(int(m.group(2)))
-            self.dl_progress.setValue(int(m.group(1)))
-        self.dl_progress.setFormat(msg[:50])
-
-    def _on_lua_decrypt_finished(self, success_count, fail_count):
-        """Lua 解密完成 → 加载角色数据"""
-        self.btn_lua.setEnabled(True)
-        self.dl_progress.setVisible(False)
-        self._character_loading = False
-        total = success_count + fail_count
-        if total == 0:
-            self.status_bar.showMessage("Lua 解密: 无待处理文件")
-            self._character_data_loaded = False
-            return
-        msg = f"Lua 解密完成: 成功 {success_count} 个, 失败 {fail_count} 个"
-        self.status_bar.showMessage(msg)
-        logger.info(msg)
-        # 自动加载角色数据
         self._load_character_data()
-
-    def _on_lua_decrypt_error(self, err_msg):
-        """Lua 解密错误"""
-        self.btn_lua.setEnabled(True)
-        self.dl_progress.setVisible(False)
-        self._character_loading = False
-        logger.error(f"Lua 解密错误: {err_msg}")
-        self.status_bar.showMessage(f"Lua 解密错误: {err_msg}")
-        QMessageBox.warning(self, "Lua 解密错误", err_msg)
-
-    def _on_lua_file_done(self, filename):
-        """当 BaseWord_cn.lua 或 BaseCard.lua 解密完成时，立即加载角色数据"""
-        logger.info(f"角色数据文件解密完成: {filename}，立即加载")
-        # 如果当前角色视图可见且未在加载中，则刷新数据
-        if self.character_container.isVisible() and not self._character_loading:
-            self._load_character_data()
-            # 强制刷新表格和状态
-            self._populate_character_table()
-            if len(self.characters) > 0:
-                self.character_status.setText(f"共 {len(self.characters)} 个角色")
-            else:
-                self.character_status.setText("暂无角色数据")
-        else:
-            # 若视图不可见，设置待刷新标志，下次打开时自动加载
-            self._pending_refresh = True
 
     def _export_selected_audio(self):
         """导出选中的音频文件"""
@@ -1944,9 +1967,9 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background-color:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:6px; padding:4px 0px; }}
-            QMenu::item {{ padding:8px 24px; color:{TEXT_PRIMARY}; font-size:13px; border-radius:4px; }}
-            QMenu::item:selected {{ background-color:{ACCENT}; color:#fff; }}
+            QMenu {{ background-color:{get_color('BG_SURFACE')}; border:1px solid {get_color('BORDER')}; border-radius:6px; padding:4px 0px; }}
+            QMenu::item {{ padding:8px 24px; color:{get_color('TEXT_PRIMARY')}; font-size:13px; border-radius:4px; }}
+            QMenu::item:selected {{ background-color:{get_color('ACCENT')}; color:#fff; }}
         """)
 
         act_open = menu.addAction("📂 打开文件所在目录")
@@ -2220,11 +2243,11 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{ background-color:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:6px;
+            QMenu {{ background-color:{get_color('BG_SURFACE')}; border:1px solid {get_color('BORDER')}; border-radius:6px;
                      padding:4px 0px; }}
-            QMenu::item {{ padding:8px 24px; color:{TEXT_PRIMARY}; font-size:13px; border-radius:4px; }}
-            QMenu::item:selected {{ background-color:{ACCENT}; color:#fff; }}
-            QMenu::separator {{ height:1px; background-color:{BORDER}; margin:4px 8px; }}
+            QMenu::item {{ padding:8px 24px; color:{get_color('TEXT_PRIMARY')}; font-size:13px; border-radius:4px; }}
+            QMenu::item:selected {{ background-color:{get_color('ACCENT')}; color:#fff; }}
+            QMenu::separator {{ height:1px; background-color:{get_color('BORDER')}; margin:4px 8px; }}
         """)
 
         is_multi = len(selected_items) > 1
