@@ -9,7 +9,7 @@
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QFrame, QAbstractItemView, QListWidget,
+    QProgressBar, QFrame, QAbstractItemView, QListWidget, QComboBox,
 )
 
 from app.ui.theme import (
@@ -74,6 +74,18 @@ def create_preview_view(parent=None):
         btn_reload.clicked.connect(parent._force_reload_preview)
     ctrl_layout.addWidget(btn_reload)
 
+    # 角色过滤下拉框（按角色分类显示）
+    ctrl_layout.addWidget(QLabel("角色:"))
+    character_filter = QComboBox()
+    character_filter.setFixedWidth(140)
+    character_filter.setStyleSheet(f"""
+        QComboBox {{ background-color:{BG_ELEVATED}; border:1px solid {BORDER};
+                    border-radius:6px; padding:4px 10px; color:{TEXT_PRIMARY}; font-size:12px; }}
+    """)
+    if parent is not None:
+        character_filter.currentIndexChanged.connect(parent._on_character_filter_changed)
+    ctrl_layout.addWidget(character_filter)
+
     preview_progress = QProgressBar()
     preview_progress.setFixedHeight(24)
     preview_progress.setFixedWidth(250)
@@ -130,5 +142,6 @@ def create_preview_view(parent=None):
         "empty_label": empty_label,
         "preview_status": preview_status,
         "btn_reload": btn_reload,
+        "character_filter": character_filter,
     }
     return container, controls

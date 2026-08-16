@@ -99,6 +99,35 @@ def composite_images(role_path, bg_path, output_path):
         return False
 
 
+def composite_with_offset(char_path, bg_path, offset_xy, output_path):
+    """按背景偏移合成立绘（不拉伸变形）。
+
+    offset_xy = 背景相对人物的像素偏移（Pillow 坐标，Y 向下已翻转）。
+    背景按偏移贴，人物 (0,0) 对齐，画布自动扩展到覆盖两者。
+    """
+    if not PILLOW_AVAILABLE:
+        logger.warning("Pillow 未安装，跳过图片合成")
+        return False
+    try:
+        char_img = Image.open(char_path).convert("RGBA")
+        bg_img = Image.open(bg_path).convert("RGBA")
+        dx, dy = int(round(offset_xy[0])), int(round(offset_xy[1]))
+        # 画布范围：负偏移需要扩展左上角
+        min_x = min(0, dx)
+        min_y = min(0, dy)
+        w = max(char_img.width, bg_img.width + dx) - min_x
+        h = max(char_img.height, bg_img.height + dy) - min_y
+        canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        canvas.paste(bg_img, (dx - min_x, dy - min_y), bg_img)
+        canvas.paste(char_img, (-min_x, -min_y), char_img)
+        canvas.save(output_path, "PNG")
+        logger.info(f"偏移合成成功: {output_path} (offset={offset_xy})")
+        return True
+    except Exception as e:
+        logger.error(f"偏移合成失败: {e}", exc_info=True)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # 动画名称获取
 # ---------------------------------------------------------------------------

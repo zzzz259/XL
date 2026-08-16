@@ -11,7 +11,7 @@ import time
 
 from PySide6.QtCore import QThread, Signal
 
-from app.core.logger import logger
+from app.core.logger import logger, timed
 from app.core.path_utils import DATA_DIR, get_base_dir, get_tools_dir
 from app.core.bundle_parser import fix_bundle_inplace
 from app.ui.workers.lua_decrypt import decompile_lua_dir
@@ -21,12 +21,13 @@ from app.ui.workers.lua_decrypt import decompile_lua_dir
 # 经全量 assets_map.json 分析，四类按 Container 前缀严格区分、互不重叠：
 #   lua=assets/lua，角色立绘=assets/art/models，FGUI=assets/fairygui，音频=assets/fmodassets
 # type=None 不按类型过滤；name_regex/container_regex 为 None 表示不过滤该维度
+# 角色立绘贴图排除 _e/_n 结尾（法线/发光贴图，Unity 用，Spine 拼图用不上）
 EXPORT_CATEGORIES = {
     "lua":       [("TextAsset", None, r"assets/lua")],
     "character": [("TextAsset",  None, r"assets/art/models/cardspine"),
-                  ("Texture2D",  None, r"assets/art/models/cardspine"),
+                  ("Texture2D",  r"^(?!.*_[en]$)", r"assets/art/models/cardspine"),
                   ("TextAsset",  r"battlespine_1\d{4}", r"assets/art/models/battlespine"),
-                  ("Texture2D",  r"battlespine_1\d{4}", r"assets/art/models/battlespine")],
+                  ("Texture2D",  r"battlespine_1\d{4}(?!.*_[en]$)", r"assets/art/models/battlespine")],
     "fgui":      [("TextAsset", None, r"assets/fairygui"),
                   ("Texture2D", None, r"assets/fairygui")],
     "audio":     [("TextAsset", None, r"assets/fmodassets/voice_cn/btl"),
@@ -55,6 +56,7 @@ class ImportASWorker(QThread):
     """
     progress_stage = Signal(str, int, int)  # stage_name, current, total
     stage_finished = Signal(str)            # stage_name
+    category_finished = Signal(str)         # 单个分类导出完成的 label（如「导出 audio」）
     all_finished = Signal(bool, str)        # success, message
 
     def __init__(self, bundle_paths, bundle_dir, material_dir, as_cli, parent=None,
@@ -120,6 +122,7 @@ class ImportASWorker(QThread):
             logger.error(f"[导入AS] 工作线程异常: {e}", exc_info=True)
             self.all_finished.emit(False, f"导入失败: {e}")
 
+    @timed("导入AS-修复文件头")
     def _stage_fix(self):
         """阶段 1: 直接修复原始 .bundle 文件头"""
         total = len(self.bundle_paths)
@@ -141,6 +144,7 @@ class ImportASWorker(QThread):
         logger.info(f"[导入AS] 阶段1完成: 成功 {success}, 失败 {fail}")
         return success, fail
 
+    @timed("导入AS-解析资源")
     def _stage_map(self):
         """阶段 2: 调用 AssetStudio CLI 生成资源映射"""
         if not os.path.exists(self.as_cli):
@@ -185,6 +189,7 @@ class ImportASWorker(QThread):
         except Exception as e:
             return None, str(e)
 
+    @timed("导入AS-导出分类")
     def _stage_export(self, assets):
         """阶段 3: 按分类（或类型）导出资源到 data/material/"""
         if not os.path.exists(self.as_cli):
@@ -260,6 +265,8 @@ class ImportASWorker(QThread):
                     logger.warning(f"[导入AS] {label} 导出失败 (退出码 {proc.returncode}, 耗时 {elapsed:.1f}s)")
                 else:
                     logger.info(f"[导入AS] {label} 完成（耗时 {elapsed:.1f}s）")
+                # 通知单个分类导出完成（边导出边预览：主窗口收到后刷新对应视图）
+                self.category_finished.emit(label)
             except subprocess.TimeoutExpired:
                 logger.error(f"[导入AS] {label} 导出超时（>300s）")
             except Exception as e:
@@ -291,6 +298,7 @@ class ImportASWorker(QThread):
                 commands.append((f"导出 {cat}", extra))
         return commands
 
+    @timed("导入AS-反编译Lua")
     def _decompile_lua(self):
         """TextAsset 导出后，反编译 data/material/assets/lua/ 下的 .lua.bytes → .lua"""
         lua_dir = os.path.join(self.material_dir, "assets", "lua")
@@ -316,13 +324,39 @@ class ImportASWorker(QThread):
             done[0] += 1
             self.progress_stage.emit("反编译 Lua", min(done[0], total), total if total else 1)
 
+        def on_progress(msg):
+            m = re.search(r"正在反编译 Lua:\s*(\d+)/(\d+)", msg)
+            if m:
+                d, t = int(m.group(1)), int(m.group(2))
+                self.progress_stage.emit("反编译 Lua", d, t)
+            else:
+                logger.info(f"[导入AS] {msg}")
+
         success, fail = decompile_lua_dir(
             lua_dir, unluac_path, opmap_path,
-            progress_cb=lambda msg: logger.info(f"[导入AS] {msg}"),
+            progress_cb=on_progress,
             file_done_cb=on_file_done,
             cancel_check=lambda: self._cancelled)
         self.progress_stage.emit("反编译 Lua", total, total if total else 1)
         logger.info(f"[导入AS] Lua 反编译完成: 成功 {success}, 失败 {fail}")
+
+        # 同步反编译的 .lua 到 output/lua/（留存，供后续查询）
+        out_lua_dir = os.path.join(get_base_dir(), "output", "lua")
+        os.makedirs(out_lua_dir, exist_ok=True)
+        copied = 0
+        for _root, _dirs, files in os.walk(lua_dir):
+            for f in files:
+                if f.endswith(".lua"):
+                    src = os.path.join(_root, f)
+                    dst = os.path.join(out_lua_dir, f)
+                    try:
+                        if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
+                            continue
+                        shutil.copy2(src, dst)
+                        copied += 1
+                    except (OSError, PermissionError) as e:
+                        logger.warning(f"[导入AS] 同步 lua 失败 {f}: {e}")
+        logger.info(f"[导入AS] 已留存 {copied} 个 .lua 到 {out_lua_dir}")
 
     @staticmethod
     def _count_files(directory):

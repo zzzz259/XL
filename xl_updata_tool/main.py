@@ -12,7 +12,10 @@ from app.core.path_utils import get_base_dir
 
 def main():
     debug_mode = '--debug' in sys.argv
-    logger.info("XL Update Tool 启动（调试模式）" if debug_mode else "XL Update Tool 启动")
+    if debug_mode:
+        logger.info("========== XL Update Tool 启动（DEBUG 模式） ==========")
+    else:
+        logger.info("========== XL Update Tool 启动（正常模式） ==========")
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("XL Update Tool")

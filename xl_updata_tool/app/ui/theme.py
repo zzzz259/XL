@@ -293,6 +293,10 @@ QGroupBox {{
     padding: 20px 16px 16px 16px;
     color: {TEXT_PRIMARY};
 }}
+QCheckBox, QRadioButton {{
+    color: {TEXT_PRIMARY};
+    spacing: 6px;
+}}
 QGroupBox::title {{
     subcontrol-origin: margin;
     left: 16px;
@@ -300,3 +304,137 @@ QGroupBox::title {{
     color: {ACCENT};
 }}
 """
+
+
+# ============ 新主题（蓝灰专业深色，参考 QDarkStyleSheet）============
+
+NEW_PALETTE = {
+    "ACCENT": "#259ae9",
+    "ACCENT_HOVER": "#4fb3f7",
+    "ACCENT_2": "#2dd4bf",
+    "BG_DARK": "#19232d",
+    "BG_SURFACE": "#1f2c3a",
+    "BG_ELEVATED": "#293544",
+    "BG_HOVER": "#37414f",
+    "BORDER": "#455364",
+    "TEXT_PRIMARY": "#dfe1e2",
+    "TEXT_SECONDARY": "#acb1b6",
+    "TEXT_MUTED": "#9da9b5",
+}
+
+# 旧颜色值 -> 新颜色值（复用 BASE_STYLESHEET 模板，替换颜色）
+_REPLACEMENTS = {
+    "#8b5cf6": "#259ae9",  # ACCENT / PROGRESS_FILL
+    "#a78bfa": "#4fb3f7",  # ACCENT_HOVER
+    "#0f0f1a": "#19232d",  # BG_DARK
+    "#1a1a2e": "#1f2c3a",  # BG_SURFACE
+    "#252540": "#293544",  # BG_ELEVATED / PROGRESS_BG
+    "#2d2d4a": "#37414f",  # BG_HOVER
+    "#35355a": "#455364",  # BORDER
+    "#9898b8": "#acb1b6",  # TEXT_SECONDARY
+    "#686890": "#9da9b5",  # TEXT_MUTED
+    "#1e1e35": "#1f2c3a",  # ROW_ALT
+}
+
+# 新主题追加的控件样式（覆盖 BASE_STYLESHEET，双强调色紫主粉辅）
+_NEW_CONTROL_STYLES = """
+QCheckBox {{ color: {TEXT_PRIMARY}; spacing: 6px; }}
+QRadioButton {{ color: {TEXT_PRIMARY}; spacing: 6px; }}
+QLineEdit {{
+    background-color: {BG_ELEVATED};
+    border: 1.5px solid {BORDER};
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: {TEXT_PRIMARY};
+    selection-background-color: {ACCENT_2};
+}}
+QLineEdit:hover {{ border-color: {TEXT_MUTED}; }}
+QLineEdit:focus {{ border-color: {ACCENT_2}; }}
+QComboBox {{
+    background-color: {BG_ELEVATED};
+    border: 1.5px solid {BORDER};
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: {TEXT_PRIMARY};
+}}
+QComboBox:hover {{ border-color: {TEXT_MUTED}; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox::down-arrow {{
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid {TEXT_SECONDARY};
+    margin-right: 8px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {BG_ELEVATED};
+    border: 1px solid {BORDER};
+    selection-background-color: {ACCENT};
+}}
+QTreeView, QTableView, QListView {{
+    selection-background-color: {ACCENT};
+    selection-color: white;
+}}
+QTabBar::tab:selected {{
+    color: {ACCENT};
+    border-bottom: 2px solid {ACCENT_2};
+}}
+"""
+
+
+def _build_stylesheet(p, replacements):
+    """复用 BASE_STYLESHEET 模板替换颜色 + 追加新控件样式，生成新主题 QSS"""
+    qss = BASE_STYLESHEET
+    for old, new in replacements.items():
+        qss = qss.replace(old, new)
+    qss += _NEW_CONTROL_STYLES.format(
+        ACCENT=p["ACCENT"], ACCENT_2=p["ACCENT_2"], BORDER=p["BORDER"],
+        BG_ELEVATED=p["BG_ELEVATED"], TEXT_PRIMARY=p["TEXT_PRIMARY"],
+        TEXT_MUTED=p["TEXT_MUTED"], TEXT_SECONDARY=p["TEXT_SECONDARY"],
+    )
+    return qss
+
+
+OLD_STYLESHEET = BASE_STYLESHEET
+NEW_STYLESHEET = _build_stylesheet(NEW_PALETTE, _REPLACEMENTS)
+
+# 浅色主题（参考 QDarkStyleSheet light）
+LIGHT_PALETTE = {
+    "ACCENT": "#1a72bb",
+    "ACCENT_HOVER": "#259ae9",
+    "ACCENT_2": "#2dd4bf",
+    "BG_DARK": "#f5f5f5",
+    "BG_SURFACE": "#ffffff",
+    "BG_ELEVATED": "#ececec",
+    "BG_HOVER": "#e0e0e0",
+    "BORDER": "#c8c8c8",
+    "TEXT_PRIMARY": "#19232d",
+    "TEXT_SECONDARY": "#455364",
+    "TEXT_MUTED": "#788d9c",
+}
+
+_LIGHT_REPLACEMENTS = {
+    "#8b5cf6": "#1a72bb",  # ACCENT / PROGRESS_FILL
+    "#a78bfa": "#259ae9",  # ACCENT_HOVER
+    "#e8e8f0": "#19232d",  # TEXT_PRIMARY（浅→深）
+    "#0f0f1a": "#f5f5f5",  # BG_DARK
+    "#1a1a2e": "#ffffff",  # BG_SURFACE
+    "#252540": "#ececec",  # BG_ELEVATED / PROGRESS_BG
+    "#2d2d4a": "#e0e0e0",  # BG_HOVER
+    "#35355a": "#c8c8c8",  # BORDER
+    "#9898b8": "#455364",  # TEXT_SECONDARY
+    "#686890": "#788d9c",  # TEXT_MUTED
+    "#1e1e35": "#e8e8e8",  # ROW_ALT
+}
+
+LIGHT_STYLESHEET = _build_stylesheet(LIGHT_PALETTE, _LIGHT_REPLACEMENTS)
+
+
+def apply_theme(app, name):
+    """应用主题（"old" / "new" / "light"），立即生效"""
+    if name == "new":
+        app.setStyleSheet(NEW_STYLESHEET)
+    elif name == "light":
+        app.setStyleSheet(LIGHT_STYLESHEET)
+    else:
+        app.setStyleSheet(OLD_STYLESHEET)

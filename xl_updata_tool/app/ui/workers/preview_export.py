@@ -13,7 +13,7 @@ from PIL import Image
 from PySide6.QtCore import QThread, Signal, QMimeData, QUrl
 from PySide6.QtGui import QPixmap
 
-from app.core.logger import logger
+from app.core.logger import logger, timed
 from app.ui.theme import *
 from app.core.path_utils import DATA_DIR, get_base_dir, get_tools_dir
 
@@ -21,6 +21,7 @@ from app.ui.features.fgui_atlas import UIPackageTool
 from app.ui.adapters.spine_adapter import (
     find_paired_files,
     composite_images,
+    composite_with_offset,
     get_animation_names,
     extract_motion_names,
     export_animation_frames,
@@ -28,6 +29,7 @@ from app.ui.adapters.spine_adapter import (
     run_spine_export,
     extract_character_id,
 )
+from app.core.prefab_parser import parse_prefab, compute_pixel_offset, build_cardspine_bundle_map
 
 
 class PreviewExportWorker(QThread):
@@ -40,12 +42,13 @@ class PreviewExportWorker(QThread):
     export_finished = Signal(bool, str)    # success, summary
     error = Signal(str)
 
-    def __init__(self, material_dir, output_dir, spine_cli, force=False, parent=None):
+    def __init__(self, material_dir, output_dir, spine_cli, force=False, selected_roles=None, parent=None):
         super().__init__(parent)
         self.material_dir = material_dir
         self.output_dir = output_dir
         self.spine_cli = spine_cli
         self.force = force
+        self.selected_roles = selected_roles
         self._cancelled = False
 
     def cancel(self):
@@ -58,6 +61,18 @@ class PreviewExportWorker(QThread):
             logger.error(f"预览导出线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
 
+    def _find_assets_map(self):
+        """扫描 data/bundles/*/_map/assets_map.json，返回最新一个的路径（用于角色→bundle 映射）"""
+        bundles_dir = os.path.join(DATA_DIR, "bundles")
+        if not os.path.isdir(bundles_dir):
+            return None
+        for ts in sorted(os.listdir(bundles_dir), reverse=True):
+            map_path = os.path.join(bundles_dir, ts, "_map", "assets_map.json")
+            if os.path.isfile(map_path):
+                return map_path
+        return None
+
+    @timed("图片导出")
     def _do_export(self):
         """执行完整的 .skel 导出流程，返回 (success, summary)"""
         logger.info(f"图片预览导出开始：material={self.material_dir}, output={self.output_dir}, force={self.force}")
@@ -67,6 +82,14 @@ class PreviewExportWorker(QThread):
             for f in files:
                 if f.endswith(".skel"):
                     skel_files.append(os.path.join(root, f))
+
+        # 选中角色过滤：只导出勾选角色（含对应的 _bg 背景）
+        if self.selected_roles:
+            def _kept(p):
+                base = os.path.splitext(os.path.basename(p))[0]
+                role = base[:-3] if base.endswith("_bg") else base
+                return role in self.selected_roles
+            skel_files = [p for p in skel_files if _kept(p)]
 
         if not skel_files:
             logger.warning("未找到 .skel 文件")
@@ -141,7 +164,10 @@ class PreviewExportWorker(QThread):
                 )
                 logger.info(f"皮肤导出完成: {base_name} (成功 {skin_count}/{len(skin_names)})")
 
-        # 处理配对合成
+        # 处理配对合成（UnityPy 提取背景偏移 → 按偏移合成，无偏移则回退旧合成）
+        bundle_map = build_cardspine_bundle_map(self._find_assets_map())
+        _offset_cache = {}  # bundle 路径 -> 像素偏移（空间换时间）
+
         for role_skel, bg_skel in pairs:
             if self._cancelled:
                 break
@@ -169,7 +195,23 @@ class PreviewExportWorker(QThread):
                 logger.info(f"跳过已存在的合成图: {role_name}_composite.png")
                 continue
 
-            if composite_images(role_png, bg_png, composite_path):
+            # 提取背景偏移（有 bundle 映射时才做，结果缓存）
+            offset = None
+            bundle_path = bundle_map.get(role_name)
+            if bundle_path and os.path.isfile(bundle_path):
+                if bundle_path not in _offset_cache:
+                    _offset_cache[bundle_path] = compute_pixel_offset(parse_prefab(bundle_path))
+                off = _offset_cache[bundle_path]
+                if off:
+                    # Unity (x,y) → Pillow (px,py)，Y 轴翻转
+                    offset = (off['pixel_offset'][0], -off['pixel_offset'][1])
+
+            if offset is not None:
+                ok = composite_with_offset(role_png, bg_png, offset, composite_path)
+            else:
+                ok = composite_images(role_png, bg_png, composite_path)
+
+            if ok:
                 composite_count += 1
                 logger.info(f"合成完成: {composite_path}")
             else:

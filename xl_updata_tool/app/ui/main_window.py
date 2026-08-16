@@ -5,8 +5,9 @@ from PySide6.QtWidgets import (
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QToolButton, QHeaderView,
     QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
+    QGridLayout, QDialog, QTreeWidgetItem, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMimeData, QUrl
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMimeData, QUrl, QSettings
 from PySide6.QtGui import QColor, QPixmap
 
 try:
@@ -15,16 +16,24 @@ try:
 except ImportError:
     QT_MULTIMEDIA_AVAILABLE = False
 
+try:
+    import qtawesome as qta
+    QT_AWESOME_AVAILABLE = True
+except ImportError:
+    qta = None
+    QT_AWESOME_AVAILABLE = False
+
 from .theme import (
     BASE_STYLESHEET, ACCENT, BG_SURFACE, BG_DARK, BG_ELEVATED, BORDER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
+    apply_theme,
 )
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
 from app.core.downloader import CheckUpdateThread, DownloadWorker
 from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace, compute_delta
 from app.core import database as db
-from app.core.logger import logger
+from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
 
 # 拆分后的模块导入
@@ -65,7 +74,9 @@ class MainWindow(QMainWindow):
         self.resize(1200, 700)
         self.setMinimumSize(900, 500)
         self.showMaximized()
-        self.setStyleSheet(BASE_STYLESHEET)
+        # 读取主题偏好（默认旧主题），应用
+        _theme = QSettings("XL", "xl_updata_tool").value("theme", "old")
+        apply_theme(self, _theme if _theme in ("old", "new", "light") else "old")
         self.version_mgr = VersionManager()
         # 后台工作线程实例（避免 AttributeError）
         self._preview_worker = None
@@ -107,15 +118,18 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._view_toolbar())
+        self.view_toolbar = self._view_toolbar()
+        root.addWidget(self.view_toolbar)
         if self.debug_mode:
-            root.addWidget(self._debug_toolbar())
+            self.debug_toolbar = self._debug_toolbar()
+            root.addWidget(self.debug_toolbar)
 
         # 主体：侧边功能工具栏 + 内容区
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
-        body.addWidget(self._action_toolbar())
+        self.action_toolbar = self._action_toolbar()
+        body.addWidget(self.action_toolbar)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
@@ -123,21 +137,23 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(0)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(["版本", "状态", "Bundle数", "备注", "", "", ""])
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels(["", "版本", "状态", "Bundle数", "备注", "", "", ""])
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.Interactive)
+        hdr.setSectionResizeMode(0, QHeaderView.Fixed)
         hdr.setSectionResizeMode(1, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(3, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(4, QHeaderView.Fixed)
+        hdr.setSectionResizeMode(2, QHeaderView.Interactive)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.Stretch)
         hdr.setSectionResizeMode(5, QHeaderView.Fixed)
         hdr.setSectionResizeMode(6, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 180)
-        self.table.setColumnWidth(1, 140)
-        self.table.setColumnWidth(4, 90)
-        self.table.setColumnWidth(5, 90)
-        self.table.setColumnWidth(6, 90)
+        hdr.setSectionResizeMode(7, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 40)
+        self.table.setColumnWidth(1, 180)
+        self.table.setColumnWidth(2, 140)
+        self.table.setColumnWidth(5, 108)
+        self.table.setColumnWidth(6, 108)
+        self.table.setColumnWidth(7, 108)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -216,19 +232,19 @@ class MainWindow(QMainWindow):
         bar = QToolBar(); bar.setMovable(False)
         bar.addWidget(self._lbl("XL 1.0.1", 16, ACCENT, True))
         bar.addSeparator()
-        self.btn_home = self._tbtn("版本列表")
+        self.btn_home = self._tbtn("版本列表", icon=self._icon("list"))
         self.btn_home.setCheckable(True)
         self.btn_home.clicked.connect(self._load_data)
         bar.addWidget(self.btn_home)
-        self.btn_image_preview = self._tbtn("图片预览")
+        self.btn_image_preview = self._tbtn("图片预览", icon=self._icon("image"))
         self.btn_image_preview.setCheckable(True)
         self.btn_image_preview.clicked.connect(lambda: self._toggle_preview_mode(True))
         bar.addWidget(self.btn_image_preview)
-        self.btn_audio = self._tbtn("音频")
+        self.btn_audio = self._tbtn("音频", icon=self._icon("music"))
         self.btn_audio.setCheckable(True)
         self.btn_audio.clicked.connect(lambda: self._toggle_audio_mode(True))
         bar.addWidget(self.btn_audio)
-        self.btn_lua = self._tbtn("角色")
+        self.btn_lua = self._tbtn("角色", icon=self._icon("users"))
         self.btn_lua.setCheckable(True)
         self.btn_lua.clicked.connect(self._start_lua_decrypt)
         bar.addWidget(self.btn_lua)
@@ -245,23 +261,31 @@ class MainWindow(QMainWindow):
         return bar
 
     def _action_toolbar(self):
-        """侧边功能工具栏（检查更新 / 导入AS / 刷新 / 作者 + 导出配置），竖排"""
-        bar = QToolBar(); bar.setMovable(False)
-        bar.setOrientation(Qt.Vertical)
-        self.btn_check = self._tbtn("检查更新")
+        """侧边功能工具栏：检查更新/导入AS + 导出配置 + 主题（设置区）+ 刷新/作者（底部），竖排"""
+        bar = QWidget()
+        bar.setFixedWidth(190)
+        bar.setStyleSheet(f"background-color:{BG_SURFACE}; border-right:1px solid {BORDER};")
+        layout = QVBoxLayout(bar)
+        layout.setContentsMargins(6, 10, 6, 10)
+        layout.setSpacing(6)
+
+        def _side_btn(t, icon):
+            b = QPushButton(t)
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setMinimumHeight(34)
+            ic = self._icon(icon)
+            if ic:
+                b.setIcon(ic)
+            return b
+
+        self.btn_check = _side_btn("检查更新", "arrows-rotate")
         self.btn_check.clicked.connect(self._check_update)
-        bar.addWidget(self.btn_check)
-        self.btn_browse = self._tbtn("导入AS")
+        layout.addWidget(self.btn_check)
+        self.btn_browse = _side_btn("导入AS", "file-import")
         self.btn_browse.clicked.connect(self._import_selected)
-        bar.addWidget(self.btn_browse)
-        self.btn_refresh = self._tbtn("刷新")
-        self.btn_refresh.clicked.connect(self._load_data)
-        bar.addWidget(self.btn_refresh)
-        self.btn_author = self._tbtn("作者")
-        self.btn_author.clicked.connect(self._show_author_info)
-        bar.addWidget(self.btn_author)
-        bar.addSeparator()
-        bar.addWidget(self._lbl("导出配置", 12, TEXT_SECONDARY, True))
+        layout.addWidget(self.btn_browse)
+        layout.addSpacing(8)
+        layout.addWidget(self._lbl("导出配置", 12, TEXT_SECONDARY, True))
         self.cb_export_lua = QCheckBox("lua")
         self.cb_export_lua.setChecked(True)
         self.cb_export_character = QCheckBox("角色立绘")
@@ -270,10 +294,35 @@ class MainWindow(QMainWindow):
         self.cb_export_fgui.setChecked(True)
         self.cb_export_audio = QCheckBox("音频")
         self.cb_export_audio.setChecked(True)
-        for cb in (self.cb_export_lua, self.cb_export_character,
-                   self.cb_export_fgui, self.cb_export_audio):
-            bar.addWidget(cb)
+        # 4 个勾选竖排（一列一个，不挤）
+        for cb in (self.cb_export_lua, self.cb_export_character, self.cb_export_fgui, self.cb_export_audio):
+            layout.addWidget(cb)
+        layout.addSpacing(8)
+        layout.addWidget(self._lbl("主题", 12, TEXT_SECONDARY, True))
+        self.theme_selector = QComboBox()
+        self.theme_selector.addItem("旧主题", "old")
+        self.theme_selector.addItem("蓝灰新主题", "new")
+        self.theme_selector.addItem("浅色", "light")
+        cur = QSettings("XL", "xl_updata_tool").value("theme", "old")
+        self.theme_selector.setCurrentIndex({"old": 0, "new": 1, "light": 2}.get(cur, 0))
+        self.theme_selector.currentIndexChanged.connect(self._on_theme_changed)
+        layout.addWidget(self.theme_selector)
+        # 底部：刷新 + 作者（stretch 推到最下面）
+        layout.addStretch()
+        self.btn_refresh = _side_btn("刷新", "arrow-rotate-right")
+        self.btn_refresh.clicked.connect(self._load_data)
+        layout.addWidget(self.btn_refresh)
+        self.btn_author = _side_btn("作者", "user")
+        self.btn_author.clicked.connect(self._show_author_info)
+        layout.addWidget(self.btn_author)
         return bar
+
+    def _on_theme_changed(self):
+        """主题切换（旧主题 / Dracula 新主题），立即生效并保存偏好"""
+        name = self.theme_selector.currentData()
+        apply_theme(self, name)
+        QSettings("XL", "xl_updata_tool").setValue("theme", name)
+        logger.info(f"切换主题: {name}")
 
     def _get_export_categories(self):
         """返回勾选的导出分类集合（lua/character/fgui/audio）"""
@@ -291,24 +340,32 @@ class MainWindow(QMainWindow):
     def _lbl(self, t, s=12, c=TEXT_PRIMARY, b=False):
         l = QLabel(t); l.setStyleSheet(f"color:{c};font-size:{s}px;font-weight:{'bold' if b else 'normal'};padding:4px 8px;background:transparent;border:none;"); return l
 
-    def _tbtn(self, t, accent=False):
+    def _icon(self, name, color=TEXT_PRIMARY):
+        if QT_AWESOME_AVAILABLE:
+            return qta.icon(f"fa6s.{name}", color=color)
+        return None
+
+    def _tbtn(self, t, accent=False, icon=None):
         b = QToolButton(); b.setText(t)
+        b.setMinimumWidth(110)
+        if icon:
+            b.setIcon(icon)
+            b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         if accent: b.setProperty("accent","true"); b.setStyleSheet(b.styleSheet())
         return b
 
     def _debug_toolbar(self):
-        """调试模式专属工具栏：选择性导出 + 清空各数据区域"""
+        """调试模式专属工具栏：导入范围 + 清空各数据区域"""
         bar = QToolBar()
         bar.setMovable(False)
         bar.addWidget(self._lbl("调试模式", 12, ACCENT, True))
         bar.addSeparator()
-        bar.addWidget(self._lbl("导出范围:", 12))
-        self.debug_export_scope = QComboBox()
-        self.debug_export_scope.addItem("全量导出", None)
-        self.debug_export_scope.addItem("只导出 Lua", ["TextAsset"])
-        self.debug_export_scope.addItem("只导出贴图", ["Texture2D"])
-        self.debug_export_scope.setFixedWidth(130)
-        bar.addWidget(self.debug_export_scope)
+        bar.addWidget(self._lbl("导入范围:", 12))
+        self.debug_import_scope = QComboBox()
+        self.debug_import_scope.addItem("全量导入", False)
+        self.debug_import_scope.addItem("增量导入", True)
+        self.debug_import_scope.setFixedWidth(130)
+        bar.addWidget(self.debug_import_scope)
         bar.addSeparator()
         output_dir = os.path.join(get_base_dir(), "output")
         self._add_clear_btn(bar, "清空ab包", BUNDLES_DIR)
@@ -349,22 +406,30 @@ class MainWindow(QMainWindow):
             logger.error(f"[调试] 清空失败 {target_dir}: {e}")
             QMessageBox.warning(self, "清空失败", str(e))
 
-    def _get_export_filter(self):
-        """调试模式的选择性导出类型（None = 全量）"""
-        if self.debug_mode:
-            return self.debug_export_scope.currentData()
-        return None
+    def _compute_delta_hashes(self, ts):
+        """返回本版本相对上一版本的增量 hash 集合（新增/修改的 bundle）；无上一版本时返回全量"""
+        vs = self.version_mgr.get_versions()
+        ph = set()
+        for vv in vs:
+            if vv[0] < ts and "(delta" not in (vv[9] or ""):
+                ph = set(r[0] for r in db.get_sub_bundles(vv[0]))
+                break
+        ah = set(r[0] for r in db.get_sub_bundles(ts))
+        delta = ah - ph
+        return delta if delta else ah
 
     def _row_btn(self, text, color, tooltip=""):
         b = QPushButton(text)
-        b.setFixedHeight(32)
-        if "增量" in text or "全量" in text: b.setFixedWidth(82)
-        elif "删除" in text: b.setFixedWidth(82)
+        b.setFixedHeight(30)
+        if "增量" in text or "全量" in text: b.setFixedWidth(78)
+        elif "删除" in text: b.setFixedWidth(100)
         else: b.setFixedWidth(64)
+        # 克制配色：描边 + 同色字，hover 才实心
         b.setStyleSheet(f"""
-            QPushButton {{ background-color:{color}; border:none; border-radius:6px;
-                          padding:4px 8px; color:#fff; font-size:12px; font-weight:600; }}
-            QPushButton:hover {{ opacity:0.85; }}
+            QPushButton {{ background-color:transparent; border:1px solid {color};
+                          border-radius:6px; padding:2px 8px; color:{color};
+                          font-size:12px; font-weight:600; }}
+            QPushButton:hover {{ background-color:{color}; color:#fff; }}
         """)
         return b
 
@@ -415,6 +480,7 @@ class MainWindow(QMainWindow):
         self.character_container.setVisible(False)
         self._show_character = False
         self._set_active_view_btn(self.btn_home)
+        self._set_toolbars_visible(True)
         prev = getattr(self, '_sel_ts', None)
         self._sync_local_bundles()
         versions = self.version_mgr.refresh()
@@ -423,7 +489,7 @@ class MainWindow(QMainWindow):
         if prev:
             self._sel_ts = prev
             for i in range(self.table.rowCount()):
-                if self.table.item(i, 0) and self.table.item(i, 0).data(Qt.UserRole) == prev:
+                if self.table.item(i, 1) and self.table.item(i, 1).data(Qt.UserRole) == prev:
                     self.table.selectRow(i); break
         self.status_bar.showMessage(f"已追踪 {len(versions)} 个版本")
 
@@ -448,14 +514,26 @@ class MainWindow(QMainWindow):
         self.table.clearContents()
         self.table.setRowCount(0)
         self.table.setRowCount(len(versions))
+        self._version_checkboxes = {}  # row -> (ts, checkbox)
         for i, v in enumerate(versions):
             ts, arts, data, other, video, apk, manifest, is_cur, dl, created, notes = v
+            # checkbox 列（第 0 列，打勾选中）
+            cb = QCheckBox()
+            cb.setStyleSheet("background:transparent; border:none;")
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(Qt.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.table.setCellWidget(i, 0, cb_widget)
+            self._version_checkboxes[i] = (ts, cb)
+            # 版本列（第 1 列）
             dt = ticks_to_date(ts); date_str = dt.strftime("%Y-%m-%d")
             label = date_str
             if is_cur: label += "  [最新]"
             vi = QTableWidgetItem(label); vi.setData(Qt.UserRole, ts)
             if is_cur: vi.setForeground(QColor("#f0a040")); f = vi.font(); f.setBold(True); vi.setFont(f)
-            self.table.setItem(i, 0, vi)
+            self.table.setItem(i, 1, vi)
             sub = db.get_sub_bundles(ts); total = len(sub) if sub else 0
             down = sum(1 for r in sub if r[2]) if sub else 0
             if total == 0: status = "无Bundle"
@@ -466,37 +544,36 @@ class MainWindow(QMainWindow):
             if status == "已下载": si.setForeground(QColor(SUCCESS))
             elif "部分" in status: si.setForeground(QColor(WARNING))
             else: si.setForeground(QColor(TEXT_MUTED))
-            self.table.setItem(i, 1, si)
-            self.table.setItem(i, 2, QTableWidgetItem(f"{total:,}" if total else "-"))
+            self.table.setItem(i, 2, si)
+            self.table.setItem(i, 3, QTableWidgetItem(f"{total:,}" if total else "-"))
             # 备注：优先显示相对上一版本的增量/删除
             if delta_map and ts in delta_map:
                 added, removed, common = delta_map[ts]
                 display_notes = f"新增 {added} | 移除 {removed} | 未变 {common}"
             else:
                 display_notes = notes or ""
-            self.table.setItem(i, 3, QTableWidgetItem(display_notes))
+            self.table.setItem(i, 4, QTableWidgetItem(display_notes))
             # per-row buttons: delta, full, delete
-            for col, (txt, clr, cb) in enumerate([
+            for col, (txt, clr, action) in enumerate([
                 ("增量下载", SUCCESS, lambda c, t=ts: self._download_version(t, True)),
                 ("全量下载", INFO, lambda c, t=ts: self._download_version(t, False)),
                 ("删除已下载", DANGER, lambda c, t=ts: self._delete_version(t)),
-            ], start=4):
+            ], start=5):
                 btn = self._row_btn(txt, clr)
-                btn.clicked.connect(cb)
+                btn.clicked.connect(action)
                 self.table.setCellWidget(i, col, btn)
         self.table.setSortingEnabled(True)
 
     def _get_selected_ts(self):
-        rows = set(idx.row() for idx in self.table.selectedIndexes())
-        if rows:
-            r = list(rows)[0]
-            it = self.table.item(r, 0)
-            if it: return it.data(Qt.UserRole)
+        """返回第一个勾选的版本 ts（导入 AS 等单版本操作用）"""
+        for _row, (ts, cb) in getattr(self, "_version_checkboxes", {}).items():
+            if cb.isChecked():
+                return ts
         return None
 
     def _on_row_select(self, current, prev):
         if current:
-            it = self.table.item(current.row(), 0)
+            it = self.table.item(current.row(), 1)
             if it and it.data(Qt.UserRole):
                 self._sel_ts = it.data(Qt.UserRole)
 
@@ -566,12 +643,7 @@ class MainWindow(QMainWindow):
         sub = db.get_sub_bundles(ts); ds = {r[0] for r in sub if r[2]}
         label = "增量下载"
         if delta_only:
-            vs = self.version_mgr.get_versions(); ph = set()
-            for vv in vs:
-                if vv[0] < ts and "(delta" not in (vv[9] or ""):
-                    ph = set(r[0] for r in db.get_sub_bundles(vv[0])); break
-            target = set(ah) - ph
-            if not target: target = set(ah)
+            target = self._compute_delta_hashes(ts)
         else:
             rp = QMessageBox.question(self, "全量下载确认",
                 f"全量下载将下载此版本的全部 {len(ah)} 个 bundle 文件.\n\n"
@@ -618,11 +690,11 @@ class MainWindow(QMainWindow):
     def _update_row_status(self, ts, text):
         self.table.blockSignals(True)
         for i in range(self.table.rowCount()):
-            it = self.table.item(i, 0)
+            it = self.table.item(i, 1)
             if it and it.data(Qt.UserRole) == ts:
                 si = QTableWidgetItem(text)
                 si.setForeground(QColor(SUCCESS))
-                self.table.setItem(i, 1, si)
+                self.table.setItem(i, 2, si)
                 break
         self.table.blockSignals(False)
 
@@ -655,7 +727,15 @@ class MainWindow(QMainWindow):
         # 同步该版本磁盘实际状态（磁盘为准），再取已下载的本地路径
         self._sync_local_bundles(ts)
         sub = db.get_sub_bundles(ts)
-        fs = [r[2] for r in sub if r[2] and os.path.exists(r[2])] if sub else []
+        # debug 模式：可选「全量导入 / 增量导入」
+        delta_only = (self.debug_mode and getattr(self, "debug_import_scope", None)
+                      and self.debug_import_scope.currentData())
+        if delta_only:
+            delta_hashes = self._compute_delta_hashes(ts)
+            fs = [r[2] for r in sub if r[2] and os.path.exists(r[2]) and r[0] in delta_hashes]
+            logger.info(f"[导入AS] 增量导入：{len(fs)} 个增量 bundle（增量 hash {len(delta_hashes)} 个）")
+        else:
+            fs = [r[2] for r in sub if r[2] and os.path.exists(r[2])]
         if not fs:
             QMessageBox.information(self, "无文件", "此版本没有已下载的 bundle，请先下载.")
             return
@@ -690,10 +770,21 @@ class MainWindow(QMainWindow):
             self.btn_browse.setEnabled(True)
             self.dl_progress.setVisible(False)
             return
+        # 大规模操作告知耗时（全量导出 bundle 数大时）
+        if len(fs) > 1000:
+            ret = QMessageBox.question(
+                self, "耗时提示",
+                f"本次将导入 {len(fs)} 个 bundle，预计耗时较长（可能数分钟）。\n\n是否继续？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if ret != QMessageBox.Yes:
+                self.btn_browse.setEnabled(True)
+                self.dl_progress.setVisible(False)
+                return
         logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件，勾选导出分类 {sorted(export_categories)}")
         self._import_worker = ImportASWorker(fs, bundle_dir, material_dir, as_cli, self, export_categories=export_categories)
         self._import_worker.progress_stage.connect(self._on_import_progress)
         self._import_worker.stage_finished.connect(self._on_import_stage_finished)
+        self._import_worker.category_finished.connect(self._on_import_category_finished)
         self._import_worker.all_finished.connect(self._on_import_all_finished)
         self._import_worker.start()
 
@@ -704,18 +795,20 @@ class MainWindow(QMainWindow):
         self._import_progress_dialog.setMinimumDuration(0)
         self._import_progress_dialog.setAutoClose(False)
         self._import_progress_dialog.setAutoReset(False)
+        self._import_progress_dialog.setMinimumWidth(520)
+        self._import_progress_dialog.setMinimumHeight(160)
         self._import_progress_dialog.canceled.connect(self._import_worker.cancel)
         self._import_progress_dialog.show()
 
     def _on_import_progress(self, stage_name, current, total):
-        """导入AS进度更新"""
+        """导入AS进度更新（两行：阶段名 + 进度/处理中，避免来回跳）"""
         if getattr(self, "_import_progress_dialog", None):
             if total > 0:
-                self._import_progress_dialog.setLabelText(f"{stage_name}: {current}/{total}")
+                self._import_progress_dialog.setLabelText(f"{stage_name}\n已处理 {current}/{total}")
                 self._import_progress_dialog.setRange(0, total)
                 self._import_progress_dialog.setValue(current)
             else:
-                self._import_progress_dialog.setLabelText(f"{stage_name}: 处理中...")
+                self._import_progress_dialog.setLabelText(f"{stage_name}\n处理中...")
                 self._import_progress_dialog.setRange(0, 0)
         if total > 0:
             self.dl_progress.setMaximum(total)
@@ -730,6 +823,12 @@ class MainWindow(QMainWindow):
         logger.info(f"导入AS阶段完成: {stage_name}")
         self.status_bar.showMessage(f"导入AS: {stage_name} 完成")
 
+    def _on_import_category_finished(self, label):
+        """单个分类导出完成，边导出边预览：刷新对应视图"""
+        if "audio" in label and getattr(self, "audio_container", None) and self.audio_container.isVisible():
+            self._load_audio_list()
+        logger.debug(f"[导入AS] 分类完成: {label}")
+
     def _on_import_all_finished(self, success, message):
         """导入AS全部完成"""
         self.btn_browse.setEnabled(True)
@@ -739,6 +838,7 @@ class MainWindow(QMainWindow):
             self._import_progress_dialog = None
         if success:
             self.status_bar.showMessage("导入AS: 文件已分类完成")
+            self._append_changelog(message)
             QMessageBox.information(self, "完成", message)
         else:
             self.status_bar.showMessage("导入AS: 失败")
@@ -746,6 +846,19 @@ class MainWindow(QMainWindow):
                 self, "失败",
                 f"{message}\n\n文件可能损坏，请点击【删除已下载】并重新下载。"
             )
+
+    def _append_changelog(self, message):
+        """追加导入更新日志到 output/CHANGELOG.md（像 git 提交记录）"""
+        try:
+            from datetime import datetime
+            out_log = os.path.join(get_base_dir(), "output", "CHANGELOG.md")
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            line = f"- {ts} | {message.replace(chr(10), ' ')}"
+            with open(out_log, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+            logger.info(f"已写更新日志: {out_log}")
+        except Exception as e:
+            logger.warning(f"写更新日志失败: {e}")
 
     def _browse_version(self, ts):
         """备用方法：打开资源浏览器窗口（当前未使用，保留以备后用）"""
@@ -816,10 +929,11 @@ class MainWindow(QMainWindow):
         logger.info("预览目录为空，开始导出 ...")
         self._start_preview_export(force=False)
 
-    def _start_preview_export(self, force=False):
+    def _start_preview_export(self, force=False, selected_roles=None):
         """启动后台线程执行 .skel → PNG 导出（含配对合成 + 皮肤导出）
 
         force=True 时强制重新导出（跳过去重检查）。
+        selected_roles 非空时只导出这些角色（角色名集合）。
         """
         material_dir = os.path.join(DATA_DIR, "material")
         output_dir = os.path.join(get_base_dir(), "output", "character")
@@ -850,7 +964,7 @@ class MainWindow(QMainWindow):
 
         # 启动后台线程
         self._preview_worker = PreviewExportWorker(
-            material_dir, output_dir, spine_cli, force=force, parent=self
+            material_dir, output_dir, spine_cli, force=force, selected_roles=selected_roles, parent=self
         )
         self._preview_worker.progress.connect(self._on_preview_export_progress)
         self._preview_worker.export_finished.connect(self._on_preview_export_finished)
@@ -883,12 +997,36 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "错误", f"预览导出失败:\n{err_msg}")
 
     def _force_reload_preview(self):
-        """重新加载预览图片（不清空目录，只补充缺失的图片）"""
-        logger.info("重新加载预览图片，只补充缺失的 ...")
-        self.status_bar.showMessage("重新加载预览图片，只补充缺失的 ...")
+        """重新加载预览图片：弹出角色选择对话框，只导出勾选的角色"""
+        roles = self._scan_cardspine_roles()
+        if not roles:
+            QMessageBox.warning(self, "提示", "未找到角色立绘，请先导入资源")
+            return
+        from .dialogs.character_select import CharacterSelectDialog
+        dialog = CharacterSelectDialog(roles, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        selected = dialog.selected_roles()
+        if not selected:
+            QMessageBox.information(self, "提示", "未选择任何角色")
+            return
+        logger.info(f"重新加载预览图片，选中 {len(selected)} 个角色")
+        self.status_bar.showMessage(f"导出 {len(selected)} 个角色...")
+        self._start_preview_export(force=False, selected_roles=selected)
 
-        # 启动后台线程，force=False 时利用去重逻辑跳过已存在的文件
-        self._start_preview_export(force=False)
+    def _scan_cardspine_roles(self):
+        """扫描 material 的 cardspine .skel，返回角色名列表（去重排序，排除 _bg）"""
+        material_dir = os.path.join(DATA_DIR, "material", "assets", "art", "models", "cardspine")
+        roles = set()
+        if os.path.isdir(material_dir):
+            for root, _dirs, files in os.walk(material_dir):
+                for f in files:
+                    if f.endswith(".skel"):
+                        base = os.path.splitext(f)[0]
+                        if base.endswith("_bg"):
+                            continue
+                        roles.add(base)
+        return sorted(roles)
 
     # ========== IMAGE GALLERY PREVIEW ==========
 
@@ -897,9 +1035,15 @@ class MainWindow(QMainWindow):
         for btn in (self.btn_home, self.btn_image_preview, self.btn_audio, self.btn_lua):
             btn.setChecked(btn is active_btn)
 
+    def _set_toolbars_visible(self, visible):
+        """切换视图时只隐藏侧边栏，顶部导航栏（view_toolbar/debug_toolbar）始终保留"""
+        if hasattr(self, "action_toolbar"):
+            self.action_toolbar.setVisible(visible)
+
     def _toggle_preview_mode(self, show_preview):
         """切换预览视图/版本列表"""
         self._set_active_view_btn(self.btn_image_preview if show_preview else self.btn_home)
+        self._set_toolbars_visible(not show_preview)
         self.table.setVisible(not show_preview)
         self.preview_container.setVisible(show_preview)
         self.character_container.setVisible(False)
@@ -913,6 +1057,7 @@ class MainWindow(QMainWindow):
     def _toggle_audio_mode(self, show_audio):
         """切换音频管理器视图"""
         self._set_active_view_btn(self.btn_audio if show_audio else self.btn_home)
+        self._set_toolbars_visible(not show_audio)
         self.table.setVisible(not show_audio)
         self.preview_container.setVisible(False)
         self.character_container.setVisible(False)
@@ -920,8 +1065,8 @@ class MainWindow(QMainWindow):
         self.audio_container.setVisible(show_audio)
         if show_audio:
             self._init_audio_player()
-            # 启动后台线程：转换 .bytes → 解密 .bank → 完成后加载列表
-            self._start_audio_decrypt(force=False)
+            # 手动开始：只加载已有列表，不自动解密（点「开始解密」才解密）
+            self._load_audio_list()
 
     def _cancel_preview_worker(self):
         """取消预览导出线程"""
@@ -958,13 +1103,16 @@ class MainWindow(QMainWindow):
         self._audio_worker.error.connect(self._on_audio_decrypt_error)
         self._audio_worker.start()
 
-        # 进度弹窗（非模态，无取消按钮）
-        self._audio_progress_dialog = QProgressDialog("正在处理音频...", "", 0, 100, self)
+        # 进度弹窗（非模态，可取消）
+        self._audio_progress_dialog = QProgressDialog("正在处理音频...", "取消", 0, 100, self)
         self._audio_progress_dialog.setWindowTitle("音频解密")
         self._audio_progress_dialog.setWindowModality(Qt.NonModal)
         self._audio_progress_dialog.setMinimumDuration(0)
         self._audio_progress_dialog.setAutoClose(False)
         self._audio_progress_dialog.setAutoReset(False)
+        self._audio_progress_dialog.setMinimumWidth(520)
+        self._audio_progress_dialog.setMinimumHeight(160)
+        self._audio_progress_dialog.canceled.connect(self._audio_worker.cancel)
         self._audio_progress_dialog.show()
 
     def _on_audio_decrypt_progress(self, msg):
@@ -972,11 +1120,15 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(msg)
 
     def _on_audio_decrypt_progress_value(self, current, total, msg):
-        """音频解密数值进度"""
+        """音频解密数值进度（两行：消息 + 进度/处理中，避免来回跳）"""
         if getattr(self, "_audio_progress_dialog", None):
-            self._audio_progress_dialog.setLabelText(msg)
-            self._audio_progress_dialog.setRange(0, total)
-            self._audio_progress_dialog.setValue(current)
+            if total > 0:
+                self._audio_progress_dialog.setLabelText(f"{msg}\n已处理 {current}/{total}")
+                self._audio_progress_dialog.setRange(0, total)
+                self._audio_progress_dialog.setValue(current)
+            else:
+                self._audio_progress_dialog.setLabelText(f"{msg}\n处理中...")
+                self._audio_progress_dialog.setRange(0, 0)
         self.status_bar.showMessage(msg)
 
     def _on_audio_decrypt_finished(self):
@@ -1009,6 +1161,7 @@ class MainWindow(QMainWindow):
         self._audio_player.durationChanged.connect(self._update_audio_duration)
         self._audio_player.playbackStateChanged.connect(self._on_audio_state_changed)
 
+    @timed("音频列表加载")
     def _load_audio_list(self, force_reload=False):
         """扫描 output/audio/ 目录，加载已解密的音频文件列表"""
         audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
@@ -1019,7 +1172,7 @@ class MainWindow(QMainWindow):
         if not os.path.isdir(audio_output_dir):
             self.audio_title.setText("🎵 音频管理器  共 0 个音频文件")
             self.audio_status.setText("已选: 0 个 | 共 0 个音频文件")
-            self.audio_table.setRowCount(0)
+            self.audio_table.clear()
             logger.info(f"音频输出目录不存在: {audio_output_dir}")
             return
 
@@ -1035,6 +1188,7 @@ class MainWindow(QMainWindow):
                     self._audio_files.append({
                         "path": filepath,
                         "name": rel_name,
+                        "dir": os.path.dirname(rel_name),
                         "ext": ext.lstrip(".").upper(),
                         "size": size,
                         "duration": None,
@@ -1043,23 +1197,49 @@ class MainWindow(QMainWindow):
         # 按文件名排序
         self._audio_files.sort(key=lambda x: x["name"])
 
-        # 填充表格
-        self.audio_table.setRowCount(len(self._audio_files))
-        for i, info in enumerate(self._audio_files):
-            # 复选框
-            cb = QCheckBox()
-            cb.setStyleSheet("background:transparent; border:none;")
-            cb_widget = QWidget()
-            cb_layout = QHBoxLayout(cb_widget)
-            cb_layout.addWidget(cb)
-            cb_layout.setAlignment(Qt.AlignCenter)
-            cb_layout.setContentsMargins(0, 0, 0, 0)
-            self.audio_table.setCellWidget(i, 0, cb_widget)
+        # 建树：voice → 角色编号 → cn/jp → 文件；album → 专辑名 → 文件
+        self.audio_table.clear()
+        self._audio_file_items = []
+        roots = {}      # 顶层(voice/album) -> node
+        mid_nodes = {}  # (顶层, 中段) -> node；voice 中段=角色编号，album 中段=专辑名
+        leaf_nodes = {}  # (顶层, 中段, 末段) -> node；voice 末段=cn|jp
+        for info in self._audio_files:
+            leaf = QTreeWidgetItem([
+                os.path.basename(info["name"]),
+                info["dir"],
+                "-",
+                info["ext"],
+                self._format_size(info["size"]),
+            ])
+            leaf.setData(0, Qt.UserRole, info)
+            leaf.setCheckState(0, Qt.Unchecked)
+            self._audio_file_items.append(leaf)
 
-            self.audio_table.setItem(i, 1, QTableWidgetItem(info["name"]))
-            self.audio_table.setItem(i, 2, QTableWidgetItem("-"))
-            self.audio_table.setItem(i, 3, QTableWidgetItem(info["ext"]))
-            self.audio_table.setItem(i, 4, QTableWidgetItem(self._format_size(info["size"])))
+            parts = info["dir"].replace("\\", "/").split("/")
+            top = parts[0] if parts and parts[0] else "其他"
+            if top not in roots:
+                roots[top] = QTreeWidgetItem([top])
+                self.audio_table.addTopLevelItem(roots[top])
+
+            if top == "voice" and len(parts) >= 2:
+                cid = parts[1]
+                lang = parts[2] if len(parts) > 2 else "?"
+                mk = (top, cid)
+                if mk not in mid_nodes:
+                    mid_nodes[mk] = QTreeWidgetItem([cid])
+                    roots[top].addChild(mid_nodes[mk])
+                lk = (top, cid, lang)
+                if lk not in leaf_nodes:
+                    leaf_nodes[lk] = QTreeWidgetItem([lang])
+                    mid_nodes[mk].addChild(leaf_nodes[lk])
+                leaf_nodes[lk].addChild(leaf)
+            else:
+                album_name = parts[1] if len(parts) > 1 else info["dir"]
+                mk = (top, album_name)
+                if mk not in mid_nodes:
+                    mid_nodes[mk] = QTreeWidgetItem([album_name])
+                    roots[top].addChild(mid_nodes[mk])
+                mid_nodes[mk].addChild(leaf)
 
         total = len(self._audio_files)
         self.audio_title.setText(f"🎵 音频管理器  共 {total} 个音频文件")
@@ -1076,6 +1256,7 @@ class MainWindow(QMainWindow):
     def _toggle_character_mode(self, show_character):
         """切换角色视图显示/隐藏"""
         self._set_active_view_btn(self.btn_lua if show_character else self.btn_home)
+        self._set_toolbars_visible(not show_character)
         self.table.setVisible(not show_character)
         self.preview_container.setVisible(False)
         self.audio_container.setVisible(False)
@@ -1089,12 +1270,23 @@ class MainWindow(QMainWindow):
             self.character_container.raise_()
             self.character_container.show()
 
+    @timed("角色数据加载")
     def _load_character_data(self):
         """从解密后的 Lua 文件中加载角色数据（UI 协调层）"""
+        lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
+        # 先读本地缓存（lua 已反编译且缓存有效时直接加载，不重新解析）
+        cache = self._load_character_cache(lua_dir)
+        if cache:
+            self.characters = cache
+            self._populate_character_table()
+            self._character_data_loaded = True
+            self._character_loading = False
+            self.status_bar.showMessage(f"角色数据从缓存加载: {len(cache)} 个角色")
+            return
+
         self._character_loading = True
         self.status_bar.showMessage("正在加载角色数据...")
         QApplication.processEvents()
-        lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
         logger.info(f"开始加载角色数据，lua_dir: {lua_dir}")
 
         # 清空旧数据
@@ -1123,6 +1315,35 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"角色数据加载完成: {len(self.characters)} 个角色")
         else:
             self.status_bar.showMessage("角色数据加载完成: 无匹配角色")
+
+        # 留存角色数据到 output/character_data/characters.json
+        try:
+            import json as _json
+            out_data_dir = os.path.join(get_base_dir(), "output", "character_data")
+            os.makedirs(out_data_dir, exist_ok=True)
+            out_json = os.path.join(out_data_dir, "characters.json")
+            with open(out_json, "w", encoding="utf-8") as f:
+                _json.dump(self.characters, f, ensure_ascii=False, indent=2, default=str)
+            logger.info(f"已留存 {len(self.characters)} 个角色数据到 {out_json}")
+        except Exception as e:
+            logger.warning(f"留存角色数据失败: {e}")
+
+    def _load_character_cache(self, lua_dir):
+        """读本地角色数据缓存；lua 未反编译完（有 .lua.bytes 残留）时返回 None 走解析"""
+        if not self._lua_decompiled(lua_dir):
+            return None
+        out_json = os.path.join(get_base_dir(), "output", "character_data", "characters.json")
+        if not os.path.isfile(out_json):
+            return None
+        try:
+            import json as _json
+            with open(out_json, encoding="utf-8") as f:
+                data = _json.load(f)
+            if isinstance(data, list) and data:
+                return data
+        except Exception as e:
+            logger.warning(f"读取角色缓存失败: {e}")
+        return None
 
     def _populate_character_table(self):
         """填充角色表格"""
@@ -1462,25 +1683,29 @@ class MainWindow(QMainWindow):
     # ========== Lua Decrypt ==========
 
     def _start_lua_decrypt(self):
-        """点击【角色】按钮，切换角色视图显示/隐藏"""
+        """点击【角色】按钮：切换视图；lua 已反编译则自动读缓存加载"""
         if self._show_character:
             # 当前已显示角色视图，切换到版本列表
             self._toggle_character_mode(False)
             return
-
-        # 切换到角色视图
         self._toggle_character_mode(True)
+        # 已有数据则直接显示
+        if self._character_data_loaded:
+            self._populate_character_table()
+            return
+        # lua 已反编译（或已有缓存）→ 自动加载（内部先读缓存）；未反编译 → 等手动「开始解析」
+        lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
+        if self._lua_decompiled(lua_dir):
+            self._load_character_data()
 
-        # 如果已加载过数据，直接显示
+    def _manual_load_character(self):
+        """手动开始：反编译 lua（若未反编译）+ 加载角色数据"""
+        if self._character_loading:
+            return
         if self._character_data_loaded:
             self._populate_character_table()
             return
 
-        # 如果正在加载中，不重复启动
-        if self._character_loading:
-            return
-
-        # 计算路径
         lua_dir = os.path.join(DATA_DIR, "material", "assets", "lua")
         # 导入 AS 时已顺带反编译，.lua 就绪则直接加载角色数据
         if self._lua_decompiled(lua_dir):
@@ -1598,12 +1823,11 @@ class MainWindow(QMainWindow):
     def _export_selected_audio(self):
         """导出选中的音频文件"""
         selected = []
-        for i in range(self.audio_table.rowCount()):
-            cb_widget = self.audio_table.cellWidget(i, 0)
-            if cb_widget:
-                cb = cb_widget.findChild(QCheckBox)
-                if cb and cb.isChecked():
-                    selected.append(self._audio_files[i])
+        for item in getattr(self, "_audio_file_items", []):
+            if item.checkState(0) == Qt.Checked:
+                info = item.data(0, Qt.UserRole)
+                if info:
+                    selected.append(info)
 
         if not selected:
             QMessageBox.information(self, "提示", "请先勾选要导出的音频文件")
@@ -1627,29 +1851,26 @@ class MainWindow(QMainWindow):
         logger.info(f"导出 {success} 个音频文件到 {dst_dir}")
 
     def _play_selected_audio(self):
-        """播放选中的音频文件（取第一个）"""
-        for i in range(self.audio_table.rowCount()):
-            cb_widget = self.audio_table.cellWidget(i, 0)
-            if cb_widget:
-                cb = cb_widget.findChild(QCheckBox)
-                if cb and cb.isChecked():
-                    info = self._audio_files[i]
+        """播放选中的音频文件（取第一个勾选，否则当前选中项）"""
+        for item in getattr(self, "_audio_file_items", []):
+            if item.checkState(0) == Qt.Checked:
+                info = item.data(0, Qt.UserRole)
+                if info:
                     self._play_audio_file(info["path"], info["name"])
                     return
 
-        # 如果没有勾选，尝试播放当前选中行
-        row = self.audio_table.currentRow()
-        if row >= 0 and row < len(self._audio_files):
-            info = self._audio_files[row]
-            self._play_audio_file(info["path"], info["name"])
+        cur = self.audio_table.currentItem()
+        if cur:
+            info = cur.data(0, Qt.UserRole)
+            if info:
+                self._play_audio_file(info["path"], info["name"])
 
-    def _on_audio_double_click(self, index):
+    def _on_audio_double_click(self, item, column):
         """双击播放音频"""
-        row = index.row()
-        if row < 0 or row >= len(self._audio_files):
-            return
-        info = self._audio_files[row]
-        self._play_audio_file(info["path"], info["name"])
+        if item:
+            info = item.data(0, Qt.UserRole)
+            if info:
+                self._play_audio_file(info["path"], info["name"])
 
     def _play_audio_file(self, filepath, filename):
         """播放指定音频文件"""
@@ -1716,10 +1937,9 @@ class MainWindow(QMainWindow):
         item = self.audio_table.itemAt(position)
         if not item:
             return
-        row = item.row()
-        if row < 0 or row >= len(self._audio_files):
-            return
-        info = self._audio_files[row]
+        info = item.data(0, Qt.UserRole)
+        if not info:
+            return  # 目录节点，无音频信息
         filepath = info["path"]
 
         menu = QMenu(self)
@@ -1800,12 +2020,49 @@ class MainWindow(QMainWindow):
         else:
             return f"{size / (1024 * 1024):.1f} MB"
 
+    def _populate_character_filter(self):
+        """扫描 output/character 的角色目录，填充图片预览的角色过滤下拉框"""
+        cb = getattr(self, "character_filter", None)
+        if cb is None:
+            return
+        preview_dir = os.path.join(get_base_dir(), "output", "character")
+        roles = []
+        if os.path.isdir(preview_dir):
+            roles = sorted(d for d in os.listdir(preview_dir)
+                           if os.path.isdir(os.path.join(preview_dir, d)))
+        cur = cb.currentText()
+        cb.blockSignals(True)
+        cb.clear()
+        cb.addItem("全部角色", "")
+        for r in roles:
+            cb.addItem(r, r)
+        idx = cb.findText(cur)
+        cb.setCurrentIndex(idx if idx >= 0 else 0)
+        cb.blockSignals(False)
+
+    def _on_character_filter_changed(self):
+        """角色过滤：只显示选中角色的图片"""
+        cb = getattr(self, "character_filter", None)
+        if cb is None:
+            return
+        role = cb.currentData()
+        for i in range(self.image_list.count()):
+            item = self.image_list.item(i)
+            info = item.data(Qt.UserRole)
+            png = info.get("png", "") if isinstance(info, dict) else ""
+            visible = True
+            if role:
+                visible = f"/{role}/" in png.replace("\\", "/")
+            item.setHidden(not visible)
+
+    @timed("图片缩略图加载")
     def _load_preview_images(self):
         """异步加载预览图片"""
         preview_dir = os.path.join(get_base_dir(), "output", "character")
         material_dir = os.path.join(DATA_DIR, "material")
 
         logger.info(f"开始加载预览图片: {preview_dir}")
+        self._populate_character_filter()
 
         if not os.path.isdir(preview_dir):
             os.makedirs(preview_dir, exist_ok=True)

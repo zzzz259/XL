@@ -55,6 +55,17 @@ def create_character_view(parent=None):
     ctrl_layout = QHBoxLayout(ctrl_bar)
     ctrl_layout.setContentsMargins(16, 0, 16, 0)
 
+    btn_parse = QPushButton("🔍 开始解析")
+    btn_parse.setFixedSize(110, 32)
+    btn_parse.setStyleSheet(f"""
+        QPushButton {{ background-color:{ACCENT}; border:none; border-radius:6px;
+                      color:#fff; font-size:12px; font-weight:600; }}
+        QPushButton:hover {{ opacity:0.85; }}
+    """)
+    if parent is not None:
+        btn_parse.clicked.connect(parent._manual_load_character)
+    ctrl_layout.addWidget(btn_parse)
+
     character_search = QLineEdit()
     character_search.setPlaceholderText("搜索角色名称...")
     character_search.setFixedWidth(250)

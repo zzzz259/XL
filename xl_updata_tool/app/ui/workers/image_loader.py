@@ -58,6 +58,9 @@ class ImageLoadWorker(QThread):
             except Exception as e:
                 logger.error(f"加载图片失败 {fname}: {e}")
             self.progress.emit(i + 1, total)
+            # 每 20 张让主线程喘息（分批限流，避免一次性插入几千缩略图卡顿）
+            if (i + 1) % 20 == 0:
+                self.msleep(10)
 
         logger.info(f"加载图片完成：{len(loaded_paths)}/{total} 张")
         self.finished_loading.emit(loaded_paths)

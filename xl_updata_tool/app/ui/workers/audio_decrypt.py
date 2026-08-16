@@ -9,7 +9,7 @@ import sys
 
 from PySide6.QtCore import QThread, Signal
 
-from app.core.logger import logger
+from app.core.logger import logger, timed
 from app.core.path_utils import DATA_DIR, get_base_dir, get_tools_dir
 from app.core.album_map import build_album_map
 
@@ -56,6 +56,7 @@ class AudioDecryptWorker(QThread):
             logger.error(f"音频解密线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
 
+    @timed("音频-转换bytes")
     def _convert_bytes_to_bank(self):
         """扫描 data/material/ 目录，将符合条件的 .bytes 文件重命名为 .bank，并复制到解密工具的 input 目录
 
@@ -120,6 +121,7 @@ class AudioDecryptWorker(QThread):
             self.progress.emit(f"已转换 {count} 个 .bytes → .bank")
         return count
 
+    @timed("音频-解密bank")
     def _decrypt_bank_files(self):
         """通过导入 epic7_debank 模块解密 .bank 文件（递归扫描 data/material/，输出到 output/audio/）"""
         if not os.path.isdir(self.debank_dir):

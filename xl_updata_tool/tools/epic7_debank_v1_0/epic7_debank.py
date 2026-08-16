@@ -48,15 +48,16 @@ def parse_args():
 def _should_process_file(filepath):
     """判断文件是否应作为音频处理
 
-    筛选规则（两者需同时满足）：
-    1. 文件名（不含扩展名）完全由数字组成
-    2. 路径中包含 fmodassets 子目录
+    筛选规则（需同时满足）：
+    1. 路径中包含 fmodassets 子目录
+    2. 语音（文件名不含扩展名完全由数字组成）或 bgm（位于 bgm 目录下）
     """
     fname = os.path.basename(filepath)
     base = os.path.splitext(fname)[0]
-    if not base.isdigit():
+    parts = filepath.split(os.sep)
+    if "fmodassets" not in parts:
         return False
-    if "fmodassets" not in filepath.split(os.sep):
+    if not base.isdigit() and "bgm" not in parts:
         return False
     return True
 

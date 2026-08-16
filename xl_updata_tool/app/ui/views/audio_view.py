@@ -9,7 +9,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QAbstractItemView, QFrame, QSlider, QHeaderView,
+    QTreeWidget, QTreeWidgetItem, QAbstractItemView, QFrame, QSlider, QHeaderView,
 )
 
 from app.ui.theme import (
@@ -67,6 +67,12 @@ def create_audio_view(parent=None):
                       color:#fff; font-size:12px; font-weight:600; padding:6px 12px; }}
         QPushButton:hover {{ opacity:0.85; }}
     """
+    btn_decrypt = QPushButton("🔓 开始解密")
+    btn_decrypt.setStyleSheet(btn_style)
+    if parent is not None:
+        btn_decrypt.clicked.connect(lambda: parent._start_audio_decrypt(force=False))
+    ctrl_layout.addWidget(btn_decrypt)
+
     btn_refresh = QPushButton("🔄 刷新列表")
     btn_refresh.setStyleSheet(btn_style)
     if parent is not None:
@@ -88,28 +94,23 @@ def create_audio_view(parent=None):
     ctrl_layout.addStretch()
     layout.addWidget(ctrl_bar)
 
-    # 音频表格
-    audio_table = QTableWidget()
+    # 音频树（按目录层级折叠收起，加快加载）
+    audio_table = QTreeWidget()
     audio_table.setColumnCount(5)
-    audio_table.setHorizontalHeaderLabels(["", "文件名", "时长", "格式", "大小"])
-    hdr = audio_table.horizontalHeader()
-    hdr.setSectionResizeMode(0, QHeaderView.Fixed)
-    hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+    audio_table.setHeaderLabels(["文件名", "目录", "时长", "格式", "大小"])
+    hdr = audio_table.header()
+    hdr.setSectionResizeMode(0, QHeaderView.Stretch)
+    hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-    audio_table.setColumnWidth(0, 36)
     audio_table.setAlternatingRowColors(True)
     audio_table.setSelectionMode(QAbstractItemView.SingleSelection)
-    audio_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-    audio_table.setEditTriggers(QTableWidget.NoEditTriggers)
-    audio_table.verticalHeader().setVisible(False)
-    audio_table.setShowGrid(False)
-    audio_table.verticalHeader().setDefaultSectionSize(36)
+    audio_table.setEditTriggers(QTreeWidget.NoEditTriggers)
     audio_table.setStyleSheet(f"""
-        QTableWidget {{ background-color:{BG_DARK}; border:none; gridline-color:transparent; }}
-        QTableWidget::item {{ padding:6px 8px; font-size:13px; }}
-        QTableWidget::item:selected {{ background-color:{ACCENT}; color:#fff; }}
+        QTreeWidget {{ background-color:{BG_DARK}; border:none; }}
+        QTreeWidget::item {{ padding:6px 8px; font-size:13px; }}
+        QTreeWidget::item:selected {{ background-color:{ACCENT}; color:#fff; }}
         QHeaderView::section {{ background-color:{BG_SURFACE}; padding:8px 10px;
             border:none; border-bottom:1px solid {BORDER}; font-size:12px;
             font-weight:600; color:{TEXT_SECONDARY}; }}
@@ -117,7 +118,7 @@ def create_audio_view(parent=None):
     audio_table.setContextMenuPolicy(Qt.CustomContextMenu)
     if parent is not None:
         audio_table.customContextMenuRequested.connect(parent._show_audio_context_menu)
-        audio_table.doubleClicked.connect(parent._on_audio_double_click)
+        audio_table.itemDoubleClicked.connect(parent._on_audio_double_click)
     layout.addWidget(audio_table, 1)
 
     # 底部播放控制区
