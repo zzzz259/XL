@@ -56,6 +56,8 @@
 
 其中「备注」列显示该版本相对上一版本的差异：`新增 X | 移除 Y | 未变 Z`。
 
+开发者请先阅读：[架构与协作基线](docs/架构与协作基线.md)。其中记录了 core/ui 边界、运行时目录契约、失败恢复要求和后续拆分路线。
+
 每行有三个操作按钮：
 
 | 按钮 | 作用 |
@@ -128,3 +130,13 @@ A: bundle 文件托管在 CDN 上，速度取决于网络环境。
 **Q: 能离线使用吗**
 
 A: 浏览已下载的资源和查看版本历史可以离线，但检查更新和下载 bundle 需要联网。
+
+### 开发验证
+
+在仓库根目录安装开发依赖后，可运行：
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+python -m ruff check --no-cache tests xl_updata_tool/app/core
+```

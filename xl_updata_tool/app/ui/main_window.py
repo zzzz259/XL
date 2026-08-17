@@ -30,7 +30,7 @@ from .theme import (
 )
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
-from app.core.downloader import CheckUpdateThread, DownloadWorker
+from .workers.download import CheckUpdateThread, DownloadWorker
 from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace, compute_delta
 from app.core import database as db
 from app.core.logger import logger, timed
