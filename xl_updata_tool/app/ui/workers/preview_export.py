@@ -2,20 +2,11 @@
 """图片预览导出工作线程（.skel → PNG，含配对合成 + 皮肤导出 + FGUI 图集切割）"""
 
 import os
-import json
-import re
-import subprocess
-import sys
-import time
-import math
 
-from PIL import Image
-from PySide6.QtCore import QThread, Signal, QMimeData, QUrl
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
-from app.ui.theme import *
-from app.core.path_utils import DATA_DIR, get_base_dir, get_tools_dir
+from app.core.path_utils import DATA_DIR, get_base_dir
 
 from app.ui.features.fgui_atlas import UIPackageTool
 from app.ui.adapters.spine_adapter import (
@@ -26,7 +17,6 @@ from app.ui.adapters.spine_adapter import (
     extract_motion_names,
     export_animation_frames,
     export_skel_skins,
-    run_spine_export,
     extract_character_id,
 )
 from app.core.prefab_parser import parse_prefab, compute_pixel_offset, build_cardspine_bundle_map
@@ -56,7 +46,7 @@ class PreviewExportWorker(QThread):
 
     def run(self):
         try:
-            success = self._do_export()
+            self._do_export()
         except Exception as e:
             logger.error(f"预览导出线程异常: {e}", exc_info=True)
             self.error.emit(str(e))

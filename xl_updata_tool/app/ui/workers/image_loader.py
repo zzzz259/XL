@@ -7,7 +7,6 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QPixmap, QPainter, Qt
 
 from app.core.logger import logger
-from app.ui.theme import THUMB_SIZE
 
 
 class ImageLoadWorker(QThread):

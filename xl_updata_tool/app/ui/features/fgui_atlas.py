@@ -240,7 +240,7 @@ class UIPackage:
             raise Exception(f"Invalid package format in '{asset_name_prefix}'")
         buffer.version = buffer.read_int()
         ver2 = buffer.version >= 2
-        compressed = buffer.read_bool()
+        buffer.read_bool()  # 压缩标志由后续索引解析决定，仍需消费该字段
         self.id = buffer.read_string()
         self.name = buffer.read_string()
         buffer.skip(20)

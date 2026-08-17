@@ -9,12 +9,10 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTreeWidget, QTreeWidgetItem, QAbstractItemView, QFrame, QSlider, QHeaderView,
+    QTreeWidget, QAbstractItemView, QFrame, QSlider, QHeaderView,
 )
 
 from app.ui.theme import (
-    BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER, ACCENT,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, DANGER, INFO,
     get_color,
 )
 

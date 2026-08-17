@@ -1,4 +1,7 @@
-import os, shutil, subprocess, sys
+import os
+import shutil
+import subprocess
+import sys
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -24,14 +27,12 @@ except ImportError:
     QT_AWESOME_AVAILABLE = False
 
 from .theme import (
-    ACCENT, BG_SURFACE, BG_DARK, BG_ELEVATED, BORDER,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
+    ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
     apply_theme, get_color,
 )
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
 from .workers.download import CheckUpdateThread, DownloadWorker
-from app.core.bundle_parser import extract_manifest_hashes
 from app.core.version_data import compute_download_hashes, compute_version_delta_map
 from app.core.local_bundle_sync import sync_local_bundles
 from app.core.character_cache import (
@@ -65,13 +66,6 @@ from .features.export_controller import (
     export_composite_video,
     export_with_dialog,
     batch_export_with_dialog,
-    on_composite_progress,
-    on_composite_all_finished,
-    start_regular_batch_export,
-    on_regular_all_finished,
-    on_batch_progress,
-    on_batch_one_finished,
-    on_batch_all_finished,
 )
 from app.core.character_loader import load_character_data
 

@@ -6,12 +6,11 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QCheckBox, QComboBox, QSpinBox, QFormLayout, QFrame,
+    QCheckBox, QComboBox, QSpinBox, QFormLayout,
 )
 from PySide6.QtCore import Qt
 
-from app.ui.theme import BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, DANGER
-from app.core.logger import logger
+from app.ui.theme import BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT
 
 
 class ExportSettingsDialog(QDialog):

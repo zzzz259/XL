@@ -5,13 +5,12 @@ import os
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QGraphicsScene, QGraphicsView, QSizePolicy,
+    QFrame, QGraphicsScene, QGraphicsView,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QPainter, QKeyEvent
+from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QPainter
 
 from app.ui.theme import BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, DANGER
-from app.core.logger import logger
 
 
 class ImageViewerDialog(QDialog):

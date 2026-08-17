@@ -10,9 +10,6 @@ import re
 import subprocess
 import sys
 import time
-import math
-import json
-import struct
 import gc
 import shutil
 
@@ -23,7 +20,7 @@ except ImportError:
     PILLOW_AVAILABLE = False
 
 from app.core.logger import logger
-from app.core.path_utils import get_tools_dir, get_base_dir
+from app.core.path_utils import get_tools_dir
 
 
 def extract_character_id(base_name):
@@ -336,7 +333,7 @@ def run_spine_export(spine_cli, skel_path, atlas_path, output_path, scale, max_r
             return True
 
         # fallback: 不带 --pma
-        logger.debug(f"--pma 导出失败，尝试不带 --pma")
+        logger.debug("--pma 导出失败，尝试不带 --pma")
         cmd_no_pma = [
             spine_cli, "export", skel_path,
             "-f", "Png",

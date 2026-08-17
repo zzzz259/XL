@@ -13,3 +13,8 @@ exclude = [
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# MainWindow 和旧版 AssetBrowser 仍在渐进拆分；新 core、views 和 tests 不使用这些豁免。
+"xl_updata_tool/app/ui/main_window.py" = ["E701", "E702", "E722", "E741"]
+"xl_updata_tool/app/ui/asset_browser.py" = ["E701", "E702", "E722", "E741"]

@@ -32,4 +32,4 @@ jobs:
         run: python -m pytest
 
       - name: Lint tests and core modules
-        run: python -m ruff check tests xl_updata_tool/app/core
+        run: python -m ruff check tests xl_updata_tool/app/core xl_updata_tool/app/ui/views/version_view.py xl_updata_tool/app/ui/legacy

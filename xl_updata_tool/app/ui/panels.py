@@ -1,22 +1,19 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QLineEdit, QSplitter, QProgressBar, QTextEdit, QHeaderView,
-    QFrame, QScrollArea, QGridLayout, QGroupBox, QComboBox, QMessageBox,
-    QStackedWidget,
+    QPushButton, QLineEdit, QTextEdit, QFrame, QComboBox,
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QSize
-from PySide6.QtGui import QFont, QIcon, QColor, QMouseEvent, QAction, QClipboard
+from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QColor, QMouseEvent, QAction
 from PySide6.QtWidgets import QAbstractItemView, QMenu, QApplication
-from datetime import datetime, timedelta
 
 from .theme import (
     ACCENT, BG_SURFACE, BG_ELEVATED, BG_HOVER, BORDER, TEXT_PRIMARY,
-    TEXT_SECONDARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
-    ACCENT_HOVER
+    TEXT_SECONDARY, TEXT_MUTED, SUCCESS
 )
 from app.core import database as db
+from app.core.audio_library import format_size
 
 
 def ticks_to_date(ticks):
@@ -179,7 +176,6 @@ class BundleBrowserPanel(QWidget):
         layout.setSpacing(8)
         from .bundle_model import BundleTableModel
         from PySide6.QtWidgets import QTableView
-        from PySide6.QtCore import QSortFilterProxyModel
 
         top = QHBoxLayout()
         top.setSpacing(8)
@@ -245,7 +241,7 @@ class BundleBrowserPanel(QWidget):
             copy_name.triggered.connect(lambda: cb.setText(name))
             copy_hash.triggered.connect(lambda: cb.setText(full_hash))
             copy_all.triggered.connect(
-                lambda: cb.setText(f"{name}  v{ver}  hash={full_hash}  size={_format_size(size)}")
+                lambda: cb.setText(f"{name}  v{ver}  hash={full_hash}  size={format_size(size)}")
             )
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
@@ -290,8 +286,8 @@ class VersionInfoPanel(QWidget):
             f"Bundle 数:   {sub_count}",
             f"清单文件:   {manifest}",
             f"备注:       {notes or '-'}",
-            f"",
-            f"--- updateinfo.json ---",
+            "",
+            "--- updateinfo.json ---",
         ]
         if update_json:
             try:
@@ -373,7 +369,7 @@ class ComparePanel(QWidget):
 
         lines = [
             "=== 版本变化摘要 ===",
-            f"",
+            "",
             f"旧版 bundle: {len(old_hashes):,}",
             f"新版 bundle: {len(new_hashes):,}",
             f"未变化:     {common:,}",
