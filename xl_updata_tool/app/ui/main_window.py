@@ -1,13 +1,13 @@
-import os, re, shutil, subprocess, sys, urllib.request, ssl
+import os, shutil, subprocess, sys
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QToolButton, QHeaderView,
     QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
-    QGridLayout, QDialog, QTreeWidgetItem, QSizePolicy,
+    QDialog, QTreeWidgetItem, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMimeData, QUrl, QSettings, QEvent
+from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings, QEvent
 from PySide6.QtGui import QColor, QPixmap, QBrush
 
 try:
@@ -24,14 +24,14 @@ except ImportError:
     QT_AWESOME_AVAILABLE = False
 
 from .theme import (
-    BASE_STYLESHEET, ACCENT, BG_SURFACE, BG_DARK, BG_ELEVATED, BORDER,
+    ACCENT, BG_SURFACE, BG_DARK, BG_ELEVATED, BORDER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
     apply_theme, get_color,
 )
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
 from .workers.download import CheckUpdateThread, DownloadWorker
-from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace
+from app.core.bundle_parser import extract_manifest_hashes
 from app.core.version_data import compute_download_hashes, compute_version_delta_map
 from app.core.local_bundle_sync import sync_local_bundles
 from app.core.character_cache import (
@@ -40,13 +40,16 @@ from app.core.character_cache import (
     save_cache as save_character_cache_file,
     source_mtime,
 )
+from app.core.character_presenter import build_character_detail_html, export_characters_csv
+from app.core.audio_library import scan_audio_files
+from app.core.preview_catalog import build_skel_map, find_skel_paths
+from app.core.seed_versions import seed_bundled_versions
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
 
 # 拆分后的模块导入
 from .dialogs.image_viewer import ImageViewerDialog
-from .widgets.drag_list import DragListWidget
 from .workers.image_loader import ImageLoadWorker
 from .workers.preview_export import PreviewExportWorker
 from .workers.audio_decrypt import AudioDecryptWorker
@@ -1218,9 +1221,7 @@ class MainWindow(QMainWindow):
     def _load_audio_list(self, force_reload=False):
         """扫描 output/audio/ 目录，加载已解密的音频文件列表"""
         audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
-        audio_exts = {".wav", ".ogg", ".mp3"}
-
-        self._audio_files = []
+        self._audio_files = scan_audio_files(audio_output_dir)
 
         if not os.path.isdir(audio_output_dir):
             self.audio_title.setText("🎵 音频管理器  共 0 个音频文件")
@@ -1228,27 +1229,6 @@ class MainWindow(QMainWindow):
             self.audio_table.clear()
             logger.info(f"音频输出目录不存在: {audio_output_dir}")
             return
-
-        # 递归扫描 output/audio/ 目录中的音频文件（支持子目录结构）
-        for root, dirs, files in os.walk(audio_output_dir):
-            for f in files:
-                ext = os.path.splitext(f)[1].lower()
-                filepath = os.path.join(root, f)
-                if ext in audio_exts:
-                    size = os.path.getsize(filepath)
-                    # 使用相对于 output/audio/ 的路径作为显示名，以区分同名文件
-                    rel_name = os.path.relpath(filepath, audio_output_dir)
-                    self._audio_files.append({
-                        "path": filepath,
-                        "name": rel_name,
-                        "dir": os.path.dirname(rel_name),
-                        "ext": ext.lstrip(".").upper(),
-                        "size": size,
-                        "duration": None,
-                    })
-
-        # 按文件名排序
-        self._audio_files.sort(key=lambda x: x["name"])
 
         # 建树：voice → 角色编号 → cn/jp → 文件；album → 专辑名 → 文件
         self.audio_table.clear()
@@ -1460,160 +1440,13 @@ class MainWindow(QMainWindow):
             self._update_character_detail(char_data)
 
     def _update_character_detail(self, char):
-        """更新右侧详情卡片（展示文图效果的全部内容，放入 QScrollArea）"""
-        # 辅助函数
-        def _nl(text):
-            return text.replace("\n", "<br/>") if text else ""
-
-        def _pct(v):
-            if v and v != "未知":
-                try:
-                    n = int(v)
-                    return f"{n // 100}%"
-                except (ValueError, TypeError):
-                    return str(v)
-            return "-"
-
-        name = char.get("name", "未知").split('/')[0] if '/' in str(char.get("name", "")) else char.get("name", "未知")
+        """把角色详情渲染结果交给 Qt 控件。"""
+        name, html = build_character_detail_html(char)
         self.character_detail_name.setText(name)
-
-        # ---- 基础信息 ----
-        star = char.get("star", "未知")
-        profession = char.get("profession", "未知")
-        element = char.get("element", "未知")
-        birthday = char.get("birthday", "未知")
-        height = char.get("height", "未知")
-        faction = char.get("faction", "未知")
-        cv = char.get("cv", "未知")
-        description = _nl(char.get("description", "未知"))
-
-        # ---- 战斗属性 ----
-        init_hp = char.get("init_hp", 0)
-        init_atk = char.get("init_atk", 0)
-        init_def = char.get("init_def", 0)
-        max_hp = char.get("max_hp", 0)
-        max_atk = char.get("max_atk", 0)
-        max_def = char.get("max_def", 0)
-
-        crt = _pct(char.get("crt", "0"))
-        blk = _pct(char.get("blk", "0"))
-        crt_int = _pct(char.get("crt_int", "0"))
-        blk_int = _pct(char.get("blk_int", "0"))
-        spd_move = char.get("spd_move", "未知")
-        spd_atk = char.get("spd_atk", "未知")
-        range_atk = char.get("range_atk", "未知")
-
-        # ---- 构建 HTML 内容 ----
-        html_parts = []
-        html_parts.append(f"<h2>基础信息</h2>")
-        html_parts.append(f"<p><b>名称：</b>{name}</p>")
-        html_parts.append(f"<p><b>星级：</b>{star}</p>")
-        html_parts.append(f"<p><b>职业：</b>{profession}</p>")
-        html_parts.append(f"<p><b>属性：</b>{element}</p>")
-        html_parts.append(f"<p><b>生日：</b>{birthday}</p>")
-        html_parts.append(f"<p><b>身高：</b>{height}</p>")
-        html_parts.append(f"<p><b>阵营：</b>{faction}</p>")
-        html_parts.append(f"<p><b>CV：</b>{cv}</p>")
-        html_parts.append(f"<p><b>简介：</b><br/>{description}</p>")
-
-        html_parts.append(f"<h2>战斗属性</h2>")
-        html_parts.append(f"<p><b>初始生命：</b>{init_hp} → <b>满级生命：</b>{max_hp}</p>")
-        html_parts.append(f"<p><b>初始攻击：</b>{init_atk} → <b>满级攻击：</b>{max_atk}</p>")
-        html_parts.append(f"<p><b>初始防御：</b>{init_def} → <b>满级防御：</b>{max_def}</p>")
-        html_parts.append(f"<p><b>暴击：</b>{crt} &nbsp; <b>格挡：</b>{blk}</p>")
-        html_parts.append(f"<p><b>暴击伤害：</b>{crt_int} &nbsp; <b>格挡效果：</b>{blk_int}</p>")
-        html_parts.append(f"<p><b>移动速度：</b>{spd_move} &nbsp; <b>攻击速度：</b>{spd_atk} &nbsp; <b>攻击范围：</b>{range_atk}</p>")
-
-        # ---- 技能 ----
-        html_parts.append(f"<h2>技能</h2>")
-        skill_fields = [
-            ("队长技能", "leader_skill"),
-            ("普通技能", "normal_skill"),
-            ("特殊技能", "special_skill"),
-            ("爆发技能", "burst_skill"),
-        ]
-        for label, field in skill_fields:
-            val = char.get(field, "未知")
-            if val and val != "未知":
-                html_parts.append(f"<p><b>{label}：</b><br/>{_nl(val)}</p>")
-
-        # 被动技能
-        for i in range(1, 4):
-            val = char.get(f"passive_skill_{i}", "未知")
-            if val and val != "未知":
-                html_parts.append(f"<p><b>被动技能{i}：</b><br/>{_nl(val)}</p>")
-
-        # 觉醒技能
-        for i in range(1, 6):
-            val = char.get(f"awakening_skill_{i}", "未知")
-            if val and val != "未知":
-                html_parts.append(f"<p><b>觉醒技能{i}：</b><br/>{_nl(val)}</p>")
-
-        # ---- 徽章推荐 ----
-        badge_info = char.get("badge_info", "")
-        if badge_info:
-            html_parts.append(f"<h2>徽章推荐</h2>")
-            html_parts.append(f"<p>{_nl(badge_info)}</p>")
-
-        # ---- 突破消耗 ----
-        breakthrough_costs = char.get("breakthrough_costs", ["", "", "", ""])
-        if any(breakthrough_costs):
-            html_parts.append(f"<h2>突破消耗</h2>")
-            labels = ["突破一", "突破二", "突破三", "突破四"]
-            for i, cost in enumerate(breakthrough_costs):
-                if cost:
-                    html_parts.append(f"<p><b>{labels[i]}：</b>{cost}</p>")
-
-        # ---- 技能升级消耗 ----
-        normal_upgrade_costs = char.get("normal_skill_upgrade_costs", ["", "", ""])
-        if any(normal_upgrade_costs):
-            html_parts.append(f"<h2>普通技能升级消耗</h2>")
-            for i, cost in enumerate(normal_upgrade_costs):
-                if cost:
-                    html_parts.append(f"<p><b>升级{i+1}：</b>{cost}</p>")
-
-        passive_upgrade_costs = char.get("passive_skill_upgrade_costs", ["", "", ""])
-        if any(passive_upgrade_costs):
-            html_parts.append(f"<h2>被动技能升级消耗</h2>")
-            for i, cost in enumerate(passive_upgrade_costs):
-                if cost:
-                    html_parts.append(f"<p><b>升级{i+1}：</b>{cost}</p>")
-
-        # ---- 语音 ----
-        html_parts.append(f"<h2>语音</h2>")
-        voice_labels = [
-            "成员报道", "问候", "闲谈1", "闲谈2", "闲谈3",
-            "突破感悟1", "突破感悟2", "突破感悟3",
-            "觉醒感悟1", "觉醒感悟2", "觉醒感悟3", "觉醒感悟4", "觉醒感悟5",
-            "出战", "攻击1", "攻击2", "攻击3", "战技1", "战技2",
-            "总攻技1", "总攻技2", "总攻技3", "受击1", "受击2", "受击3",
-            "重伤", "退场", "作战胜利", "作战失败",
-            "生日祝福", "新年祝福", "情人节祝福", "万圣节祝福", "圣诞节祝福"
-        ]
-        for i in range(34):
-            voice_key = f"voice_{i+1}"
-            voice_text = char.get(voice_key, "")
-            if voice_text:
-                html_parts.append(f"<p><b>{voice_labels[i]}：</b>{voice_text}</p>")
-
-        # ---- 故事 ----
-        html_parts.append(f"<h2>故事</h2>")
-        story_fields = [
-            ("个人情报", "personal_info"),
-            ("风闻", "anecdote"),
-            ("记录", "record"),
-            ("逸事", "anecdote2"),
-        ]
-        for label, field in story_fields:
-            val = char.get(field, "未知")
-            if val and val != "未知":
-                html_parts.append(f"<p><b>{label}：</b><br/>{_nl(val)}</p>")
-
-        full_html = "<html><body>" + "<br/>".join(html_parts) + "</body></html>"
-        self.character_detail_info.setText(full_html)
+        self.character_detail_info.setText(html)
 
     def _export_characters_csv(self):
-        """导出角色数据为 CSV 文件（直接从 self.characters_full 缓存写入）"""
+        """弹出保存对话框并委托无 Qt 的 CSV 导出逻辑。"""
         if not self.characters_full:
             QMessageBox.information(self, "提示", "没有角色数据可导出，请先加载角色视图。")
             return
@@ -1626,119 +1459,14 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("正在生成角色数据...")
         QApplication.processEvents()
-
-        headers = [
-            "ID", "Name", "Star", "Profession", "Element", "Birthday", "Height", "Faction", "CV", "Description",
-            "Init_ATK", "Init_DEF", "Init_HP", "Max_ATK", "Max_DEF", "Max_HP",
-            "CRT", "BLK", "CRT_INT", "BLK_INT", "SPD_MOVE", "SPD_ATK", "RANGE_ATK", "WEIGHT",
-            "Leader_Skill", "Normal_Skill", "Special_Skill", "Burst_Skill",
-            "Passive_Skill_1", "Passive_Skill_2", "Passive_Skill_3",
-            "觉醒1", "觉醒2", "觉醒3", "觉醒4", "觉醒5",
-            "成员报道", "问候", "闲谈1", "闲谈2", "闲谈3",
-            "突破感悟1", "突破感悟2", "突破感悟3",
-            "觉醒感悟1", "觉醒感悟2", "觉醒感悟3", "觉醒感悟4", "觉醒感悟5",
-            "出战", "攻击1", "攻击2", "攻击3", "战技1", "战技2",
-            "总攻技1", "总攻技2", "总攻技3", "受击1", "受击2", "受击3",
-            "重伤", "退场", "作战胜利", "作战失败",
-            "生日祝福", "新年祝福", "情人节祝福", "万圣节祝福", "圣诞节祝福",
-            "个人情报", "风闻", "记录", "逸事",
-            "推荐徽章",
-            "突破一", "突破二", "突破三", "突破四",
-            "普通技能升级一", "普通技能升级二", "普通技能升级三",
-            "被动技能升级一", "被动技能升级二", "被动技能升级三"
-        ]
-
-        # 过滤 ID 范围 80100001~80101999
-        filtered_full = {}
-        for char_id, char_info in self.characters_full.items():
-            raw_id = char_info.get("raw_id", 0)
-            if 80100001 <= raw_id <= 80101999:
-                filtered_full[char_id] = char_info
-
-        if not filtered_full:
+        count = export_characters_csv(file_path, self.characters_full)
+        if not count:
             QMessageBox.information(self, "提示", "未找到匹配的角色数据。")
             self.status_bar.showMessage("CSV 导出失败：无匹配角色")
             return
 
-        import csv
-        with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-
-            for char_id, char_info in sorted(filtered_full.items(), key=lambda x: x[1].get("raw_id", 0)):
-                def _g(key, default=""):
-                    v = char_info.get(key, default)
-                    if v is None:
-                        return default
-                    return str(v)
-
-                def _skill(field, default=""):
-                    val = char_info.get(field, default)
-                    if val and val != "未知":
-                        return val.replace("\n", " | ").replace("\"", "'")
-                    return default
-
-                def _voice(idx):
-                    v = char_info.get(f"voice_{idx}", "")
-                    if v:
-                        return v.strip('"')
-                    return ""
-
-                row = [
-                    _g("raw_id"),
-                    _g("name", "").split('/')[0] if '/' in str(_g("name", "")) else _g("name", ""),
-                    _g("star"),
-                    _g("profession"),
-                    _g("element"),
-                    _g("birthday"),
-                    _g("height"),
-                    _g("faction"),
-                    _g("cv"),
-                    _g("description", "").replace("\n", " "),
-                    _g("init_atk"), _g("init_def"), _g("init_hp"),
-                    _g("max_atk"), _g("max_def"), _g("max_hp"),
-                    _g("crt"), _g("blk"), _g("crt_int"), _g("blk_int"),
-                    _g("spd_move"), _g("spd_atk"), _g("range_atk"), _g("weight"),
-                    _skill("leader_skill"),
-                    _skill("normal_skill"),
-                    _skill("special_skill"),
-                    _skill("burst_skill"),
-                    _skill("passive_skill_1"),
-                    _skill("passive_skill_2"),
-                    _skill("passive_skill_3"),
-                    _skill("awakening_skill_1"),
-                    _skill("awakening_skill_2"),
-                    _skill("awakening_skill_3"),
-                    _skill("awakening_skill_4"),
-                    _skill("awakening_skill_5"),
-                ]
-                # 34条语音
-                for i in range(1, 35):
-                    row.append(_voice(i))
-                # 故事
-                row.append(_g("personal_info", "").replace("\n", " "))
-                row.append(_g("anecdote", "").replace("\n", " "))
-                row.append(_g("record", "").replace("\n", " "))
-                row.append(_g("anecdote2", "").replace("\n", " "))
-                # 徽章推荐
-                row.append(_g("badge_info", "").replace("\n", " | "))
-                # 突破消耗
-                breakthrough_costs = char_info.get("breakthrough_costs", ["", "", "", ""])
-                for i in range(4):
-                    row.append(breakthrough_costs[i] if i < len(breakthrough_costs) else "")
-                # 普通技能升级消耗
-                normal_upgrade_costs = char_info.get("normal_skill_upgrade_costs", ["", "", ""])
-                for i in range(3):
-                    row.append(normal_upgrade_costs[i] if i < len(normal_upgrade_costs) else "")
-                # 被动技能升级消耗
-                passive_upgrade_costs = char_info.get("passive_skill_upgrade_costs", ["", "", ""])
-                for i in range(3):
-                    row.append(passive_upgrade_costs[i] if i < len(passive_upgrade_costs) else "")
-
-                writer.writerow(row)
-
-        logger.info(f"CSV 导出完成: {file_path} ({len(filtered_full)} 个角色)")
-        self.status_bar.showMessage(f"CSV 导出完成: {len(filtered_full)} 个角色")
+        logger.info(f"CSV 导出完成: {file_path} ({count} 个角色)")
+        self.status_bar.showMessage(f"CSV 导出完成: {count} 个角色")
 
     # ========== Lua Decrypt ==========
 
@@ -2019,16 +1747,8 @@ class MainWindow(QMainWindow):
             logger.warning(f"预览目录不存在，已创建: {preview_dir}")
 
         # 预扫描 material 目录，建立 文件名→skel路径 映射
-        self._skel_map = {}  # base_name -> (skel_path, atlas_path)
-        if os.path.isdir(material_dir):
-            for root, dirs, files in os.walk(material_dir):
-                for f in files:
-                    if f.endswith(".skel"):
-                        base = os.path.splitext(f)[0]
-                        skel_p = os.path.join(root, f)
-                        atlas_p = os.path.join(root, f"{base}.atlas")
-                        self._skel_map[base] = (skel_p, atlas_p)
-            logger.debug(f"扫描到 {len(self._skel_map)} 个 .skel 文件用于路径匹配")
+        self._skel_map = build_skel_map(material_dir)
+        logger.debug(f"扫描到 {len(self._skel_map)} 个 .skel 文件用于路径匹配")
 
         self._clear_list()
         self._thumb_cache = {}
@@ -2089,32 +1809,7 @@ class MainWindow(QMainWindow):
           - {base}_bg.png           -> skel: {base}_bg.skel
           - {base}_composite.png    -> skel: {base}.skel (角色)
         """
-        fname = os.path.splitext(os.path.basename(png_path))[0]
-
-        # 处理 composite（合成图对应角色的 skel）
-        if fname.endswith("_composite"):
-            base = fname[:-len("_composite")]
-        # 处理 _bg 后缀
-        elif fname.endswith("_bg"):
-            base = fname
-        else:
-            # 尝试去掉可能的动画后缀
-            # 先直接匹配
-            if fname in self._skel_map:
-                base = fname
-            else:
-                # 尝试查找 {base}_{anim} 模式
-                found_base = None
-                for known_base in self._skel_map:
-                    if fname.startswith(known_base + "_"):
-                        found_base = known_base
-                        break
-                base = found_base if found_base else fname
-
-        if base in self._skel_map:
-            return self._skel_map[base]
-
-        return None, None
+        return find_skel_paths(png_path, self._skel_map)
 
     def _on_load_finished(self, loaded_paths):
         """加载完成回调"""
@@ -2320,33 +2015,7 @@ class MainWindow(QMainWindow):
     # ========== SEED ==========
 
     def _seed_bundled_version(self):
-        existing = {r[0] for r in db.get_all_versions()}
-        logger.info(f"写入种子版本：已存在 {len(existing)} 个版本")
-        ctx = ssl.create_default_context()
-        CDN_DIR = os.path.join(BUNDLES_DIR, "seeds")
-        HD = {"User-Agent": "UnityPlayer/2021.3.45f2c1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)","X-Unity-Version": "2021.3.45f2c1"}
-        def dcat(n,h):
-            fp=os.path.join(CDN_DIR,f"SEED_{n}_{h[:12]}.json")
-            if not os.path.exists(fp):
-                os.makedirs(CDN_DIR,exist_ok=True)
-                d=urllib.request.urlopen(urllib.request.Request(f"https://elpis.17995cdn.com/Android/Bundles/{n.lower()}_{h}.json",headers=HD),context=ctx,timeout=15).read()
-                with open(fp,"wb")as f:f.write(d)
-            return fp
-        def seed(ts,info,vd,notes,cats,ic=False):
-            if ts in existing:
-                logger.debug(f"种子版本 {ts} 已存在，跳过")
-                return
-            self.version_mgr.register_version(ts,info,vd,is_current=ic)
-            db.add_notes(ts,notes)
-            ah=set()
-            for n,h in cats:
-                try: ah|=extract_manifest_hashes(dcat(n,h))
-                except: pass
-            if ah: db.save_sub_bundles(ts,list(ah))
-            logger.info(f"种子版本 {ts}：注册完成，{len(ah)} 个 bundle")
-        seed(134091181056097516,{"timestamp":134091181056097516,"file":"versions_vA137.D342.O142.V6_134091181056097516.json","hash":"","size":0,"downloadURL":"https://elpis.17995cdn.com/Android/Bundles","playerURL":"https://xl.haoplay.com.cn/dl","latestVersion":"1.0","minVersion":"1.0"},{"timestamp":134091181056097516,"data":[{"name":"Arts","hash":"80d80e718768bdd7b35f5b9406d624ed","size":781708,"ver":137},{"name":"Data","hash":"48002d6e908b3fce2c4b61d8c34b9393","size":158685,"ver":342},{"name":"Other","hash":"fdf0f3b9cad9498a25f542c4c9ce0f8b","size":129635,"ver":142},{"name":"Video","hash":"a7fd12e3f78b95bcfb6c63be49247b5f","size":2738,"ver":6}]},"APK内置版本, 2025年12月",[("Arts","80d80e718768bdd7b35f5b9406d624ed"),("Data","48002d6e908b3fce2c4b61d8c34b9393"),("Other","fdf0f3b9cad9498a25f542c4c9ce0f8b")])
-        seed(134239138473475084,{"timestamp":134239138473475084,"file":"versions_vA145.D378.O152.V6_134239138473475084.json","hash":"","size":0,"downloadURL":"https://elpis.17995cdn.com/Android/Bundles","playerURL":"https://xl.haoplay.com.cn/dl","latestVersion":"1.1","minVersion":"1.1"},{"timestamp":134239138473475084,"data":[{"name":"Arts","hash":"a1c72aae7f79b72bc763e63803362d01","size":836280,"ver":145},{"name":"Data","hash":"7bbfa67db42e024cb7124dddb8b91d2b","size":180385,"ver":378},{"name":"Other","hash":"d3632702f53de4ba0457b5e518aaf0f3","size":139791,"ver":152},{"name":"Video","hash":"01fe1717b1979689c37f26f6312ea23b","size":2738,"ver":6}]},"完整版本, 2026年5月26日",[("Arts","a1c72aae7f79b72bc763e63803362d01"),("Data","7bbfa67db42e024cb7124dddb8b91d2b"),("Other","d3632702f53de4ba0457b5e518aaf0f3")])
-        seed(134272123703055311,{"timestamp":134272123703055311,"file":"versions_vA152.D386.O156.V6_134272123703055311.json","hash":"bb7d22dab4acab771f336ce53f6af261","size":367,"downloadURL":"https://elpis.17995cdn.com/Android/Bundles","playerURL":"https://xl.haoplay.com.cn/dl","latestVersion":"1.2","minVersion":"1.2"},{"timestamp":134272123703055311,"data":[{"name":"Arts","hash":"30ed8244781b44cacc3c5d1ea10a976e","size":844382,"ver":152},{"name":"Data","hash":"5d2c794364dfe22100547764f60689fe","size":185983,"ver":386},{"name":"Other","hash":"dd50845a464e1eda86b027103d2cce43","size":146765,"ver":156},{"name":"Video","hash":"ac0fb4b1842c88408eee708a5f394a8b","size":2744,"ver":6}]},"在线版本, 2026年6月29日",[("Arts","30ed8244781b44cacc3c5d1ea10a976e"),("Data","5d2c794364dfe22100547764f60689fe"),("Other","dd50845a464e1eda86b027103d2cce43")])
+        seed_bundled_versions(self.version_mgr, BUNDLES_DIR)
 
     def _check_auto(self):
         cur = self.version_mgr.get_current()
