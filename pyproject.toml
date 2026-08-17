@@ -1,0 +1,15 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["xl_updata_tool"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+  "xl_updata_tool/tools",
+  "xl_updata_tool/refactor_main_window.py",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

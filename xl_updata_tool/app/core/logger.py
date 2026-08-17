@@ -28,14 +28,6 @@ def _cleanup_old_logs(logs_dir, keep=20):
 
 
 def setup_logger():
-    logs_dir = get_logs_dir()
-    os.makedirs(logs_dir, exist_ok=True)
-    _cleanup_old_logs(logs_dir, keep=20)
-
-    # 每次启动新建一个带时间戳的日志文件
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(logs_dir, f"app_{timestamp}.log")
-
     logger = logging.getLogger("xl_updata_tool")
     logger.setLevel(logging.DEBUG)
 
@@ -47,18 +39,32 @@ def setup_logger():
         datefmt="%Y-%m-%d %H:%M:%S"
     )
 
-    # 文件日志：DEBUG 级别，每次启动新建文件（不轮转）
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
+    # 允许测试、便携版和受限目录通过环境变量指定日志目录。
+    # 文件日志不可用时仍保留控制台日志，避免日志权限问题阻止应用启动。
+    log_dir_error = None
+    try:
+        logs_dir = os.environ.get("XL_LOG_DIR") or get_logs_dir()
+        os.makedirs(logs_dir, exist_ok=True)
+        _cleanup_old_logs(logs_dir, keep=20)
+
+        # 微秒避免同一秒内多次启动覆盖同一个日志文件。
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        log_file = os.path.join(logs_dir, f"app_{timestamp}.log")
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except (OSError, PermissionError) as exc:
+        log_dir_error = exc
 
     # 控制台日志：INFO 级别
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
 
-    logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+    if log_dir_error:
+        logger.warning("文件日志不可用，将仅输出控制台日志: %s", log_dir_error)
 
     return logger
 

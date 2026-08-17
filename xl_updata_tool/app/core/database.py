@@ -1,8 +1,5 @@
 import sqlite3
 import json
-import os
-import threading
-from datetime import datetime
 
 from .logger import logger
 
