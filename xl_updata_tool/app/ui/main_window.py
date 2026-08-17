@@ -975,7 +975,7 @@ class MainWindow(QMainWindow):
             if sys.platform == "win32":
                 os.startfile(sv_exe)
             else:
-                subprocess.Popen([sv_exe], shell=True)
+                subprocess.Popen([sv_exe])
             self.status_bar.showMessage("SpineViewer 已启动")
         except Exception as e:
             logger.error(f"启动 SpineViewer 失败: {e}")
@@ -2341,8 +2341,7 @@ class MainWindow(QMainWindow):
         logger.info(f"打开文件所在目录: {file_path}")
         try:
             subprocess.Popen(
-                ['explorer', '/select,', os.path.normpath(file_path)],
-                shell=True
+                ['explorer', '/select,', os.path.normpath(file_path)]
             )
         except Exception as e:
             logger.error(f"打开文件位置失败: {e}")
