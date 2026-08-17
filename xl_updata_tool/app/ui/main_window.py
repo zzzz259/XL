@@ -3,7 +3,7 @@ import os, shutil, subprocess, sys
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
-    QTableWidget, QTableWidgetItem, QAbstractItemView, QToolButton, QHeaderView,
+    QTableWidgetItem, QToolButton,
     QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
     QDialog, QTreeWidgetItem, QSizePolicy,
 )
@@ -42,7 +42,7 @@ from app.core.character_cache import (
 )
 from app.core.character_presenter import build_character_detail_html, export_characters_csv
 from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
-from app.core.preview_catalog import build_skel_map, find_skel_paths
+from app.core.preview_catalog import build_skel_map, find_skel_paths, scan_cardspine_roles, scan_preview_roles
 from app.core.seed_versions import seed_bundled_versions
 from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
 from app.core.version_update import append_changelog, record_downloaded_bundle, register_checked_version
@@ -60,6 +60,7 @@ from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
 from .views.preview_view import create_preview_view
 from .views.audio_view import create_audio_view
 from .views.character_view import create_character_view
+from .views.version_view import create_version_table
 from .features.export_controller import (
     export_composite_video,
     export_with_dialog,
@@ -156,43 +157,7 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels(["", "版本", "状态", "Bundle数", "备注", "", "", ""])
-        hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.Fixed)
-        hdr.setSectionResizeMode(1, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(2, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(4, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(5, QHeaderView.Fixed)
-        hdr.setSectionResizeMode(6, QHeaderView.Fixed)
-        hdr.setSectionResizeMode(7, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 60)
-        self.table.setColumnWidth(1, 180)
-        self.table.setColumnWidth(2, 140)
-        self.table.setColumnWidth(5, 116)
-        self.table.setColumnWidth(6, 116)
-        self.table.setColumnWidth(7, 116)
-        self.table.setAlternatingRowColors(True)
-        self.table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(True)
-        self.table.verticalHeader().setDefaultSectionSize(52)
-        self.table.setMouseTracking(True)
-        self.table.viewport().setMouseTracking(True)
-        self.table.viewport().installEventFilter(self)
-        self.table.setStyleSheet(f"""
-            QTableWidget {{ background-color:{get_color('BG_DARK')}; border:none; gridline-color:{get_color('BORDER')}; }}
-            QTableWidget::item {{ padding:14px 12px; font-size:14px; }}
-            QHeaderView::section {{ background-color:{get_color('BG_SURFACE')}; padding:12px 14px;
-                border:none; border-right:1px solid {get_color('BORDER')}; border-bottom:2px solid {get_color('BORDER')}; font-size:13px;
-                font-weight:600; color:{get_color('TEXT_SECONDARY')}; }}
-        """)
-        self.table.currentItemChanged.connect(self._on_row_select)
-        self.table.cellClicked.connect(self._on_cell_clicked)
+        self.table = create_version_table(self)
         self._hover_row = -1
         self._checkbox_containers = {}
         self._checked_ts = set()
@@ -1062,16 +1027,7 @@ class MainWindow(QMainWindow):
     def _scan_cardspine_roles(self):
         """扫描 material 的 cardspine .skel，返回角色名列表（去重排序，排除 _bg）"""
         material_dir = os.path.join(DATA_DIR, "material", "assets", "art", "models", "cardspine")
-        roles = set()
-        if os.path.isdir(material_dir):
-            for root, _dirs, files in os.walk(material_dir):
-                for f in files:
-                    if f.endswith(".skel"):
-                        base = os.path.splitext(f)[0]
-                        if base.endswith("_bg"):
-                            continue
-                        roles.add(base)
-        return sorted(roles)
+        return scan_cardspine_roles(material_dir)
 
     # ========== IMAGE GALLERY PREVIEW ==========
 
@@ -1679,10 +1635,7 @@ class MainWindow(QMainWindow):
         if cb is None:
             return
         preview_dir = os.path.join(get_base_dir(), "output", "character")
-        roles = []
-        if os.path.isdir(preview_dir):
-            roles = sorted(d for d in os.listdir(preview_dir)
-                           if os.path.isdir(os.path.join(preview_dir, d)))
+        roles = scan_preview_roles(preview_dir)
         cur = cb.currentText()
         cb.blockSignals(True)
         cb.clear()

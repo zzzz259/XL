@@ -18,6 +18,30 @@ def build_skel_map(material_dir: str) -> dict[str, tuple[str, str]]:
     return result
 
 
+def scan_cardspine_roles(material_dir: str) -> list[str]:
+    """扫描 cardspine 目录中的角色 skel 名称，排除背景资源。"""
+    roles = set()
+    if not os.path.isdir(material_dir):
+        return []
+    for root, _dirs, files in os.walk(material_dir):
+        for filename in files:
+            if filename.endswith(".skel"):
+                role = os.path.splitext(filename)[0]
+                if not role.endswith("_bg"):
+                    roles.add(role)
+    return sorted(roles)
+
+
+def scan_preview_roles(preview_dir: str) -> list[str]:
+    """扫描预览输出目录的一级角色目录。"""
+    if not os.path.isdir(preview_dir):
+        return []
+    return sorted(
+        name for name in os.listdir(preview_dir)
+        if os.path.isdir(os.path.join(preview_dir, name))
+    )
+
+
 def find_skel_paths(png_path: str, skel_map: dict[str, tuple[str, str]]) -> tuple[str | None, str | None]:
     """按预览图命名规则查找对应的 Spine 文件。"""
     filename = os.path.splitext(os.path.basename(png_path))[0]
