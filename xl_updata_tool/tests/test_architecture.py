@@ -2,7 +2,7 @@ from pathlib import Path
 
 from app.core.file_utils import atomic_write_bytes, replace_directory
 
-CORE_DIR = Path(__file__).parents[1] / "xl_updata_tool" / "app" / "core"
+CORE_DIR = Path(__file__).parents[1] / "app" / "core"
 
 
 def test_core_layer_does_not_import_qt():

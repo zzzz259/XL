@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["xl_updata_tool/tests"]
 pythonpath = ["xl_updata_tool"]
 addopts = "-q"
 
