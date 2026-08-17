@@ -47,6 +47,7 @@ from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_
 from app.core.seed_versions import seed_bundled_versions
 from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
 from app.core.version_update import append_changelog, record_downloaded_bundle, register_checked_version
+from app.core.version_download import calculate_missing_downloads
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -653,7 +654,7 @@ class MainWindow(QMainWindow):
         if not ts: return
         ah = [r[0] for r in db.get_sub_bundles(ts)]
         if not ah: QMessageBox.information(self, "无Bundle", "此版本无 bundle."); return
-        sub = db.get_sub_bundles(ts); ds = {r[0] for r in sub if r[2]}
+        sub = db.get_sub_bundles(ts)
         label = "增量下载"
         if delta_only:
             target = self._compute_delta_hashes(ts)
@@ -667,7 +668,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes|QMessageBox.No, QMessageBox.No)
             if rp != QMessageBox.Yes: return
             target = set(ah); label = "全量下载"
-        missing = sorted(target - ds)
+        missing = calculate_missing_downloads(sub, target)
         if not missing: QMessageBox.information(self, "已下载", "全部已下载."); return
 
         self._dl_ts = ts; self._dl_total = len(missing); self._dl_size = 0
@@ -680,7 +681,8 @@ class MainWindow(QMainWindow):
         self.dl_progress.setMaximum(len(missing)); self.dl_progress.setValue(0)
         self.dl_progress.setFormat(f"{label}: 0/{len(missing)}")
         self.status_bar.showMessage(f"{label}: 准备下载 {len(missing)} 个文件...")
-        logger.info(f"开始{label}版本 {ts}：待下载 {len(missing)} 个文件（已下载 {len(ds)} 个）")
+        downloaded_count = len(sub) - len(calculate_missing_downloads(sub, set(ah)))
+        logger.info(f"开始{label}版本 {ts}：待下载 {len(missing)} 个文件（已下载 {downloaded_count} 个）")
 
         out_dir = os.path.join(BUNDLES_DIR, str(ts))
         self.dl_worker = DownloadWorker(missing, out_dir)
