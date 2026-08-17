@@ -941,9 +941,8 @@ class MainWindow(QMainWindow):
         sub = db.get_sub_bundles(ts)
         fs = [r[2] for r in sub if r[2] and os.path.exists(r[2])] if sub else []
         if not fs: QMessageBox.information(self, "无文件", "此版本没有已下载的 bundle，请先下载."); return
-        from .asset_browser import AssetBrowser
-        browser = AssetBrowser(self, fs, ts)
-        browser.exec()
+        from .legacy.asset_browser_entry import open_legacy_asset_browser
+        open_legacy_asset_browser(self, fs, ts)
         self.status_bar.showMessage("资源浏览器已关闭.")
 
     # ========== AUTHOR INFO ==========

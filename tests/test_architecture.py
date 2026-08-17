@@ -16,6 +16,12 @@ def test_core_layer_does_not_import_qt():
     assert offenders == []
 
 
+def test_legacy_asset_browser_has_explicit_compatibility_entrypoint():
+    from app.ui.legacy.asset_browser_entry import open_legacy_asset_browser
+
+    assert callable(open_legacy_asset_browser)
+
+
 def test_atomic_write_preserves_existing_file_when_transform_fails(tmp_path):
     destination = tmp_path / "asset.bundle"
     destination.write_bytes(b"known-good")
