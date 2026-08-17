@@ -7,11 +7,11 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
     QTableWidgetItem, QToolButton,
-    QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
+    QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
     QDialog, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings, QEvent
-from PySide6.QtGui import QColor, QPixmap, QBrush
+from PySide6.QtGui import QColor, QBrush
 
 try:
     from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -43,7 +43,7 @@ from app.core.character_cache import (
 )
 from app.core.character_presenter import build_character_detail_html, export_characters_csv
 from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
-from app.core.preview_catalog import build_skel_map, find_skel_paths, scan_cardspine_roles, scan_preview_roles
+from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
 from app.core.seed_versions import seed_bundled_versions
 from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
 from app.core.version_update import append_changelog, record_downloaded_bundle, register_checked_version
@@ -68,6 +68,7 @@ from .features.export_controller import (
     batch_export_with_dialog,
 )
 from .features.audio_controller import populate_audio_tree
+from .features.preview_controller import build_preview_item
 from app.core.character_loader import load_character_data
 
 DATA_DIR = get_data_dir()
@@ -1667,32 +1668,8 @@ class MainWindow(QMainWindow):
         self._thumb_cache[image_path] = thumbnail
         self._image_paths.append(image_path)
 
-        # 从 PNG 文件名反查 skel/atlas 路径
-        skel_path, atlas_path = self._find_skel_paths(image_path)
-
-        item = QListWidgetItem(QPixmap(thumbnail), "")
-        item.setData(Qt.UserRole, {
-            "png": image_path,
-            "skel": skel_path,
-            "atlas": atlas_path,
-        })
-
-        fname = os.path.basename(image_path)
-        display_name = fname if len(fname) <= 22 else fname[:19] + "..."
-        item.setText(display_name)
-        item.setToolTip(fname)
-
+        item = build_preview_item(image_path, thumbnail, self._skel_map)
         self.image_list.addItem(item)
-
-    def _find_skel_paths(self, png_path):
-        """从 PNG 文件名反查对应的 .skel 和 .atlas 路径
-        PNG 命名规则:
-          - {base}.png              -> skel: {base}.skel
-          - {base}_{anim}.png       -> skel: {base}.skel
-          - {base}_bg.png           -> skel: {base}_bg.skel
-          - {base}_composite.png    -> skel: {base}.skel (角色)
-        """
-        return find_skel_paths(png_path, self._skel_map)
 
     def _on_load_finished(self, loaded_paths):
         """加载完成回调"""
