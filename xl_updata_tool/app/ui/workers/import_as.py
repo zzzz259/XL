@@ -286,7 +286,23 @@ class ImportASWorker(QThread):
             if self._cancelled:
                 return 0, "已取消"
             if failed_labels:
-                return 0, f"导出失败，未替换已有产物: {', '.join(failed_labels)}"
+                hard_failed = []
+                if self.export_categories:
+                    for label in sorted(set(failed_labels)):
+                        category = label.removeprefix("导出 ")
+                        relative = CATEGORY_DIRS.get(category)
+                        output_dir = os.path.join(self._working_material_dir, relative) if relative else ""
+                        if not output_dir or self._count_files(output_dir) == 0:
+                            hard_failed.append(label)
+                elif self._count_files(self._working_material_dir) == 0:
+                    hard_failed = failed_labels
+
+                if hard_failed:
+                    return 0, f"导出失败，未替换已有产物: {', '.join(sorted(set(hard_failed)))}"
+                logger.warning(
+                    "[导入AS] AssetStudio 部分命令失败，但目标分类已有产物，继续提交：%s",
+                    ", ".join(sorted(set(failed_labels))),
+                )
 
             if self.export_categories and "lua" in self.export_categories:
                 self._decompile_lua()
@@ -299,6 +315,9 @@ class ImportASWorker(QThread):
             self._commit_staged_material()
             if self.export_categories and "lua" in self.export_categories:
                 self._sync_lua_output()
+            for category in sorted(self.export_categories or ()):
+                if category not in {label.removeprefix("导出 ") for label in completed_labels}:
+                    completed_labels.append(f"导出 {category}")
             for label in completed_labels:
                 self.category_finished.emit(label)
             logger.info(f"[导入AS] 阶段3完成: 共导出 {total_files} 个文件到 {self.material_dir}")

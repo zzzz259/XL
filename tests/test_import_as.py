@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from app.ui.workers.import_as import ImportASWorker
 
@@ -49,6 +50,41 @@ def test_import_as_keeps_old_output_when_assetstudio_fails(tmp_path, monkeypatch
     assert total == 0
     assert "未替换已有产物" in message
     assert old_lua.read_text(encoding="utf-8") == "old"
+
+
+def test_import_as_commits_partial_assetstudio_output(tmp_path, monkeypatch):
+    material_dir = tmp_path / "material"
+    old_lua = material_dir / "assets" / "lua" / "old.lua"
+    old_lua.parent.mkdir(parents=True)
+    old_lua.write_text("old", encoding="utf-8")
+    as_cli = tmp_path / "AssetStudio.CLI.exe"
+    as_cli.write_bytes(b"placeholder")
+
+    class PartialProcess:
+        returncode = 1
+
+        def __init__(self, output_dir):
+            output = output_dir / "assets" / "lua" / "new.lua"
+            output.parent.mkdir(parents=True)
+            output.write_text("new", encoding="utf-8")
+            self.stdout = ()
+
+        def wait(self):
+            return self.returncode
+
+    monkeypatch.setattr(
+        "app.ui.workers.import_as.subprocess.Popen",
+        lambda command, **kwargs: PartialProcess(Path(command[2])),
+    )
+    worker = ImportASWorker(
+        [], str(tmp_path / "bundles"), str(material_dir), str(as_cli), export_categories={"lua"}
+    )
+
+    total, message = worker._stage_export(None)
+
+    assert total == 1
+    assert message == ""
+    assert (material_dir / "assets" / "lua" / "new.lua").read_text(encoding="utf-8") == "new"
 
 
 def test_import_as_replaces_only_selected_category(tmp_path):
