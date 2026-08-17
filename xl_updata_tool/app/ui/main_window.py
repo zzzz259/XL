@@ -33,6 +33,7 @@ from app.core.version_manager import VersionManager
 from .workers.download import CheckUpdateThread, DownloadWorker
 from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace
 from app.core.version_data import compute_download_hashes, compute_version_delta_map
+from app.core.local_bundle_sync import sync_local_bundles
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -456,36 +457,7 @@ class MainWindow(QMainWindow):
         磁盘是事实来源：磁盘有但 DB 未记录 → 标记已下载；DB 有记录但磁盘无 → 清除。
         ts 非空时只同步该版本，否则同步全部版本。
         """
-        for v in db.get_all_versions():
-            vts = v[0]
-            if ts is not None and vts != ts:
-                continue
-            bundle_dir = os.path.join(BUNDLES_DIR, str(vts))
-            if not os.path.isdir(bundle_dir):
-                continue
-            on_disk = {}
-            for f in os.listdir(bundle_dir):
-                if f.lower().endswith(".bundle"):
-                    on_disk[f[:-len(".bundle")]] = os.path.join(bundle_dir, f)
-            sub = db.get_sub_bundles(vts) or []
-            conn = db.get_conn()
-            changed = 0
-            for h, downloadable, local_path in sub:
-                if h in on_disk:
-                    if not local_path:
-                        conn.execute(
-                            "UPDATE sub_bundles SET local_path=?, downloadable=1 WHERE hash=? AND version_timestamp=?",
-                            (on_disk[h], h, vts))
-                        changed += 1
-                elif local_path:
-                    conn.execute(
-                        "UPDATE sub_bundles SET local_path=NULL, downloadable=0 WHERE hash=? AND version_timestamp=?",
-                        (h, vts))
-                    changed += 1
-            conn.commit()
-            conn.close()
-            if changed:
-                logger.info(f"[同步] 版本 {vts} 下载状态：{changed} 条变更")
+        return sync_local_bundles(BUNDLES_DIR, ts)
 
     def _load_data(self):
         # 确保版本列表可见（隐藏图片预览、音频和角色视图）
