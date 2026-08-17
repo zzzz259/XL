@@ -1,5 +1,11 @@
 """AssetBundle manifest 解析 —— 通过 AssetStudio CLI 提取 xasset bundle 清单"""
-import os, sys, json, shutil, subprocess, tempfile, re, time
+import os
+import sys
+import json
+import shutil
+import subprocess
+import tempfile
+import time
 from app.core.logger import logger
 from app.core.path_utils import get_base_dir, get_tools_dir
 

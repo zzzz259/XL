@@ -56,6 +56,13 @@
 
 其中「备注」列显示该版本相对上一版本的差异：`新增 X | 移除 Y | 未变 Z`。
 
+开发者请先阅读：[架构与协作基线](docs/架构与协作基线.md)。其中记录了 core/ui 边界、运行时目录契约、失败恢复要求和后续拆分路线。
+
+旧版资源浏览器仅作为兼容入口保留，正常导入流程使用主界面的 AssetStudio 后台任务。
+版本列表刷新时会以 `data/bundles/` 的实际文件校准数据库下载状态。
+角色数据缓存位于 `output/character_data/`，源 Lua 更新后会自动失效并重新解析。
+角色详情展示和 CSV 导出由无 Qt 的 `app/core/character_presenter.py` 负责，便于测试和后续扩展。
+
 每行有三个操作按钮：
 
 | 按钮 | 作用 |
@@ -82,7 +89,7 @@
 | 控件 | 作用 |
 |---|---|
 | 检查更新 | 检查并列出可下载的版本 |
-| 导入 AS | 将已下载的 bundle 解析导出到 data/material/（自动反编译 Lua）|
+| 导入 AS | 将已下载的 bundle 解析导出到 data/material/（自动反编译 Lua；失败或取消时保留旧产物）|
 | 刷新 | 刷新版本列表 |
 | 作者 | 查看作者信息 |
 | 导出配置（4 个勾选）| lua / 角色立绘 / FGUI图集 / 音频，控制「导入 AS」只导出勾选的资源类型（默认全勾）|
@@ -128,3 +135,16 @@ A: bundle 文件托管在 CDN 上，速度取决于网络环境。
 **Q: 能离线使用吗**
 
 A: 浏览已下载的资源和查看版本历史可以离线，但检查更新和下载 bundle 需要联网。
+
+### 开发验证
+
+在仓库根目录安装开发依赖后，可运行：
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+python -m ruff check --no-cache tests xl_updata_tool/app/core xl_updata_tool/app/ui
+python -m compileall -q xl_updata_tool/app tests
+```
+
+提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md)。

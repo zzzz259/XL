@@ -556,7 +556,7 @@ def extract_awakening_info(association_skill_id, skill_level_up_file_path, word_
                         awakening_name = AWAKENING_MAPPING.get(awakening_level, f"觉醒{awakening_level - 13}")
                         awakening_info = f"\n\n{awakening_name}\n{main_text}"
                     except ValueError:
-                        awakening_info = f"\n\n觉醒描述参数错误"
+                        awakening_info = "\n\n觉醒描述参数错误"
     except Exception:
         logger.debug(f"提取觉醒信息出错: association_skill_id={association_skill_id}")
     return awakening_info
@@ -742,14 +742,6 @@ def parse_basecard_file(file_path, word_dict, cv_dict, level_up_dict,
     """完整解析 BaseCard.lua，返回角色数据字典（与参考脚本完全一致）"""
     TYPE_MAPPING = {1: "坚甲", 2: "异刃", 4: "言灵", 5: "猎影"}
     ELEMENT_MAPPING = ELEMENT_MAP
-    # 语音类型映射（按顺序34条）
-    VOICE_TYPE_MAPPING = [
-        "成员报道", "问候", "闲谈1", "闲谈2", "闲谈3", "突破感悟1", "突破感悟2", "突破感悟3",
-        "觉醒感悟1", "觉醒感悟2", "觉醒感悟3", "觉醒感悟4", "觉醒感悟5", "出战", "攻击1", "攻击2",
-        "攻击3", "战技1", "战技2", "总攻技1", "总攻技2", "总攻技3", "受击1", "受击2", "受击3",
-        "重伤", "退场", "作战胜利", "作战失败", "生日祝福", "新年祝福", "情人节祝福", "万圣节祝福", "圣诞节祝福"
-    ]
-
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 

@@ -14,8 +14,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.theme import (
-    BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER, ACCENT,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, INFO,
     get_color,
 )
 

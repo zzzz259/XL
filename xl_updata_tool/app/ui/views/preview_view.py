@@ -13,8 +13,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.theme import (
-    BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, DANGER, SUCCESS, INFO,
     get_color,
 )
 from app.ui.widgets.drag_list import DragListWidget

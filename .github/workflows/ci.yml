@@ -1,0 +1,35 @@
+name: XL CI
+
+on:
+  push:
+    branches: [main, "feature/**", "fix/**", "chore/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            xl_updata_tool/requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r xl_updata_tool/requirements.txt -r requirements-dev.txt
+
+      - name: Compile Python sources
+        run: python -B -c "import pathlib; files=list(pathlib.Path('xl_updata_tool').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Lint tests and core modules
+        run: python -m ruff check tests xl_updata_tool/app/core xl_updata_tool/app/ui/views/version_view.py xl_updata_tool/app/ui/legacy

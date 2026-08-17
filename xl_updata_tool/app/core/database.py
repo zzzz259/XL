@@ -1,8 +1,5 @@
 import sqlite3
 import json
-import os
-import threading
-from datetime import datetime
 
 from .logger import logger
 
@@ -203,8 +200,8 @@ def get_bundle_history(name):
 
 def record_changes(from_ts, to_ts):
     conn = get_conn()
-    old_bundles = {r[0]: (r[1], r[2]) for r in conn.execute(
-        "SELECT name, ver, hash FROM bundles WHERE version_timestamp=?", (from_ts,)
+    old_bundles = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+        "SELECT name, ver, hash, size FROM bundles WHERE version_timestamp=?", (from_ts,)
     ).fetchall()}
     new_bundles = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
         "SELECT name, ver, hash, size FROM bundles WHERE version_timestamp=?", (to_ts,)
@@ -215,13 +212,13 @@ def record_changes(from_ts, to_ts):
     )
     for name, (new_ver, new_hash, new_size) in new_bundles.items():
         if name in old_bundles:
-            old_ver, old_hash = old_bundles[name]
+            old_ver, old_hash, old_size = old_bundles[name]
             if old_ver != new_ver:
                 conn.execute("""
                     INSERT INTO version_changes
                     (from_timestamp, to_timestamp, bundle_name, from_ver, to_ver, from_hash, to_hash, size_diff)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (from_ts, to_ts, name, old_ver, new_ver, old_hash, new_hash, new_size))
+                """, (from_ts, to_ts, name, old_ver, new_ver, old_hash, new_hash, new_size - old_size))
         else:
             conn.execute("""
                 INSERT INTO version_changes

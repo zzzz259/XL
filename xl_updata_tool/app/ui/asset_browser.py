@@ -1,9 +1,12 @@
 """Asset browser - flat table with drag-reorder columns, wide preview"""
-import os, json, subprocess, sys, shutil
+import os
+import json
+import subprocess
+import sys
+import shutil
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QLineEdit, QComboBox,
-    QPushButton, QTableWidget, QTableWidgetItem, QLabel, QTextEdit,
+    QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QLabel, QTextEdit,
     QProgressBar, QMessageBox, QWidget, QAbstractItemView, QHeaderView,
     QListWidget, QListWidgetItem,
 )
@@ -11,8 +14,8 @@ from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtGui import QPixmap
 
 from .theme import (
-    ACCENT, BG_SURFACE, BG_ELEVATED, BG_DARK, BG_HOVER, BORDER,
-    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, INFO, WARNING,
+    ACCENT, BG_SURFACE, BG_ELEVATED, BG_HOVER, BORDER,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, INFO,
 )
 from app.core.bundle_parser import fix_bundle_inplace
 from app.core.logger import logger
@@ -137,7 +140,6 @@ class _TypePopup(QWidget):
         self._list.clear()
 
     def _on_item_clicked(self, item):
-        type_name = item.data(Qt.UserRole)
         if item.checkState() == Qt.Checked:
             item.setCheckState(Qt.Unchecked)
         else:
@@ -471,9 +473,9 @@ class AssetBrowser(QDialog):
     def _on_fix_error(self, err):
         logger.error(f"文件修复错误: {err}")
         self.fix_bar.setFormat(f"修复错误: {err}")
-        self.fix_bar.setStyleSheet(f"""
-            QProgressBar {{ background-color:#4a2020; border:none; border-radius:4px;
-                           text-align:center; color:#ff8888; font-size:13px; }}""")
+        self.fix_bar.setStyleSheet("""
+            QProgressBar { background-color:#4a2020; border:none; border-radius:4px;
+                           text-align:center; color:#ff8888; font-size:13px; }""")
 
     def _start_map(self):
         self.load_bar.setVisible(True)
@@ -503,9 +505,9 @@ class AssetBrowser(QDialog):
     def _on_map_error(self, err):
         logger.error(f"资源加载错误: {err}")
         self.load_bar.setFormat(f"错误: {err}")
-        self.load_bar.setStyleSheet(f"""
-            QProgressBar {{ background-color:#4a2020; border:none; border-radius:4px;
-                           text-align:center; color:#ff8888; font-size:13px; }}""")
+        self.load_bar.setStyleSheet("""
+            QProgressBar { background-color:#4a2020; border:none; border-radius:4px;
+                           text-align:center; color:#ff8888; font-size:13px; }""")
 
     def _debounce(self):
         self._timer.start()
@@ -529,7 +531,6 @@ class AssetBrowser(QDialog):
             atype = a.get("Type", "?")
             container = a.get("Container", "")
             size = a.get("Size", 0)
-            path_id = str(a.get("PathID", ""))
             hash_val = ""
             vals = {"Name": name, "Type": atype, "Path": container, "Size": f"{size / 1024:.0f}KB" if size else "-", "Hash": hash_val or "-"}
             hdr = self.table.horizontalHeader()
@@ -576,12 +577,12 @@ class AssetBrowser(QDialog):
                     raw = fp.read()[:16000]
                 try:
                     text = raw.decode("utf-8")
-                except:
+                except UnicodeDecodeError:
                     text = raw.decode("latin-1", errors="replace")
                 self.preview_text.setVisible(True)
                 self.preview_text.setPlainText(text)
                 return
-            except:
+            except OSError:
                 pass
         self.preview_img.setText(f"[{atype}]\n\n{name}\n\n{container}")
         self.preview_img.setStyleSheet(

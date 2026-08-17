@@ -2,15 +2,12 @@
 """音频解密工作线程（.bytes → .bank → 解密 → output/audio/）"""
 
 import os
-import re
 import shutil
-import subprocess
 import sys
 
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
-from app.core.path_utils import DATA_DIR, get_base_dir, get_tools_dir
 from app.core.album_map import build_album_map
 
 
@@ -18,7 +15,7 @@ class AudioDecryptWorker(QThread):
     """音频解密工作线程（.bytes → .bank → 解密 → output/audio/）
 
     在后台线程执行 epic7_debank.py 解密，避免阻塞 UI。
-    支持去重：force=False 时若 output/audio/ 已有音频文件则跳过解密。
+    支持增量：force=False 时保留已有音频，并继续扫描当前 bank；底层按文件大小去重。
     """
     progress = Signal(str)
     progress_value = Signal(int, int, str)  # current, total, message
@@ -143,18 +140,19 @@ class AudioDecryptWorker(QThread):
             logger.info("素材目录无 .bank 文件，跳过解密")
             return
 
-        # 去重检查：force=False 时若 output/audio/ 已有音频文件则跳过解密（递归扫描子目录）
+        # 不能用“输出目录非空”判断整个任务已完成：新版本可能只增加少量 bank。
+        # epic7_debank.run() 本身按 bank 和文件大小去重，因此这里始终扫描当前输入，
+        # 让新增语音/BGM 能够补进已有 output/audio/。
         if not self.force and os.path.isdir(self.audio_output_dir):
-            existing_audio = 0
-            for root, dirs, files in os.walk(self.audio_output_dir):
-                for f in files:
-                    ext = os.path.splitext(f)[1].lower()
-                    if ext in (".wav", ".ogg", ".mp3") and os.path.getsize(os.path.join(root, f)) > 0:
-                        existing_audio += 1
+            existing_audio = sum(
+                1
+                for root, _dirs, files in os.walk(self.audio_output_dir)
+                for f in files
+                if os.path.splitext(f)[1].lower() in (".wav", ".ogg", ".mp3")
+                and os.path.getsize(os.path.join(root, f)) > 0
+            )
             if existing_audio > 0:
-                logger.info(f"output/audio/ 已有 {existing_audio} 个音频文件，跳过解密")
-                self.progress.emit(f"已有 {existing_audio} 个音频文件，跳过解密")
-                return
+                logger.info("output/audio/ 已有 %s 个音频文件，但仍扫描当前 bank 以支持增量解密", existing_audio)
 
         self.progress.emit(f"正在解密 {bank_count} 个 .bank 文件...")
 

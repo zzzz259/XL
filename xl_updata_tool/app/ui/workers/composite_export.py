@@ -2,17 +2,13 @@
 """批量合成图视频导出工作线程"""
 
 import os
-import subprocess
-import sys
 import time
 from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger
-from app.core.path_utils import get_tools_dir, get_base_dir
 from app.ui.adapters.spine_adapter import (
-    get_ffmpeg_path,
     ffmpeg_composite_videos,
     cleanup_temp,
     extract_skin_name_from_png,
