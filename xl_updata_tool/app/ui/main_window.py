@@ -31,7 +31,8 @@ from .theme import (
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
 from .workers.download import CheckUpdateThread, DownloadWorker
-from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace, compute_delta
+from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace
+from app.core.version_data import compute_download_hashes, compute_version_delta_map
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -425,14 +426,12 @@ class MainWindow(QMainWindow):
     def _compute_delta_hashes(self, ts):
         """返回本版本相对上一版本的增量 hash 集合（新增/修改的 bundle）；无上一版本时返回全量"""
         vs = self.version_mgr.get_versions()
-        ph = set()
-        for vv in vs:
-            if vv[0] < ts and "(delta" not in (vv[9] or ""):
-                ph = set(r[0] for r in db.get_sub_bundles(vv[0]))
-                break
-        ah = set(r[0] for r in db.get_sub_bundles(ts))
-        delta = ah - ph
-        return delta if delta else ah
+        hashes_by_version = {
+            row[0]: (r[0] for r in (db.get_sub_bundles(row[0]) or []))
+            for row in vs
+            if "(delta" not in (row[10] or "")
+        }
+        return compute_download_hashes(ts, (row[0] for row in vs), hashes_by_version)
 
     def _row_btn(self, text, color, tooltip=""):
         b = QPushButton(text)
@@ -505,18 +504,11 @@ class MainWindow(QMainWindow):
 
     def _compute_version_deltas(self, versions):
         """计算每个版本相对上一版本的 bundle 差异，返回 {ts: (added, removed, common)}"""
-        delta_map = {}
-        sorted_versions = sorted(versions, key=lambda v: v[0])
-        prev_hashes = None
-        for v in sorted_versions:
-            ts = v[0]
-            sub = db.get_sub_bundles(ts)
-            hashes = [r[0] for r in sub] if sub else []
-            if prev_hashes is not None:
-                d = compute_delta(prev_hashes, hashes)
-                delta_map[ts] = (len(d["added"]), len(d["removed"]), d["common"])
-            prev_hashes = hashes
-        return delta_map
+        hashes_by_version = {
+            row[0]: (r[0] for r in (db.get_sub_bundles(row[0]) or []))
+            for row in versions
+        }
+        return compute_version_delta_map((row[0] for row in versions), hashes_by_version)
 
     def _populate_table(self, versions, delta_map=None):
         self.table.setSortingEnabled(False)
