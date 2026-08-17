@@ -34,6 +34,12 @@ from .workers.download import CheckUpdateThread, DownloadWorker
 from app.core.bundle_parser import extract_manifest_hashes, fix_bundle_inplace
 from app.core.version_data import compute_download_hashes, compute_version_delta_map
 from app.core.local_bundle_sync import sync_local_bundles
+from app.core.character_cache import (
+    derive_character_index,
+    load_cache as load_character_cache_file,
+    save_cache as save_character_cache_file,
+    source_mtime,
+)
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -1379,42 +1385,17 @@ class MainWindow(QMainWindow):
 
     def _character_source_mtime(self):
         """返回角色源文件的最大 mtime（用于缓存失效）；缺失返回 0"""
-        m = 0
-        for f in CHARACTER_SOURCE_FILES:
-            p = os.path.join(LUA_OUTPUT_DIR, f)
-            if os.path.isfile(p):
-                try:
-                    m = max(m, os.path.getmtime(p))
-                except OSError:
-                    pass
-        return m
+        return source_mtime(LUA_OUTPUT_DIR, CHARACTER_SOURCE_FILES)
 
     def _derive_character_index(self, characters_full):
         """从完整角色数据派生表格索引列表（复用 load_character_data 的过滤逻辑）"""
-        characters = []
-        for char_id, info in sorted(characters_full.items(), key=lambda x: x[1].get("raw_id", 0)):
-            raw_id = info.get("raw_id", 0)
-            if 80100001 <= raw_id <= 80101999:
-                characters.append({
-                    "name": str(info.get("name", "未知")).split('/')[0],
-                    "char_id": char_id,
-                    "raw_id": raw_id,
-                    "display_index": raw_id,
-                })
-        return characters
+        return derive_character_index(characters_full)
 
     def _save_character_cache(self, characters_full):
         """留存完整角色数据到 output/character_data/characters_full.json"""
         try:
-            import json as _json
-            os.makedirs(CHARACTER_DATA_DIR, exist_ok=True)
             out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
-            payload = {
-                "source_mtime": self._character_source_mtime(),
-                "characters_full": characters_full,
-            }
-            with open(out_json, "w", encoding="utf-8") as f:
-                _json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+            save_character_cache_file(out_json, characters_full, self._character_source_mtime())
             logger.info(f"已留存完整角色数据到 {out_json}")
         except Exception as e:
             logger.warning(f"留存角色数据失败: {e}")
@@ -1422,24 +1403,7 @@ class MainWindow(QMainWindow):
     def _load_character_cache(self):
         """读完整角色数据缓存；源文件 mtime 变化时返回 None 触发重解析"""
         out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
-        if not os.path.isfile(out_json):
-            return None
-        try:
-            import json as _json
-            with open(out_json, encoding="utf-8") as f:
-                payload = _json.load(f)
-            if not isinstance(payload, dict):
-                return None
-            stored_mtime = payload.get("source_mtime", 0)
-            if stored_mtime != self._character_source_mtime():
-                logger.info("角色源 lua 有更新，缓存失效，重新解析")
-                return None
-            full = payload.get("characters_full")
-            if isinstance(full, dict) and full:
-                return full
-        except Exception as e:
-            logger.warning(f"读取角色缓存失败: {e}")
-        return None
+        return load_character_cache_file(out_json, self._character_source_mtime())
 
     def _populate_character_table(self):
         """填充角色表格"""
