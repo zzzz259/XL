@@ -41,9 +41,10 @@ from app.core.character_cache import (
     source_mtime,
 )
 from app.core.character_presenter import build_character_detail_html, export_characters_csv
-from app.core.audio_library import scan_audio_files
+from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
 from app.core.preview_catalog import build_skel_map, find_skel_paths
 from app.core.seed_versions import seed_bundled_versions
+from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -1516,14 +1517,9 @@ class MainWindow(QMainWindow):
             return
 
         logger.info(f"导出音频：选中 {len(selected)} 个文件 → {dst_dir}")
-        success = 0
-        for info in selected:
-            try:
-                dst = os.path.join(dst_dir, info["name"])
-                shutil.copy2(info["path"], dst)
-                success += 1
-            except (OSError, PermissionError) as e:
-                logger.error(f"导出失败 {info['name']}: {e}")
+        success, failures = export_audio_files(selected, dst_dir)
+        for filename in failures:
+            logger.error(f"导出失败 {filename}")
 
         QMessageBox.information(self, "导出完成", f"成功导出 {success} 个音频文件到:\n{dst_dir}")
         logger.info(f"导出 {success} 个音频文件到 {dst_dir}")
@@ -1682,21 +1678,12 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _format_duration(ms):
         """毫秒转 mm:ss"""
-        if not ms or ms <= 0:
-            return "00:00"
-        seconds = int(ms / 1000)
-        m, s = divmod(seconds, 60)
-        return f"{m:02d}:{s:02d}"
+        return format_duration(ms)
 
     @staticmethod
     def _format_size(size):
         """字节转可读大小"""
-        if size < 1024:
-            return f"{size} B"
-        elif size < 1024 * 1024:
-            return f"{size / 1024:.1f} KB"
-        else:
-            return f"{size / (1024 * 1024):.1f} MB"
+        return format_size(size)
 
     def _populate_character_filter(self):
         """扫描 output/character 的角色目录，填充图片预览的角色过滤下拉框"""
@@ -1995,18 +1982,19 @@ class MainWindow(QMainWindow):
     # ========== DELETE ==========
 
     def _delete_version(self, ts):
-        sub = db.get_sub_bundles(ts); down = sum(1 for r in sub if r[2]) if sub else 0
-        if down == 0: QMessageBox.information(self, "无文件", "没有已下载的 bundle."); return
-        rp = QMessageBox.question(self, "确认删除", f"删除此版本 {down} 个文件?", QMessageBox.Yes|QMessageBox.No, QMessageBox.No)
-        if rp != QMessageBox.Yes: return
+        sub = db.get_sub_bundles(ts)
+        down = count_downloaded_bundles(sub)
+        if down == 0:
+            QMessageBox.information(self, "无文件", "没有已下载的 bundle.")
+            return
+        reply = QMessageBox.question(
+            self, "确认删除", f"删除此版本 {down} 个文件?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
         logger.info(f"删除版本 {ts}：共 {down} 个已下载文件")
-        c = db.get_conn()
-        for r in sub:
-            if r[2]:
-                try: os.remove(r[2])
-                except: pass
-                c.execute("UPDATE sub_bundles SET local_path=NULL, downloadable=0 WHERE hash=? AND version_timestamp=?",(r[0],ts))
-        c.commit(); c.close()
+        delete_downloaded_bundles(ts, sub)
         self._load_data()
         logger.info(f"已删除版本 {ts} 的 {down} 个文件，并清空数据库下载状态")
         self.status_bar.showMessage(f"已删除 {down} 个文件.")
