@@ -12,7 +12,7 @@ import time
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
-from app.core.path_utils import DATA_DIR, get_base_dir, get_tools_dir
+from app.core.path_utils import get_base_dir, get_tools_dir
 from app.core.bundle_parser import fix_bundle_inplace
 from app.ui.workers.lua_decrypt import decompile_lua_dir
 
@@ -142,9 +142,12 @@ class ImportASWorker(QThread):
                 break
             h = os.path.basename(f).replace(".bundle", "")
             try:
-                fix_bundle_inplace(f)
-                success += 1
-                logger.debug(f"[导入AS] 修复完成: {h[:16]}...")
+                if fix_bundle_inplace(f):
+                    success += 1
+                    logger.debug(f"[导入AS] 修复完成: {h[:16]}...")
+                else:
+                    fail += 1
+                    logger.error(f"[导入AS] 修复未通过: {h[:16]}...")
             except Exception as e:
                 logger.error(f"[导入AS] 修复失败: {h[:16]}... - {e}")
                 fail += 1
