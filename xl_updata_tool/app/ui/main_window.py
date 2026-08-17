@@ -45,6 +45,7 @@ from app.core.audio_library import export_audio_files, format_duration, format_s
 from app.core.preview_catalog import build_skel_map, find_skel_paths
 from app.core.seed_versions import seed_bundled_versions
 from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
+from app.core.version_update import append_changelog, record_downloaded_bundle, register_checked_version
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -669,19 +670,12 @@ class MainWindow(QMainWindow):
     def _on_update_checked(self, info, versions, new_hashes, delta):
         self._anim_timer.stop()
         self.btn_check.setEnabled(True)
-        ts = versions["timestamp"]
-        existing = {r[0] for r in db.get_all_versions()}
-        if ts not in existing:
-            self.version_mgr.register_version(ts, info, versions)
-            db.save_sub_bundles(ts, new_hashes)
-            notes = f"新增 {len(delta['added'])} | 移除 {len(delta['removed'])} | 未变 {delta['common']}"
-            db.add_notes(ts, notes)
-            cnt = len(delta['added'])
-            logger.info(f"检查更新：发现新版本 {ts}，新增 {cnt} 个 bundle（移除 {len(delta['removed'])}，未变 {delta['common']}）")
-            self.status_bar.showMessage(f"发现新版本! 新增 {cnt} 个 bundle.")
-            QMessageBox.information(self, "更新完成", f"发现新版本!\n\n{notes}")
+        result = register_checked_version(self.version_mgr, info, versions, new_hashes, delta)
+        if result:
+            self.status_bar.showMessage(f"发现新版本! 新增 {result['added']} 个 bundle.")
+            QMessageBox.information(self, "更新完成", f"发现新版本!\n\n{result['notes']}")
         else:
-            logger.info(f"检查更新：版本 {ts} 已存在，无需更新")
+            logger.info(f"检查更新：版本 {versions['timestamp']} 已存在，无需更新")
             self.status_bar.showMessage("已是最新版本.")
             QMessageBox.information(self, "已是最新", "当前已是最新版本，无需更新。")
         self._load_data()
@@ -758,9 +752,7 @@ class MainWindow(QMainWindow):
 
     def _dl_done(self, n, f, p, ts):
         try:
-            c = db.get_conn()
-            c.execute("UPDATE sub_bundles SET local_path=?, downloadable=1 WHERE hash=? AND version_timestamp=?",(p,n,ts))
-            c.commit(); c.close()
+            record_downloaded_bundle(ts, n, p)
             logger.debug(f"文件下载完成并更新数据库: {n[:16]}...")
         except Exception as e:
             logger.error(f"更新数据库失败: {n[:16]}... - {e}", exc_info=True)
@@ -908,12 +900,8 @@ class MainWindow(QMainWindow):
     def _append_changelog(self, message):
         """追加导入更新日志到 output/CHANGELOG.md（像 git 提交记录）"""
         try:
-            from datetime import datetime
             out_log = os.path.join(get_base_dir(), "output", "CHANGELOG.md")
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            line = f"- {ts} | {message.replace(chr(10), ' ')}"
-            with open(out_log, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
+            append_changelog(out_log, message)
             logger.info(f"已写更新日志: {out_log}")
         except Exception as e:
             logger.warning(f"写更新日志失败: {e}")
