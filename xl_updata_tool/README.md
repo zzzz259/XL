@@ -142,6 +142,9 @@ A: 浏览已下载的资源和查看版本历史可以离线，但检查更新�
 
 ```bash
 python -m pip install -r requirements-dev.txt
-python -m pytest
-python -m ruff check --no-cache tests xl_updata_tool/app/core
+python -m pytest -q
+python -m ruff check --no-cache tests xl_updata_tool/app/core xl_updata_tool/app/ui
+python -m compileall -q xl_updata_tool/app tests
 ```
+
+提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md)。
