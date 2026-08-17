@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
     QTableWidgetItem, QToolButton,
     QListWidgetItem, QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
-    QDialog, QTreeWidgetItem, QSizePolicy,
+    QDialog, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings, QEvent
 from PySide6.QtGui import QColor, QPixmap, QBrush
@@ -67,6 +67,7 @@ from .features.export_controller import (
     export_with_dialog,
     batch_export_with_dialog,
 )
+from .features.audio_controller import populate_audio_tree
 from app.core.character_loader import load_character_data
 
 DATA_DIR = get_data_dir()
@@ -1169,49 +1170,9 @@ class MainWindow(QMainWindow):
             logger.info(f"音频输出目录不存在: {audio_output_dir}")
             return
 
-        # 建树：voice → 角色编号 → cn/jp → 文件；album → 专辑名 → 文件
-        self.audio_table.clear()
-        self._audio_file_items = []
-        roots = {}      # 顶层(voice/album) -> node
-        mid_nodes = {}  # (顶层, 中段) -> node；voice 中段=角色编号，album 中段=专辑名
-        leaf_nodes = {}  # (顶层, 中段, 末段) -> node；voice 末段=cn|jp
-        for info in self._audio_files:
-            leaf = QTreeWidgetItem([
-                os.path.basename(info["name"]),
-                info["dir"],
-                "-",
-                info["ext"],
-                self._format_size(info["size"]),
-            ])
-            leaf.setData(0, Qt.UserRole, info)
-            leaf.setCheckState(0, Qt.Unchecked)
-            self._audio_file_items.append(leaf)
-
-            parts = info["dir"].replace("\\", "/").split("/")
-            top = parts[0] if parts and parts[0] else "其他"
-            if top not in roots:
-                roots[top] = QTreeWidgetItem([top])
-                self.audio_table.addTopLevelItem(roots[top])
-
-            if top == "voice" and len(parts) >= 2:
-                cid = parts[1]
-                lang = parts[2] if len(parts) > 2 else "?"
-                mk = (top, cid)
-                if mk not in mid_nodes:
-                    mid_nodes[mk] = QTreeWidgetItem([cid])
-                    roots[top].addChild(mid_nodes[mk])
-                lk = (top, cid, lang)
-                if lk not in leaf_nodes:
-                    leaf_nodes[lk] = QTreeWidgetItem([lang])
-                    mid_nodes[mk].addChild(leaf_nodes[lk])
-                leaf_nodes[lk].addChild(leaf)
-            else:
-                album_name = parts[1] if len(parts) > 1 else info["dir"]
-                mk = (top, album_name)
-                if mk not in mid_nodes:
-                    mid_nodes[mk] = QTreeWidgetItem([album_name])
-                    roots[top].addChild(mid_nodes[mk])
-                mid_nodes[mk].addChild(leaf)
+        self._audio_file_items = populate_audio_tree(
+            self.audio_table, self._audio_files, self._format_size
+        )
 
         total = len(self._audio_files)
         self.audio_title.setText(f"🎵 音频管理器  共 {total} 个音频文件")
