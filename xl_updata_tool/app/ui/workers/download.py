@@ -11,6 +11,7 @@ import time
 from PySide6.QtCore import QThread, Signal
 
 from app.core.bundle_parser import compute_delta, extract_manifest_hashes, fix_bundle_inplace
+from app.core.file_utils import atomic_write_bytes
 from app.core.downloader import BUNDLES_URL, check_update, http_get
 from app.core.logger import logger
 
@@ -115,9 +116,7 @@ class DownloadWorker(QThread):
                             continue
                         self.error.emit(f"{h[:16]}...: MD5 failed after 3 attempts")
                         break
-                    with open(out, "wb") as f:
-                        f.write(data)
-                    fix_bundle_inplace(out)
+                    atomic_write_bytes(out, data, transform=fix_bundle_inplace)
                     ok = True
                     break
                 except Exception as e:
