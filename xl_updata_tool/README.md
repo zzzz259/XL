@@ -111,6 +111,7 @@ xl_updata_tool/
 ├── app/                源代码
 │   ├── core/           核心逻辑（下载、解析、数据库）
 │   └── ui/             UI 界面（workers/dialogs/features/views/adapters）
+├── tests/              项目测试（与 app/ 平级）
 ├── tools/              外部工具（AssetStudio 等）
 ├── docs/               开发文档
 ├── data/               运行时数据（版本数据库、下载的 bundle）
@@ -143,8 +144,8 @@ A: 浏览已下载的资源和查看版本历史可以离线，但检查更新�
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
-python -m ruff check --no-cache tests xl_updata_tool/app/core xl_updata_tool/app/ui
-python -m compileall -q xl_updata_tool/app tests
+python -m ruff check --no-cache xl_updata_tool/tests xl_updata_tool/app/core xl_updata_tool/app/ui
+python -m compileall -q xl_updata_tool/app xl_updata_tool/tests
 ```
 
 提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md)。

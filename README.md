@@ -6,7 +6,7 @@
 
 | 项目 | 说明 |
 |---|---|
-| [xl_updata_tool](xl_updata_tool/) | 游戏更新管理工具：监控更新、下载资源包、追踪版本变化、导入 AssetStudio 浏览解析 |
+| [xl_updata_tool](xl_updata_tool/) | 游戏更新管理工具：监控更新、下载资源包、追踪版本变化、导入 AssetStudio 浏览解析；项目测试位于 `xl_updata_tool/tests/` |
 
 ## 协作规范
 
