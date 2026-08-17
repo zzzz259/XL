@@ -1,3 +1,9 @@
+import os
+import tempfile
+
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+
 THUMB_SIZE = 150
 ACCENT = "#8b5cf6"
 ACCENT_HOVER = "#a78bfa"
@@ -297,6 +303,30 @@ QCheckBox, QRadioButton {{
     color: {TEXT_PRIMARY};
     spacing: 6px;
 }}
+QCheckBox::indicator {{
+    width: 18px; height: 18px;
+    border: 2px solid {TEXT_MUTED};
+    border-radius: 4px;
+    background: {BG_ELEVATED};
+}}
+QCheckBox::indicator:hover {{ border-color: {TEXT_PRIMARY}; }}
+QCheckBox::indicator:checked {{
+    background: {ACCENT};
+    border-color: {ACCENT};
+    image: url({{CHECK}});
+}}
+QRadioButton::indicator {{
+    width: 18px; height: 18px;
+    border: 2px solid {TEXT_MUTED};
+    border-radius: 9px;
+    background: {BG_ELEVATED};
+}}
+QRadioButton::indicator:hover {{ border-color: {TEXT_PRIMARY}; }}
+QRadioButton::indicator:checked {{
+    background: {ACCENT};
+    border-color: {ACCENT};
+    image: url({{CHECK}});
+}}
 QGroupBox::title {{
     subcontrol-origin: margin;
     left: 16px;
@@ -430,11 +460,76 @@ _LIGHT_REPLACEMENTS = {
 LIGHT_STYLESHEET = _build_stylesheet(LIGHT_PALETTE, _LIGHT_REPLACEMENTS)
 
 
+# 旧深色主题 palette（供 get_color 动态读取，含语义色）
+OLD_PALETTE = {
+    "ACCENT": "#8b5cf6",
+    "ACCENT_HOVER": "#a78bfa",
+    "ACCENT_2": "#8b5cf6",
+    "BG_DARK": "#0f0f1a",
+    "BG_SURFACE": "#1a1a2e",
+    "BG_ELEVATED": "#252540",
+    "BG_HOVER": "#2d2d4a",
+    "BORDER": "#35355a",
+    "TEXT_PRIMARY": "#e8e8f0",
+    "TEXT_SECONDARY": "#9898b8",
+    "TEXT_MUTED": "#686890",
+}
+
+# 语义色（三主题通用，不随主题变）
+_SEMANTIC = {
+    "SUCCESS": "#34d399",
+    "WARNING": "#fbbf24",
+    "DANGER": "#f87171",
+    "INFO": "#60a5fa",
+}
+
+_current_palette = OLD_PALETTE
+
+
+def get_color(key):
+    """返回当前主题的 palette 颜色（供各 view 的 inline 样式动态读取）"""
+    if key in _SEMANTIC:
+        return _SEMANTIC[key]
+    return _current_palette.get(key, "")
+
+
+_checkmark_url = None
+
+
+def _checkmark_path():
+    """生成并缓存白色对勾 PNG，返回 QSS url() 可用的正斜杠路径"""
+    global _checkmark_url
+    if _checkmark_url is not None:
+        return _checkmark_url
+    path = os.path.join(tempfile.gettempdir(), "xl_checkmark.png")
+    if not os.path.exists(path):
+        pm = QPixmap(18, 18)
+        pm.fill(QColor(0, 0, 0, 0))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor("#ffffff"))
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.drawLine(QPoint(4, 9), QPoint(8, 13))
+        p.drawLine(QPoint(8, 13), QPoint(14, 5))
+        p.end()
+        pm.save(path, "PNG")
+    _checkmark_url = path.replace("\\", "/")
+    return _checkmark_url
+
+
 def apply_theme(app, name):
-    """应用主题（"old" / "new" / "light"），立即生效"""
+    """应用主题（"old" / "new" / "light"），立即生效并更新当前 palette"""
+    global _current_palette
+    check = _checkmark_path()
     if name == "new":
-        app.setStyleSheet(NEW_STYLESHEET)
+        _current_palette = NEW_PALETTE
+        app.setStyleSheet(NEW_STYLESHEET.replace("{CHECK}", check))
     elif name == "light":
-        app.setStyleSheet(LIGHT_STYLESHEET)
+        _current_palette = LIGHT_PALETTE
+        app.setStyleSheet(LIGHT_STYLESHEET.replace("{CHECK}", check))
     else:
-        app.setStyleSheet(OLD_STYLESHEET)
+        _current_palette = OLD_PALETTE
+        app.setStyleSheet(OLD_STYLESHEET.replace("{CHECK}", check))

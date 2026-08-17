@@ -69,9 +69,17 @@ class ImportASWorker(QThread):
         self.export_types = export_types
         self.export_categories = export_categories
         self._cancelled = False
+        self._last_progress_emit = 0.0
 
     def cancel(self):
         self._cancelled = True
+
+    def _emit_progress(self, label, current, total):
+        """节流进度信号：阶段起点/终点必发，中间值 200ms 才发一次，避免 UI 闪烁"""
+        now = time.time()
+        if current == 0 or current == total or now - self._last_progress_emit > 0.2:
+            self._last_progress_emit = now
+            self.progress_stage.emit(label, current, total)
 
     def run(self):
         try:
@@ -154,7 +162,7 @@ class ImportASWorker(QThread):
         os.makedirs(map_dir, exist_ok=True)
         total_bundles = len(self.bundle_paths)
         logger.info(f"[导入AS] 阶段2: 解析资源，输出映射到 {map_dir}（{total_bundles} 个 bundle）")
-        self.progress_stage.emit("解析资源", 0, 0)
+        self._emit_progress("解析资源", 0, total_bundles)
         try:
             proc = subprocess.Popen(
                 [self.as_cli, self.bundle_dir, map_dir, "--game", "UnityCN", "--key_index", "23",
@@ -172,9 +180,9 @@ class ImportASWorker(QThread):
                     continue
                 if "Loading" in line and ".bundle" in line:
                     loaded += 1
-                    self.progress_stage.emit("解析资源", loaded, total_bundles)
+                    self._emit_progress("解析资源", loaded, total_bundles)
                 elif "Process Assets" in line or "Read assets" in line:
-                    self.progress_stage.emit("解析资源", 0, 0)
+                    logger.debug(f"[导入AS] CLI: {line}")
                 else:
                     logger.debug(f"[导入AS] CLI: {line}")
             proc.wait()
@@ -254,9 +262,9 @@ class ImportASWorker(QThread):
                         continue
                     if "Loading" in line and ".bundle" in line:
                         loaded += 1
-                        self.progress_stage.emit(label, loaded, total_bundles)
+                        self._emit_progress(label, loaded, total_bundles)
                     elif "Process Assets" in line or "Read assets" in line:
-                        self.progress_stage.emit(label, 0, 0)
+                        logger.debug(f"[导入AS] CLI: {line}")
                     else:
                         logger.debug(f"[导入AS] CLI: {line}")
                 proc.wait()
@@ -322,13 +330,13 @@ class ImportASWorker(QThread):
         done = [0]
         def on_file_done(name):
             done[0] += 1
-            self.progress_stage.emit("反编译 Lua", min(done[0], total), total if total else 1)
+            self._emit_progress("反编译 Lua", min(done[0], total), total if total else 1)
 
         def on_progress(msg):
             m = re.search(r"正在反编译 Lua:\s*(\d+)/(\d+)", msg)
             if m:
                 d, t = int(m.group(1)), int(m.group(2))
-                self.progress_stage.emit("反编译 Lua", d, t)
+                self._emit_progress("反编译 Lua", d, t)
             else:
                 logger.info(f"[导入AS] {msg}")
 
