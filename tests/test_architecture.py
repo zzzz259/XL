@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.core.file_utils import atomic_write_bytes
+from app.core.file_utils import atomic_write_bytes, replace_directory
 
 CORE_DIR = Path(__file__).parents[1] / "xl_updata_tool" / "app" / "core"
 
@@ -29,3 +29,17 @@ def test_atomic_write_preserves_existing_file_when_transform_fails(tmp_path):
 
     assert destination.read_bytes() == b"known-good"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_replace_directory_swaps_staged_output(tmp_path):
+    destination = tmp_path / "material"
+    destination.mkdir()
+    (destination / "old.txt").write_text("old", encoding="utf-8")
+    source = tmp_path / "staging" / "assets"
+    source.mkdir(parents=True)
+    (source / "new.txt").write_text("new", encoding="utf-8")
+
+    replace_directory(source, destination)
+
+    assert (destination / "new.txt").read_text(encoding="utf-8") == "new"
+    assert not (destination / "old.txt").exists()

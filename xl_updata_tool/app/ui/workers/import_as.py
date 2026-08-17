@@ -7,6 +7,7 @@ import re
 import subprocess
 import shutil
 import sys
+import tempfile
 import time
 
 from PySide6.QtCore import QThread, Signal
@@ -14,6 +15,7 @@ from PySide6.QtCore import QThread, Signal
 from app.core.logger import logger, timed
 from app.core.path_utils import get_base_dir, get_tools_dir
 from app.core.bundle_parser import fix_bundle_inplace
+from app.core.file_utils import replace_directory
 from app.ui.workers.lua_decrypt import decompile_lua_dir
 
 
@@ -70,6 +72,8 @@ class ImportASWorker(QThread):
         self.export_categories = export_categories
         self._cancelled = False
         self._last_progress_emit = 0.0
+        self._working_material_dir = material_dir
+        self._staging_material_dir = None
 
     def cancel(self):
         self._cancelled = True
@@ -116,6 +120,9 @@ class ImportASWorker(QThread):
             total_files, msg = self._stage_export(assets)
             if self._cancelled:
                 self.all_finished.emit(False, "已取消")
+                return
+            if msg:
+                self.all_finished.emit(False, msg)
                 return
             self.stage_finished.emit("导出分类")
 
@@ -202,97 +209,169 @@ class ImportASWorker(QThread):
 
     @timed("导入AS-导出分类")
     def _stage_export(self, assets):
-        """阶段 3: 按分类（或类型）导出资源到 data/material/"""
+        """阶段 3: 先导出到 staging，成功后再替换 data/material/。"""
         if not os.path.exists(self.as_cli):
             logger.error(f"[导入AS] AssetStudio.CLI.exe 不存在: {self.as_cli}")
-            return
-        logger.info(f"[导入AS] 阶段3: 导出分类到 {self.material_dir}")
-        os.makedirs(self.material_dir, exist_ok=True)
-        # 只清空本次勾选分类对应的目录（保留其他分类产物，如 lua 反编译结果）
-        if self.export_categories:
-            for cat in sorted(self.export_categories):
-                rel = CATEGORY_DIRS.get(cat)
-                if not rel:
-                    continue
-                cat_dir = os.path.join(self.material_dir, rel)
-                if os.path.exists(cat_dir):
-                    shutil.rmtree(cat_dir, ignore_errors=True)
-                    logger.info(f"[导入AS] 清空 {cat} 目录: {cat_dir}")
-                else:
-                    logger.info(f"[导入AS] {cat} 目录不存在，无需清空: {cat_dir}")
-        else:
-            # 调试模式（按类型导出）仍清空整个 material
-            if os.path.exists(self.material_dir):
-                shutil.rmtree(self.material_dir, ignore_errors=True)
-                logger.info(f"[导入AS] 清空整个 material 目录: {self.material_dir}")
-            os.makedirs(self.material_dir, exist_ok=True)
+            return 0, f"AssetStudio CLI 不存在: {self.as_cli}"
 
-        # 构建导出命令列表
-        if self.export_categories:
-            commands = self._build_category_commands()
-            logger.info(f"[导入AS] 按分类导出: {sorted(self.export_categories)}")
-        else:
-            all_types = sorted(set(a.get("Type", "") for a in assets if a.get("Type")))
-            if self.export_types:
-                all_types = [t for t in all_types if t in self.export_types]
-            commands = [(f"导出 {tp}", ["--types", tp]) for tp in all_types]
-            logger.info(f"[导入AS] 按类型导出（共 {len(commands)} 种）: {all_types}")
+        material_parent = os.path.dirname(os.path.abspath(self.material_dir))
+        os.makedirs(material_parent, exist_ok=True)
+        staging_root = tempfile.mkdtemp(prefix=".xl-import-", dir=material_parent)
+        self._staging_material_dir = staging_root
+        self._working_material_dir = os.path.join(staging_root, "material")
+        os.makedirs(self._working_material_dir, exist_ok=True)
+        logger.info(f"[导入AS] 阶段3: 先导出到临时目录 {self._working_material_dir}")
 
-        total = len(commands)
-        total_bundles = len(self.bundle_paths)
-        for i, (label, extra_args) in enumerate(commands):
-            if self._cancelled:
-                break
-            self.progress_stage.emit("导出分类", i + 1, total)
-            cmd = [self.as_cli, self.bundle_dir, self.material_dir,
-                   "--game", "UnityCN", "--key_index", "23"] + extra_args + \
-                  ["--group_assets", "ByContainer", "--export_type", "Convert"]
-            logger.info(f"[导入AS] {label} 开始（{i + 1}/{total}）: {' '.join(cmd)}")
-            t0 = time.time()
-            try:
-                proc = subprocess.Popen(
-                    cmd, cwd=os.path.dirname(self.as_cli),
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-                loaded = 0
-                for line in proc.stdout:
-                    if self._cancelled:
-                        proc.terminate()
-                        break
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if "Loading" in line and ".bundle" in line:
-                        loaded += 1
-                        self._emit_progress(label, loaded, total_bundles)
-                    elif "Process Assets" in line or "Read assets" in line:
-                        logger.debug(f"[导入AS] CLI: {line}")
+        try:
+            if self.export_categories:
+                commands = self._build_category_commands()
+                logger.info(f"[导入AS] 按分类导出: {sorted(self.export_categories)}")
+            else:
+                all_types = sorted(set(a.get("Type", "") for a in assets if a.get("Type")))
+                if self.export_types:
+                    all_types = [t for t in all_types if t in self.export_types]
+                commands = [(f"导出 {tp}", ["--types", tp]) for tp in all_types]
+                logger.info(f"[导入AS] 按类型导出（共 {len(commands)} 种）: {all_types}")
+
+            if not commands:
+                return 0, "没有可执行的导出分类"
+
+            total = len(commands)
+            total_bundles = len(self.bundle_paths)
+            failed_labels = []
+            completed_labels = []
+            for i, (label, extra_args) in enumerate(commands):
+                if self._cancelled:
+                    return 0, "已取消"
+                self.progress_stage.emit("导出分类", i + 1, total)
+                cmd = [self.as_cli, self.bundle_dir, self._working_material_dir,
+                       "--game", "UnityCN", "--key_index", "23"] + extra_args + \
+                      ["--group_assets", "ByContainer", "--export_type", "Convert"]
+                logger.info(f"[导入AS] {label} 开始（{i + 1}/{total}）: {' '.join(cmd)}")
+                t0 = time.time()
+                try:
+                    proc = subprocess.Popen(
+                        cmd, cwd=os.path.dirname(self.as_cli),
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                    loaded = 0
+                    for line in proc.stdout:
+                        if self._cancelled:
+                            proc.terminate()
+                            break
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if "Loading" in line and ".bundle" in line:
+                            loaded += 1
+                            self._emit_progress(label, loaded, total_bundles)
+                        else:
+                            logger.debug(f"[导入AS] CLI: {line}")
+                    proc.wait()
+                    elapsed = time.time() - t0
+                    if proc.returncode != 0:
+                        failed_labels.append(label)
+                        logger.warning(f"[导入AS] {label} 导出失败 (退出码 {proc.returncode}, 耗时 {elapsed:.1f}s)")
                     else:
-                        logger.debug(f"[导入AS] CLI: {line}")
-                proc.wait()
-                elapsed = time.time() - t0
-                if proc.returncode != 0:
-                    logger.warning(f"[导入AS] {label} 导出失败 (退出码 {proc.returncode}, 耗时 {elapsed:.1f}s)")
-                else:
-                    logger.info(f"[导入AS] {label} 完成（耗时 {elapsed:.1f}s）")
-                # 通知单个分类导出完成（边导出边预览：主窗口收到后刷新对应视图）
+                        logger.info(f"[导入AS] {label} 完成（耗时 {elapsed:.1f}s）")
+                        completed_labels.append(label)
+                except subprocess.TimeoutExpired:
+                    failed_labels.append(label)
+                    logger.error(f"[导入AS] {label} 导出超时（>300s）")
+                except Exception as e:
+                    failed_labels.append(label)
+                    logger.error(f"[导入AS] {label} 导出异常: {e}")
+
+            if self._cancelled:
+                return 0, "已取消"
+            if failed_labels:
+                return 0, f"导出失败，未替换已有产物: {', '.join(failed_labels)}"
+
+            if self.export_categories and "lua" in self.export_categories:
+                self._decompile_lua()
+
+            self._cleanup_prefab_suffix(self._working_material_dir)
+            total_files = self._count_files(self._working_material_dir)
+            if total_files <= 0:
+                return 0, "导出完成但文件数为 0，请检查资源"
+
+            self._commit_staged_material()
+            if self.export_categories and "lua" in self.export_categories:
+                self._sync_lua_output()
+            for label in completed_labels:
                 self.category_finished.emit(label)
-            except subprocess.TimeoutExpired:
-                logger.error(f"[导入AS] {label} 导出超时（>300s）")
-            except Exception as e:
-                logger.error(f"[导入AS] {label} 导出异常: {e}")
+            logger.info(f"[导入AS] 阶段3完成: 共导出 {total_files} 个文件到 {self.material_dir}")
+            return total_files, ""
+        finally:
+            self._working_material_dir = self.material_dir
+            if self._staging_material_dir:
+                shutil.rmtree(self._staging_material_dir, ignore_errors=True)
+                self._staging_material_dir = None
 
-        # 若导出了 lua 分类，反编译 .lua.bytes → .lua（角色数据加载免等待）
-        if self.export_categories and "lua" in self.export_categories:
-            self._decompile_lua()
+    def _commit_staged_material(self):
+        """只在全部分类成功后替换最终产物，保留未选中的分类。"""
+        if not self.export_categories:
+            replace_directory(self._working_material_dir, self.material_dir)
+            return
 
-        # 统计导出文件数
-        total_files = self._count_files(self.material_dir)
-        # 清理 .prefab 后缀（AssetStudio CLI 可能错误添加）
-        self._cleanup_prefab_suffix(self.material_dir)
-        logger.info(f"[导入AS] 阶段3完成: 共导出 {total_files} 个文件到 {self.material_dir}")
-        return total_files, ""
+        material_root = os.path.abspath(self.material_dir)
+        backup_root = tempfile.mkdtemp(prefix=".xl-import-backup-", dir=os.path.dirname(material_root))
+        replacements = []
+        try:
+            for category in sorted(self.export_categories):
+                relative = CATEGORY_DIRS.get(category)
+                if not relative:
+                    continue
+                source = os.path.join(self._working_material_dir, relative)
+                destination = os.path.join(material_root, relative)
+                os.makedirs(source, exist_ok=True)
+                replacements.append((source, destination, relative))
+
+            # 先把所有旧分类移入备份区，再开始放入新分类，避免跨分类提交留下半成品。
+            for _source, destination, relative in replacements:
+                if os.path.exists(destination):
+                    backup = os.path.join(backup_root, relative)
+                    os.makedirs(os.path.dirname(backup), exist_ok=True)
+                    os.replace(destination, backup)
+
+            for source, destination, _relative in replacements:
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                os.replace(source, destination)
+        except Exception:
+            logger.error("[导入AS] 分类提交失败，开始回滚", exc_info=True)
+            for _source, destination, _relative in reversed(replacements):
+                if os.path.isdir(destination):
+                    shutil.rmtree(destination, ignore_errors=True)
+            for _source, destination, relative in replacements:
+                backup = os.path.join(backup_root, relative)
+                if os.path.exists(backup):
+                    os.makedirs(os.path.dirname(destination), exist_ok=True)
+                    os.replace(backup, destination)
+            raise
+        finally:
+            shutil.rmtree(backup_root, ignore_errors=True)
+
+    def _sync_lua_output(self):
+        """提交成功后，再把 Lua 展示输入同步到 output/lua。"""
+        lua_dir = os.path.join(self.material_dir, "assets", "lua")
+        out_lua_dir = os.path.join(get_base_dir(), "output", "lua")
+        os.makedirs(out_lua_dir, exist_ok=True)
+        copied = 0
+        for _root, _dirs, files in os.walk(lua_dir):
+            for filename in files:
+                if not filename.endswith(".lua"):
+                    continue
+                src = os.path.join(_root, filename)
+                dst = os.path.join(out_lua_dir, filename)
+                try:
+                    if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
+                        continue
+                    shutil.copy2(src, dst)
+                    copied += 1
+                except (OSError, PermissionError) as exc:
+                    logger.warning(f"[导入AS] 同步 lua 失败 {filename}: {exc}")
+        logger.info(f"[导入AS] 已留存 {copied} 个 .lua 到 {out_lua_dir}")
 
     def _build_category_commands(self):
         """根据勾选的分类构建 CLI 导出命令（label, extra_args）列表"""
@@ -311,8 +390,8 @@ class ImportASWorker(QThread):
 
     @timed("导入AS-反编译Lua")
     def _decompile_lua(self):
-        """TextAsset 导出后，反编译 data/material/assets/lua/ 下的 .lua.bytes → .lua"""
-        lua_dir = os.path.join(self.material_dir, "assets", "lua")
+        """TextAsset 导出后，在 staging 的 lua 目录中反编译。"""
+        lua_dir = os.path.join(self._working_material_dir, "assets", "lua")
         if not os.path.isdir(lua_dir):
             return
         tools_dir = get_tools_dir()
@@ -351,23 +430,6 @@ class ImportASWorker(QThread):
         self.progress_stage.emit("反编译 Lua", total, total if total else 1)
         logger.info(f"[导入AS] Lua 反编译完成: 成功 {success}, 失败 {fail}")
 
-        # 同步反编译的 .lua 到 output/lua/（留存，供后续查询）
-        out_lua_dir = os.path.join(get_base_dir(), "output", "lua")
-        os.makedirs(out_lua_dir, exist_ok=True)
-        copied = 0
-        for _root, _dirs, files in os.walk(lua_dir):
-            for f in files:
-                if f.endswith(".lua"):
-                    src = os.path.join(_root, f)
-                    dst = os.path.join(out_lua_dir, f)
-                    try:
-                        if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
-                            continue
-                        shutil.copy2(src, dst)
-                        copied += 1
-                    except (OSError, PermissionError) as e:
-                        logger.warning(f"[导入AS] 同步 lua 失败 {f}: {e}")
-        logger.info(f"[导入AS] 已留存 {copied} 个 .lua 到 {out_lua_dir}")
 
     @staticmethod
     def _count_files(directory):

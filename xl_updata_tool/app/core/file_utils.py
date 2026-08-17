@@ -1,6 +1,7 @@
 """文件落盘辅助函数。"""
 
 import os
+import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -36,3 +37,30 @@ def atomic_write_bytes(
             os.unlink(temp_name)
         except FileNotFoundError:
             pass
+
+
+def replace_directory(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
+    """用 source 替换 destination，失败时尽量恢复原目录。"""
+    source_path = Path(source)
+    destination_path = Path(destination)
+    if not source_path.is_dir():
+        raise FileNotFoundError(f"替换源目录不存在: {source_path}")
+
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path = None
+    if destination_path.exists():
+        backup_path = Path(
+            tempfile.mkdtemp(prefix=f".{destination_path.name}.backup-", dir=destination_path.parent)
+        )
+        backup_path.rmdir()
+        os.replace(destination_path, backup_path)
+
+    try:
+        os.replace(source_path, destination_path)
+    except Exception:
+        if backup_path is not None and not destination_path.exists():
+            os.replace(backup_path, destination_path)
+        raise
+    else:
+        if backup_path is not None:
+            shutil.rmtree(backup_path, ignore_errors=True)
