@@ -5,9 +5,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QCheckBox,
 )
-
-from app.ui.theme import BG_DARK, BG_SURFACE, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT, BORDER
-
+from PySide6.QtCore import Qt
 
 class CharacterSelectDialog(QDialog):
     """列出角色，勾选要导出的（默认全选）。selected_roles() 返回勾选的角色名集合。"""
@@ -15,8 +13,8 @@ class CharacterSelectDialog(QDialog):
     def __init__(self, characters, parent=None):
         super().__init__(parent)
         self.setWindowTitle("选择要导出的角色")
+        self.setObjectName("characterSelectDialog")
         self.resize(440, 560)
-        self.setStyleSheet(f"QDialog {{ background-color:{BG_DARK}; }}")
         self._characters = list(characters)
         self._checkboxes = []
         self._build_ui()
@@ -27,20 +25,17 @@ class CharacterSelectDialog(QDialog):
         layout.setSpacing(10)
 
         title = QLabel(f"共 {len(self._characters)} 个角色，勾选要导出的（默认全选）")
-        title.setStyleSheet(f"color:{TEXT_PRIMARY}; font-size:14px; font-weight:600; background:transparent;")
+        title.setObjectName("dialogTitle")
         layout.addWidget(title)
 
         # 全选 / 全不选
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        for txt, checked in (("全选", True), ("全不选", False)):
+        for txt, checked, object_name in (("全选", True, "selectAllButton"), ("全不选", False, "clearAllButton")):
             b = QPushButton(txt)
+            b.setObjectName(object_name)
             b.setFixedSize(72, 30)
-            b.setStyleSheet(f"""
-                QPushButton {{ background-color:{BG_SURFACE}; border:1px solid {BORDER};
-                              border-radius:6px; color:{TEXT_PRIMARY}; font-size:12px; }}
-                QPushButton:hover {{ border-color:{ACCENT}; }}
-            """)
+            b.setAccessibleName(txt)
             b.clicked.connect(lambda _, c=checked: self._set_all(c))
             btn_row.addWidget(b)
         btn_row.addStretch()
@@ -48,19 +43,24 @@ class CharacterSelectDialog(QDialog):
 
         # 滚动勾选列表
         scroll = QScrollArea()
+        scroll.setObjectName("characterSelectScroll")
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"QScrollArea {{ border:1px solid {BORDER}; border-radius:8px; background:{BG_SURFACE}; }}")
         container = QWidget()
-        container.setStyleSheet(f"background:{BG_SURFACE};")
+        container.setObjectName("characterSelectContainer")
         grid = QVBoxLayout(container)
         grid.setContentsMargins(12, 12, 12, 12)
         grid.setSpacing(3)
         for name in self._characters:
             cb = QCheckBox(name)
+            cb.setObjectName("characterOption")
             cb.setChecked(True)
-            cb.setStyleSheet(f"color:{TEXT_PRIMARY}; font-size:13px; spacing:6px;")
             grid.addWidget(cb)
             self._checkboxes.append(cb)
+        if not self._characters:
+            empty = QLabel("暂无可导出的角色")
+            empty.setObjectName("dialogEmptyState")
+            empty.setAlignment(Qt.AlignCenter)
+            grid.addWidget(empty)
         grid.addStretch()
         scroll.setWidget(container)
         layout.addWidget(scroll, 1)
@@ -69,20 +69,15 @@ class CharacterSelectDialog(QDialog):
         confirm_row = QHBoxLayout()
         confirm_row.addStretch()
         btn_cancel = QPushButton("取消")
+        btn_cancel.setObjectName("dialogCancelButton")
         btn_cancel.setFixedSize(88, 34)
-        btn_cancel.setStyleSheet(f"""
-            QPushButton {{ background-color:{BG_SURFACE}; border:1px solid {BORDER};
-                          border-radius:6px; color:{TEXT_SECONDARY}; font-size:13px; }}
-            QPushButton:hover {{ border-color:{ACCENT}; }}
-        """)
+        btn_cancel.setAccessibleName("取消导出角色选择")
         btn_cancel.clicked.connect(self.reject)
         btn_ok = QPushButton("导出选中")
+        btn_ok.setObjectName("dialogPrimaryButton")
+        btn_ok.setProperty("fluentAppearance", "primary")
         btn_ok.setFixedSize(100, 34)
-        btn_ok.setStyleSheet(f"""
-            QPushButton {{ background-color:{ACCENT}; border:none; border-radius:6px;
-                          color:#fff; font-size:13px; font-weight:600; }}
-            QPushButton:hover {{ opacity:0.85; }}
-        """)
+        btn_ok.setAccessibleName("导出选中角色")
         btn_ok.clicked.connect(self.accept)
         confirm_row.addWidget(btn_cancel)
         confirm_row.addWidget(btn_ok)

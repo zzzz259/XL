@@ -8,14 +8,18 @@
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QFrame, QAbstractItemView, QListWidget, QComboBox,
+    QWidget, QVBoxLayout, QGridLayout, QLabel, QProgressBar,
+    QAbstractItemView, QListWidget, QComboBox,
 )
 
-from app.ui.theme import (
-    get_color,
-)
 from app.ui.widgets.drag_list import DragListWidget
+from app.ui.widgets.view_chrome import (
+    create_action_button,
+    create_command_bar,
+    create_empty_state,
+    create_page_header,
+    create_status_label,
+)
 
 
 def create_preview_view(parent=None):
@@ -26,82 +30,56 @@ def create_preview_view(parent=None):
       preview_status, btn_reload
     """
     container = QWidget()
-    container.setStyleSheet(f"background-color:{get_color('BG_DARK')};")
+    container.setObjectName("viewContainer")
     layout = QVBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
     # 顶部栏：标题 + 关闭按钮
-    top_bar = QFrame()
-    top_bar.setFixedHeight(50)
-    top_bar.setStyleSheet(f"QFrame {{ background-color:{get_color('BG_SURFACE')}; border-bottom:1px solid {get_color('BORDER')}; }}")
-    top_layout = QHBoxLayout(top_bar)
-    top_layout.setContentsMargins(16, 0, 16, 0)
-
-    preview_title = QLabel("🖼️ 角色预览器  共 0 张图片")
-    preview_title.setStyleSheet(f"color:{get_color('TEXT_PRIMARY')}; font-size:16px; font-weight:bold; background:transparent; border:none;")
-    top_layout.addWidget(preview_title)
-    top_layout.addStretch()
-
-    btn_close_preview = QPushButton("✕ 关闭预览")
-    btn_close_preview.setFixedSize(100, 32)
-    btn_close_preview.setStyleSheet(f"""
-        QPushButton {{ background-color:{get_color('DANGER')}; border:none; border-radius:6px;
-                      color:#fff; font-size:12px; font-weight:600; }}
-        QPushButton:hover {{ background-color:#fca5a5; }}
-        QPushButton:pressed {{ background-color:{get_color('DANGER')}; }}
-    """)
-    if parent is not None:
-        btn_close_preview.clicked.connect(lambda: parent._toggle_preview_mode(False))
-    top_layout.addWidget(btn_close_preview)
+    preview_title_text = "角色预览器 · 共 0 张图片"
+    top_bar, preview_title, btn_close_preview = create_page_header(
+        preview_title_text,
+        "关闭预览",
+        (lambda: parent._toggle_preview_mode(False)) if parent is not None else None,
+        container,
+    )
     layout.addWidget(top_bar)
 
     # 工具栏：重新加载 + 进度条
-    ctrl_bar = QFrame()
-    ctrl_bar.setFixedHeight(50)
-    ctrl_bar.setStyleSheet(f"QFrame {{ background-color:{get_color('BG_ELEVATED')}; border-bottom:1px solid {get_color('BORDER')}; }}")
-    ctrl_layout = QHBoxLayout(ctrl_bar)
-    ctrl_layout.setContentsMargins(16, 0, 16, 0)
+    ctrl_bar, ctrl_layout = create_command_bar(container)
 
-    btn_reload = QPushButton("🔄 重新加载图片")
-    btn_reload.setFixedSize(140, 32)
-    btn_reload.setStyleSheet(f"""
-        QPushButton {{ background-color:{get_color('INFO')}; border:none; border-radius:6px;
-                      color:#fff; font-size:12px; font-weight:600; }}
-        QPushButton:hover {{ background-color:#93c5fd; }}
-        QPushButton:pressed {{ background-color:{get_color('INFO')}; }}
-    """)
-    if parent is not None:
-        btn_reload.clicked.connect(parent._force_reload_preview)
+    btn_reload = create_action_button(
+        "重新加载图片",
+        "secondary",
+        parent._force_reload_preview if parent is not None else None,
+        container,
+    )
     ctrl_layout.addWidget(btn_reload)
 
     # 角色过滤下拉框（按角色分类显示）
-    ctrl_layout.addWidget(QLabel("角色:"))
+    filter_label = QLabel("角色")
+    filter_label.setAccessibleName("角色筛选")
+    ctrl_layout.addWidget(filter_label)
     character_filter = QComboBox()
-    character_filter.setFixedWidth(140)
-    character_filter.setStyleSheet(f"""
-        QComboBox {{ background-color:{get_color('BG_ELEVATED')}; border:1px solid {get_color('BORDER')};
-                    border-radius:6px; padding:4px 10px; color:{get_color('TEXT_PRIMARY')}; font-size:12px; }}
-    """)
+    character_filter.setMinimumWidth(140)
+    character_filter.setToolTip("按角色筛选图片")
+    character_filter.setAccessibleName("角色筛选")
     if parent is not None:
         character_filter.currentIndexChanged.connect(parent._on_character_filter_changed)
     ctrl_layout.addWidget(character_filter)
 
     preview_progress = QProgressBar()
+    preview_progress.setObjectName("previewProgress")
     preview_progress.setFixedHeight(24)
     preview_progress.setFixedWidth(250)
     preview_progress.setVisible(False)
-    preview_progress.setStyleSheet(f"""
-        QProgressBar {{ background-color:{get_color('BG_DARK')}; border:none; border-radius:4px;
-                       text-align:center; color:{get_color('TEXT_PRIMARY')}; font-size:12px; }}
-        QProgressBar::chunk {{ background-color:{get_color('SUCCESS')}; border-radius:4px; }}
-    """)
     ctrl_layout.addWidget(preview_progress)
     ctrl_layout.addStretch()
     layout.addWidget(ctrl_bar)
 
     # 图片列表（IconMode，自适应列数，支持多选和拖放）
     image_list = DragListWidget()
+    image_list.setObjectName("previewImageList")
     image_list.setViewMode(QListWidget.IconMode)
     image_list.setIconSize(QSize(150, 150))
     image_list.setGridSize(QSize(180, 210))
@@ -111,30 +89,29 @@ def create_preview_view(parent=None):
     image_list.setContextMenuPolicy(Qt.CustomContextMenu)
     image_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
     image_list.setDragEnabled(True)
-    image_list.setStyleSheet(f"""
-        QListWidget {{ border:none; background-color:{get_color('BG_DARK')}; padding:10px; }}
-        QListWidget::item {{ border-radius:6px; }}
-        QListWidget::item:hover {{ background-color:{get_color('BG_ELEVATED')}; }}
-        QListWidget::item:selected {{ background-color:{get_color('BG_ELEVATED')}; }}
-    """)
     if parent is not None:
         image_list.customContextMenuRequested.connect(parent._show_context_menu)
         image_list.itemClicked.connect(parent._on_item_clicked)
         image_list.itemDoubleClicked.connect(parent._on_item_double_clicked)
-    layout.addWidget(image_list, 1)
+        image_list.itemSelectionChanged.connect(parent._on_preview_selection_changed)
+    # 内容区：空状态叠加在图片列表中央，不再作为底部横条参与布局。
+    content = QWidget(container)
+    content.setObjectName("viewContent")
+    content_layout = QGridLayout(content)
+    content_layout.setContentsMargins(0, 0, 0, 0)
+    content_layout.setSpacing(0)
+    content_layout.addWidget(image_list, 0, 0)
+
+    empty_label = create_empty_state("暂无图片，请先导出角色立绘", content)
+    empty_label.setVisible(False)
+    empty_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    content_layout.addWidget(empty_label, 0, 0)
+    layout.addWidget(content, 1)
 
     # 底部状态
-    preview_status = QLabel("共 0 张图片")
+    preview_status = create_status_label("共 0 张图片", container)
     preview_status.setFixedHeight(28)
-    preview_status.setStyleSheet(f"color:{get_color('TEXT_SECONDARY')}; font-size:12px; padding:4px 16px; background-color:{get_color('BG_SURFACE')}; border-top:1px solid {get_color('BORDER')};")
     layout.addWidget(preview_status)
-
-    # 空状态提示
-    empty_label = QLabel("暂无图片，请先导出角色立绘")
-    empty_label.setAlignment(Qt.AlignCenter)
-    empty_label.setStyleSheet(f"color:{get_color('TEXT_MUTED')}; font-size:18px; background:transparent; border:none;")
-    empty_label.setVisible(False)
-    layout.addWidget(empty_label)
 
     controls = {
         "preview_title": preview_title,

@@ -8,12 +8,16 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QTreeWidget, QAbstractItemView, QFrame, QSlider, QHeaderView,
 )
 
-from app.ui.theme import (
-    get_color,
+from app.ui.widgets.view_chrome import (
+    create_action_button,
+    create_command_bar,
+    create_empty_state,
+    create_page_header,
+    create_status_label,
 )
 
 
@@ -25,71 +29,53 @@ def create_audio_view(parent=None):
       audio_position_label, audio_slider, audio_volume, audio_status
     """
     container = QWidget()
-    container.setStyleSheet(f"background-color:{get_color('BG_DARK')};")
+    container.setObjectName("viewContainer")
     layout = QVBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
     # 顶部栏：标题 + 关闭按钮
-    top_bar = QFrame()
-    top_bar.setFixedHeight(50)
-    top_bar.setStyleSheet(f"QFrame {{ background-color:{get_color('BG_SURFACE')}; border-bottom:1px solid {get_color('BORDER')}; }}")
-    top_layout = QHBoxLayout(top_bar)
-    top_layout.setContentsMargins(16, 0, 16, 0)
-
-    audio_title = QLabel("🎵 音频管理器  共 0 个音频文件")
-    audio_title.setStyleSheet(f"color:{get_color('TEXT_PRIMARY')}; font-size:16px; font-weight:bold; background:transparent; border:none;")
-    top_layout.addWidget(audio_title)
-    top_layout.addStretch()
-
-    btn_close_audio = QPushButton("✕ 关闭音频")
-    btn_close_audio.setFixedSize(100, 32)
-    btn_close_audio.setStyleSheet(f"""
-        QPushButton {{ background-color:{get_color('DANGER')}; border:none; border-radius:6px;
-                      color:#fff; font-size:12px; font-weight:600; }}
-        QPushButton:hover {{ background-color:#fca5a5; }}
-        QPushButton:pressed {{ background-color:{get_color('DANGER')}; }}
-    """)
-    if parent is not None:
-        btn_close_audio.clicked.connect(lambda: parent._toggle_audio_mode(False))
-    top_layout.addWidget(btn_close_audio)
+    top_bar, audio_title, btn_close_audio = create_page_header(
+        "音频管理器 · 共 0 个音频文件",
+        "关闭音频",
+        (lambda: parent._toggle_audio_mode(False)) if parent is not None else None,
+        container,
+    )
     layout.addWidget(top_bar)
 
     # 工具栏
-    ctrl_bar = QFrame()
-    ctrl_bar.setFixedHeight(50)
-    ctrl_bar.setStyleSheet(f"QFrame {{ background-color:{get_color('BG_ELEVATED')}; border-bottom:1px solid {get_color('BORDER')}; }}")
-    ctrl_layout = QHBoxLayout(ctrl_bar)
-    ctrl_layout.setContentsMargins(16, 0, 16, 0)
+    ctrl_bar, ctrl_layout = create_command_bar(container)
 
-    btn_style = f"""
-        QPushButton {{ background-color:{get_color('INFO')}; border:none; border-radius:6px;
-                      color:#fff; font-size:12px; font-weight:600; padding:6px 12px; }}
-        QPushButton:hover {{ background-color:#93c5fd; }}
-        QPushButton:pressed {{ background-color:{get_color('INFO')}; }}
-    """
-    btn_decrypt = QPushButton("🔓 开始解密")
-    btn_decrypt.setStyleSheet(btn_style)
-    if parent is not None:
-        btn_decrypt.clicked.connect(lambda: parent._start_audio_decrypt(force=False))
+    btn_decrypt = create_action_button(
+        "开始解密",
+        "primary",
+        (lambda: parent._start_audio_decrypt(force=False)) if parent is not None else None,
+        container,
+    )
     ctrl_layout.addWidget(btn_decrypt)
 
-    btn_refresh = QPushButton("🔄 刷新列表")
-    btn_refresh.setStyleSheet(btn_style)
-    if parent is not None:
-        btn_refresh.clicked.connect(lambda: parent._load_audio_list())
+    btn_refresh = create_action_button(
+        "刷新列表",
+        "secondary",
+        parent._load_audio_list if parent is not None else None,
+        container,
+    )
     ctrl_layout.addWidget(btn_refresh)
 
-    btn_export = QPushButton("📤 导出选中")
-    btn_export.setStyleSheet(btn_style)
-    if parent is not None:
-        btn_export.clicked.connect(parent._export_selected_audio)
+    btn_export = create_action_button(
+        "导出选中",
+        "secondary",
+        parent._export_selected_audio if parent is not None else None,
+        container,
+    )
     ctrl_layout.addWidget(btn_export)
 
-    btn_play = QPushButton("▶ 播放选中")
-    btn_play.setStyleSheet(btn_style)
-    if parent is not None:
-        btn_play.clicked.connect(parent._play_selected_audio)
+    btn_play = create_action_button(
+        "播放选中",
+        "secondary",
+        parent._play_selected_audio if parent is not None else None,
+        container,
+    )
     ctrl_layout.addWidget(btn_play)
 
     ctrl_layout.addStretch()
@@ -97,6 +83,7 @@ def create_audio_view(parent=None):
 
     # 音频树（按目录层级折叠收起，加快加载）
     audio_table = QTreeWidget()
+    audio_table.setObjectName("audioTree")
     audio_table.setColumnCount(5)
     audio_table.setHeaderLabels(["文件名", "目录", "时长", "格式", "大小"])
     hdr = audio_table.header()
@@ -108,74 +95,66 @@ def create_audio_view(parent=None):
     audio_table.setAlternatingRowColors(True)
     audio_table.setSelectionMode(QAbstractItemView.SingleSelection)
     audio_table.setEditTriggers(QTreeWidget.NoEditTriggers)
-    audio_table.setStyleSheet(f"""
-        QTreeWidget {{ background-color:{get_color('BG_DARK')}; border:none; }}
-        QTreeWidget::item {{ padding:6px 8px; font-size:13px; }}
-        QTreeWidget::item:selected {{ background-color:{get_color('ACCENT')}; color:#fff; }}
-        QHeaderView::section {{ background-color:{get_color('BG_SURFACE')}; padding:8px 10px;
-            border:none; border-bottom:1px solid {get_color('BORDER')}; font-size:12px;
-            font-weight:600; color:{get_color('TEXT_SECONDARY')}; }}
-    """)
     audio_table.setContextMenuPolicy(Qt.CustomContextMenu)
     if parent is not None:
         audio_table.customContextMenuRequested.connect(parent._show_audio_context_menu)
         audio_table.itemDoubleClicked.connect(parent._on_audio_double_click)
-    layout.addWidget(audio_table, 1)
+    content = QWidget(container)
+    content.setObjectName("viewContent")
+    content_layout = QGridLayout(content)
+    content_layout.setContentsMargins(0, 0, 0, 0)
+    content_layout.setSpacing(0)
+    content_layout.addWidget(audio_table, 0, 0)
+
+    audio_empty = create_empty_state("暂无音频文件\n请先导入资源并点击“开始解密”", content)
+    audio_empty.setObjectName("audioEmptyState")
+    audio_empty.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    content_layout.addWidget(audio_empty, 0, 0)
+    layout.addWidget(content, 1)
 
     # 底部播放控制区
     player_bar = QFrame()
+    player_bar.setObjectName("pagePlayerBar")
     player_bar.setFixedHeight(56)
-    player_bar.setStyleSheet(f"QFrame {{ background-color:{get_color('BG_SURFACE')}; border-top:1px solid {get_color('BORDER')}; }}")
     player_layout = QHBoxLayout(player_bar)
     player_layout.setContentsMargins(16, 0, 16, 0)
 
-    audio_play_btn = QPushButton("▶")
-    audio_play_btn.setFixedSize(36, 36)
-    audio_play_btn.setStyleSheet(f"""
-        QPushButton {{ background-color:{get_color('ACCENT')}; border:none; border-radius:18px;
-                      color:#fff; font-size:16px; font-weight:bold; }}
-        QPushButton:hover {{ background-color:{get_color('ACCENT_HOVER')}; }}
-        QPushButton:pressed {{ background-color:{get_color('ACCENT')}; }}
-        QPushButton:disabled {{ background-color:{get_color('BG_ELEVATED')}; color:{get_color('TEXT_MUTED')}; }}
-    """)
+    audio_play_btn = QPushButton("播放")
+    audio_play_btn.setObjectName("audioPlayButton")
+    audio_play_btn.setFixedSize(64, 32)
+    audio_play_btn.setProperty("fluentAppearance", "primary")
+    audio_play_btn.setToolTip("播放或暂停当前音频")
+    audio_play_btn.setAccessibleName("播放或暂停当前音频")
     audio_play_btn.setEnabled(False)
     if parent is not None:
         audio_play_btn.clicked.connect(parent._toggle_play)
     player_layout.addWidget(audio_play_btn)
 
     audio_now_playing = QLabel("未播放")
-    audio_now_playing.setStyleSheet(f"color:{get_color('TEXT_SECONDARY')}; font-size:12px; background:transparent; border:none; min-width:160px;")
+    audio_now_playing.setObjectName("audioNowPlaying")
     player_layout.addWidget(audio_now_playing)
 
     audio_position_label = QLabel("00:00 / 00:00")
-    audio_position_label.setStyleSheet(f"color:{get_color('TEXT_MUTED')}; font-size:11px; background:transparent; border:none;")
+    audio_position_label.setObjectName("audioPosition")
     player_layout.addWidget(audio_position_label)
 
     audio_slider = QSlider(Qt.Horizontal)
+    audio_slider.setObjectName("audioProgressSlider")
     audio_slider.setFixedHeight(20)
-    audio_slider.setStyleSheet(f"""
-        QSlider::groove:horizontal {{ background:{get_color('BG_ELEVATED')}; height:4px; border-radius:2px; }}
-        QSlider::handle:horizontal {{ background:{get_color('ACCENT')}; width:14px; margin:-5px 0; border-radius:7px; }}
-        QSlider::sub-page:horizontal {{ background:{get_color('ACCENT')}; border-radius:2px; }}
-    """)
     audio_slider.setEnabled(False)
     if parent is not None:
         audio_slider.sliderMoved.connect(parent._on_audio_slider_moved)
     player_layout.addWidget(audio_slider, 1)
 
-    vol_label = QLabel("🔊")
-    vol_label.setStyleSheet("background:transparent; border:none;")
+    vol_label = QLabel("音量")
+    vol_label.setAccessibleName("音量")
     player_layout.addWidget(vol_label)
 
     audio_volume = QSlider(Qt.Horizontal)
+    audio_volume.setObjectName("audioVolumeSlider")
     audio_volume.setFixedWidth(80)
     audio_volume.setRange(0, 100)
     audio_volume.setValue(80)
-    audio_volume.setStyleSheet(f"""
-        QSlider::groove:horizontal {{ background:{get_color('BG_ELEVATED')}; height:4px; border-radius:2px; }}
-        QSlider::handle:horizontal {{ background:{get_color('ACCENT')}; width:10px; margin:-3px 0; border-radius:5px; }}
-        QSlider::sub-page:horizontal {{ background:{get_color('ACCENT')}; border-radius:2px; }}
-    """)
     if parent is not None:
         audio_volume.valueChanged.connect(parent._set_audio_volume)
     player_layout.addWidget(audio_volume)
@@ -183,9 +162,8 @@ def create_audio_view(parent=None):
     layout.addWidget(player_bar)
 
     # 状态栏
-    audio_status = QLabel("已选: 0 个 | 共 0 个音频文件")
+    audio_status = create_status_label("已选: 0 个 | 共 0 个音频文件", container)
     audio_status.setFixedHeight(28)
-    audio_status.setStyleSheet(f"color:{get_color('TEXT_SECONDARY')}; font-size:12px; padding:4px 16px; background-color:{get_color('BG_SURFACE')}; border-top:1px solid {get_color('BORDER')};")
     layout.addWidget(audio_status)
 
     controls = {
@@ -197,5 +175,6 @@ def create_audio_view(parent=None):
         "audio_slider": audio_slider,
         "audio_volume": audio_volume,
         "audio_status": audio_status,
+        "audio_empty": audio_empty,
     }
     return container, controls
