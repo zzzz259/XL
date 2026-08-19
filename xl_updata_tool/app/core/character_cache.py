@@ -43,8 +43,8 @@ def save_cache(cache_path: str, characters_full: Mapping, source_timestamp: floa
         json.dump(payload, handle, ensure_ascii=False, indent=2, default=str)
 
 
-def load_cache(cache_path: str, source_timestamp: float):
-    """读取有效缓存；文件不存在、损坏或源文件已更新时返回 None。"""
+def load_cache(cache_path: str, source_timestamp: float, validate_source: bool = True):
+    """读取角色缓存；迁移旧缓存时可关闭源文件时间校验。"""
     if not os.path.isfile(cache_path):
         return None
     try:
@@ -52,7 +52,7 @@ def load_cache(cache_path: str, source_timestamp: float):
             payload = json.load(handle)
         if not isinstance(payload, dict):
             return None
-        if payload.get("source_mtime", 0) != source_timestamp:
+        if validate_source and payload.get("source_mtime", 0) != source_timestamp:
             logger.info("角色源 lua 有更新，缓存失效，重新解析")
             return None
         characters_full = payload.get("characters_full")

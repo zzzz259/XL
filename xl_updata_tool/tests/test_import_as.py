@@ -22,6 +22,26 @@ def test_import_as_counts_unrepairable_bundle_as_failure(tmp_path):
     assert (success, fail) == (1, 1)
 
 
+def test_import_as_publishes_versioned_lua_and_cleans_material_staging(tmp_path):
+    material_dir = tmp_path / "material"
+    lua_dir = material_dir / "assets" / "lua"
+    lua_dir.mkdir(parents=True)
+    (lua_dir / "BaseCard.lua").write_text("card", encoding="utf-8")
+    (lua_dir / "BaseWord_cn.lua").write_text("word", encoding="utf-8")
+    output_dir = tmp_path / "output" / "lua"
+
+    worker = ImportASWorker(
+        [], str(tmp_path / "bundles"), str(material_dir), str(tmp_path / "AssetStudio.CLI.exe"),
+        export_categories={"lua"}, version_timestamp=20260811, lua_output_dir=str(output_dir),
+    )
+    result = worker._sync_lua_output()
+
+    assert result["version"] == 20260811
+    assert result["character_sources"] is True
+    assert (output_dir / "20260811" / "BaseCard.lua").is_file()
+    assert list(lua_dir.iterdir()) == []
+
+
 def test_import_as_keeps_old_output_when_assetstudio_fails(tmp_path, monkeypatch):
     material_dir = tmp_path / "material"
     old_lua = material_dir / "assets" / "lua" / "old.lua"
@@ -111,6 +131,30 @@ def test_import_as_replaces_only_selected_category(tmp_path):
     assert (material_dir / "assets" / "lua" / "new.lua").read_text(encoding="utf-8") == "new"
     assert not old_lua.exists()
     assert old_fgui.read_text(encoding="utf-8") == "keep"
+
+
+def test_import_as_isolates_selected_bundles_for_assetstudio(tmp_path):
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    first = bundle_dir / "first.bundle"
+    second = bundle_dir / "second.bundle"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+
+    worker = ImportASWorker(
+        [str(first)], str(bundle_dir), str(tmp_path / "material"),
+        str(tmp_path / "AssetStudio.CLI.exe"), export_categories={"lua"},
+        isolate_bundle_dir=True,
+    )
+    worker._prepare_cli_bundle_dir()
+
+    try:
+        assert Path(worker._cli_bundle_dir, "first.bundle").read_bytes() == b"first"
+        assert not Path(worker._cli_bundle_dir, "second.bundle").exists()
+    finally:
+        worker._cleanup_cli_bundle_dir()
+
+    assert worker._cli_bundle_dir == str(bundle_dir)
 
 
 def test_import_as_rolls_back_all_categories_when_commit_fails(tmp_path, monkeypatch):
