@@ -27,13 +27,13 @@
 3. 安装依赖（只需执行一次）：
 
    ```bash
-   pip install PySide6 Pillow
+   pip install -r requirements.txt
    ```
 
    如果下载慢，可用国内镜像：
 
    ```bash
-   pip install PySide6 Pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
+   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
    ```
 
 4. 运行：
@@ -107,6 +107,8 @@ xl_updata_tool/
 ├── run.bat             正常启动脚本
 ├── debug.bat           调试模式启动脚本
 ├── requirements.txt    Python 依赖
+├── requirements-dev.txt 开发与测试依赖
+├── pyproject.toml      pytest 与 Ruff 配置
 ├── build.spec          PyInstaller 打包配置
 ├── app/                源代码
 │   ├── core/           核心逻辑（下载、解析、数据库）
@@ -123,7 +125,7 @@ xl_updata_tool/
 
 **Q: 启动报错 `No module named PySide6`**
 
-A: 未安装依赖，执行 `pip install PySide6 Pillow`。
+A: 未安装依赖，进入 `xl_updata_tool/` 后执行 `pip install -r requirements.txt`。
 
 **Q: 提示找不到 `AssetStudio.CLI.exe`**
 
@@ -139,13 +141,13 @@ A: 浏览已下载的资源和查看版本历史可以离线，但检查更新�
 
 ### 开发验证
 
-在仓库根目录安装开发依赖后，可运行：
+进入 `xl_updata_tool/` 目录安装开发依赖后，可运行：
 
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
-python -m ruff check --no-cache xl_updata_tool/tests xl_updata_tool/app/core xl_updata_tool/app/ui
-python -m compileall -q xl_updata_tool/app xl_updata_tool/tests
+python -m ruff check --no-cache tests app/core app/ui
+python -B -c "from pathlib import Path; files=list(Path('app').rglob('*.py'))+list(Path('tests').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
 ```
 
 提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md)。
