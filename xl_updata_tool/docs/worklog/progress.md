@@ -8,7 +8,7 @@
 
 ### Actions Taken
 - 已读取并启用 XL 协作流程、Planning with Files、grill-me、完成前验证规则。
-- 已在仓库根目录创建 `task_plan.md`、`findings.md`、`progress.md`。
+- 已在 `xl_updata_tool/docs/worklog/` 创建 `task_plan.md`、`findings.md`、`progress.md`，作为项目开发过程档案。
 - 已确认当前分支为 `chore/architecture-stabilization`，初始工作区干净。
 - 已完成第一轮源码目录盘点，确认 UI 代码集中在 `xl_updata_tool/app/ui/`。
 - 已读取 `theme.py` 并搜索全局/局部 QSS：确认现有三主题、颜色替换生成机制和大量页面内联样式。
@@ -54,7 +54,7 @@
 - 按协作流程创建 Issue #29：图片预览、音频与版本工作区视觉收口，明确不改导出、解密、下载和数据契约。
 - 完成本轮页面改动：预览选择状态反馈、音频内容区空状态、音频播放中文文本、版本表格主题化，以及相关右键菜单 emoji 清理。
 - 针对性 Ruff 与页面壳层测试首次发现预览进度条迁移残留 `get_color()` 调用；已按根因移除残留内联样式，复跑通过。
-- 已完成 Issue #29 文档同步：`README.md`、`docs/开发文档指南.md`、`开发计划与沟通事项.md`、`task_plan.md`、`findings.md` 均记录本轮边界和变更。
+- 已完成 Issue #29 文档同步：`README.md`、`docs/开发文档指南.md`、`开发计划与沟通事项.md`、`docs/worklog/task_plan.md`、`docs/worklog/findings.md` 均记录本轮边界和变更。
 - Issue #29 完成前验证：Ruff 通过，80 个 Python 文件内存编译通过，专用可写临时目录下 37 项 pytest 通过；预览、音频、版本页正式蓝灰主题离屏构建截图通过。
 - 当前等待用户正常启动验证：预览选择数、音频空状态/播放文本、版本表格样式和既有页面功能回归。
 - 用户已确认 Issue #29 页面视觉收口和功能回归均正常。
@@ -108,7 +108,7 @@
 - 已将 `ImportASWorker` 接入版本时间戳：Lua 成功提交后发布到 `output/lua/<版本>/`，不再合并覆盖单一 `output/lua`。
 - 已将 `MainWindow` 接入最新版本/Base 门槛；非最新版本或缺 Base 时只留存 Lua，不自动解析角色；最新有效版本导出完成后自动解析。
 - 已在角色列表增加状态列显示“新”，选中角色详情时清除持久化未读标记；历史未查看角色继续保留角标。
-- 已同步 `README.md`、`docs/开发文档指南.md` 和 `开发计划与沟通事项.md`，记录运行目录契约、调用链和本轮边界。
+- 已同步 `README.md`、`docs/开发文档指南.md` 和 `开发计划与沟通事项.md`，记录运行目录契约、调用链和本轮边界；开发过程记录统一归档到 `docs/worklog/`。
 
 ### Errors
 | Error | Attempt | Resolution |
