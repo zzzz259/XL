@@ -4,7 +4,7 @@
 在不破坏现有功能、数据契约和多人协作边界的前提下，重新审视 XL 的桌面应用视觉系统：保留可用的新蓝灰主题，去除明显的 AI 生成感，建立统一、可维护、可渐进落地的主题、布局、组件和交互视觉规范，并分阶段完成界面优化。
 
 ## Next Step
-完成 Issue #32 回归修复的全量验证，并等待用户真实导入/切换角色页验证后再提交 PR。
+维护 Issue #32 及后续 XL 开发任务的计划、发现和验证记录；当前 Issue #32 已提交 PR #33。
 
 ## Current Phase
 Phase 6 - Lua 与角色数据链路重构
@@ -15,7 +15,7 @@ Phase 6 - Lua 与角色数据链路重构
 - [x] Understand user intent
 - [ ] Read existing UI and theme implementation
 - [ ] Inventory all top-level pages, dialogs, shared widgets, and theme entry points
-- [ ] Document visual problems, constraints, and non-goals in findings.md
+- [ ] Document visual problems, constraints, and non-goals in `docs/worklog/findings.md`
 - [x] Confirm design direction with user through focused questions
 - [x] Evaluate PySide6/Qt-specific visual references and skills
 - **Status:** complete
