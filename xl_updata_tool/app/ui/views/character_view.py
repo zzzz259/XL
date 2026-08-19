@@ -70,6 +70,14 @@ def create_character_view(parent=None):
     )
     ctrl_layout.addWidget(btn_refresh)
 
+    btn_mark_all_read = create_action_button(
+        "全部标为已读",
+        "secondary",
+        parent._mark_all_characters_read if parent is not None else None,
+        container,
+    )
+    ctrl_layout.addWidget(btn_mark_all_read)
+
     btn_csv = create_action_button(
         "下载 CSV",
         "secondary",
@@ -92,11 +100,12 @@ def create_character_view(parent=None):
 
     # 左侧：角色表格
     character_table = QTableWidget()
-    character_table.setColumnCount(2)
-    character_table.setHorizontalHeaderLabels(["序号", "名称"])
+    character_table.setColumnCount(3)
+    character_table.setHorizontalHeaderLabels(["序号", "名称", "状态"])
     hdr = character_table.horizontalHeader()
     hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(1, QHeaderView.Stretch)
+    hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
     character_table.setAlternatingRowColors(True)
     character_table.setSelectionBehavior(QAbstractItemView.SelectRows)
     character_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -155,5 +164,6 @@ def create_character_view(parent=None):
         "character_profile_view": character_profile_view,
         "character_status": character_status,
         "character_empty": character_empty,
+        "btn_mark_all_read": btn_mark_all_read,
     }
     return container, controls

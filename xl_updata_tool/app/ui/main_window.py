@@ -41,6 +41,16 @@ from app.core.character_cache import (
     save_cache as save_character_cache_file,
     source_mtime,
 )
+from app.core.character_repository import (
+    clear_all_unread as clear_all_character_unread,
+    clear_unread as clear_character_unread,
+    current_characters as repository_characters,
+    load_repository as load_character_repository,
+    merge_snapshot as merge_character_snapshot,
+    repository_path as character_repository_path,
+    unread_status as character_unread_status,
+)
+from app.core.bundle_selector import lua_assets_map_path, select_lua_bundles
 from app.core.character_presenter import export_characters_csv
 from app.core.character_profile import build_character_profile
 from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
@@ -52,6 +62,12 @@ from app.core.version_download import calculate_missing_downloads
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
+from app.core.lua_repository import (
+    has_character_sources,
+    latest_lua_version,
+    should_auto_parse,
+    version_directory,
+)
 
 # 拆分后的模块导入
 from .dialogs.image_viewer import ImageViewerDialog
@@ -77,6 +93,7 @@ DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
 LUA_OUTPUT_DIR = os.path.join(get_base_dir(), "output", "lua")
 CHARACTER_DATA_DIR = os.path.join(get_base_dir(), "output", "character_data")
+CHARACTER_REPOSITORY_PATH = character_repository_path(CHARACTER_DATA_DIR)
 # 角色数据解析依赖的源文件（用于缓存失效判断）
 CHARACTER_SOURCE_FILES = [
     "BaseWord_cn.lua", "BaseCvNameCn.lua", "BaseCardLevelUp.lua",
@@ -116,7 +133,8 @@ class MainWindow(QMainWindow):
         self._show_character = False
         self._character_data_loaded = False
         self._character_loading = False
-        self._pending_refresh = False
+        self.character_unread = {}
+        self.character_source_version = None
         self.character_base = []      # 角色基础信息：{raw_id, name, display_index}
         self.characters = []           # 角色完整数据：{name, element_type, max_hp, atk, def, skills, raw_text}
         self.characters_full = {}      # 角色完整数据字典：char_id -> 完整数据
@@ -210,6 +228,7 @@ class MainWindow(QMainWindow):
         self.character_profile_view = self.character_controls["character_profile_view"]
         self.character_status = self.character_controls["character_status"]
         self.character_empty = self.character_controls["character_empty"]
+        self._refresh_unread_badges()
 
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet(f"""
@@ -231,22 +250,38 @@ class MainWindow(QMainWindow):
         brand_layout.addWidget(self._lbl("资源工作台", 10, get_color("TEXT_MUTED")))
         bar.addWidget(brand)
         bar.addSeparator()
-        self.btn_home = self._tbtn("版本列表", icon=self._icon("list"))
-        self.btn_home.setCheckable(True)
-        self.btn_home.clicked.connect(self._load_data)
-        bar.addWidget(self.btn_home)
-        self.btn_image_preview = self._tbtn("图片预览", icon=self._icon("image"))
-        self.btn_image_preview.setCheckable(True)
-        self.btn_image_preview.clicked.connect(lambda: self._toggle_preview_mode(True))
-        bar.addWidget(self.btn_image_preview)
-        self.btn_audio = self._tbtn("音频", icon=self._icon("music"))
-        self.btn_audio.setCheckable(True)
-        self.btn_audio.clicked.connect(lambda: self._toggle_audio_mode(True))
-        bar.addWidget(self.btn_audio)
-        self.btn_lua = self._tbtn("角色", icon=self._icon("users"))
-        self.btn_lua.setCheckable(True)
-        self.btn_lua.clicked.connect(self._start_lua_decrypt)
-        bar.addWidget(self.btn_lua)
+        self._unread_badges = {}
+
+        def add_nav_button(key, text, icon, callback):
+            wrapper = QWidget()
+            wrapper_layout = QHBoxLayout(wrapper)
+            wrapper_layout.setContentsMargins(0, 0, 2, 0)
+            wrapper_layout.setSpacing(0)
+            button = self._tbtn(text, icon=self._icon(icon))
+            button.setCheckable(True)
+            button.clicked.connect(callback)
+            badge = QLabel("●")
+            badge.setFixedWidth(14)
+            badge.setAlignment(Qt.AlignCenter)
+            badge.setToolTip("有新的或变更的角色数据")
+            badge.setStyleSheet(
+                f"color:{get_color('DANGER')}; background:transparent; font-size:11px;"
+            )
+            badge.setVisible(False)
+            wrapper_layout.addWidget(button)
+            wrapper_layout.addWidget(badge)
+            bar.addWidget(wrapper)
+            self._unread_badges[key] = badge
+            return button
+
+        self.btn_home = add_nav_button("home", "版本列表", "list", self._load_data)
+        self.btn_image_preview = add_nav_button(
+            "preview", "图片预览", "image", lambda: self._toggle_preview_mode(True)
+        )
+        self.btn_audio = add_nav_button(
+            "audio", "音频", "music", lambda: self._toggle_audio_mode(True)
+        )
+        self.btn_lua = add_nav_button("character", "角色", "users", self._start_lua_decrypt)
         bar.addSeparator()
         self.dl_progress = QProgressBar()
         self.dl_progress.setFixedHeight(28); self.dl_progress.setFixedWidth(260)
@@ -258,6 +293,18 @@ class MainWindow(QMainWindow):
         """)
         bar.addWidget(self.dl_progress)
         return bar
+
+    def _refresh_unread_badges(self):
+        """把角色未读状态同步到所有顶层工作区标签。"""
+        repository = load_character_repository(CHARACTER_REPOSITORY_PATH)
+        unread = character_unread_status(repository)
+        has_unread = bool(unread)
+        if not has_unread:
+            has_unread = bool(self.character_unread)
+        for key, badge in getattr(self, "_unread_badges", {}).items():
+            # 当前已实现的未读来源只有角色数据；不要把角色未读状态
+            # 冒充成版本、图片预览或音频页面的未读状态。
+            badge.setVisible(key == "character" and has_unread)
 
     def _action_toolbar(self):
         """侧边功能工具栏：检查更新/导入AS + 导出配置 + 主题（设置区）+ 刷新/作者（底部），竖排"""
@@ -382,7 +429,8 @@ class MainWindow(QMainWindow):
         self._add_clear_btn(bar, "清空ab包", BUNDLES_DIR)
         self._add_clear_btn(bar, "清空AS导出", os.path.join(DATA_DIR, "material"))
         self._add_clear_btn(bar, "清空立绘", os.path.join(output_dir, "character"))
-        self._add_clear_btn(bar, "清空图鉴", os.path.join(DATA_DIR, "material", "assets", "lua"))
+        self._add_clear_btn(bar, "清空Lua临时", os.path.join(DATA_DIR, "material", "assets", "lua"))
+        self._add_clear_btn(bar, "清空Lua版本", LUA_OUTPUT_DIR)
         self._add_clear_btn(bar, "清空音频", os.path.join(output_dir, "audio"))
         return bar
 
@@ -780,6 +828,10 @@ class MainWindow(QMainWindow):
         self.audio_container.setVisible(False)
         ts = self._get_selected_ts()
         if not ts: QMessageBox.warning(self, "未选择", "请先选中一个版本."); return
+        export_categories = self._get_export_categories()
+        if not export_categories:
+            QMessageBox.warning(self, "提示", "请至少勾选一类要导出的资源")
+            return
 
         # 同步该版本磁盘实际状态（磁盘为准），再取已下载的本地路径
         self._sync_local_bundles(ts)
@@ -799,6 +851,28 @@ class MainWindow(QMainWindow):
 
         # 计算路径
         bundle_dir = os.path.dirname(fs[0])
+        isolate_bundle_dir = False
+        if export_categories == {"lua"}:
+            map_path = lua_assets_map_path(bundle_dir)
+            lua_fs, mapped, asset_count = select_lua_bundles(fs, map_path)
+            if mapped:
+                fs = lua_fs
+                isolate_bundle_dir = True
+                logger.info(
+                    "[导入AS] Lua 资源映射命中 %s 个资源，筛选 %s/%s 个 bundle",
+                    asset_count, len(fs), len(sub),
+                )
+                if not fs:
+                    QMessageBox.information(
+                        self, "没有 Lua 资源", "该版本的资源映射中没有找到 Lua 文件。"
+                    )
+                    return
+            else:
+                logger.warning(
+                    "[导入AS] Lua 资源映射不可用，无法提前精准筛选 bundle，将兼容扫描已下载包：%s",
+                    map_path,
+                )
+                self.status_bar.showMessage("未找到资源映射，将扫描已下载 bundle 以建立 Lua 映射")
         as_cli = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
         material_dir = os.path.join(DATA_DIR, "material")
 
@@ -821,12 +895,6 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("正在导入AS: 修复文件头...")
 
         # 启动后台工作线程
-        export_categories = self._get_export_categories()
-        if not export_categories:
-            QMessageBox.warning(self, "提示", "请至少勾选一类要导出的资源")
-            self.btn_browse.setEnabled(True)
-            self.dl_progress.setVisible(False)
-            return
         # 大规模操作告知耗时（全量导出 bundle 数大时）
         if len(fs) > 1000:
             ret = QMessageBox.question(
@@ -838,7 +906,13 @@ class MainWindow(QMainWindow):
                 self.dl_progress.setVisible(False)
                 return
         logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件，勾选导出分类 {sorted(export_categories)}")
-        self._import_worker = ImportASWorker(fs, bundle_dir, material_dir, as_cli, self, export_categories=export_categories)
+        self._import_worker = ImportASWorker(
+            fs, bundle_dir, material_dir, as_cli, self,
+            export_categories=export_categories,
+            version_timestamp=ts,
+            lua_output_dir=LUA_OUTPUT_DIR,
+            isolate_bundle_dir=isolate_bundle_dir,
+        )
         self._import_worker.progress_stage.connect(self._on_import_progress)
         self._import_worker.stage_finished.connect(self._on_import_stage_finished)
         self._import_worker.category_finished.connect(self._on_import_category_finished)
@@ -889,15 +963,22 @@ class MainWindow(QMainWindow):
     def _on_import_all_finished(self, success, message):
         """导入AS全部完成"""
         self.btn_browse.setEnabled(True)
-        self.dl_progress.setVisible(False)
-        if getattr(self, "_import_progress_dialog", None):
-            self._import_progress_dialog.close()
-            self._import_progress_dialog = None
         if success:
             self.status_bar.showMessage("导入AS: 文件已分类完成")
             self._append_changelog(message)
+            # Lua 自动角色解析属于本次导入的收尾阶段，复用同一个进度弹窗，
+            # 让用户明确知道“导出完成”后仍可能有数据处理在进行。
+            self._auto_parse_after_lua_export()
+            self.dl_progress.setVisible(False)
+            if getattr(self, "_import_progress_dialog", None):
+                self._import_progress_dialog.close()
+                self._import_progress_dialog = None
             QMessageBox.information(self, "完成", message)
         else:
+            self.dl_progress.setVisible(False)
+            if getattr(self, "_import_progress_dialog", None):
+                self._import_progress_dialog.close()
+                self._import_progress_dialog = None
             self.status_bar.showMessage("导入AS: 失败")
             QMessageBox.warning(
                 self, "失败",
@@ -1246,54 +1327,81 @@ class MainWindow(QMainWindow):
         self.character_container.setVisible(show_character)
         self._show_character = show_character
         if show_character:
-            # 检查是否有待刷新的数据
-            if self._pending_refresh:
-                self._pending_refresh = False
-                self._load_character_data()
             self.character_container.raise_()
             self.character_container.show()
 
     @timed("角色数据加载")
-    def _load_character_data(self):
-        """从 output/lua 加载角色数据（UI 协调层），解析后缓存完整数据到 output/character_data"""
-        lua_dir = LUA_OUTPUT_DIR
-        if not self._has_character_source():
-            self.status_bar.showMessage("未找到角色 Lua 数据，请先点击【导入AS】")
+    def _load_character_data(self, lua_dir=None, version_timestamp=None, force=False, automatic=False):
+        """加载最新有效 Lua，并把解析结果增量写入角色数据仓库。"""
+        if lua_dir is None and version_timestamp is None and not force:
+            if self._restore_character_data():
+                return True
+        if lua_dir is None:
+            version_timestamp, lua_dir = self._latest_lua_source()
+        if not lua_dir or not self._has_character_source(lua_dir):
+            self.status_bar.showMessage("未找到完整角色 Lua 数据，请先导出包含 BaseCard/BaseWord 的最新版本")
             self._character_loading = False
-            return
+            return False
 
-        # 先读缓存（完整数据）；缓存有效直接还原，避免重复解析
-        characters_full = self._load_character_cache()
-        if characters_full:
-            self.characters_full = characters_full
-            self.characters = self._derive_character_index(characters_full)
-            self._populate_character_table()
-            self._character_data_loaded = True
+        repository = load_character_repository(CHARACTER_REPOSITORY_PATH)
+        if (
+            not force
+            and version_timestamp is not None
+            and repository.get("current_version") == int(version_timestamp)
+            and repository.get("current_characters")
+        ):
+            self._apply_character_repository(repository)
+            self._character_data_loaded = bool(self.characters)
             self._character_loading = False
-            self.status_bar.showMessage(f"角色数据从缓存加载: {len(self.characters)} 个角色")
-            return
+            self.status_bar.showMessage(f"角色数据从版本仓库加载: {len(self.characters)} 个角色")
+            return True
 
         self._character_loading = True
-        self.status_bar.showMessage("正在加载角色数据...")
+        source_label = f"版本 {version_timestamp}" if version_timestamp is not None else "当前 Lua"
+        self.status_bar.showMessage(f"正在解析角色数据（{source_label}）...")
+        if automatic and getattr(self, "_import_progress_dialog", None):
+            self._import_progress_dialog.setLabelText("自动解析角色数据\n准备读取 Lua...")
+            self._import_progress_dialog.setRange(0, 100)
+            self._import_progress_dialog.setValue(0)
         QApplication.processEvents()
-        logger.info(f"开始加载角色数据，lua_dir: {lua_dir}")
-
-        # 清空旧数据
-        self.character_base = []
-        self.characters = []
-        self.characters_full = {}
-        self.word_map = {}
+        logger.info(f"开始加载角色数据，version={version_timestamp}, lua_dir: {lua_dir}")
 
         def on_progress(prog, msg):
             self.dl_progress.setValue(prog)
             self.status_bar.showMessage(msg)
+            if automatic and getattr(self, "_import_progress_dialog", None):
+                self._import_progress_dialog.setLabelText(f"自动解析角色数据\n{msg}")
+                self._import_progress_dialog.setRange(0, 100)
+                self._import_progress_dialog.setValue(prog)
             QApplication.processEvents()
 
         # 实际解析委托给 app.core.character_loader.load_character_data（纯解析引擎）
         characters, characters_full, word_map = load_character_data(lua_dir, on_progress)
+        if not characters_full:
+            self._character_loading = False
+            self.status_bar.showMessage("角色 Lua 未解析出有效数据，保留已有角色数据")
+            return False
         self.word_map = word_map
-        self.characters_full = characters_full
-        self.characters = characters
+        if version_timestamp is not None:
+            baseline = None
+            if not repository.get("current_characters"):
+                baseline = self._load_character_cache(validate_source=False)
+            merged = merge_character_snapshot(
+                CHARACTER_DATA_DIR,
+                version_timestamp,
+                characters_full,
+                source_dir=lua_dir,
+                baseline_characters=baseline,
+            )
+            self.characters_full = merged["characters_full"]
+            self.character_unread = merged["unread"]
+            self.character_source_version = int(version_timestamp)
+        else:
+            # 兼容升级前的根目录 output/lua，不阻断旧用户第一次启动。
+            self.characters_full = characters_full
+            self.character_unread = {}
+            self._save_character_cache(characters_full, lua_dir)
+        self.characters = self._derive_character_index(self.characters_full)
 
         self.dl_progress.setValue(100)
         self._populate_character_table()
@@ -1301,39 +1409,118 @@ class MainWindow(QMainWindow):
         self._character_loading = False
 
         if len(self.characters) > 0:
-            self.status_bar.showMessage(f"角色数据加载完成: {len(self.characters)} 个角色")
+            action = "自动解析完成" if automatic else "角色数据加载完成"
+            unread_count = len(self.character_unread)
+            self.status_bar.showMessage(
+                f"{action}: {len(self.characters)} 个角色，{unread_count} 个新/变更"
+            )
         else:
             self.status_bar.showMessage("角色数据加载完成: 无匹配角色")
 
-        # 留存完整数据（含 source_mtime 供失效判断）
-        self._save_character_cache(characters_full)
+        # 保留旧缓存文件作为迁移期兼容产物；正式状态以角色仓库为准。
+        self._save_character_cache(self.characters_full, lua_dir)
+        self._refresh_unread_badges()
+        return True
 
-    def _has_character_source(self):
-        """检查 output/lua 是否已有解析所需的源文件"""
-        return (os.path.isfile(os.path.join(LUA_OUTPUT_DIR, "BaseCard.lua"))
-                and os.path.isfile(os.path.join(LUA_OUTPUT_DIR, "BaseWord_cn.lua")))
+    def _restore_character_data(self):
+        """只从本地仓库/缓存恢复角色数据，不触发 Lua 解析。"""
+        repository = load_character_repository(CHARACTER_REPOSITORY_PATH)
+        if repository_characters(repository):
+            self._apply_character_repository(repository)
+            self._character_data_loaded = bool(self.characters)
+            self._character_loading = False
+            self.status_bar.showMessage(f"角色数据从本地仓库加载: {len(self.characters)} 个角色")
+            return True
 
-    def _character_source_mtime(self):
+        # 旧版本只有 characters_full.json，没有版本仓库。这里宁可显示本地
+        # 缓存，也不在切换页面时现场解析；用户可用“开始解析”主动刷新。
+        cached = self._load_character_cache(validate_source=False)
+        if not cached:
+            return False
+        self.characters_full = cached
+        self.character_unread = character_unread_status(repository)
+        self.character_source_version = None
+        self.characters = self._derive_character_index(self.characters_full)
+        self._character_data_loaded = bool(self.characters)
+        self._character_loading = False
+        self._populate_character_table()
+        self._refresh_unread_badges()
+        self.status_bar.showMessage(f"角色数据从本地缓存加载: {len(self.characters)} 个角色")
+        return self._character_data_loaded
+
+    def _latest_lua_source(self):
+        """返回最新版本 Lua 目录；兼容升级前的 output/lua 根目录。"""
+        version = latest_lua_version(LUA_OUTPUT_DIR)
+        if version is not None:
+            return version, version_directory(LUA_OUTPUT_DIR, version)
+        if has_character_sources(LUA_OUTPUT_DIR):
+            return None, LUA_OUTPUT_DIR
+        return None, None
+
+    def _has_character_source(self, lua_dir=None):
+        """检查指定 Lua 目录是否具备自动角色解析所需的 Base 文件。"""
+        if lua_dir is None:
+            _version, lua_dir = self._latest_lua_source()
+        return bool(lua_dir and has_character_sources(lua_dir))
+
+    def _apply_character_repository(self, repository):
+        """从角色仓库恢复当前数据和未读状态。"""
+        self.characters_full = repository_characters(repository)
+        self.character_unread = character_unread_status(repository)
+        version = repository.get("current_version")
+        self.character_source_version = int(version) if version is not None else None
+        self.characters = self._derive_character_index(self.characters_full)
+        self._character_data_loaded = bool(self.characters)
+        self._populate_character_table()
+        self._refresh_unread_badges()
+
+    def _character_source_mtime(self, lua_dir=LUA_OUTPUT_DIR):
         """返回角色源文件的最大 mtime（用于缓存失效）；缺失返回 0"""
-        return source_mtime(LUA_OUTPUT_DIR, CHARACTER_SOURCE_FILES)
+        return source_mtime(lua_dir, CHARACTER_SOURCE_FILES)
 
     def _derive_character_index(self, characters_full):
         """从完整角色数据派生表格索引列表（复用 load_character_data 的过滤逻辑）"""
-        return derive_character_index(characters_full)
+        characters = derive_character_index(characters_full)
+        for item in characters:
+            item["change_status"] = self.character_unread.get(str(item.get("char_id")))
+        return characters
 
-    def _save_character_cache(self, characters_full):
+    def _save_character_cache(self, characters_full, lua_dir=LUA_OUTPUT_DIR):
         """留存完整角色数据到 output/character_data/characters_full.json"""
         try:
             out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
-            save_character_cache_file(out_json, characters_full, self._character_source_mtime())
+            save_character_cache_file(out_json, characters_full, self._character_source_mtime(lua_dir))
             logger.info(f"已留存完整角色数据到 {out_json}")
         except Exception as e:
             logger.warning(f"留存角色数据失败: {e}")
 
-    def _load_character_cache(self):
+    def _load_character_cache(self, lua_dir=LUA_OUTPUT_DIR, validate_source=True):
         """读完整角色数据缓存；源文件 mtime 变化时返回 None 触发重解析"""
         out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
-        return load_character_cache_file(out_json, self._character_source_mtime())
+        return load_character_cache_file(
+            out_json,
+            self._character_source_mtime(lua_dir),
+            validate_source=validate_source,
+        )
+
+    def _auto_parse_after_lua_export(self):
+        """Lua 导出完成后，仅对最新版本且 Base 文件齐全的结果自动解析。"""
+        worker = getattr(self, "_import_worker", None)
+        result = getattr(worker, "lua_export_result", None)
+        if not result:
+            return
+        version = result.get("version")
+        lua_dir = result.get("directory")
+        latest_version = latest_lua_version(LUA_OUTPUT_DIR)
+        if not should_auto_parse(version, latest_version, lua_dir):
+            if not result.get("character_sources"):
+                self.status_bar.showMessage("Lua 已按版本留存，但缺少角色 Base 文件，未自动解析")
+                logger.info("跳过 Lua 自动角色解析：版本 %s 缺少必要 Base 文件", version)
+                return
+            self.status_bar.showMessage(f"历史 Lua 已留存（版本 {version}），非最新版本，不自动解析角色")
+            logger.info("跳过 Lua 自动角色解析：导出版本 %s 不是最新版本 %s", version, latest_version)
+            return
+        self._load_character_data(lua_dir, version, force=True, automatic=True)
 
     def _populate_character_table(self):
         """填充角色表格"""
@@ -1353,6 +1540,12 @@ class MainWindow(QMainWindow):
             self.character_table.setItem(i, 0, idx_item)
             name_item = QTableWidgetItem(char.get("name", "未知"))
             self.character_table.setItem(i, 1, name_item)
+            badge_item = QTableWidgetItem("新" if char.get("change_status") else "")
+            badge_item.setTextAlignment(Qt.AlignCenter)
+            if char.get("change_status"):
+                badge_item.setForeground(QBrush(QColor(DANGER)))
+                badge_item.setToolTip("新版本新增或数据发生变化，打开详情后清除")
+            self.character_table.setItem(i, 2, badge_item)
         self.character_status.setText(f"共 {count} 个角色")
 
     def _filter_character_table(self, text):
@@ -1365,7 +1558,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_character_list(self):
         """刷新角色列表（重新加载 Lua 文件，不重新解密）"""
-        self._load_character_data()
+        self._load_character_data(force=True)
 
     def _on_character_select(self):
         """角色表格选中行时更新详情卡片"""
@@ -1389,6 +1582,13 @@ class MainWindow(QMainWindow):
                     char_data = cinfo
                     break
         if char_data:
+            if clear_character_unread(CHARACTER_DATA_DIR, char_id):
+                self.character_unread.pop(str(char_id), None)
+                char_item["change_status"] = None
+                badge_item = self.character_table.item(row, 2)
+                if badge_item:
+                    badge_item.setText("")
+                self._refresh_unread_badges()
             self._update_character_detail(char_data)
 
     def _update_character_detail(self, char):
@@ -1421,32 +1621,37 @@ class MainWindow(QMainWindow):
     # ========== Lua Decrypt ==========
 
     def _start_lua_decrypt(self):
-        """点击【角色】按钮：切换视图；lua 已反编译则自动读缓存加载"""
+        """点击【角色】按钮：只切换视图并读取本地数据，不现场解析 Lua。"""
         if self._show_character:
             # 当前已显示角色视图，切换到版本列表
             self._toggle_character_mode(False)
             return
         self._toggle_character_mode(True)
-        # 已有数据则直接显示
-        if self._character_data_loaded:
-            self._populate_character_table()
-            return
-        # 读 output/lua（AS 导入已反编译到此处）；无则等手动「开始解析」提示导入
-        if self._has_character_source():
-            self._load_character_data()
+        if not self._character_data_loaded:
+            self._restore_character_data()
 
     def _manual_load_character(self):
         """手动开始：读 output/lua 并加载角色数据（AS 导入已反编译）"""
         if self._character_loading:
             return
-        if self._character_data_loaded:
-            self._populate_character_table()
-            return
         if not self._has_character_source():
-            QMessageBox.information(self, "提示", "未找到角色 Lua 数据。\n\n请先点击侧边栏【导入AS】导出并反编译 Lua 后再解析。")
+            QMessageBox.information(self, "提示", "未找到完整角色 Lua 数据。\n\n请先导出包含 BaseCard/BaseWord 的版本后再解析。")
             self.status_bar.showMessage("请先导入AS")
             return
-        self._load_character_data()
+        self._load_character_data(force=True)
+
+    def _mark_all_characters_read(self):
+        """清除角色仓库中的全部未读状态，并同步所有顶层标签。"""
+        cleared = clear_all_character_unread(CHARACTER_DATA_DIR)
+        self.character_unread.clear()
+        for item in self.characters:
+            item["change_status"] = None
+        for row in range(self.character_table.rowCount()):
+            badge = self.character_table.item(row, 2)
+            if badge:
+                badge.setText("")
+        self._refresh_unread_badges()
+        self.status_bar.showMessage("已将全部角色数据标记为已读" if cleared else "当前没有未读角色数据")
 
     def _export_selected_audio(self):
         """导出选中的音频文件"""

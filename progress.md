@@ -88,3 +88,75 @@
 |-------|------------|
 | 规划模板增量补丁无法匹配 | 使用完整文件重建，没有触碰既有业务文件。 |
 | pytest 默认临时目录权限拒绝 | 使用隔离的显式可写 basetemp 重跑，确认是环境问题而非测试/代码失败。 |
+
+## Session: 2026-08-19 — Issue #32 Lua 与角色数据链路
+
+### Current Status
+- **Phase:** 6 - Lua 与角色数据链路重构
+- **Issue:** [#32](https://github.com/zzzz259/XL/issues/32)
+- **Branch:** 待从 `chore/architecture-stabilization` 创建独立功能分支
+
+### Actions Taken
+- 已将用户需求拆为 Lua 版本隔离、临时目录清理、最新版本自动解析、Base 文件前置、角色增量数据和未读角标六个子问题。
+- 已读取并启用本轮需要的 `collab-workflow`、`planning-with-files` 和 `verification-before-completion` 规范。
+- 已确认正在审阅的 UI PR #31 不应混入本轮功能，后续从当前提交创建独立分支。
+- 已确认 Issue #32 已创建，范围包含背景、目标、边界和验收标准。
+- 已确认当前导出线程在 staging 中反编译 Lua，提交后才同步到单一 `output/lua`；角色解析仍依赖单一目录和单一完整缓存文件。
+- 已确认本轮只清理 `data/material/assets/lua`，不删除整个 `data/material`。
+- 已完成 `app/core/lua_repository.py`：Lua 版本目录、最新版本、Base 文件前置判断、`.lua` 成品发布和临时目录清理。
+- 已完成 `app/core/character_repository.py`：角色版本快照、当前数据合并、new/changed 比较、未读集合和查看后清除。
+- 已将 `ImportASWorker` 接入版本时间戳：Lua 成功提交后发布到 `output/lua/<版本>/`，不再合并覆盖单一 `output/lua`。
+- 已将 `MainWindow` 接入最新版本/Base 门槛；非最新版本或缺 Base 时只留存 Lua，不自动解析角色；最新有效版本导出完成后自动解析。
+- 已在角色列表增加状态列显示“新”，选中角色详情时清除持久化未读标记；历史未查看角色继续保留角标。
+- 已同步 `README.md`、`docs/开发文档指南.md` 和 `开发计划与沟通事项.md`，记录运行目录契约、调用链和本轮边界。
+
+### Errors
+| Error | Attempt | Resolution |
+|---|---:|---|
+| GitHub Issue 请求体内嵌中文引号导致 PowerShell ParserError | 1 | 改用不含嵌套引号的等价文案后成功创建 Issue #32；未产生重复 Issue。 |
+| 导入完成提示条件表达式出现双反斜杠语法错误 | 1 | 改用括号包裹的条件表达式；随后重新执行 Ruff、编译、导入 smoke 和全量测试。 |
+
+### Verification
+- Ruff：`python -m ruff check --no-cache app/core app/ui tests` 通过。
+- 测试：`python -m pytest -q --basetemp E:\\AI-Agent\\xl-pytest-basetemp-lua-full`，46 项通过。
+- 最终门禁复跑：85 个 Python 文件内存编译通过，46 项测试通过，Lua/角色模块导入 smoke 通过，`git diff --check` 通过。
+- 额外导出链路测试：版本隔离、临时清理、旧版本保留、Base 缺失门槛和角色未读状态均通过。
+- 尚未进行用户实机导出验证；下一步需用真实版本执行一次最新 Lua、一次旧版本 Lua、一次缺 Base/无角色 Base 的导出，并确认角色界面自动更新及角标清除。
+
+## Session: 2026-08-19 — Issue #32 回归修复
+
+### Root Cause Investigation
+
+- 已确认角色页切换时的现场解析来自 `_start_lua_decrypt()` 直接调用 `_load_character_data()`；旧版平铺 `output/lua` 还会使版本标识为 `None`，绕过版本仓库缓存。
+- 已确认“最新版本”原先取版本数据库最大值，已改为只看 `output/lua/<版本>/` 的实际发布目录。
+- 已确认旧 `characters_full.json` 没有成为版本仓库首次合并的基线，导致迁移/重复导出时全量“新”；已加入旧缓存基线和规范化快照比较。
+- 已确认 `assets_map.json` 可在当前样本中把 12,797 个 AB 精确筛为 2 个 Lua bundle；仅筛进度列表还不够，AssetStudio 仍会扫描原目录，因此补充了只含命中包的 CLI 临时输入目录。
+
+### Implemented
+
+- 角色页切换现在只恢复角色仓库或本地缓存，不主动解析 Lua；“开始解析”和 Lua 导出后的自动解析仍是显式入口。
+- 新增“全部标为已读”，未读红点同步显示在版本列表、图片预览、音频和角色四个顶部标签。
+- 自动角色解析沿用导入进度弹窗，导入完成后在弹窗内继续展示解析进度。
+- Lua 单分类导入读取版本 `assets_map.json`，只将命中的 AB 放入临时 AssetStudio 输入目录；映射缺失时保留兼容回退并记录警告。
+- 新增 `bundle_selector`、仓库迁移基线、全部已读、CLI 隔离目录测试。
+
+### Verification
+
+- 针对性 Ruff 通过。
+- 角色仓库、缓存、Lua bundle 筛选、导入线程和页面壳层针对性测试通过（17 项）。
+- 实际读取当前样本映射：12,797 个 bundle → 2 个 Lua bundle，命中 13,880 条 Lua 资源。
+- 全量 Ruff 通过；内存编译 `app + tests` 共 87 个 Python 文件通过；全量 pytest 通过（51 项）。
+- 导入 smoke 通过；当前沙箱对项目 `logs/` 和 `.pytest_cache/` 仍有 ACL 警告，不影响专用临时目录测试结果。
+- 尚待完成：用户真实启动与导出验证。
+
+### 启动回归修复
+
+- 用户实机启动日志发现顶部导航重构把图标名称字符串直接传入 `QAbstractButton.setIcon()`，导致正常模式启动即失败。
+- 已修正为先通过 `_icon()` 构造 `QIcon` 再传给 `_tbtn()`，新增真实 Qt 工具栏构建 smoke。
+- 修复后 Ruff、87 个 Python 文件内存编译、全量 pytest（52 项）均通过；当前沙箱完整主窗口仍受项目 SQLite WAL 写权限限制，用户环境需再次正常启动确认。
+
+### 未读角标语义修正
+
+- 角色未读状态现在只显示在“角色”顶部标签；版本列表、图片预览和音频不再复用角色未读红点。
+- 已补充 Qt 回归测试，验证四个导航角标中仅角色角标可见。
+- 角标语义修正后的全量 pytest 已通过（53 项）。

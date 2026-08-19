@@ -78,6 +78,21 @@
 ## Issue #29 页面收口观察
 
 - 音频页原先在输出目录不存在或为空时只显示空树，用户需要依赖底部状态栏理解下一步；内容区叠加空状态后，与图片和角色页的反馈模式一致。
+
+## Issue #32 回归问题（2026-08-19）
+
+- 角色页切换链路为 `角色按钮 → _start_lua_decrypt() → _load_character_data()`；应用每次启动时 `_character_data_loaded=False`，因此首次切换角色页就会重新解析。旧的 `output/lua` 平铺目录会返回 `version=None`，现有实现没有先读取 `characters_full.json`，所以日志表现为每次现场解析。
+- “最新 Lua”判断错误地取了版本数据库中的最大时间戳，而不是 `output/lua/<版本>/` 中已经实际发布的最大目录。数据库中存在但尚未导出的版本不应参与自动角色解析判断。
+- 旧缓存路径没有迁移进角色仓库；同版本重导或从旧缓存首次迁移时缺少稳定基线，导致整批角色被标为“新”。
+- 未读状态目前只绘制在角色表格，顶部四个视图按钮没有共享未读状态，也没有一键清除入口。
+- `_import_selected()` 原本把版本全部已下载 AB 放入 AssetStudio 输入目录；即使只勾选 Lua，CLI 仍扫描整个目录。当前 `data/bundles/134309118097910091/_map/assets_map.json` 可将 Lua 资源精确映射到 2 个 bundle，因此需要在 CLI 侧使用只含命中包的临时输入目录。
+- 导入完成处理器先关闭进度弹窗，再触发 Lua 自动角色解析，自动解析阶段无法复用用户已经看到的进度窗口。
+
+### 启动回归补充
+
+- 顶部导航加入未读角标时，导航构建函数将 list/image 等名称字符串直接传给 _tbtn(icon=...)；当 QtAwesome 可用时，setIcon(str) 立即触发 PySide6 类型错误，导致整个主窗口无法启动。
+- 修复方式为在导航构建层统一调用 _icon()，让 _tbtn() 始终只接收 QIcon 或 None；新增 Qt 工具栏构建 smoke，避免再次把图标名称和图标对象混用。
+- 用户实机反馈角色未读红点错误出现在所有顶层标签；根因是角色未读集合被无差别同步到四个导航角标。已收窄为仅“角色”标签显示，其他标签等待各自建立独立未读来源后再接入。
 - 音频列表刷新前未显式重置 `_audio_file_items`，在目录被删除或扫描失败后存在旧叶节点仍可被导出的风险；本轮在加载入口重置，未改变扫描和导出逻辑。
 - 预览列表已经支持多选和批量右键操作，但状态栏只显示总数；新增选择数反馈，不改变选择模型和导出流程。
 - 预览、音频、版本页原本分别维护局部 QSS；本轮将稳定的控件样式迁入 `theme.py`，页面只保留对象名和行为，降低主题分叉和多人协作冲突。
@@ -99,3 +114,36 @@
 - [Matt Pocock Skills](https://github.com/mattpocock/skills)
 - [Planning with Files](https://github.com/soucod/planning-with-files-skill)
 - [obra/superpowers](https://github.com/obra/superpowers)
+
+## Issue #32 Lua/角色数据链路审查（2026-08-19）
+
+- 当前版本选择使用数据库中的 `timestamp`，版本列表通过 `ticks_to_date()` 展示日期；它可以作为 Lua 版本目录的稳定主键，目录建议使用 `output/lua/<timestamp>/`，同时保留日期/版本信息在元数据中，避免同一天多个版本互相覆盖。
+- `ImportASWorker._stage_export()` 先把分类导出到 staging，再通过 `_commit_staged_material()` 提交到 `data/material`；Lua 反编译发生在 staging 内，当前提交后 `_sync_lua_output()` 将 Lua 合并覆盖到单一 `output/lua`。
+- Lua 版本化应放在 staging 提交成功之后：先复制到 `output/lua/<version>`，验证必要文件，再清理 `data/material/assets/lua`；复制失败或自动解析失败不能回滚已经成功的 Lua 最终产物，也不能删除历史版本。
+- 角色解析当前由 `MainWindow._load_character_data()` 协调，使用单一 `output/character_data/characters_full.json` 和源文件 mtime 缓存；该格式无法表达版本历史、字段变化和未读状态，需要升级为带版本快照、当前合并数据和 pending 变化记录的持久化仓库。
+- `load_character_data(lua_dir)` 是无 Qt 的纯解析入口，已经支持 BaseCard/BaseWord/BaseSkill 等文件组合；`BaseCard.lua`、`BaseWord_cn.lua` 和相关 Base 文件缺失时应明确返回不可自动解析，而不是写入空数据覆盖旧结果。
+- 自动角色解析的触发条件必须由版本元数据决定，而不是仅检查 `output/lua` 是否存在：本次导出的版本必须是版本列表中的最新版本，并且该版本目录满足角色解析所需 Base 文件集合。
+- 角色列表目前由 `derive_character_index()` 从完整字典派生；新增/变更状态可在索引项中增加 `change_status`/`unread`，不改变角色详情模型和 CSV 导出字段，界面显示角标与清除状态应由 UI 协调层处理。
+- 角色选中后 `_on_character_select()` 能拿到 `char_id` 并更新 Wiki 详情，是清除对应未读状态的稳定交互边界；刷新和重新加载时应继续保留未查看记录。
+- `data/material` 仍被立绘预览、音频解密和 Spine 流程使用，本轮不能整体删除；仅 Lua 子目录可以在成功导出并完成最终复制后清理。
+- 导出线程提交顺序为 staging → `data/material` 分类提交 → Lua 最终发布 → Lua 临时目录清理；历史 `output/lua/<版本>` 目录只会在同版本重复导出时替换，其他版本不受影响。
+- Lua 发布只复制 `.lua`，不会把 `.lua.bytes`、`.lua.bank` 等反编译中间文件带入最终目录；没有生成 `.lua` 时不会替换已有版本目录，但仍清理本次临时目录。
+- 自动解析由 `MainWindow._auto_parse_after_lua_export()` 触发，版本判断使用版本数据库中最大 timestamp；导出旧版本即使 Base 齐全也只留存，不更新当前角色仓库。
+- 角色解析异常或返回空结果时，解析前不再清空内存中的旧角色数据，磁盘上的当前仓库和历史快照也不会被覆盖。
+- 角色仓库的“增量”语义是：每个版本保存完整快照，当前索引更新为最新有效快照，新增/变更 ID 进入累积未读集合；打开详情只清除对应 ID，不影响其他未读角色。
+
+## Technical Decisions（Issue #32）
+
+| Decision | Rationale |
+|---|---|
+| Lua 最终文件按版本目录留存 | 版本可追溯，避免多版本导出相互覆盖；目录主键使用数据库 timestamp，适合与 ab 包对应。 |
+| 自动解析只认“最新版本 + 必要 Base 文件” | 避免导出旧版本时误更新当前角色数据，也避免缺失 Base 文件写出不完整快照。 |
+| 角色数据采用历史快照 + 当前合并索引 + 未读变化 | 同时满足保留历史、增量更新、查看差异和 UI 红点，不再用单一缓存覆盖过去。 |
+| 先保留手动解析按钮 | 自动链路失败或用户需要补偿时仍有可操作入口；手动入口默认指向最新可解析版本。 |
+| 只清理 Lua 临时目录 | `material` 还承担音频/立绘/FGUI 处理中间态，整体清理属于后续批次。 |
+
+## Verification Notes（Issue #32）
+
+- 新增 6 项测试：Lua 版本目录隔离与中间文件过滤、临时目录清理、最新/Base 自动解析门槛、角色版本快照、new/changed 比较和未读状态幂等清除。
+- 针对性测试共 12 项通过；全量测试由 40 项增至 46 项并全部通过。
+- Ruff 检查 `app/core app/ui tests` 通过；项目默认 `.pytest_cache` 仍受已有 ACL 警告影响，测试使用明确可写 basetemp 执行。

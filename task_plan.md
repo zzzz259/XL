@@ -4,10 +4,10 @@
 在不破坏现有功能、数据契约和多人协作边界的前提下，重新审视 XL 的桌面应用视觉系统：保留可用的新蓝灰主题，去除明显的 AI 生成感，建立统一、可维护、可渐进落地的主题、布局、组件和交互视觉规范，并分阶段完成界面优化。
 
 ## Next Step
-完成 Issue #30 的对话框与主窗口局部视觉收口，并在用户实机验证后再进入全局主题与 PR 收尾。
+完成 Issue #32 回归修复的全量验证，并等待用户真实导入/切换角色页验证后再提交 PR。
 
 ## Current Phase
-Phase 3 - 页面视觉迁移
+Phase 6 - Lua 与角色数据链路重构
 
 ## Phases
 
@@ -38,7 +38,7 @@ Phase 3 - 页面视觉迁移
 - [x] Issue #29：图片预览、音频、版本工作区主要局部 QSS 收口
 - [x] Issue #29：用户实机验证与页面交互回归（用户已验证）
 - [x] Issue #30：对话框与主窗口局部视觉收口
-- [ ] Issue #30：用户实机验证与对话框操作回归
+- [x] Issue #30：用户实机验证与对话框操作回归（用户已验证）
 - **Status:** in_progress
 
 ### Phase 4: Testing & Verification
@@ -48,16 +48,40 @@ Phase 3 - 页面视觉迁移
 - [x] 验证角色详情区空状态与选中后的详情切换（用户已验证）
 - [x] 验证 Wiki 详情分区与技能数字高亮（用户已验证）
 - [x] 验证 Issue #29 的图片选择反馈、音频空状态/播放文本、版本工作区样式（用户已验证）
-- [ ] 验证 Issue #30 的图片查看器、角色选择、导出设置和右键菜单
+- [x] 验证 Issue #30 的图片查看器、角色选择、导出设置和右键菜单（用户已验证）
 - [x] Validate theme compatibility and major workflow regression（35 项测试 + 页面构建）
 - [x] Record fresh verification evidence
 - **Status:** pending
 
 ### Phase 5: Delivery
 - [x] Update required project documentation（已同步角色 Wiki 首版结构与边界）
-- [ ] Review diff for scope creep and collaboration conflicts
-- [ ] Report results and wait for user confirmation before PR
-- **Status:** pending
+- [x] Review diff for scope creep and collaboration conflicts（PR #31 已创建）
+- [x] Report results and wait for user confirmation before PR（用户已确认并已创建 PR #31）
+- **Status:** complete
+
+## Phase 6: Lua 导出与角色数据链路（Issue #32）
+
+### 目标
+
+将 Lua 导出从临时 `data/material/assets/lua` 改为按版本留存的最终产物，并在满足“最新版本 + 必要 Base 文件”条件时自动完成角色数据增量同步。保留手动解析按钮作为补偿入口，不改变 Lua 解析字段和 CSV 导出契约。
+
+### 阶段
+
+- [x] 建立 Issue #32，明确范围、边界和验收标准
+- [x] 审查版本标识、导出线程提交点、角色解析入口和现有缓存格式
+- [x] 设计并实现 `output/lua/<版本>/` 版本目录与临时 Lua 清理
+- [x] 实现最新版本/Base 文件前置判断和导出后自动解析
+- [x] 将角色数据改为按版本增量合并，保留历史快照与新/变更状态
+- [x] 在角色界面显示新角标并实现查看后清除
+- [x] 补充测试、文档和本轮报告
+- [ ] 用户实机验证：切换角色页不解析、最新已发布 Lua 自动解析、旧版本不触发、缺 Base 不触发、角标与全部已读
+- [ ] 用户实机验证：仅勾选 Lua 时只导入映射命中的 AB
+
+### 本轮边界
+
+- 本轮只处理 Lua 导出和角色数据；音频 debank、FGUI、Spine 立绘合并留待后续批次。
+- 暂不删除整个 `data/material`，只在 Lua 成功提交后清理 `data/material/assets/lua`。
+- 不破坏导出失败/取消时的已有最终产物，不把历史版本 Lua 覆盖为当前版本。
 
 ## Character Wiki Detail Plan（Issue #27 后续子计划）
 

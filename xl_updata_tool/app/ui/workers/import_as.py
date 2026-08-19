@@ -16,6 +16,7 @@ from app.core.logger import logger, timed
 from app.core.path_utils import get_base_dir, get_tools_dir
 from app.core.bundle_parser import fix_bundle_inplace
 from app.core.file_utils import replace_directory
+from app.core.lua_repository import cleanup_lua_staging, publish_lua_version
 from app.ui.workers.lua_decrypt import decompile_lua_dir
 
 
@@ -54,7 +55,8 @@ class ImportASWorker(QThread):
 
     直接修复原始 .bundle 文件（不复制到临时目录），
     然后调用 AssetStudio CLI 生成资源映射（assets_map.json），
-    最后按类型导出所有资源到 data/material/。
+    最后按分类导出到 data/material/；Lua 分类提交后会立即发布到 output/lua/<版本>/，
+    并清理 data/material/assets/lua 中的临时 Lua 文件。
     """
     progress_stage = Signal(str, int, int)  # stage_name, current, total
     stage_finished = Signal(str)            # stage_name
@@ -62,7 +64,8 @@ class ImportASWorker(QThread):
     all_finished = Signal(bool, str)        # success, message
 
     def __init__(self, bundle_paths, bundle_dir, material_dir, as_cli, parent=None,
-                 export_types=None, export_categories=None):
+                 export_types=None, export_categories=None, version_timestamp=None,
+                 lua_output_dir=None, isolate_bundle_dir=False):
         super().__init__(parent)
         self.bundle_paths = bundle_paths
         self.bundle_dir = bundle_dir
@@ -70,10 +73,16 @@ class ImportASWorker(QThread):
         self.as_cli = as_cli
         self.export_types = export_types
         self.export_categories = export_categories
+        self.version_timestamp = version_timestamp
+        self.lua_output_dir = lua_output_dir or os.path.join(get_base_dir(), "output", "lua")
+        self.lua_export_result = None
         self._cancelled = False
         self._last_progress_emit = 0.0
         self._working_material_dir = material_dir
         self._staging_material_dir = None
+        self._isolate_bundle_dir = bool(isolate_bundle_dir)
+        self._cli_bundle_dir = bundle_dir
+        self._isolated_bundle_dir = None
 
     def cancel(self):
         self._cancelled = True
@@ -101,6 +110,10 @@ class ImportASWorker(QThread):
             if fail > 0:
                 logger.warning(f"[导入AS] 修复阶段：{fail} 个文件失败，继续处理 {success} 个成功文件")
 
+            # Lua 单分类导出可只把映射命中的包交给 CLI；临时目录在阶段 1
+            # 之后创建，确保原始包仍由修复阶段直接处理。
+            self._prepare_cli_bundle_dir()
+
             # 阶段 2: 解析资源（生成 assets_map.json）
             # 按分类导出时跳过：映射对分类导出无用（命令直接从 EXPORT_CATEGORIES 构建）
             assets = None
@@ -127,15 +140,22 @@ class ImportASWorker(QThread):
             self.stage_finished.emit("导出分类")
 
             if total_files > 0:
+                destination = (
+                    "Lua 已按版本写入 output/lua/，其余分类写入 data/material/"
+                    if self.export_categories and "lua" in self.export_categories
+                    else "文件已分类到 data/material/"
+                )
                 self.all_finished.emit(
                     True,
-                    f"导入完成！文件已分类到 data/material/\n共导出 {total_files} 个文件"
+                    f"导入完成！{destination}\n共导出 {total_files} 个文件"
                 )
             else:
                 self.all_finished.emit(False, "导出完成但文件数为 0，请检查资源")
         except Exception as e:
             logger.error(f"[导入AS] 工作线程异常: {e}", exc_info=True)
             self.all_finished.emit(False, f"导入失败: {e}")
+        finally:
+            self._cleanup_cli_bundle_dir()
 
     @timed("导入AS-修复文件头")
     def _stage_fix(self):
@@ -175,7 +195,7 @@ class ImportASWorker(QThread):
         self._emit_progress("解析资源", 0, total_bundles)
         try:
             proc = subprocess.Popen(
-                [self.as_cli, self.bundle_dir, map_dir, "--game", "UnityCN", "--key_index", "23",
+                [self.as_cli, self._cli_bundle_dir, map_dir, "--game", "UnityCN", "--key_index", "23",
                  "--map_op", "Both", "--map_type", "JSON"],
                 cwd=os.path.dirname(self.as_cli), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, bufsize=1,
@@ -244,7 +264,7 @@ class ImportASWorker(QThread):
                 if self._cancelled:
                     return 0, "已取消"
                 self.progress_stage.emit("导出分类", i + 1, total)
-                cmd = [self.as_cli, self.bundle_dir, self._working_material_dir,
+                cmd = [self.as_cli, self._cli_bundle_dir, self._working_material_dir,
                        "--game", "UnityCN", "--key_index", "23"] + extra_args + \
                       ["--group_assets", "ByContainer", "--export_type", "Convert"]
                 logger.info(f"[导入AS] {label} 开始（{i + 1}/{total}）: {' '.join(cmd)}")
@@ -314,7 +334,7 @@ class ImportASWorker(QThread):
 
             self._commit_staged_material()
             if self.export_categories and "lua" in self.export_categories:
-                self._sync_lua_output()
+                self.lua_export_result = self._sync_lua_output()
             for category in sorted(self.export_categories or ()):
                 if category not in {label.removeprefix("导出 ") for label in completed_labels}:
                     completed_labels.append(f"导出 {category}")
@@ -372,25 +392,54 @@ class ImportASWorker(QThread):
             shutil.rmtree(backup_root, ignore_errors=True)
 
     def _sync_lua_output(self):
-        """提交成功后，再把 Lua 展示输入同步到 output/lua。"""
+        """提交成功后，把 Lua 发布到版本目录并清理 material 临时目录。"""
         lua_dir = os.path.join(self.material_dir, "assets", "lua")
-        out_lua_dir = os.path.join(get_base_dir(), "output", "lua")
-        os.makedirs(out_lua_dir, exist_ok=True)
-        copied = 0
-        for _root, _dirs, files in os.walk(lua_dir):
-            for filename in files:
-                if not filename.endswith(".lua"):
-                    continue
-                src = os.path.join(_root, filename)
-                dst = os.path.join(out_lua_dir, filename)
+        if self.version_timestamp is None:
+            logger.warning("[导入AS] 未提供 Lua 版本标识，跳过最终 Lua 版本发布（测试/兼容调用）")
+            return None
+        version_dir, copied, source_ready = publish_lua_version(
+            lua_dir, self.lua_output_dir, self.version_timestamp
+        )
+        cleanup_lua_staging(self.material_dir)
+        logger.info(
+            "[导入AS] Lua 已按版本留存: %s（%s 个文件，角色 Base=%s）",
+            version_dir, copied, source_ready,
+        )
+        return {
+            "version": int(self.version_timestamp),
+            "directory": version_dir,
+            "file_count": copied,
+            "character_sources": source_ready,
+        }
+
+    def _prepare_cli_bundle_dir(self):
+        """为精确分类导出创建只包含命中 AB 的 CLI 输入目录。"""
+        if not self._isolate_bundle_dir or not self.bundle_paths:
+            return
+        parent = os.path.dirname(os.path.abspath(self.bundle_dir))
+        staged = tempfile.mkdtemp(prefix=".xl-lua-bundles-", dir=parent)
+        try:
+            for source in self.bundle_paths:
+                destination = os.path.join(staged, os.path.basename(source))
                 try:
-                    if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
-                        continue
-                    shutil.copy2(src, dst)
-                    copied += 1
-                except (OSError, PermissionError) as exc:
-                    logger.warning(f"[导入AS] 同步 lua 失败 {filename}: {exc}")
-        logger.info(f"[导入AS] 已留存 {copied} 个 .lua 到 {out_lua_dir}")
+                    os.link(source, destination)
+                except OSError:
+                    shutil.copy2(source, destination)
+            self._isolated_bundle_dir = staged
+            self._cli_bundle_dir = staged
+            logger.info(
+                "[导入AS] Lua 精确导入：AssetStudio 仅使用 %s 个命中 bundle（输入目录=%s）",
+                len(self.bundle_paths), staged,
+            )
+        except Exception:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
+
+    def _cleanup_cli_bundle_dir(self):
+        if self._isolated_bundle_dir:
+            shutil.rmtree(self._isolated_bundle_dir, ignore_errors=True)
+            self._isolated_bundle_dir = None
+            self._cli_bundle_dir = self.bundle_dir
 
     def _build_category_commands(self):
         """根据勾选的分类构建 CLI 导出命令（label, extra_args）列表"""
