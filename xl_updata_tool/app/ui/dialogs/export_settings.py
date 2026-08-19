@@ -10,33 +10,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from app.ui.theme import BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT
-
-
 class ExportSettingsDialog(QDialog):
     """导出参数设置对话框"""
 
     def __init__(self, skel_path, atlas_path, default_format="MP4", parent=None):
         super().__init__(parent)
         self.setWindowTitle("导出设置")
+        self.setObjectName("exportSettingsDialog")
         self.setMinimumWidth(420)
-        self.setStyleSheet(f"""
-            QDialog {{ background-color:{BG_SURFACE}; color:{TEXT_PRIMARY}; }}
-            QLabel {{ color:{TEXT_PRIMARY}; font-size:13px; background:transparent; border:none; }}
-            QLabel#fileLabel {{ color:{TEXT_SECONDARY}; font-size:11px; padding:6px;
-                               background-color:{BG_DARK}; border:1px solid {BORDER}; border-radius:4px; }}
-            QComboBox, QSpinBox {{
-                background-color:{BG_DARK}; border:1px solid {BORDER}; border-radius:4px;
-                padding:5px 8px; color:{TEXT_PRIMARY}; font-size:13px; min-height:24px;
-            }}
-            QComboBox::drop-down {{ border:none; width:20px; }}
-            QCheckBox {{ color:{TEXT_PRIMARY}; font-size:13px; }}
-            QPushButton {{ padding:8px 20px; border-radius:6px; border:none; color:#fff; font-size:13px; font-weight:600; }}
-            QPushButton#okBtn {{ background-color:{ACCENT}; }}
-            QPushButton#okBtn:hover {{ opacity:0.85; }}
-            QPushButton#cancelBtn {{ background-color:{BG_ELEVATED}; border:1px solid {BORDER}; color:{TEXT_PRIMARY}; }}
-            QPushButton#cancelBtn:hover {{ border-color:{ACCENT}; }}
-        """)
 
         self.skel_path = skel_path
         self.atlas_path = atlas_path
@@ -52,7 +33,7 @@ class ExportSettingsDialog(QDialog):
 
         # 标题
         title = QLabel("导出 Spine 动画")
-        title.setStyleSheet(f"font-size:16px; font-weight:bold; color:{ACCENT};")
+        title.setObjectName("dialogTitle")
         layout.addWidget(title)
 
         # 表单
@@ -98,7 +79,7 @@ class ExportSettingsDialog(QDialog):
 
         # 输出文件路径
         file_header = QLabel("输出文件:")
-        file_header.setStyleSheet(f"font-weight:bold; color:{TEXT_SECONDARY};")
+        file_header.setObjectName("dialogFieldLabel")
         layout.addWidget(file_header)
 
         self.file_label = QLabel()
@@ -121,12 +102,15 @@ class ExportSettingsDialog(QDialog):
         btn_layout.addStretch()
 
         cancel_btn = QPushButton("取消")
-        cancel_btn.setObjectName("cancelBtn")
+        cancel_btn.setObjectName("dialogCancelButton")
+        cancel_btn.setAccessibleName("取消导出设置")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
         ok_btn = QPushButton("导出")
-        ok_btn.setObjectName("okBtn")
+        ok_btn.setObjectName("dialogPrimaryButton")
+        ok_btn.setProperty("fluentAppearance", "primary")
+        ok_btn.setAccessibleName("确认导出")
         ok_btn.clicked.connect(self.accept)
         btn_layout.addWidget(ok_btn)
 

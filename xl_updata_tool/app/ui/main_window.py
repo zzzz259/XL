@@ -27,8 +27,8 @@ except ImportError:
     QT_AWESOME_AVAILABLE = False
 
 from .theme import (
-    ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
-    apply_theme, get_color,
+    ACCENT, TEXT_PRIMARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
+    FORMAL_THEME, THEME_LABEL, apply_theme, get_color, normalize_theme_name,
 )
 from .panels import ticks_to_date
 from app.core.version_manager import VersionManager
@@ -41,7 +41,8 @@ from app.core.character_cache import (
     save_cache as save_character_cache_file,
     source_mtime,
 )
-from app.core.character_presenter import build_character_detail_html, export_characters_csv
+from app.core.character_presenter import export_characters_csv
+from app.core.character_profile import build_character_profile
 from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
 from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
 from app.core.seed_versions import seed_bundled_versions
@@ -62,7 +63,7 @@ from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
 from .views.preview_view import create_preview_view
 from .views.audio_view import create_audio_view
 from .views.character_view import create_character_view
-from .views.version_view import create_version_table
+from .views.version_view import create_version_header, create_version_table
 from .features.export_controller import (
     export_composite_video,
     export_with_dialog,
@@ -92,9 +93,11 @@ class MainWindow(QMainWindow):
         self.resize(1200, 700)
         self.setMinimumSize(900, 500)
         self.showMaximized()
-        # 读取主题偏好（默认旧主题），应用
-        _theme = QSettings("XL", "xl_updata_tool").value("theme", "old")
-        apply_theme(self, _theme if _theme in ("old", "new", "light") else "old")
+        # 读取历史主题偏好并统一迁移到正式蓝灰主题。
+        settings = QSettings("XL", "xl_updata_tool")
+        _theme = normalize_theme_name(settings.value("theme", FORMAL_THEME))
+        settings.setValue("theme", _theme)
+        apply_theme(self, _theme)
         self.version_mgr = VersionManager()
         # 后台工作线程实例（避免 AttributeError）
         self._preview_worker = None
@@ -154,6 +157,8 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
+        self.version_header, self.version_summary = create_version_header(self)
+        content_layout.addWidget(self.version_header)
         self.table = create_version_table(self)
         self._hover_row = -1
         self._checkbox_containers = {}
@@ -195,14 +200,14 @@ class MainWindow(QMainWindow):
         self.audio_slider = self.audio_controls["audio_slider"]
         self.audio_volume = self.audio_controls["audio_volume"]
         self.audio_status = self.audio_controls["audio_status"]
+        self.audio_empty = self.audio_controls["audio_empty"]
 
         # 暴露角色控件引用
         self.character_title = self.character_controls["character_title"]
         self.character_search = self.character_controls["character_search"]
         self.character_table = self.character_controls["character_table"]
         self.character_detail = self.character_controls["character_detail"]
-        self.character_detail_name = self.character_controls["character_detail_name"]
-        self.character_detail_info = self.character_controls["character_detail_info"]
+        self.character_profile_view = self.character_controls["character_profile_view"]
         self.character_status = self.character_controls["character_status"]
         self.character_empty = self.character_controls["character_empty"]
 
@@ -218,7 +223,13 @@ class MainWindow(QMainWindow):
     def _view_toolbar(self):
         """顶部视图切换工具栏（版本列表 / 图片预览 / 音频 / 角色）"""
         bar = QToolBar(); bar.setMovable(False)
-        bar.addWidget(self._lbl("XL 1.0.1", 16, ACCENT, True))
+        brand = QWidget()
+        brand_layout = QVBoxLayout(brand)
+        brand_layout.setContentsMargins(8, 0, 16, 0)
+        brand_layout.setSpacing(0)
+        brand_layout.addWidget(self._lbl("XL", 16, get_color("ACCENT"), True))
+        brand_layout.addWidget(self._lbl("资源工作台", 10, get_color("TEXT_MUTED")))
+        bar.addWidget(brand)
         bar.addSeparator()
         self.btn_home = self._tbtn("版本列表", icon=self._icon("list"))
         self.btn_home.setCheckable(True)
@@ -251,7 +262,8 @@ class MainWindow(QMainWindow):
     def _action_toolbar(self):
         """侧边功能工具栏：检查更新/导入AS + 导出配置 + 主题（设置区）+ 刷新/作者（底部），竖排"""
         bar = QWidget()
-        bar.setFixedWidth(190)
+        bar.setMinimumWidth(176)
+        bar.setMaximumWidth(216)
         bar.setObjectName("sideToolbar")
         bar.setStyleSheet(f"QWidget#sideToolbar {{ background-color:{get_color('BG_SURFACE')}; border-right:1px solid {get_color('BORDER')}; }}")
         layout = QVBoxLayout(bar)
@@ -261,20 +273,25 @@ class MainWindow(QMainWindow):
         def _side_btn(t, icon):
             b = QPushButton(t)
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            b.setMinimumHeight(34)
+            b.setMinimumHeight(36)
             ic = self._icon(icon)
             if ic:
                 b.setIcon(ic)
+            b.setToolTip(t)
+            b.setAccessibleName(t)
+            b.setProperty("fluentAppearance", "secondary")
             return b
 
         self.btn_check = _side_btn("检查更新", "arrows-rotate")
+        self.btn_check.setProperty("fluentAppearance", "primary")
         self.btn_check.clicked.connect(self._check_update)
         layout.addWidget(self.btn_check)
         self.btn_browse = _side_btn("导入AS", "file-import")
+        self.btn_browse.setProperty("fluentAppearance", "primary")
         self.btn_browse.clicked.connect(self._import_selected)
         layout.addWidget(self.btn_browse)
         layout.addSpacing(8)
-        layout.addWidget(self._lbl("导出配置", 12, TEXT_SECONDARY, True))
+        layout.addWidget(self._lbl("导出内容", 11, get_color("TEXT_SECONDARY"), True))
         self.cb_export_lua = QCheckBox("lua")
         self.cb_export_lua.setChecked(True)
         self.cb_export_character = QCheckBox("角色立绘")
@@ -286,15 +303,14 @@ class MainWindow(QMainWindow):
         # 4 个勾选竖排（一列一个，不挤）
         for cb in (self.cb_export_lua, self.cb_export_character, self.cb_export_fgui, self.cb_export_audio):
             layout.addWidget(cb)
-        layout.addSpacing(8)
-        layout.addWidget(self._lbl("主题", 12, TEXT_SECONDARY, True))
+        layout.addSpacing(12)
+        layout.addWidget(self._lbl("界面主题", 11, get_color("TEXT_SECONDARY"), True))
         self.theme_selector = QComboBox()
-        self.theme_selector.addItem("旧主题", "old")
-        self.theme_selector.addItem("蓝灰新主题", "new")
-        self.theme_selector.addItem("浅色", "light")
-        cur = QSettings("XL", "xl_updata_tool").value("theme", "old")
-        self.theme_selector.setCurrentIndex({"old": 0, "new": 1, "light": 2}.get(cur, 0))
-        self.theme_selector.currentIndexChanged.connect(self._on_theme_changed)
+        self.theme_selector.addItem(THEME_LABEL, FORMAL_THEME)
+        self.theme_selector.setCurrentIndex(0)
+        self.theme_selector.setToolTip("当前正式主题")
+        self.theme_selector.setAccessibleName("当前界面主题")
+        self.theme_selector.setEnabled(False)
         layout.addWidget(self.theme_selector)
         # 底部：刷新 + 作者（stretch 推到最下面）
         layout.addStretch()
@@ -307,13 +323,11 @@ class MainWindow(QMainWindow):
         return bar
 
     def _on_theme_changed(self):
-        """主题切换（旧主题 / 蓝灰 / 浅色），立即生效并保存偏好"""
-        name = self.theme_selector.currentData()
+        """兼容未来主题入口；当前正式版只保留蓝灰深色主题。"""
+        name = normalize_theme_name(self.theme_selector.currentData())
         apply_theme(self, name)
         QSettings("XL", "xl_updata_tool").setValue("theme", name)
         logger.info(f"切换主题: {name}")
-        # 全局 QSS 即时切换；各视图容器的局部背景色重启后完全生效（构建时读 get_color）
-        QMessageBox.information(self, "主题切换", "全局样式已切换。\n\n各视图（图片预览/音频/角色）的局部背景色需重启后完全生效。")
 
     def _get_export_categories(self):
         """返回勾选的导出分类集合（lua/character/fgui/audio）"""
@@ -329,7 +343,11 @@ class MainWindow(QMainWindow):
         return cats
 
     def _lbl(self, t, s=12, c=TEXT_PRIMARY, b=False):
-        l = QLabel(t); l.setStyleSheet(f"color:{c};font-size:{s}px;font-weight:{'bold' if b else 'normal'};padding:4px 8px;background:transparent;border:none;"); return l
+        if c is None:
+            c = get_color("TEXT_PRIMARY")
+        l = QLabel(t)
+        l.setStyleSheet(f"color:{c};font-size:{s}px;font-weight:{'bold' if b else 'normal'};padding:2px 8px;background:transparent;border:none;")
+        return l
 
     def _icon(self, name, color=TEXT_PRIMARY):
         if QT_AWESOME_AVAILABLE:
@@ -342,6 +360,8 @@ class MainWindow(QMainWindow):
         if icon:
             b.setIcon(icon)
             b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        b.setToolTip(t)
+        b.setAccessibleName(t)
         if accent: b.setProperty("accent","true"); b.setStyleSheet(b.styleSheet())
         return b
 
@@ -370,6 +390,11 @@ class MainWindow(QMainWindow):
         btn = self._tbtn(text)
         btn.clicked.connect(lambda: self._clear_dir(target_dir))
         bar.addWidget(btn)
+
+    def _set_version_content_visible(self, visible):
+        """整体切换版本工作区，避免页面切换留下单独的工作区标题。"""
+        self.version_header.setVisible(visible)
+        self.table.setVisible(visible)
 
     def _clear_dir(self, target_dir):
         """确认后清空目录（rmtree + 重建）"""
@@ -434,7 +459,7 @@ class MainWindow(QMainWindow):
 
     def _load_data(self):
         # 确保版本列表可见（隐藏图片预览、音频和角色视图）
-        self.table.setVisible(True)
+        self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
         self.audio_container.setVisible(False)
         self.character_container.setVisible(False)
@@ -466,6 +491,7 @@ class MainWindow(QMainWindow):
         self._version_checkboxes = {}  # row -> (ts, checkbox)
         self._checkbox_containers = {}
         self._hover_row = -1
+        downloaded_versions = 0
         for i, v in enumerate(versions):
             ts, arts, data, other, video, apk, manifest, is_cur, dl, created, notes = v
             # checkbox 列（第 0 列，打勾选中；单选冲突，Ctrl 多选）
@@ -495,6 +521,8 @@ class MainWindow(QMainWindow):
             elif down >= total: status = "已下载"
             elif down > 0: status = f"部分 ({down}/{total})"
             else: status = "未下载"
+            if status == "已下载":
+                downloaded_versions += 1
             si = QTableWidgetItem(status)
             if status == "已下载": si.setForeground(QColor(SUCCESS))
             elif "部分" in status: si.setForeground(QColor(WARNING))
@@ -518,6 +546,21 @@ class MainWindow(QMainWindow):
                 btn.clicked.connect(action)
                 self.table.setCellWidget(i, col, btn)
         self.table.setSortingEnabled(True)
+        self._version_count = len(versions)
+        self._downloaded_version_count = downloaded_versions
+        self._update_version_summary()
+
+    def _update_version_summary(self):
+        """刷新版本工作区摘要，补充选择与下载状态的文字信息。"""
+        selected = sum(
+            1 for _ts, checkbox in getattr(self, "_version_checkboxes", {}).values()
+            if checkbox.isChecked()
+        )
+        self.version_summary.setText(
+            f"{getattr(self, '_version_count', 0)} 个版本 · "
+            f"已下载 {getattr(self, '_downloaded_version_count', 0)} · "
+            f"已选择 {selected}"
+        )
 
     def _get_selected_ts(self):
         """返回第一个勾选的版本 ts（导入 AS 等单版本操作用）"""
@@ -545,6 +588,7 @@ class MainWindow(QMainWindow):
             self._checked_ts.add(ts)
         else:
             self._checked_ts.discard(ts)
+        self._update_version_summary()
 
     def _on_cell_clicked(self, row, col):
         """点击整行任意位置（除勾选列/按钮列）→ 翻转该行勾选"""
@@ -602,7 +646,7 @@ class MainWindow(QMainWindow):
 
     def _check_update(self):
         # 确保版本列表可见（隐藏图片预览和音频视图）
-        self.table.setVisible(True)
+        self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
         self.audio_container.setVisible(False)
         self.btn_check.setEnabled(False)
@@ -731,7 +775,7 @@ class MainWindow(QMainWindow):
 
     def _import_selected(self):
         # 确保版本列表可见（隐藏图片预览和音频视图）
-        self.table.setVisible(True)
+        self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
         self.audio_container.setVisible(False)
         ts = self._get_selected_ts()
@@ -1043,7 +1087,7 @@ class MainWindow(QMainWindow):
         """切换预览视图/版本列表"""
         self._set_active_view_btn(self.btn_image_preview if show_preview else self.btn_home)
         self._set_toolbars_visible(not show_preview)
-        self.table.setVisible(not show_preview)
+        self._set_version_content_visible(not show_preview)
         self.preview_container.setVisible(show_preview)
         self.character_container.setVisible(False)
         self._show_character = False
@@ -1057,7 +1101,7 @@ class MainWindow(QMainWindow):
         """切换音频管理器视图"""
         self._set_active_view_btn(self.btn_audio if show_audio else self.btn_home)
         self._set_toolbars_visible(not show_audio)
-        self.table.setVisible(not show_audio)
+        self._set_version_content_visible(not show_audio)
         self.preview_container.setVisible(False)
         self.character_container.setVisible(False)
         self._show_character = False
@@ -1165,11 +1209,13 @@ class MainWindow(QMainWindow):
         """扫描 output/audio/ 目录，加载已解密的音频文件列表"""
         audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
         self._audio_files = scan_audio_files(audio_output_dir)
+        self._audio_file_items = []
 
         if not os.path.isdir(audio_output_dir):
-            self.audio_title.setText("🎵 音频管理器  共 0 个音频文件")
+            self.audio_title.setText("音频管理器 · 共 0 个音频文件")
             self.audio_status.setText("已选: 0 个 | 共 0 个音频文件")
             self.audio_table.clear()
+            self.audio_empty.setVisible(True)
             logger.info(f"音频输出目录不存在: {audio_output_dir}")
             return
 
@@ -1178,8 +1224,9 @@ class MainWindow(QMainWindow):
         )
 
         total = len(self._audio_files)
-        self.audio_title.setText(f"🎵 音频管理器  共 {total} 个音频文件")
+        self.audio_title.setText(f"音频管理器 · 共 {total} 个音频文件")
         self.audio_status.setText(f"已选: 0 个 | 共 {total} 个音频文件")
+        self.audio_empty.setVisible(total == 0)
         logger.info(f"音频列表加载完成: 共 {total} 个文件")
         self.status_bar.showMessage(f"音频列表加载完成: {total} 个文件")
 
@@ -1193,7 +1240,7 @@ class MainWindow(QMainWindow):
         """切换角色视图显示/隐藏"""
         self._set_active_view_btn(self.btn_lua if show_character else self.btn_home)
         self._set_toolbars_visible(not show_character)
-        self.table.setVisible(not show_character)
+        self._set_version_content_visible(not show_character)
         self.preview_container.setVisible(False)
         self.audio_container.setVisible(False)
         self.character_container.setVisible(show_character)
@@ -1292,6 +1339,7 @@ class MainWindow(QMainWindow):
         """填充角色表格"""
         self.character_table.setSortingEnabled(False)
         self.character_table.setRowCount(0)
+        self.character_profile_view.clear_profile()
         count = len(self.characters)
         if count == 0:
             self.character_empty.setVisible(True)
@@ -1323,6 +1371,7 @@ class MainWindow(QMainWindow):
         """角色表格选中行时更新详情卡片"""
         rows = self.character_table.selectionModel().selectedRows()
         if not rows:
+            self.character_profile_view.clear_profile()
             return
         row = rows[0].row()
         if row < 0 or row >= len(self.characters):
@@ -1343,10 +1392,8 @@ class MainWindow(QMainWindow):
             self._update_character_detail(char_data)
 
     def _update_character_detail(self, char):
-        """把角色详情渲染结果交给 Qt 控件。"""
-        name, html = build_character_detail_html(char)
-        self.character_detail_name.setText(name)
-        self.character_detail_info.setText(html)
+        """把角色资料模型交给 Wiki 详情视图。"""
+        self.character_profile_view.set_profile(build_character_profile(char))
 
     def _export_characters_csv(self):
         """弹出保存对话框并委托无 Qt 的 CSV 导出逻辑。"""
@@ -1461,8 +1508,8 @@ class MainWindow(QMainWindow):
         self._audio_current_path = filepath
         self._audio_player.setSource(QUrl.fromLocalFile(filepath))
         self._audio_player.play()
-        self.audio_now_playing.setText(f"▶ {filename}")
-        self.audio_play_btn.setText("⏸")
+        self.audio_now_playing.setText(f"正在播放：{filename}")
+        self.audio_play_btn.setText("暂停")
         self.audio_play_btn.setEnabled(True)
         self.audio_slider.setEnabled(True)
         logger.info(f"播放音频: {filename}")
@@ -1479,9 +1526,9 @@ class MainWindow(QMainWindow):
     def _on_audio_state_changed(self, state):
         """播放状态变化"""
         if state == QMediaPlayer.PlayingState:
-            self.audio_play_btn.setText("⏸")
+            self.audio_play_btn.setText("暂停")
         elif state in (QMediaPlayer.PausedState, QMediaPlayer.StoppedState):
-            self.audio_play_btn.setText("▶")
+            self.audio_play_btn.setText("播放")
 
     def _update_audio_position(self, position):
         """更新播放进度"""
@@ -1519,15 +1566,11 @@ class MainWindow(QMainWindow):
         filepath = info["path"]
 
         menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{ background-color:{get_color('BG_SURFACE')}; border:1px solid {get_color('BORDER')}; border-radius:6px; padding:4px 0px; }}
-            QMenu::item {{ padding:8px 24px; color:{get_color('TEXT_PRIMARY')}; font-size:13px; border-radius:4px; }}
-            QMenu::item:selected {{ background-color:{get_color('ACCENT')}; color:#fff; }}
-        """)
+        menu.setObjectName("contextMenu")
 
-        act_open = menu.addAction("📂 打开文件所在目录")
-        act_copy = menu.addAction("📋 复制文件")
-        act_play = menu.addAction("🎵 播放")
+        act_open = menu.addAction("打开文件所在目录")
+        act_copy = menu.addAction("复制文件")
+        act_play = menu.addAction("播放")
 
         action = menu.exec(self.audio_table.mapToGlobal(position))
         if action == act_open:
@@ -1618,6 +1661,19 @@ class MainWindow(QMainWindow):
             if role:
                 visible = f"/{role}/" in png.replace("\\", "/")
             item.setHidden(not visible)
+        self._update_preview_status()
+
+    def _on_preview_selection_changed(self):
+        """同步预览区的选择数量，帮助用户确认批量操作范围。"""
+        self._update_preview_status()
+
+    def _update_preview_status(self):
+        """更新预览图片总数与当前选择数。"""
+        if not hasattr(self, "preview_status"):
+            return
+        total = self.image_list.count()
+        selected = len(self.image_list.selectedItems())
+        self.preview_status.setText(f"共 {total} 张图片 · 已选 {selected}")
 
     @timed("图片缩略图加载")
     def _load_preview_images(self):
@@ -1663,7 +1719,7 @@ class MainWindow(QMainWindow):
         self.preview_progress.setMaximum(total)
         self.preview_progress.setValue(current)
         self.preview_progress.setFormat(f"加载中... {current}/{total}")
-        self.preview_title.setText(f"🖼️ 角色预览器  共 {total} 张图片  (加载中 {current}/{total})")
+        self.preview_title.setText(f"角色预览器 · 共 {total} 张图片 · 加载中 {current}/{total}")
 
     def _on_thumbnail_loaded(self, image_path, thumbnail):
         """添加缩略图到 QListWidget，同时存储 skel/atlas 路径"""
@@ -1678,15 +1734,15 @@ class MainWindow(QMainWindow):
         self.preview_progress.setVisible(False)
         count = len(loaded_paths)
         self._image_paths = loaded_paths
-        self.preview_title.setText(f"🖼️ 角色预览器  共 {count} 张图片")
+        self.preview_title.setText(f"角色预览器 · 共 {count} 张图片")
 
         if count == 0:
             self.empty_label.setVisible(True)
-            self.preview_status.setText("共 0 张图片")
+            self._update_preview_status()
             logger.warning("预览目录为空")
         else:
             self.empty_label.setVisible(False)
-            self.preview_status.setText(f"共 {count} 张图片")
+            self._update_preview_status()
 
         logger.info(f"加载完成，共 {count} 张图片")
         self.status_bar.showMessage(f"图片预览: 共 {count} 张图片")
@@ -1726,26 +1782,20 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{ background-color:{get_color('BG_SURFACE')}; border:1px solid {get_color('BORDER')}; border-radius:6px;
-                     padding:4px 0px; }}
-            QMenu::item {{ padding:8px 24px; color:{get_color('TEXT_PRIMARY')}; font-size:13px; border-radius:4px; }}
-            QMenu::item:selected {{ background-color:{get_color('ACCENT')}; color:#fff; }}
-            QMenu::separator {{ height:1px; background-color:{get_color('BORDER')}; margin:4px 8px; }}
-        """)
+        menu.setObjectName("contextMenu")
 
         is_multi = len(selected_items) > 1
 
         if is_multi:
             # 多选
             if has_skel:
-                act_batch_gif = menu.addAction(f"🎞️ 批量导出 GIF ({len(entries)} 个)")
-                act_batch_video = menu.addAction(f"🎬 批量导出视频 ({len(entries)} 个)")
+                act_batch_gif = menu.addAction(f"批量导出 GIF（{len(entries)} 个）")
+                act_batch_video = menu.addAction(f"批量导出视频（{len(entries)} 个）")
                 if has_png:
                     menu.addSeparator()
             if has_png:
-                act_open = menu.addAction("📂 打开文件所在目录")
-                act_copy = menu.addAction("📋 复制文件")
+                act_open = menu.addAction("打开文件所在目录")
+                act_copy = menu.addAction("复制文件")
 
             action = menu.exec(self.image_list.mapToGlobal(position))
             if has_skel and action == act_batch_gif:
@@ -1763,19 +1813,19 @@ class MainWindow(QMainWindow):
             data = selected_items[0].data(Qt.UserRole)
             png_path = data.get("png", "")
 
-            act_open = menu.addAction("📂 打开文件所在目录")
-            act_copy = menu.addAction("📋 复制文件")
+            act_open = menu.addAction("打开文件所在目录")
+            act_copy = menu.addAction("复制文件")
 
             if has_skel:
                 menu.addSeparator()
                 skel_path, atlas_path, _ = entries[0]
                 is_composite = is_composite_png(png_path)
                 if is_composite:
-                    act_export_gif = menu.addAction("🎞️ 导出合成 GIF")
-                    act_export_video = menu.addAction("🎬 导出合成视频")
+                    act_export_gif = menu.addAction("导出合成 GIF")
+                    act_export_video = menu.addAction("导出合成视频")
                 else:
-                    act_export_gif = menu.addAction("🎞️ 导出 GIF")
-                    act_export_video = menu.addAction("🎬 导出视频")
+                    act_export_gif = menu.addAction("导出 GIF")
+                    act_export_video = menu.addAction("导出视频")
 
             action = menu.exec(self.image_list.mapToGlobal(position))
             if action == act_open:

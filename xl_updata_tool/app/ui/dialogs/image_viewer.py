@@ -10,9 +10,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QPainter
 
-from app.ui.theme import BG_DARK, BG_SURFACE, BG_ELEVATED, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, DANGER
-
-
 class ImageViewerDialog(QDialog):
     """大图预览窗口，使用 QGraphicsView 实现无滚动条的缩放/拖拽预览"""
 
@@ -24,8 +21,8 @@ class ImageViewerDialog(QDialog):
         self.original_pixmap = QPixmap()
 
         self.setWindowTitle("图片预览")
+        self.setObjectName("imageViewerDialog")
         self.resize(900, 700)
-        self.setStyleSheet(f"background-color:{BG_DARK};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -33,25 +30,22 @@ class ImageViewerDialog(QDialog):
 
         # 顶部栏：文件名 + 关闭按钮
         top_bar = QFrame()
+        top_bar.setObjectName("imageViewerHeader")
         top_bar.setFixedHeight(44)
-        top_bar.setStyleSheet(f"QFrame {{ background-color:{BG_SURFACE}; border-bottom:1px solid {BORDER}; }}")
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(12, 0, 12, 0)
 
         self.fname_label = QLabel()
-        self.fname_label.setStyleSheet(f"color:{TEXT_PRIMARY}; font-size:13px; font-weight:600; background:transparent;")
+        self.fname_label.setObjectName("imageViewerFilename")
         top_layout.addWidget(self.fname_label)
         top_layout.addStretch()
 
-        btn_close = QPushButton("✕")
-        btn_close.setFixedSize(32, 28)
-        btn_close.setStyleSheet(f"""
-            QPushButton {{ background-color:transparent; border:none; border-radius:4px;
-                          color:{TEXT_SECONDARY}; font-size:16px; font-weight:600; }}
-            QPushButton:hover {{ background-color:{DANGER}; color:#fff; }}
-        """)
-        btn_close.clicked.connect(self.close)
-        top_layout.addWidget(btn_close)
+        self.btn_close = QPushButton("关闭")
+        self.btn_close.setObjectName("dialogCloseButton")
+        self.btn_close.setFixedSize(64, 28)
+        self.btn_close.setAccessibleName("关闭图片预览")
+        self.btn_close.clicked.connect(self.close)
+        top_layout.addWidget(self.btn_close)
         layout.addWidget(top_bar)
 
         # 图片区域：QGraphicsView + QGraphicsScene
@@ -59,46 +53,38 @@ class ImageViewerDialog(QDialog):
         self.pixmap_item = self.scene.addPixmap(QPixmap())
 
         self.view = QGraphicsView(self.scene)
+        self.view.setObjectName("imageCanvas")
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setDragMode(QGraphicsView.ScrollHandDrag)
         self.view.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.view.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-        self.view.setStyleSheet(f"QGraphicsView {{ border:none; background-color:{BG_DARK}; }}")
         self.view.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
         layout.addWidget(self.view, 1)
 
         # 底部栏：上一张 / 信息 / 下一张
         bottom_bar = QFrame()
+        bottom_bar.setObjectName("imageViewerFooter")
         bottom_bar.setFixedHeight(50)
-        bottom_bar.setStyleSheet(f"QFrame {{ background-color:{BG_SURFACE}; border-top:1px solid {BORDER}; }}")
         bottom_layout = QHBoxLayout(bottom_bar)
         bottom_layout.setContentsMargins(12, 0, 12, 0)
 
-        self.btn_prev = QPushButton("◀ 上一张")
+        self.btn_prev = QPushButton("上一张")
+        self.btn_prev.setObjectName("imagePreviousButton")
         self.btn_prev.setFixedSize(100, 32)
-        self.btn_prev.setStyleSheet(f"""
-            QPushButton {{ background-color:{BG_ELEVATED}; border:1px solid {BORDER}; border-radius:6px;
-                          color:{TEXT_PRIMARY}; font-size:12px; font-weight:600; }}
-            QPushButton:hover {{ border-color:{ACCENT}; }}
-            QPushButton:disabled {{ color:{TEXT_MUTED}; opacity:0.5; }}
-        """)
+        self.btn_prev.setAccessibleName("上一张图片")
         self.btn_prev.clicked.connect(self._prev_image)
         bottom_layout.addWidget(self.btn_prev)
 
         self.info_label = QLabel()
+        self.info_label.setObjectName("imageViewerInfo")
         self.info_label.setAlignment(Qt.AlignCenter)
-        self.info_label.setStyleSheet(f"color:{TEXT_SECONDARY}; font-size:12px; background:transparent;")
         bottom_layout.addWidget(self.info_label, 1)
 
-        self.btn_next = QPushButton("下一张 ▶")
+        self.btn_next = QPushButton("下一张")
+        self.btn_next.setObjectName("imageNextButton")
         self.btn_next.setFixedSize(100, 32)
-        self.btn_next.setStyleSheet(f"""
-            QPushButton {{ background-color:{BG_ELEVATED}; border:1px solid {BORDER}; border-radius:6px;
-                          color:{TEXT_PRIMARY}; font-size:12px; font-weight:600; }}
-            QPushButton:hover {{ border-color:{ACCENT}; }}
-            QPushButton:disabled {{ color:{TEXT_MUTED}; opacity:0.5; }}
-        """)
+        self.btn_next.setAccessibleName("下一张图片")
         self.btn_next.clicked.connect(self._next_image)
         bottom_layout.addWidget(self.btn_next)
         layout.addWidget(bottom_bar)
@@ -112,6 +98,8 @@ class ImageViewerDialog(QDialog):
     def _load_current_image(self):
         if not self.image_paths:
             self.info_label.setText("0 / 0")
+            self.btn_prev.setEnabled(False)
+            self.btn_next.setEnabled(False)
             return
 
         path = self.image_paths[self.current_index]
