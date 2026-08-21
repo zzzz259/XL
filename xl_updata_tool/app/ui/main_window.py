@@ -50,10 +50,16 @@ from app.core.character_repository import (
     repository_path as character_repository_path,
     unread_status as character_unread_status,
 )
-from app.core.bundle_selector import lua_assets_map_path, select_lua_bundles
+from app.core.bundle_selector import (
+    audio_assets_map_path,
+    lua_assets_map_path,
+    select_audio_bundles,
+    select_lua_bundles,
+)
 from app.core.character_presenter import export_characters_csv
 from app.core.character_profile import build_character_profile
 from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
+from app.core.audio_repository import mark_all_read as mark_all_audio_read, mark_read as mark_audio_read, sync_audio_snapshot, unread_files as audio_unread_files
 from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
 from app.core.seed_versions import seed_bundled_versions
 from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
@@ -85,7 +91,7 @@ from .features.export_controller import (
     export_with_dialog,
     batch_export_with_dialog,
 )
-from .features.audio_controller import populate_audio_tree
+from .features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
 from .features.preview_controller import build_preview_item
 from app.core.character_loader import load_character_data
 
@@ -125,6 +131,8 @@ class MainWindow(QMainWindow):
         self._composite_worker = None
         self._image_worker = None
         self._import_worker = None
+        self._pending_import_message = None
+        self._audio_uses_import_dialog = False
         # 音频播放器相关属性（避免首次访问 AttributeError）
         self._audio_player = None
         self._audio_output = None
@@ -295,16 +303,17 @@ class MainWindow(QMainWindow):
         return bar
 
     def _refresh_unread_badges(self):
-        """把角色未读状态同步到所有顶层工作区标签。"""
+        """把各功能模块的未读状态同步到对应顶层工作区标签。"""
         repository = load_character_repository(CHARACTER_REPOSITORY_PATH)
         unread = character_unread_status(repository)
-        has_unread = bool(unread)
-        if not has_unread:
-            has_unread = bool(self.character_unread)
+        character_has_unread = bool(unread) or bool(self.character_unread)
+        audio_dir = os.path.join(get_base_dir(), "output", "audio")
+        audio_has_unread = bool(audio_unread_files(audio_dir))
         for key, badge in getattr(self, "_unread_badges", {}).items():
-            # 当前已实现的未读来源只有角色数据；不要把角色未读状态
-            # 冒充成版本、图片预览或音频页面的未读状态。
-            badge.setVisible(key == "character" and has_unread)
+            badge.setVisible(
+                (key == "character" and character_has_unread)
+                or (key == "audio" and audio_has_unread)
+            )
 
     def _action_toolbar(self):
         """侧边功能工具栏：检查更新/导入AS + 导出配置 + 主题（设置区）+ 刷新/作者（底部），竖排"""
@@ -852,27 +861,36 @@ class MainWindow(QMainWindow):
         # 计算路径
         bundle_dir = os.path.dirname(fs[0])
         isolate_bundle_dir = False
-        if export_categories == {"lua"}:
-            map_path = lua_assets_map_path(bundle_dir)
-            lua_fs, mapped, asset_count = select_lua_bundles(fs, map_path)
+        if export_categories in ({"lua"}, {"audio"}):
+            map_path = (
+                lua_assets_map_path(bundle_dir)
+                if export_categories == {"lua"}
+                else audio_assets_map_path(bundle_dir)
+            )
+            selector = select_lua_bundles if export_categories == {"lua"} else select_audio_bundles
+            selected_fs, mapped, asset_count = selector(fs, map_path)
             if mapped:
-                fs = lua_fs
+                fs = selected_fs
                 isolate_bundle_dir = True
                 logger.info(
-                    "[导入AS] Lua 资源映射命中 %s 个资源，筛选 %s/%s 个 bundle",
+                    "[导入AS] %s 资源映射命中 %s 个资源，筛选 %s/%s 个 bundle",
+                    "Lua" if export_categories == {"lua"} else "音频",
                     asset_count, len(fs), len(sub),
                 )
                 if not fs:
                     QMessageBox.information(
-                        self, "没有 Lua 资源", "该版本的资源映射中没有找到 Lua 文件。"
+                        self,
+                        "没有对应资源",
+                        "该版本的资源映射中没有找到所选分类的资源。",
                     )
                     return
             else:
                 logger.warning(
-                    "[导入AS] Lua 资源映射不可用，无法提前精准筛选 bundle，将兼容扫描已下载包：%s",
+                    "[导入AS] %s 资源映射不可用，无法提前精准筛选 bundle，将兼容扫描已下载包：%s",
+                    "Lua" if export_categories == {"lua"} else "音频",
                     map_path,
                 )
-                self.status_bar.showMessage("未找到资源映射，将扫描已下载 bundle 以建立 Lua 映射")
+                self.status_bar.showMessage("未找到资源映射，将扫描已下载 bundle")
         as_cli = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
         material_dir = os.path.join(DATA_DIR, "material")
 
@@ -955,35 +973,59 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"导入AS: {stage_name} 完成")
 
     def _on_import_category_finished(self, label):
-        """单个分类导出完成，边导出边预览：刷新对应视图"""
-        if "audio" in label and getattr(self, "audio_container", None) and self.audio_container.isVisible():
-            self._load_audio_list()
+        """记录分类完成；音频需等后处理结束后再刷新最终列表。"""
         logger.debug(f"[导入AS] 分类完成: {label}")
 
     def _on_import_all_finished(self, success, message):
         """导入AS全部完成"""
-        self.btn_browse.setEnabled(True)
-        if success:
-            self.status_bar.showMessage("导入AS: 文件已分类完成")
-            self._append_changelog(message)
-            # Lua 自动角色解析属于本次导入的收尾阶段，复用同一个进度弹窗，
-            # 让用户明确知道“导出完成”后仍可能有数据处理在进行。
-            self._auto_parse_after_lua_export()
-            self.dl_progress.setVisible(False)
-            if getattr(self, "_import_progress_dialog", None):
-                self._import_progress_dialog.close()
-                self._import_progress_dialog = None
-            QMessageBox.information(self, "完成", message)
-        else:
-            self.dl_progress.setVisible(False)
-            if getattr(self, "_import_progress_dialog", None):
-                self._import_progress_dialog.close()
-                self._import_progress_dialog = None
-            self.status_bar.showMessage("导入AS: 失败")
-            QMessageBox.warning(
-                self, "失败",
-                f"{message}\n\n文件可能损坏，请点击【删除已下载】并重新下载。"
+        if not success:
+            self._finish_import(False, message)
+            return
+
+        self.status_bar.showMessage("导入AS: 文件已分类完成，准备执行后处理")
+        self._append_changelog(message)
+        worker = getattr(self, "_import_worker", None)
+        categories = getattr(worker, "export_categories", set()) or set()
+        self._pending_import_message = message
+        if "audio" in categories:
+            # 音频解密是导出后的必经步骤，复用导入弹窗，避免用户误以为已经完成。
+            self._start_audio_decrypt(
+                force=False,
+                shared_dialog=getattr(self, "_import_progress_dialog", None),
             )
+            return
+
+        self._finish_import(True, message)
+
+    def _finish_import(self, success, message, audio_error=None):
+        """结束导入及其后处理阶段，统一关闭共享弹窗和恢复按钮状态。"""
+        self.btn_browse.setEnabled(True)
+        self.dl_progress.setVisible(False)
+        if getattr(self, "_import_progress_dialog", None):
+            self._import_progress_dialog.close()
+            self._import_progress_dialog = None
+        self._pending_import_message = None
+        self._audio_uses_import_dialog = False
+
+        if success:
+            self._auto_parse_after_lua_export()
+            if audio_error:
+                self.status_bar.showMessage("导入完成，但音频后处理失败")
+                QMessageBox.warning(
+                    self,
+                    "导入完成但音频解析失败",
+                    f"{message}\n\n音频解析失败：{audio_error}\n可重新导入音频分类进行补偿。",
+                )
+            else:
+                self.status_bar.showMessage("导入AS: 文件与后处理均已完成")
+                QMessageBox.information(self, "完成", message)
+            return
+
+        self.status_bar.showMessage("导入AS: 失败")
+        QMessageBox.warning(
+            self, "失败",
+            f"{message}\n\n文件可能损坏，请点击【删除已下载】并重新下载。"
+        )
 
     def _append_changelog(self, message):
         """追加导入更新日志到 output/CHANGELOG.md（像 git 提交记录）"""
@@ -1189,7 +1231,7 @@ class MainWindow(QMainWindow):
         self.audio_container.setVisible(show_audio)
         if show_audio:
             self._init_audio_player()
-            # 手动开始：只加载已有列表，不自动解密（点「开始解密」才解密）
+            # 页面切换只读取最终产物，不触发导出或解密。
             self._load_audio_list()
 
     def _cancel_preview_worker(self):
@@ -1206,8 +1248,8 @@ class MainWindow(QMainWindow):
             self._audio_worker.wait(2000)
             self._audio_worker = None
 
-    def _start_audio_decrypt(self, force=False):
-        """启动后台线程执行音频解密（.bytes → .bank → 解密）"""
+    def _start_audio_decrypt(self, force=False, shared_dialog=None):
+        """启动后台线程执行音频后处理（仅由导出完成流程调用）。"""
         material_dir = os.path.join(DATA_DIR, "material")
         debank_dir = os.path.join(get_tools_dir(), "epic7_debank_v1_0")
         audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
@@ -1219,7 +1261,7 @@ class MainWindow(QMainWindow):
 
         self._audio_worker = AudioDecryptWorker(
             material_dir, audio_output_dir, debank_dir,
-            force=force, parent=self
+            force=force, lua_output_dir=LUA_OUTPUT_DIR, parent=self
         )
         self._audio_worker.progress.connect(self._on_audio_decrypt_progress)
         self._audio_worker.progress_value.connect(self._on_audio_decrypt_progress_value)
@@ -1227,15 +1269,21 @@ class MainWindow(QMainWindow):
         self._audio_worker.error.connect(self._on_audio_decrypt_error)
         self._audio_worker.start()
 
-        # 进度弹窗（非模态，可取消）
-        self._audio_progress_dialog = QProgressDialog("正在处理音频...", "取消", 0, 100, self)
-        self._audio_progress_dialog.setWindowTitle("音频解密")
-        self._audio_progress_dialog.setWindowModality(Qt.NonModal)
-        self._audio_progress_dialog.setMinimumDuration(0)
-        self._audio_progress_dialog.setAutoClose(False)
-        self._audio_progress_dialog.setAutoReset(False)
-        self._audio_progress_dialog.setMinimumWidth(520)
-        self._audio_progress_dialog.setMinimumHeight(160)
+        # 导入后的自动处理复用导入弹窗；兼容性调用才创建独立弹窗。
+        self._audio_uses_import_dialog = shared_dialog is not None
+        if shared_dialog is not None:
+            self._audio_progress_dialog = shared_dialog
+            shared_dialog.setLabelText("正在处理音频...\n准备转换音频中间文件")
+            shared_dialog.setRange(0, 0)
+        else:
+            self._audio_progress_dialog = QProgressDialog("正在处理音频...", "取消", 0, 100, self)
+            self._audio_progress_dialog.setWindowTitle("音频处理")
+            self._audio_progress_dialog.setWindowModality(Qt.NonModal)
+            self._audio_progress_dialog.setMinimumDuration(0)
+            self._audio_progress_dialog.setAutoClose(False)
+            self._audio_progress_dialog.setAutoReset(False)
+            self._audio_progress_dialog.setMinimumWidth(520)
+            self._audio_progress_dialog.setMinimumHeight(160)
         self._audio_progress_dialog.canceled.connect(self._audio_worker.cancel)
         self._audio_progress_dialog.show()
 
@@ -1257,11 +1305,14 @@ class MainWindow(QMainWindow):
 
     def _on_audio_decrypt_finished(self):
         """音频解密完成回调，自动加载音频列表"""
-        if getattr(self, "_audio_progress_dialog", None):
+        shared = self._audio_uses_import_dialog
+        if getattr(self, "_audio_progress_dialog", None) and not shared:
             self._audio_progress_dialog.close()
-            self._audio_progress_dialog = None
+        self._audio_progress_dialog = None
         self.status_bar.showMessage("音频处理完成")
         self._load_audio_list()
+        if shared and self._pending_import_message:
+            self._finish_import(True, self._pending_import_message)
 
     def _on_audio_decrypt_error(self, err_msg):
         """音频解密错误回调"""
@@ -1269,6 +1320,13 @@ class MainWindow(QMainWindow):
         logger.error(f"音频解密失败: {err_msg}")
         # 即使解密失败也尝试加载已有文件
         self._load_audio_list()
+        shared = self._audio_uses_import_dialog
+        if shared and self._pending_import_message:
+            self._audio_progress_dialog = None
+            self._finish_import(True, self._pending_import_message, audio_error=err_msg)
+        elif getattr(self, "_audio_progress_dialog", None):
+            self._audio_progress_dialog.close()
+            self._audio_progress_dialog = None
 
     def _init_audio_player(self):
         """初始化音频播放器"""
@@ -1290,6 +1348,7 @@ class MainWindow(QMainWindow):
         """扫描 output/audio/ 目录，加载已解密的音频文件列表"""
         audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
         self._audio_files = scan_audio_files(audio_output_dir)
+        sync_audio_snapshot(audio_output_dir, self._audio_files)
         self._audio_file_items = []
 
         if not os.path.isdir(audio_output_dir):
@@ -1297,6 +1356,7 @@ class MainWindow(QMainWindow):
             self.audio_status.setText("已选: 0 个 | 共 0 个音频文件")
             self.audio_table.clear()
             self.audio_empty.setVisible(True)
+            self._refresh_unread_badges()
             logger.info(f"音频输出目录不存在: {audio_output_dir}")
             return
 
@@ -1308,8 +1368,44 @@ class MainWindow(QMainWindow):
         self.audio_title.setText(f"音频管理器 · 共 {total} 个音频文件")
         self.audio_status.setText(f"已选: 0 个 | 共 {total} 个音频文件")
         self.audio_empty.setVisible(total == 0)
+        self._refresh_unread_badges()
         logger.info(f"音频列表加载完成: 共 {total} 个文件")
         self.status_bar.showMessage(f"音频列表加载完成: {total} 个文件")
+
+    def _on_audio_item_pressed(self, item, _column):
+        """记录点击前状态，兼容点击复选框时 Qt 已先行切换状态的情况。"""
+        if item.data(0, Qt.UserRole):
+            self._audio_pressed_check_state = item.checkState(0) == Qt.Checked
+
+    def _on_audio_item_clicked(self, item, _column):
+        """点击音频叶子行任意位置切换勾选，始终保持单选且不保留蓝色选中态。"""
+        info = item.data(0, Qt.UserRole)
+        if not info:
+            return
+        before = getattr(self, "_audio_pressed_check_state", None)
+        self._audio_pressed_check_state = None
+        should_check = not before if before is not None else item.checkState(0) != Qt.Checked
+        self.audio_table.blockSignals(True)
+        try:
+            for other in getattr(self, "_audio_file_items", []):
+                other.setCheckState(0, Qt.Unchecked)
+            item.setCheckState(0, Qt.Checked if should_check else Qt.Unchecked)
+        finally:
+            self.audio_table.blockSignals(False)
+        self.audio_table.clearSelection()
+        checked = 1 if should_check else 0
+        self.audio_status.setText(f"已选: {checked} 个 | 共 {len(self._audio_files)} 个音频文件")
+
+    def _mark_all_audio_read(self):
+        """清除全部音频未读状态，并同步当前树和顶部角标。"""
+        audio_dir = os.path.join(get_base_dir(), "output", "audio")
+        changed = mark_all_audio_read(audio_dir)
+        for item in getattr(self, "_audio_file_items", []):
+            info = item.data(0, Qt.UserRole) or {}
+            info["unread"] = False
+        refresh_audio_tree_unread(self.audio_table)
+        self._refresh_unread_badges()
+        self.status_bar.showMessage("已将全部音频标记为已读" if changed else "当前没有未读音频")
 
     # ========== 角色视图 ==========
 
@@ -1713,6 +1809,14 @@ class MainWindow(QMainWindow):
         self._audio_current_path = filepath
         self._audio_player.setSource(QUrl.fromLocalFile(filepath))
         self._audio_player.play()
+        mark_audio_read(os.path.join(get_base_dir(), "output", "audio"), filename)
+        for item in getattr(self, "_audio_file_items", []):
+            info = item.data(0, Qt.UserRole) or {}
+            if info.get("path") == filepath:
+                info["unread"] = False
+                break
+        refresh_audio_tree_unread(self.audio_table)
+        self._refresh_unread_badges()
         self.audio_now_playing.setText(f"正在播放：{filename}")
         self.audio_play_btn.setText("暂停")
         self.audio_play_btn.setEnabled(True)

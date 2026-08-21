@@ -150,7 +150,51 @@ Phase 6 - Lua 与角色数据链路重构
 | 版本列表采用工作区摘要而非装饰卡片 | 用标题、说明和轻量统计改善信息层级，避免继续堆叠大面积边框卡片。 |
 | 空状态使用内容区叠加 | 空状态是上下文提示，不应占用底部布局高度；叠加后可保持图片区/详情区的主体比例。 |
 
+## 2026-08-21 音频导出流程（Issue #35）
+
+- [completed] 创建中文 Issue #35，并从最新 `origin/main` 建立音频专用分支。
+- [completed] 审计真实 AB、Lua、音频 output 和旧 material 中间文件，确认 event_33/event_34 属于第五专辑。
+- [completed] 实现自动音频后处理、临时目录清理、增量状态、专辑分类和精准 AB 筛选。
+- [in_progress] 完成 UI 单选互斥、红点验证、全量测试和用户实机导出验证。
+
+### 本轮边界
+
+- 包含：音频导出后自动解析、fmodassets 临时清理、精准 AB 筛选、专辑分类纠正、增量音频状态、单行互斥选择。
+- 不包含：Lua 版本隔离、FGUI 图集和 Spine 合并。
+
 ## Errors Encountered
 | Error | Resolution |
 |-------|------------|
 | 初次增量补丁无法匹配脚本生成的模板行 | 改用完整文件重建，保留规划文件用途与编码。 |
+
+## 2026-08-21 音频中日语音同名修复
+
+- [completed] 根据实机日志确认中文 bank 已进入解密流程，根因是旧分类清理按文件名全局扫描。
+- [completed] 先添加回归测试并确认修复前失败，再按 `voice/<bank>/<cn|jp>` 作用域隔离清理。
+- [completed] 保留 BGM 跨专辑旧分类清理，避免影响既有专辑纠正逻辑。
+- [in_progress] 等待用户重新执行真实中日语音导出验证；`assets_map.json` 缺失导致的全量 bundle 回退另行处理。
+
+## 2026-08-21 全量音频审计与未读树标记
+
+- [completed] 核对 AS、debank、最终文件数量和日文文件名，确认没有字符编码失败，但发现 bank 级静默空产出风险。
+- [completed] 对照 BaseSound/BaseSoundChapter 和输出专辑，发现旅途轶事缺 E20，未分类 10 个为配置表之外的额外 BGM。
+- [completed] 将“新”标记从叶节点向上同步到所有父级文件夹。
+- [completed] 后续单独处理 E20、064/095/080 bank 错位和 debank 并行化，不与本轮 UI 标记改动混合。
+
+## 2026-08-21 音频定向修复结果
+
+- [completed] 将 QuickBMS/FSB 解包从共享 `_tempo/<bank>` + `result/` 改为每 bank 唯一 job 目录。
+- [completed] 加入默认 2 路受控并行，并保持最终 output/audio 写入串行。
+- [completed] 将 bank 空产出、QuickBMS/FSB 失败和复制失败纳入结构化统计与日志。
+- [completed] 清理 064/095 的旧异号语音残留；保守归一化 080 的连续重复事件后缀。
+- [completed] 完成针对性回归、全量测试、Ruff、内存编译和 diff 检查。
+- [in_progress] 等待用户真实全量导出，确认最终产物和性能收益；并行度可根据实机耗时再调优。
+
+## 2026-08-21 音频定向修复第二轮收口
+
+- [completed] 复现 E20 bank：确认 QuickBMS 返回成功但 FSB 子进程因日文 event 名称异常退出，存在“外层成功、内层失败”的静默空产出风险。
+- [completed] 保留旧版 `fsb_aud_extr` 主路径，增加受控超时与 vgmstream fallback；通过 `.extract_status.json` 将 FSB 子进程失败传递给 QuickBMS 调用层。
+- [completed] 复现 JP 064/095：确认错位发生在 FSB 内部 event 名称，而非 AssetStudio 临时文件覆盖或并行目录串写。
+- [completed] 对单一异号前缀执行保守归一化；混合前缀和目标文件冲突时保持原样，避免误改正常音频。
+- [completed] 真实验证 E20 单 bank fallback、旧版 FSB 成功路径，以及 064/095 两 bank 完整导出管线。
+- [in_progress] 执行最终全量测试、静态检查和 diff 审查；保留用户实机全量导出作为提交 PR 前的最后验收门槛。

@@ -160,3 +160,77 @@
 - 角色未读状态现在只显示在“角色”顶部标签；版本列表、图片预览和音频不再复用角色未读红点。
 - 已补充 Qt 回归测试，验证四个导航角标中仅角色角标可见。
 - 角标语义修正后的全量 pytest 已通过（53 项）。
+
+## Session: 2026-08-21 — Issue #35 音频流程收口
+
+### Implemented
+
+- 新增音频 AB 精准选择、音频专辑映射别名和音频增量状态仓库。
+- 导入 AS 勾选音频后自动启动音频后处理，复用导入进度弹窗；音频页面切换不触发现场解密。
+- 音频处理结束后清理 `data/material/assets/fmodassets/` 和 debank `input/`，最终产物继续保留在 `output/audio/`。
+- 音频管理器移除“开始解密”，改为整行单选、互斥勾选、无蓝色高亮和“全部标为已读”；新增/变化文件显示红色“新”。
+- 文档、版本历史和开发计划已同步。
+
+### Verification
+
+- `compileall`、`git diff --check` 通过。
+- 相关测试使用工作区专用 basetemp 运行，19 项通过。
+- 默认 pytest 临时目录存在 WinError 5 ACL 问题，已记录并改用 `E:\\AI-Agent\\Codex-GPT\\tmp\\pytest-audio`。
+- Ruff（`app/core app/ui tests`）、内存编译、diff 检查和全量 pytest 已完成；用户真实启动与音频导出验证待进行。
+
+### Final Gate（代码侧）
+
+- 全量 pytest：61 项通过。
+- Ruff：`app/core app/ui tests` 全部通过；外部 debank 工具目录保留既有风格告警，未扩展本轮范围。
+- import smoke：`app.core.album_map`、`app.core.audio_repository`、`app.core.bundle_selector`、`app.ui.main_window`、`app.ui.workers.audio_decrypt` 通过。
+- 真实数据只读 smoke：最新 Lua 映射将 `event_33/event_34` 输出到 `album\\旅途轶事`；未执行真实解密或修改用户音频产物。
+
+### Issue #35 实机问题诊断（2026-08-21）
+
+- [confirmed] AS 日志显示中英文音频分类命令均执行完成，中文 bank 并非未导出。
+- [confirmed] `AudioDecryptWorker._before_audio_copy()` 对所有输出目录按文件名全局去重；中日语音 bank 的事件文件同名，处理日语时删除了 `voice/<id>/cn/` 下已有文件，造成最终只剩日语。
+- [separate] 当前版本的音频 `assets_map.json` 对应版本不存在，导入回退扫描 362 个 bundle；这是精准筛选问题，不是中日语音丢失的根因。
+- [completed] 先增加中日同名文件的回归测试，再修正清理作用域；修复前已确认测试失败。
+
+### Issue #35 修复进展（2026-08-21）
+
+- [completed] 新增中日同名语音回归测试，并在修复前确认稳定失败。
+- [completed] 将语音旧输出清理限制到同一 bank、同一语言目录；BGM 旧专辑清理保持不变。
+- [completed] README、开发文档指南、版本历史和根目录开发计划已同步。
+- [pending] 用户需重新执行一次中日语音导出，确认实际成品同时出现在 `voice/<角色ID>/cn` 与 `voice/<角色ID>/jp`。
+
+### Issue #35 全量导出审计与树标记（2026-08-21）
+
+- [completed] 审计最新全量日志：AS 362/362 成功，bank 503 个，最终音频 7210 个，日志失败计数 0；未发现日文文件名导致的失败。
+- [completed] 核对中日音频：两侧各 3559 个、107 个角色均有双语目录；发现 064/095 编号错位和 080 事件重命名，列为独立 bank 内容/临时解包问题。
+- [completed] 核对专辑：旅途轶事配置 35 个 bank 但最终 34 个文件，E20 为疑似 debank 静默缺口；未分类 10 个对应配置表之外的额外 BGM bank。
+- [completed] 音频树“新”标记已向上汇总到语言、角色/专辑和 `voice`/`album` 根节点，播放或全部标为已读后同步清除。
+- [completed] 已完成 bank 级缺口统计、E20/064/095/080 定向复现与 debank 并行隔离测试。
+
+### Issue #35 定向修复（2026-08-21）
+
+- [completed] debank 每个 bank 使用唯一 job 临时目录，`_epic7_defsb.py` 显式接收结果目录并检查 FSB 提取器返回码。
+- [completed] debank 默认 2 路受控并行，worker 只负责解包，最终复制/分类回调保持串行。
+- [completed] 新增 bank 级成功、空产出、失败、复制失败统计；空产出会记录 bank 名称和来源路径。
+- [completed] 重新导出时清理当前角色/语言目录内的历史异号残留；小范围真实重导确认 JP 064/095 的 bank 内部仍吐出对方前缀，已记录为源资源命名错位，未强行改名。
+- [completed] 对连续 `battle_hit_01_1..N` 提取结果做保守归一化，080 的重复事件名可输出为标准 01/02/03。
+- [completed] 小范围真实测试发现工具目录 ACL 限制，运行时临时根目录已迁移到 `output/audio/.debank-temp/` 并纳入清理。
+- [completed] 全量 pytest 通过（62 项），Ruff、内存编译（93 个 Python 文件）和 diff 检查通过。
+- [completed] 小范围真实链路验证 13 个目标资源：12 个语音 bank 成功解密，中日目录不互相覆盖，080 重复事件名归一化通过；E20 暴露底层 FSB 转换器无产出/卡住，已增加 bank 级超时保护。
+- [pending] 用户执行一次真实全量音频重导，确认全量专辑缺口统计、E20 超时后的失败记录，以及源 bank 内部 064/095 命名错位的业务归属。
+
+### Issue #35 第二轮根因修复（2026-08-21）
+
+- [completed] 单独复现 E20：AS 成功、QuickBMS 成功、旧 FSB 提取器失败；确认失败状态曾被 QuickBMS 0 退出码吞掉。
+- [completed] 接入项目内 vgmstream fallback；真实 E20 FSB 输出 WAV，完整 `epic7_debank.run()` 统计成功 1、失败 0、复制 1。
+- [completed] 新增 `.extract_status.json` 状态传播和 FSB fallback 单元测试。
+- [completed] 单 bank 串行复现 JP 064/095，确认错位来自 FSB 内部前缀；新增统一异号前缀的保守归一化，真实结果恢复为外层 bank ID。
+- [pending] 用户执行一次真实全量音频重导，确认 vgmstream fallback、全量 E20、JP 064/095、080 和其他专辑均无回归。
+
+### 第二轮最终验证
+
+- 旧版 `fsb_aud_extr` 正常 bank 仍保持原路径，实测返回 0 并产生完整文件。
+- E20 单 bank 真实完整管线通过：旧提取器 15 秒超时后由 vgmstream 成功解码，结果为 `success=1 / failed=0 / copied=1`。
+- JP 064/095 两 bank 真实完整管线通过：各输出 15 个文件，最终前缀分别为 064 和 095，未再串号。
+- 最终门禁通过：pytest 68 passed、Ruff passed、96 个 Python 文件内存编译通过、`git diff --check` 通过。
+- 仍保留用户实机全量导出作为 PR 前验收项；本地小范围验证已覆盖本轮两个根因和两条提取路径。

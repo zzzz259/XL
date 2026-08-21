@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 LUA_CONTAINER_PREFIX = "assets/lua"
+AUDIO_CONTAINER_PREFIX = "assets/fmodassets"
 
 
 def _normalise_source(source: str) -> str:
@@ -17,6 +18,11 @@ def _normalise_source(source: str) -> str:
 def _is_lua_container(container: str) -> bool:
     value = str(container or "").replace("\\", "/").strip("/").lower()
     return value == LUA_CONTAINER_PREFIX or value.startswith(f"{LUA_CONTAINER_PREFIX}/")
+
+
+def _is_audio_container(container: str) -> bool:
+    value = str(container or "").replace("\\", "/").strip("/").lower()
+    return value == AUDIO_CONTAINER_PREFIX or value.startswith(f"{AUDIO_CONTAINER_PREFIX}/")
 
 
 def _load_assets_map(map_path: str | os.PathLike[str]) -> list[dict] | None:
@@ -65,6 +71,38 @@ def select_lua_bundles(
     return selected, True, asset_count
 
 
+def select_audio_bundles(
+    bundle_paths: list[str],
+    map_path: str | os.PathLike[str],
+) -> tuple[list[str], bool, int]:
+    """从 ``assets_map.json`` 筛选包含 FMOD 音频资源的 bundle。"""
+    assets = _load_assets_map(map_path)
+    if assets is None:
+        return list(bundle_paths), False, 0
+
+    source_names: set[str] = set()
+    asset_count = 0
+    for asset in assets:
+        if not isinstance(asset, dict) or not _is_audio_container(asset.get("Container", "")):
+            continue
+        source = str(asset.get("Source", "") or "")
+        if not source:
+            continue
+        source_names.add(_normalise_source(Path(source).name))
+        asset_count += 1
+
+    selected = [
+        path for path in bundle_paths
+        if _normalise_source(Path(path).name) in source_names
+    ]
+    return selected, True, asset_count
+
+
 def lua_assets_map_path(bundle_dir: str | os.PathLike[str]) -> str:
     """返回某个版本的标准资源映射路径。"""
     return os.path.join(os.fspath(bundle_dir), "_map", "assets_map.json")
+
+
+def audio_assets_map_path(bundle_dir: str | os.PathLike[str]) -> str:
+    """返回音频分类使用的标准资源映射路径。"""
+    return lua_assets_map_path(bundle_dir)

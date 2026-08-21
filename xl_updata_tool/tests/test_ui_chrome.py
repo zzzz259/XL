@@ -4,14 +4,16 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QObject
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+from PySide6.QtCore import QObject, Qt
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTreeWidget
 
 from app.ui.main_window import MainWindow
 from app.ui.views.audio_view import create_audio_view
 from app.ui.views.character_view import create_character_view
 from app.ui.views.preview_view import create_preview_view
 from app.ui.views.version_view import create_version_header, create_version_table
+from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
+from app.core.audio_library import format_size
 
 
 @pytest.fixture(scope="session")
@@ -44,6 +46,11 @@ def test_feature_views_use_shared_page_chrome(qapp):
     assert audio_empty.parent().objectName() == "viewContent"
     assert audio.findChild(QObject, "audioTree") is not None
     assert audio.findChild(QObject, "audioPlayButton").text() == "播放"
+    audio_table = audio.findChild(QObject, "audioTree")
+    assert audio_table.columnCount() == 6
+    assert audio_table.selectionMode().name == "NoSelection"
+    assert not any(button.text() == "开始解密" for button in audio.findChildren(QPushButton))
+    assert any(button.text() == "全部标为已读" for button in audio.findChildren(QPushButton))
 
     character_empty = views[2].findChild(QObject, "emptyState")
     assert character_empty is not None
@@ -104,3 +111,92 @@ def test_character_unread_only_marks_character_tab(qapp):
     assert not window._unread_badges["home"].isVisible()
     assert not window._unread_badges["preview"].isVisible()
     assert not window._unread_badges["audio"].isVisible()
+
+
+def test_audio_unread_only_marks_audio_tab(qapp):
+    window = MainWindow.__new__(MainWindow)
+    window.character_unread = {}
+    window._unread_badges = {
+        "home": QLabel(),
+        "preview": QLabel(),
+        "audio": QLabel(),
+        "character": QLabel(),
+    }
+
+    with patch(
+        "app.ui.main_window.load_character_repository",
+        return_value={"unread": {}},
+    ), patch(
+        "app.ui.main_window.audio_unread_files",
+        return_value={"album/第五专辑/event.wav"},
+    ):
+        window._refresh_unread_badges()
+
+    assert window._unread_badges["audio"].isVisible()
+    assert not window._unread_badges["character"].isVisible()
+    assert not window._unread_badges["home"].isVisible()
+    assert not window._unread_badges["preview"].isVisible()
+
+
+def test_audio_rows_are_single_choice_when_clicked_anywhere(qapp):
+    window = MainWindow.__new__(MainWindow)
+    window.audio_table = QTreeWidget()
+    window.audio_status = QLabel()
+    window._audio_files = [
+        {"name": "album\\第五专辑\\a.wav", "dir": "album\\第五专辑", "ext": "WAV", "size": 1, "path": "a.wav"},
+        {"name": "album\\第五专辑\\b.wav", "dir": "album\\第五专辑", "ext": "WAV", "size": 1, "path": "b.wav"},
+    ]
+    window._audio_file_items = populate_audio_tree(
+        window.audio_table, window._audio_files, format_size
+    )
+
+    first, second = window._audio_file_items
+    window._on_audio_item_pressed(first, 3)
+    window._on_audio_item_clicked(first, 3)
+    assert first.checkState(0).name == "Checked"
+    assert second.checkState(0).name == "Unchecked"
+
+    window._on_audio_item_pressed(second, 2)
+    window._on_audio_item_clicked(second, 2)
+    assert first.checkState(0).name == "Unchecked"
+    assert second.checkState(0).name == "Checked"
+    assert window.audio_table.selectedItems() == []
+
+
+def test_audio_unread_marker_propagates_to_outer_folders(qapp):
+    table = QTreeWidget()
+    files = [
+        {
+            "name": "voice\\064\\cn\\064_in_01.wav",
+            "dir": "voice\\064\\cn",
+            "ext": "WAV",
+            "size": 1,
+            "path": "064_in_01.wav",
+            "unread": True,
+        },
+        {
+            "name": "album\\第五专辑\\event.wav",
+            "dir": "album\\第五专辑",
+            "ext": "WAV",
+            "size": 1,
+            "path": "event.wav",
+            "unread": False,
+        },
+    ]
+    populate_audio_tree(table, files, format_size)
+
+    voice_root = table.topLevelItem(0)
+    voice_character = voice_root.child(0)
+    voice_language = voice_character.child(0)
+    voice_leaf = voice_language.child(0)
+
+    assert voice_root.text(5) == "新"
+    assert voice_character.text(5) == "新"
+    assert voice_language.text(5) == "新"
+    assert voice_leaf.text(5) == "新"
+
+    info = dict(voice_leaf.data(0, Qt.UserRole))
+    info["unread"] = False
+    voice_leaf.setData(0, Qt.UserRole, info)
+    refresh_audio_tree_unread(table)
+    assert all(item.text(5) == "" for item in [voice_root, voice_character, voice_language, voice_leaf])
