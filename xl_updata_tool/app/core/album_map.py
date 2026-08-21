@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""解析音乐专辑映射：bgm 文件名 -> 专辑名
+"""解析音乐专辑映射：bank 路径/文件名 -> 专辑名
 
 链路（三张反编译后的 lua 表）：
   BaseSound.lua         song_id -> bank 路径（含 bgm 文件名）
@@ -7,7 +7,7 @@
   BaseWord_cn.lua       text_id -> 中文名（如 80880001 -> 星落）
 
 输入：反编译后的 lua 目录（data/material/assets/lua/）
-输出：{bgm文件名: 专辑名}
+输出同时包含规范化 bank 路径和文件名别名，兼容不同导出目录。
 """
 
 import os
@@ -15,6 +15,26 @@ import re
 
 from app.core.character_loader import parse_word_file
 from app.core.logger import logger
+
+
+def _normalise_bank_key(value):
+    """统一 bank 路径，兼容 ``bank:/``、反斜杠和扩展名。"""
+    value = str(value or "").strip().replace("\\", "/")
+    value = re.sub(r"^bank:/+", "", value, flags=re.IGNORECASE)
+    value = value.strip("/").lower()
+    if value.endswith(".bank"):
+        value = value[:-5]
+    return value
+
+
+def _bank_aliases(value):
+    key = _normalise_bank_key(value)
+    if not key:
+        return set()
+    aliases = {key, os.path.basename(key)}
+    if "/" in key:
+        aliases.add(key.rsplit("/", 1)[-1])
+    return aliases
 
 
 def _split_lua_blocks(text):
@@ -53,14 +73,14 @@ def build_album_map(lua_dir):
         word_map = parse_word_file(word_path)
         logger.debug(f"[专辑映射] 文本映射 {len(word_map)} 条")
 
-        # 2. BaseSound: song_id -> bank 文件名
+        # 2. BaseSound: song_id -> bank 完整路径
         with open(sound_path, encoding="utf-8") as f:
             sound_text = f.read()
         song_banks = {}
         for song_id, block in _split_lua_blocks(sound_text):
-            bank = re.search(r'bank\s*=\s*"bank:/([^"]+)"', block)
+            bank = re.search(r'bank\s*=\s*"(bank:/[^"]+)"', block)
             if bank:
-                song_banks[song_id] = bank.group(1).split("/")[-1]
+                song_banks[song_id] = bank.group(1)
         logger.debug(f"[专辑映射] song->bank {len(song_banks)} 条")
 
         # 3. BaseSoundChapter: album_id -> name(T) + child_ids
@@ -76,9 +96,10 @@ def build_album_map(lua_dir):
             if not album_name:
                 continue
             for cid in re.findall(r'\d+', child_ids.group(1)):
-                bank_name = song_banks.get(cid)
-                if bank_name:
-                    album_map[bank_name] = album_name
+                bank_path = song_banks.get(cid)
+                if bank_path:
+                    for alias in _bank_aliases(bank_path):
+                        album_map[alias] = album_name
 
         logger.info(f"[专辑映射] 解析到 {len(album_map)} 个 bgm -> 专辑 映射")
         return album_map

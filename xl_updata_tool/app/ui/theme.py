@@ -153,8 +153,7 @@ QTreeWidget#audioTree::item {{
     font-size: 13px;
 }}
 QTreeWidget#audioTree::item:selected {{
-    background-color: {ACCENT};
-    color: #ffffff;
+    background-color: transparent;
 }}
 QLabel#audioNowPlaying {{
     color: {TEXT_SECONDARY};

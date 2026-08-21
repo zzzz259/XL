@@ -110,7 +110,7 @@ class ImportASWorker(QThread):
             if fail > 0:
                 logger.warning(f"[导入AS] 修复阶段：{fail} 个文件失败，继续处理 {success} 个成功文件")
 
-            # Lua 单分类导出可只把映射命中的包交给 CLI；临时目录在阶段 1
+            # Lua/音频单分类导出可只把映射命中的包交给 CLI；临时目录在阶段 1
             # 之后创建，确保原始包仍由修复阶段直接处理。
             self._prepare_cli_bundle_dir()
 
@@ -428,7 +428,7 @@ class ImportASWorker(QThread):
             self._isolated_bundle_dir = staged
             self._cli_bundle_dir = staged
             logger.info(
-                "[导入AS] Lua 精确导入：AssetStudio 仅使用 %s 个命中 bundle（输入目录=%s）",
+                "[导入AS] 精准分类导入：AssetStudio 仅使用 %s 个命中 bundle（输入目录=%s）",
                 len(self.bundle_paths), staged,
             )
         except Exception:

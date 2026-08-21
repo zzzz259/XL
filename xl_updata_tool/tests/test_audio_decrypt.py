@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 
@@ -17,8 +18,10 @@ def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
     debank_dir.mkdir()
     calls = []
 
-    def fake_run(input_dir, output_dir, progress_callback=None, subdir_fn=None):
-        calls.append((input_dir, output_dir, progress_callback, subdir_fn))
+    def fake_run(input_dir, output_dir, progress_callback=None, subdir_fn=None,
+                 before_copy_callback=None, audio_transform_callback=None,
+                 workers=None, temp_dir=None):
+        calls.append((input_dir, output_dir, progress_callback, subdir_fn, workers, temp_dir))
 
     monkeypatch.setitem(sys.modules, "epic7_debank", types.SimpleNamespace(run=fake_run))
     monkeypatch.setattr("app.ui.workers.audio_decrypt.build_album_map", lambda _: {})
@@ -32,3 +35,127 @@ def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
     worker._decrypt_bank_files()
 
     assert len(calls) == 1
+
+
+def test_audio_worker_normalizes_duplicate_battle_hit_names(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    paths = []
+    for suffix in (1, 2, 3):
+        path = result_dir / f"080_battle_hit_01_{suffix}.wav"
+        path.write_bytes(bytes([suffix]))
+        paths.append(str(path))
+
+    worker = AudioDecryptWorker(
+        str(tmp_path / "material"),
+        str(tmp_path / "output" / "audio"),
+        str(tmp_path / "debank"),
+    )
+    normalized = worker._normalize_voice_audio_files(
+        "080",
+        "assets/fmodassets/voice_cn/btl/080.bank",
+        paths,
+    )
+
+    assert [os.path.basename(path) for path in normalized] == [
+        "080_battle_hit_01.wav",
+        "080_battle_hit_02.wav",
+        "080_battle_hit_03.wav",
+    ]
+    assert sorted(path.name for path in result_dir.iterdir()) == [
+        "080_battle_hit_01.wav",
+        "080_battle_hit_02.wav",
+        "080_battle_hit_03.wav",
+    ]
+
+
+def test_audio_worker_normalizes_uniform_foreign_voice_prefix(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    paths = []
+    for name in ("095_battle_atk_01.wav", "095_battle_skill_01.wav"):
+        path = result_dir / name
+        path.write_bytes(b"audio")
+        paths.append(str(path))
+
+    worker = AudioDecryptWorker(
+        str(tmp_path / "material"),
+        str(tmp_path / "output" / "audio"),
+        str(tmp_path / "debank"),
+    )
+
+    normalized = worker._normalize_voice_audio_files(
+        "064",
+        "assets/fmodassets/voice_jp/btl/064.bank",
+        paths,
+    )
+
+    assert [os.path.basename(path) for path in normalized] == [
+        "064_battle_atk_01.wav",
+        "064_battle_skill_01.wav",
+    ]
+
+
+def test_audio_worker_removes_cross_character_voice_files(tmp_path):
+    voice_dir = tmp_path / "output" / "audio" / "voice" / "064" / "jp"
+    voice_dir.mkdir(parents=True)
+    stale = voice_dir / "095_battle_atk_01.wav"
+    stale.write_bytes(b"stale")
+    worker = AudioDecryptWorker(
+        str(tmp_path / "material"),
+        str(tmp_path / "output" / "audio"),
+        str(tmp_path / "debank"),
+    )
+
+    worker._before_audio_copy(
+        "064",
+        "assets/fmodassets/voice_jp/btl/064.bank",
+        os.path.join("voice", "064", "jp"),
+        ["064_battle_atk_01.wav"],
+    )
+
+    assert not stale.exists()
+
+
+def test_audio_worker_corrects_same_named_file_in_old_album(tmp_path):
+    old = tmp_path / "output" / "audio" / "album" / "未分类" / "event.wav"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"old")
+    worker = AudioDecryptWorker(
+        str(tmp_path / "material"),
+        str(tmp_path / "output" / "audio"),
+        str(tmp_path / "debank"),
+    )
+
+    worker._before_audio_copy(
+        "bgm_system_event_33",
+        "bgm/bgm_system/bgm_system_event_33.bank",
+        os.path.join("album", "第五专辑"),
+        ["event.wav"],
+    )
+
+    assert not old.exists()
+
+
+def test_audio_worker_keeps_cn_file_when_processing_same_named_jp_file(tmp_path):
+    cn_file = tmp_path / "output" / "audio" / "voice" / "116" / "cn" / "116_in_01.wav"
+    jp_file = tmp_path / "output" / "audio" / "voice" / "116" / "jp" / "116_in_01.wav"
+    cn_file.parent.mkdir(parents=True)
+    jp_file.parent.mkdir(parents=True)
+    cn_file.write_bytes(b"cn")
+    jp_file.write_bytes(b"jp")
+
+    worker = AudioDecryptWorker(
+        str(tmp_path / "material"),
+        str(tmp_path / "output" / "audio"),
+        str(tmp_path / "debank"),
+    )
+
+    worker._before_audio_copy(
+        "116",
+        "assets/fmodassets/voice_jp/btl/116.bank",
+        os.path.join("voice", "116", "jp"),
+        ["116_in_01.wav"],
+    )
+
+    assert cn_file.exists()

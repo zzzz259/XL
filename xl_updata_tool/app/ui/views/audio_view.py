@@ -46,14 +46,6 @@ def create_audio_view(parent=None):
     # 工具栏
     ctrl_bar, ctrl_layout = create_command_bar(container)
 
-    btn_decrypt = create_action_button(
-        "开始解密",
-        "primary",
-        (lambda: parent._start_audio_decrypt(force=False)) if parent is not None else None,
-        container,
-    )
-    ctrl_layout.addWidget(btn_decrypt)
-
     btn_refresh = create_action_button(
         "刷新列表",
         "secondary",
@@ -78,26 +70,38 @@ def create_audio_view(parent=None):
     )
     ctrl_layout.addWidget(btn_play)
 
+    btn_mark_read = create_action_button(
+        "全部标为已读",
+        "secondary",
+        parent._mark_all_audio_read if parent is not None else None,
+        container,
+    )
+    ctrl_layout.addWidget(btn_mark_read)
+
     ctrl_layout.addStretch()
     layout.addWidget(ctrl_bar)
 
     # 音频树（按目录层级折叠收起，加快加载）
     audio_table = QTreeWidget()
     audio_table.setObjectName("audioTree")
-    audio_table.setColumnCount(5)
-    audio_table.setHeaderLabels(["文件名", "目录", "时长", "格式", "大小"])
+    audio_table.setColumnCount(6)
+    audio_table.setHeaderLabels(["文件名", "目录", "时长", "格式", "大小", "状态"])
     hdr = audio_table.header()
     hdr.setSectionResizeMode(0, QHeaderView.Stretch)
     hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+    hdr.setSectionResizeMode(5, QHeaderView.ResizeToContents)
     audio_table.setAlternatingRowColors(True)
-    audio_table.setSelectionMode(QAbstractItemView.SingleSelection)
+    audio_table.setSelectionMode(QAbstractItemView.NoSelection)
+    audio_table.setSelectionBehavior(QAbstractItemView.SelectRows)
     audio_table.setEditTriggers(QTreeWidget.NoEditTriggers)
     audio_table.setContextMenuPolicy(Qt.CustomContextMenu)
     if parent is not None:
         audio_table.customContextMenuRequested.connect(parent._show_audio_context_menu)
+        audio_table.itemPressed.connect(parent._on_audio_item_pressed)
+        audio_table.itemClicked.connect(parent._on_audio_item_clicked)
         audio_table.itemDoubleClicked.connect(parent._on_audio_double_click)
     content = QWidget(container)
     content.setObjectName("viewContent")
@@ -106,7 +110,7 @@ def create_audio_view(parent=None):
     content_layout.setSpacing(0)
     content_layout.addWidget(audio_table, 0, 0)
 
-    audio_empty = create_empty_state("暂无音频文件\n请先导入资源并点击“开始解密”", content)
+    audio_empty = create_empty_state("暂无音频文件\n请先导入包含音频的资源", content)
     audio_empty.setObjectName("audioEmptyState")
     audio_empty.setAttribute(Qt.WA_TransparentForMouseEvents, True)
     content_layout.addWidget(audio_empty, 0, 0)

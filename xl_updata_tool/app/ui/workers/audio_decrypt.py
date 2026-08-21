@@ -2,6 +2,7 @@
 """音频解密工作线程（.bytes → .bank → 解密 → output/audio/）"""
 
 import os
+import re
 import shutil
 import sys
 
@@ -9,6 +10,8 @@ from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
 from app.core.album_map import build_album_map
+from app.core.lua_repository import latest_lua_version, version_directory
+from app.core.path_utils import get_base_dir
 
 
 class AudioDecryptWorker(QThread):
@@ -22,12 +25,14 @@ class AudioDecryptWorker(QThread):
     finished_decrypt = Signal()
     error = Signal(str)
 
-    def __init__(self, material_dir, audio_output_dir, debank_dir, force=False, parent=None):
+    def __init__(self, material_dir, audio_output_dir, debank_dir, force=False,
+                 lua_output_dir=None, parent=None):
         super().__init__(parent)
         self.material_dir = material_dir
         self.audio_output_dir = audio_output_dir
         self.debank_dir = debank_dir
         self.force = force
+        self.lua_output_dir = lua_output_dir or os.path.join(get_base_dir(), "output", "lua")
         self._cancelled = False
         self._album_map = {}
 
@@ -52,6 +57,9 @@ class AudioDecryptWorker(QThread):
         except Exception as e:
             logger.error(f"音频解密线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
+        finally:
+            self._cleanup_material_audio()
+            self._cleanup_debank_input()
 
     @timed("音频-转换bytes")
     def _convert_bytes_to_bank(self):
@@ -61,13 +69,10 @@ class AudioDecryptWorker(QThread):
         1. 文件所在路径包含 fmodassets/ 子目录
         2. 语音文件（btl/system）文件名纯数字，或 bgm 文件位于 bgm/ 子目录下
         """
-        debank_input = os.path.join(self.debank_dir, "input")
-
         if not os.path.isdir(self.material_dir):
             logger.warning(f"素材目录不存在，跳过转换: {self.material_dir}")
             return 0
 
-        os.makedirs(debank_input, exist_ok=True)
         count = 0
         skipped = 0
 
@@ -102,16 +107,6 @@ class AudioDecryptWorker(QThread):
                 except (OSError, PermissionError) as e:
                     logger.error(f"重命名失败 {f}: {e}")
                     continue
-
-                # 复制到解密工具 input 目录（去重：大小一致则跳过）
-                dest = os.path.join(debank_input, bank_name)
-                try:
-                    if os.path.exists(dest) and os.path.getsize(dest) == os.path.getsize(bank_path):
-                        logger.debug(f"跳过已存在且大小一致的文件: {bank_name}")
-                    else:
-                        shutil.copy2(bank_path, dest)
-                except (OSError, PermissionError) as e:
-                    logger.error(f"复制到解密目录失败 {bank_name}: {e}")
 
         logger.info(f"扫描到音频 .bytes 文件: {count} 个（跳过 {skipped} 个非音频文件）")
         if count > 0:
@@ -158,8 +153,13 @@ class AudioDecryptWorker(QThread):
 
         try:
             os.makedirs(self.audio_output_dir, exist_ok=True)
-            # 构建 bgm 文件名 -> 专辑名 映射（复用一键解包反编译的 lua）
-            self._album_map = build_album_map(os.path.join(self.material_dir, "assets", "lua"))
+            # Lua 已按版本留存在 output/lua；不依赖会被清理的 material 临时目录。
+            lua_dir = self._latest_lua_dir()
+            self._album_map = build_album_map(lua_dir) if lua_dir else {}
+            if lua_dir:
+                logger.info(f"[专辑映射] 使用已留存 Lua: {lua_dir}")
+            else:
+                logger.info("[专辑映射] 未找到已留存 Lua，BGM 暂归入未分类")
             # 将 epic7_debank 目录加入 sys.path 后导入调用，避免打包后 subprocess 递归启动 EXE
             if self.debank_dir not in sys.path:
                 sys.path.insert(0, self.debank_dir)
@@ -168,6 +168,9 @@ class AudioDecryptWorker(QThread):
                 self.material_dir, self.audio_output_dir,
                 progress_callback=lambda c, t: self.progress_value.emit(c, t, f"正在解密 .bank: {c}/{t}"),
                 subdir_fn=self._audio_subdir,
+                before_copy_callback=self._before_audio_copy,
+                audio_transform_callback=self._normalize_voice_audio_files,
+                temp_dir=os.path.join(self.audio_output_dir, ".debank-temp"),
             )
             # 统计输出目录中的音频文件数（递归扫描子目录）
             audio_count = 0
@@ -190,7 +193,202 @@ class AudioDecryptWorker(QThread):
         """
         parts = rel_path.replace("\\", "/").split("/")
         if "bgm" in parts:
-            album = self._album_map.get(bank_stem, "未分类") if self._album_map else "未分类"
+            bank_key = "/".join(parts[parts.index("bgm"):])
+            album = (
+                self._album_map.get(bank_key.lower())
+                or self._album_map.get(str(bank_stem).lower())
+                or "未分类"
+            ) if self._album_map else "未分类"
             return os.path.join("album", album)
         lang = "jp" if "voice_jp" in parts else "cn"
         return os.path.join("voice", bank_stem, lang)
+
+    def _latest_lua_dir(self):
+        version = latest_lua_version(self.lua_output_dir)
+        return version_directory(self.lua_output_dir, version) if version is not None else None
+
+    def _before_audio_copy(self, bank_stem, rel_path, output_subdir, filenames):
+        """修正旧分类时移除同作用域的历史输出，避免跨语言误删同名语音。"""
+        expected_dir = os.path.normcase(os.path.abspath(os.path.join(self.audio_output_dir, output_subdir)))
+        source_language = self._audio_language(rel_path)
+        if source_language:
+            self._remove_mismatched_voice_files(expected_dir, bank_stem, filenames)
+            self._remove_legacy_voice_aliases(expected_dir, bank_stem, filenames)
+        for filename in filenames:
+            for root, _dirs, files in os.walk(self.audio_output_dir):
+                if filename not in files:
+                    continue
+                if source_language and not self._is_same_voice_scope(
+                    root, bank_stem, source_language
+                ):
+                    continue
+                candidate = os.path.normcase(os.path.abspath(os.path.join(root, filename)))
+                if candidate == os.path.join(expected_dir, filename):
+                    continue
+                try:
+                    os.remove(candidate)
+                    logger.info("移除音频旧分类输出: bank=%s file=%s", bank_stem, candidate)
+                except OSError as e:
+                    logger.warning("移除音频旧分类输出失败: %s (%s)", candidate, e)
+
+    def _normalize_voice_audio_files(self, bank_stem, rel_path, audio_files):
+        """将提取器对同名事件生成的连续后缀归一化为标准事件编号。
+
+        只处理同一个 voice bank 内完整出现的 ``battle_hit_01_1..N`` 集合，
+        因此不会改动正常的 ``battle_hit_01/02/03`` 或其他后缀命名。
+        """
+        if not self._audio_language(rel_path) or not str(bank_stem).isdigit():
+            return audio_files
+
+        audio_files = self._normalize_uniform_voice_prefix(bank_stem, audio_files)
+
+        pattern = re.compile(
+            rf"^{re.escape(str(bank_stem))}_battle_hit_01_(\d+)(\.[^.]+)$",
+            re.IGNORECASE,
+        )
+        matches = []
+        existing_names = {os.path.basename(path).lower() for path in audio_files}
+        for path in audio_files:
+            match = pattern.match(os.path.basename(path))
+            if match:
+                matches.append((int(match.group(1)), path, match.group(2)))
+        if len(matches) < 2:
+            return audio_files
+
+        indexes = sorted(index for index, _path, _ext in matches)
+        if indexes != list(range(1, len(indexes) + 1)):
+            return audio_files
+
+        updated = []
+        for index, path, extension in matches:
+            target_name = f"{bank_stem}_battle_hit_{index:02d}{extension}"
+            if target_name.lower() in existing_names:
+                return audio_files
+            target = os.path.join(os.path.dirname(path), target_name)
+            try:
+                os.replace(path, target)
+                updated.append((path, target))
+            except OSError as exc:
+                logger.warning("归一化语音文件名失败: %s -> %s (%s)", path, target, exc)
+                for _old, new_path in updated:
+                    try:
+                        os.replace(new_path, _old)
+                    except OSError:
+                        pass
+                return audio_files
+
+        renamed = {old: new for old, new in updated}
+        return [renamed.get(path, path) for path in audio_files]
+
+    def _normalize_uniform_voice_prefix(self, bank_stem, audio_files):
+        """修正 bank 内统一但与外层角色 ID 不一致的历史事件名前缀。
+
+        仅在一个 bank 的所有音频都使用同一个外部数字前缀，且该前缀与
+        bank 文件名不同的情况下执行。混合前缀或已有目标文件时保留原名，
+        避免把共享音频误归属到当前角色。
+        """
+        prefix_pattern = re.compile(r"^(\d+)_")
+        matches = []
+        prefixes = set()
+        for path in audio_files:
+            match = prefix_pattern.match(os.path.basename(path))
+            if not match:
+                return audio_files
+            prefixes.add(match.group(1))
+            matches.append((path, match.group(1)))
+
+        if len(prefixes) != 1 or str(bank_stem) in prefixes:
+            return audio_files
+
+        existing_names = {os.path.basename(path).lower() for path in audio_files}
+        renamed = []
+        for path, prefix in matches:
+            name = os.path.basename(path)
+            target_name = f"{bank_stem}_{name[len(prefix) + 1:]}"
+            if target_name.lower() in existing_names:
+                return audio_files
+            renamed.append((path, os.path.join(os.path.dirname(path), target_name)))
+
+        completed = []
+        try:
+            for old_path, new_path in renamed:
+                os.replace(old_path, new_path)
+                completed.append((old_path, new_path))
+        except OSError as exc:
+            logger.warning("语音 bank 前缀归一化失败: %s (%s)", bank_stem, exc)
+            for old_path, new_path in reversed(completed):
+                try:
+                    os.replace(new_path, old_path)
+                except OSError:
+                    pass
+            return audio_files
+
+        logger.info(
+            "语音 bank 内部前缀归一化: %s -> %s (%d 个文件)",
+            next(iter(prefixes)),
+            bank_stem,
+            len(renamed),
+        )
+        renamed_map = dict(renamed)
+        return [renamed_map.get(path, path) for path in audio_files]
+
+    def _remove_mismatched_voice_files(self, expected_dir, bank_stem, filenames):
+        """清理上一次导出遗留在当前角色目录中的其他角色文件。"""
+        expected_prefix = f"{bank_stem}_"
+        if not filenames or not all(os.path.basename(name).startswith(expected_prefix) for name in filenames):
+            return
+        if not os.path.isdir(expected_dir):
+            return
+        for filename in os.listdir(expected_dir):
+            if not filename.lower().endswith((".wav", ".ogg", ".mp3")):
+                continue
+            if re.match(r"^\d+_", filename) and not filename.startswith(expected_prefix):
+                try:
+                    os.remove(os.path.join(expected_dir, filename))
+                    logger.info("移除语音目录中的错位文件: %s", os.path.join(expected_dir, filename))
+                except OSError as exc:
+                    logger.warning("移除语音错位文件失败: %s (%s)", filename, exc)
+
+    def _remove_legacy_voice_aliases(self, expected_dir, bank_stem, filenames):
+        """删除旧版本对重复 battle_hit 文件生成的 `_1/_2/_3` 别名。"""
+        if not os.path.isdir(expected_dir):
+            return
+        if not any(
+            re.match(rf"^{re.escape(str(bank_stem))}_battle_hit_0[1-3]\.", filename, re.IGNORECASE)
+            for filename in filenames
+        ):
+            return
+        prefix = f"{bank_stem}_battle_hit_01_"
+        for filename in os.listdir(expected_dir):
+            if filename.startswith(prefix) and filename.lower().endswith((".wav", ".ogg", ".mp3")):
+                try:
+                    os.remove(os.path.join(expected_dir, filename))
+                    logger.info("移除旧语音别名: %s", os.path.join(expected_dir, filename))
+                except OSError as exc:
+                    logger.warning("移除旧语音别名失败: %s (%s)", filename, exc)
+
+    def _audio_language(self, rel_path):
+        parts = rel_path.replace("\\", "/").lower().split("/")
+        if "voice_cn" in parts:
+            return "cn"
+        if "voice_jp" in parts:
+            return "jp"
+        return None
+
+    def _is_same_voice_scope(self, root, bank_stem, language):
+        relative = os.path.relpath(root, self.audio_output_dir).replace("\\", "/").lower()
+        expected = f"voice/{str(bank_stem).lower()}/{language}"
+        return relative == expected
+
+    def _cleanup_material_audio(self):
+        audio_dir = os.path.join(self.material_dir, "assets", "fmodassets")
+        if not os.path.isdir(audio_dir):
+            return
+        shutil.rmtree(audio_dir, ignore_errors=True)
+        os.makedirs(audio_dir, exist_ok=True)
+        logger.info("已清理音频临时目录: %s", audio_dir)
+
+    def _cleanup_debank_input(self):
+        input_dir = os.path.join(self.debank_dir, "input")
+        if os.path.isdir(input_dir):
+            shutil.rmtree(input_dir, ignore_errors=True)
