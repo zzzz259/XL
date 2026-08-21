@@ -3,3 +3,4 @@ Pillow>=10.0.0
 qtawesome>=1.3.0
 UnityPy>=1.25.0
 pycryptodome>=3.20.0
+psutil>=5.9.0
