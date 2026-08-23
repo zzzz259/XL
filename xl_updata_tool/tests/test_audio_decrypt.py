@@ -20,8 +20,8 @@ def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
 
     def fake_run(input_dir, output_dir, progress_callback=None, subdir_fn=None,
                  before_copy_callback=None, audio_transform_callback=None,
-                 workers=None, temp_dir=None):
-        calls.append((input_dir, output_dir, progress_callback, subdir_fn, workers, temp_dir))
+                 workers=None, temp_dir=None, cancel_check=None, use_cache=None):
+        calls.append((input_dir, output_dir, progress_callback, subdir_fn, workers, temp_dir, cancel_check, use_cache))
 
     monkeypatch.setitem(sys.modules, "epic7_debank", types.SimpleNamespace(run=fake_run))
     monkeypatch.setattr("app.ui.workers.audio_decrypt.build_album_map", lambda _: {})
@@ -35,6 +35,7 @@ def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
     worker._decrypt_bank_files()
 
     assert len(calls) == 1
+    assert calls[0][-1] is not None
 
 
 def test_audio_worker_normalizes_duplicate_battle_hit_names(tmp_path):
@@ -135,6 +136,29 @@ def test_audio_worker_corrects_same_named_file_in_old_album(tmp_path):
     )
 
     assert not old.exists()
+
+
+def test_audio_worker_does_not_delete_current_bgm_staging_file(tmp_path):
+    audio_root = tmp_path / "output" / "audio"
+    staging = audio_root / ".debank-temp" / "0001_bgm" / "result"
+    staging.mkdir(parents=True)
+    current = staging / "event.wav"
+    current.write_bytes(b"current")
+
+    worker = AudioDecryptWorker(
+        str(tmp_path / "material"),
+        str(audio_root),
+        str(tmp_path / "debank"),
+    )
+
+    worker._before_audio_copy(
+        "bgm_system_event_33",
+        "assets/fmodassets/bgm/bgm_system/bgm_system_event_33.bank",
+        os.path.join("album", "第五专辑"),
+        [current.name],
+    )
+
+    assert current.exists()
 
 
 def test_audio_worker_keeps_cn_file_when_processing_same_named_jp_file(tmp_path):

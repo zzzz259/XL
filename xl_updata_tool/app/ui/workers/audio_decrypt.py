@@ -9,7 +9,7 @@ import sys
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
-from app.core.album_map import build_album_map
+from app.core.album_map import audit_bgm_exports, build_album_map
 from app.core.lua_repository import latest_lua_version, version_directory
 from app.core.path_utils import get_base_dir
 
@@ -23,6 +23,7 @@ class AudioDecryptWorker(QThread):
     progress = Signal(str)
     progress_value = Signal(int, int, str)  # current, total, message
     finished_decrypt = Signal()
+    cancelled_decrypt = Signal()
     error = Signal(str)
 
     def __init__(self, material_dir, audio_output_dir, debank_dir, force=False,
@@ -35,6 +36,7 @@ class AudioDecryptWorker(QThread):
         self.lua_output_dir = lua_output_dir or os.path.join(get_base_dir(), "output", "lua")
         self._cancelled = False
         self._album_map = {}
+        self._audio_path_index = None
 
     def cancel(self):
         self._cancelled = True
@@ -51,9 +53,11 @@ class AudioDecryptWorker(QThread):
                 return
 
             # 步骤 2：解密 .bank 文件
-            self._decrypt_bank_files()
-
-            self.finished_decrypt.emit()
+            result = self._decrypt_bank_files()
+            if self._cancelled or (result and result.get("cancelled")):
+                self.cancelled_decrypt.emit()
+            else:
+                self.finished_decrypt.emit()
         except Exception as e:
             logger.error(f"音频解密线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
@@ -160,17 +164,20 @@ class AudioDecryptWorker(QThread):
                 logger.info(f"[专辑映射] 使用已留存 Lua: {lua_dir}")
             else:
                 logger.info("[专辑映射] 未找到已留存 Lua，BGM 暂归入未分类")
+            self._audio_path_index = self._build_audio_path_index()
             # 将 epic7_debank 目录加入 sys.path 后导入调用，避免打包后 subprocess 递归启动 EXE
             if self.debank_dir not in sys.path:
                 sys.path.insert(0, self.debank_dir)
             import epic7_debank
-            epic7_debank.run(
+            result = epic7_debank.run(
                 self.material_dir, self.audio_output_dir,
                 progress_callback=lambda c, t: self.progress_value.emit(c, t, f"正在解密 .bank: {c}/{t}"),
                 subdir_fn=self._audio_subdir,
                 before_copy_callback=self._before_audio_copy,
                 audio_transform_callback=self._normalize_voice_audio_files,
                 temp_dir=os.path.join(self.audio_output_dir, ".debank-temp"),
+                cancel_check=lambda: self._cancelled,
+                use_cache=not self.force,
             )
             # 统计输出目录中的音频文件数（递归扫描子目录）
             audio_count = 0
@@ -180,6 +187,8 @@ class AudioDecryptWorker(QThread):
                         audio_count += 1
             self.progress.emit(f"解密完成: 提取 {audio_count} 个音频文件")
             logger.info(f"解密完成: 输出 {audio_count} 个音频文件到 {self.audio_output_dir}")
+            self._log_bgm_audit(lua_dir)
+            return result
 
         except Exception as e:
             logger.error(f"解密异常: {e}", exc_info=True)
@@ -208,28 +217,96 @@ class AudioDecryptWorker(QThread):
         return version_directory(self.lua_output_dir, version) if version is not None else None
 
     def _before_audio_copy(self, bank_stem, rel_path, output_subdir, filenames):
-        """修正旧分类时移除同作用域的历史输出，避免跨语言误删同名语音。"""
+        """修正旧分类时移除同作用域的历史输出，避免跨语言误删同名语音。
+
+        输出索引只构建一次，避免每个 bank、每个 subsong 都递归扫描数千个
+        最终文件；这也是大批量 debank 实机耗时异常的主要 UI 外部瓶颈。
+        """
         expected_dir = os.path.normcase(os.path.abspath(os.path.join(self.audio_output_dir, output_subdir)))
         source_language = self._audio_language(rel_path)
         if source_language:
             self._remove_mismatched_voice_files(expected_dir, bank_stem, filenames)
             self._remove_legacy_voice_aliases(expected_dir, bank_stem, filenames)
+        path_index = self._audio_path_index
+        if path_index is None:
+            path_index = self._audio_path_index = self._build_audio_path_index()
         for filename in filenames:
-            for root, _dirs, files in os.walk(self.audio_output_dir):
-                if filename not in files:
+            key = str(filename).lower()
+            target = os.path.normcase(os.path.abspath(os.path.join(expected_dir, filename)))
+            candidates = list(path_index.get(key, set()))
+            for candidate in candidates:
+                candidate_root = os.path.dirname(candidate)
+                if candidate == target:
                     continue
                 if source_language and not self._is_same_voice_scope(
-                    root, bank_stem, source_language
+                    candidate_root, bank_stem, source_language
                 ):
-                    continue
-                candidate = os.path.normcase(os.path.abspath(os.path.join(root, filename)))
-                if candidate == os.path.join(expected_dir, filename):
                     continue
                 try:
                     os.remove(candidate)
                     logger.info("移除音频旧分类输出: bank=%s file=%s", bank_stem, candidate)
+                    path_index[key].discard(candidate)
                 except OSError as e:
                     logger.warning("移除音频旧分类输出失败: %s (%s)", candidate, e)
+            path_index.setdefault(key, set()).add(target)
+
+    def _build_audio_path_index(self):
+        """建立最终音频的 basename 索引，排除 debank 临时目录。"""
+        index = {}
+        if not os.path.isdir(self.audio_output_dir):
+            return index
+        for root, _dirs, files in os.walk(self.audio_output_dir):
+            if self._is_audio_staging_root(root):
+                continue
+            for filename in files:
+                if not filename.lower().endswith((".wav", ".ogg", ".mp3")):
+                    continue
+                path = os.path.normcase(os.path.abspath(os.path.join(root, filename)))
+                index.setdefault(filename.lower(), set()).add(path)
+        return index
+
+    def _discard_audio_path(self, path):
+        """从分类清理索引移除一个已删除的最终文件。"""
+        if self._audio_path_index is None:
+            return
+        key = os.path.basename(path).lower()
+        paths = self._audio_path_index.get(key)
+        if paths is not None:
+            paths.discard(os.path.normcase(os.path.abspath(path)))
+
+    def _log_bgm_audit(self, lua_dir):
+        """记录 Lua 配置与已发布 BGM bank 的缺口，不把额外 BGM 误报为缺失。"""
+        if not lua_dir:
+            return
+        report = audit_bgm_exports(lua_dir, self.audio_output_dir)
+        if not report.get("available") or not report.get("state_available"):
+            logger.info("[专辑审计] 缺少 Lua 或 bank 状态，跳过 BGM 完整性核对")
+            return
+        expected = sum(len(items) for items in report["expected_by_album"].values())
+        missing = sum(len(items) for items in report["missing_by_album"].values())
+        logger.info(
+            "[专辑审计] Lua 配置 %d 个 BGM bank，缺失 %d 个，错分类 %d 个，额外未归类 %d 个",
+            expected,
+            missing,
+            len(report["misclassified"]),
+            len(report["untracked"]),
+        )
+        for album, banks in report["missing_by_album"].items():
+            logger.warning("[专辑审计] %s 缺少: %s", album, ", ".join(banks))
+        for item in report["misclassified"]:
+            logger.warning(
+                "[专辑审计] BGM 错分类: %s，应为 %s，当前为 %s",
+                item["bank"],
+                item["expected"],
+                item["actual"],
+            )
+        for item in report["untracked"]:
+            logger.info("[专辑审计] 配置表之外的 BGM 归入未分类: %s", item["bank"])
+
+    def _is_audio_staging_root(self, root):
+        """临时解包目录只允许在最终复制完成后统一清理。"""
+        relative = os.path.relpath(root, self.audio_output_dir).replace("\\", "/")
+        return relative == ".debank-temp" or relative.startswith(".debank-temp/")
 
     def _normalize_voice_audio_files(self, bank_stem, rel_path, audio_files):
         """将提取器对同名事件生成的连续后缀归一化为标准事件编号。
@@ -344,8 +421,10 @@ class AudioDecryptWorker(QThread):
                 continue
             if re.match(r"^\d+_", filename) and not filename.startswith(expected_prefix):
                 try:
-                    os.remove(os.path.join(expected_dir, filename))
-                    logger.info("移除语音目录中的错位文件: %s", os.path.join(expected_dir, filename))
+                    path = os.path.join(expected_dir, filename)
+                    os.remove(path)
+                    self._discard_audio_path(path)
+                    logger.info("移除语音目录中的错位文件: %s", path)
                 except OSError as exc:
                     logger.warning("移除语音错位文件失败: %s (%s)", filename, exc)
 
@@ -362,8 +441,10 @@ class AudioDecryptWorker(QThread):
         for filename in os.listdir(expected_dir):
             if filename.startswith(prefix) and filename.lower().endswith((".wav", ".ogg", ".mp3")):
                 try:
-                    os.remove(os.path.join(expected_dir, filename))
-                    logger.info("移除旧语音别名: %s", os.path.join(expected_dir, filename))
+                    path = os.path.join(expected_dir, filename)
+                    os.remove(path)
+                    self._discard_audio_path(path)
+                    logger.info("移除旧语音别名: %s", path)
                 except OSError as exc:
                     logger.warning("移除旧语音别名失败: %s (%s)", filename, exc)
 

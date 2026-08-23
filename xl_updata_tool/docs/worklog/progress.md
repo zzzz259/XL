@@ -234,3 +234,49 @@
 - JP 064/095 两 bank 真实完整管线通过：各输出 15 个文件，最终前缀分别为 064 和 095，未再串号。
 - 最终门禁通过：pytest 68 passed、Ruff passed、96 个 Python 文件内存编译通过、`git diff --check` 通过。
 - 仍保留用户实机全量导出作为 PR 前验收项；本地小范围验证已覆盖本轮两个根因和两条提取路径。
+
+## Session: 2026-08-22 — 音频全量导出复查
+
+### Initial evidence
+
+- 最新日志为 `logs/app_20260822_140730_100108.log`，大小约 3.34 MB。
+- 当前 `output/audio` 递归统计为 7,118 个音频文件，总大小约 4.65 GB。
+- 当前调查对象：未读“新”状态无法消除、BGM 专辑未产出、取消后任务继续执行、全量处理速度慢。
+- 尚未修改代码；下一步先从日志中的 bank 级成功/空产出/复制/取消记录和输出目录时间线定位根因。
+### 2026-08-22 音频全量导出复查：调查阶段
+
+- 已读取当天完整日志与当前 `output/audio` 快照，确认 503 个 bank、93 个复制失败、7118 个最终语音文件、0 个专辑文件。
+- 已确认专辑映射本身成功加载最新 Lua，解析到 138 个 BGM 映射；当前首要故障位于 BGM 临时文件复制前的自删除，而非专辑映射入口。
+- 已确认取消只设置标志、未终止外部解包进程，主界面 2 秒后放弃 worker 引用；速度则受 2 路并行和每次重复解码全部 bank 影响。
+- 当前仍未修改业务代码，等待确认“新”标记的具体复现路径、取消的终止语义和首轮性能优化边界。
+
+### 2026-08-23 第一轮修复
+
+- [completed] 修复 BGM 复制前清理误删 `output/audio/.debank-temp` 当前源文件的问题。
+- [completed] 修复“全部标为已读”只修改字典副本、导致叶节点和父节点仍显示旧红点的问题。
+- [completed] 新增 BGM staging 保留测试和完整音频树未读清除测试；定向测试通过。
+- [in_progress] 继续设计取消传播和 bank 指纹缓存，尚未进入第二轮代码修改。
+
+### 2026-08-23 第二轮修复
+
+- [completed] 将取消状态贯穿 `AudioDecryptWorker`、debank bank job 和 QuickBMS/FSB 子进程树；取消后保留已发布产物且不自动续跑。
+- [completed] 新增 `output/audio/.bank_state.json` bank 级增量缓存，并验证缓存命中与成品缺失失效。
+- [completed] 同步 README、开发文档指南、版本历史和根目录开发计划。
+- [completed] 全量 pytest 72 项、Ruff、Python 编译门禁通过。
+- [in_progress] 等待进行小范围真实音频链路验证，确认 BGM、取消和缓存日志符合实机行为。
+
+### 2026-08-23 第三轮：debank 直解性能实测
+
+- [completed] 从本地版本 `134309118097910091` 按 `assets_map.json` 精准建立 1528 个音频 bundle 的独立 hardlink staging，并完成 1530 个 `.bytes` 的完整 AS 提取。
+- [completed] 完成 12 bank 对照基线：QuickBMS 29.539 秒，vgmstream 5.598 秒，125 条音频和输出字节数一致。
+- [completed] 完成 735 bank 的 vgmstream 全量直解基准：712 成功、23 失败、10423 条 WAV、约 7.20 GB、273.793 秒；失败样本属于 SFX，保留旧链路兜底。
+- [completed] 将 bank/FSB 解码策略调整为 vgmstream 直解优先、旧 QuickBMS/`fsb_aud_extr` 兼容回退，并补充直解优先、命名归一化和回退测试。
+- [completed] 默认并行度调整为 4；同盘成品优先 `os.replace`，跨盘自动回退复制；worker 2/4/6/8 已完成小样本对照。
+- [completed] 最终门禁通过：pytest 77 passed、Ruff 通过、compileall 通过、`git diff --check` 通过。
+
+### 2026-08-23 用户实机问题
+
+- [x] 读取 2026-08-23 实机日志并确认 503 bank、7211 音频、734.91 秒和重复列表加载证据。
+- [x] 复查 Lua BGM 配置与 output 音频产物的对应关系，配置内缺失 0 个。
+- [x] 修复 bank 清理索引、列表缓存、未读聚合、播放 seek 和树形层级选择。
+- [x] 补充回归测试、静态检查、编译和 diff 检查；已创建本地检查点提交。

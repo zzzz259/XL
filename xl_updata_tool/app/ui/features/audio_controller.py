@@ -25,9 +25,45 @@ def refresh_audio_tree_unread(table):
         if info is not None:
             unread = bool(info.get("unread"))
         else:
-            unread = any(update_item(item.child(i)) for i in range(item.childCount()))
+            # 不能使用 any(generator)：第一个未读子节点会短路，后续同级节点
+            # 的颜色和文字就不会被刷新，表现为“只有第一个新是红色”。
+            unread = False
+            for index in range(item.childCount()):
+                unread = update_item(item.child(index)) or unread
         _set_unread_marker(item, unread)
         return unread
+
+    for index in range(table.topLevelItemCount()):
+        update_item(table.topLevelItem(index))
+
+
+def iter_audio_leaves(item):
+    """返回目录节点下的所有音频叶节点。"""
+    if item.data(0, Qt.UserRole) is not None:
+        return [item]
+    leaves = []
+    for index in range(item.childCount()):
+        leaves.extend(iter_audio_leaves(item.child(index)))
+    return leaves
+
+
+def refresh_audio_tree_checks(table):
+    """根据叶节点状态刷新目录节点的全选/半选状态。"""
+    def update_item(item):
+        leaves = iter_audio_leaves(item)
+        if item.data(0, Qt.UserRole) is not None:
+            return item.checkState(0)
+        checked = sum(leaf.checkState(0) == Qt.Checked for leaf in leaves)
+        if not leaves or checked == 0:
+            state = Qt.Unchecked
+        elif checked == len(leaves):
+            state = Qt.Checked
+        else:
+            state = Qt.PartiallyChecked
+        item.setCheckState(0, state)
+        for index in range(item.childCount()):
+            update_item(item.child(index))
+        return state
 
     for index in range(table.topLevelItemCount()):
         update_item(table.topLevelItem(index))
@@ -60,6 +96,8 @@ def populate_audio_tree(table, audio_files: list[dict], format_size) -> list[QTr
         top = parts[0] if parts and parts[0] else "其他"
         if top not in roots:
             roots[top] = QTreeWidgetItem([top])
+            roots[top].setFlags(roots[top].flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            roots[top].setCheckState(0, Qt.Unchecked)
             table.addTopLevelItem(roots[top])
 
         if top == "voice" and len(parts) >= 2:
@@ -68,10 +106,14 @@ def populate_audio_tree(table, audio_files: list[dict], format_size) -> list[QTr
             mid_key = (top, character_id)
             if mid_key not in mid_nodes:
                 mid_nodes[mid_key] = QTreeWidgetItem([character_id])
+                mid_nodes[mid_key].setFlags(mid_nodes[mid_key].flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                mid_nodes[mid_key].setCheckState(0, Qt.Unchecked)
                 roots[top].addChild(mid_nodes[mid_key])
             leaf_key = (top, character_id, language)
             if leaf_key not in leaf_nodes:
                 leaf_nodes[leaf_key] = QTreeWidgetItem([language])
+                leaf_nodes[leaf_key].setFlags(leaf_nodes[leaf_key].flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                leaf_nodes[leaf_key].setCheckState(0, Qt.Unchecked)
                 mid_nodes[mid_key].addChild(leaf_nodes[leaf_key])
             leaf_nodes[leaf_key].addChild(leaf)
         else:
@@ -79,8 +121,11 @@ def populate_audio_tree(table, audio_files: list[dict], format_size) -> list[QTr
             mid_key = (top, album_name)
             if mid_key not in mid_nodes:
                 mid_nodes[mid_key] = QTreeWidgetItem([album_name])
+                mid_nodes[mid_key].setFlags(mid_nodes[mid_key].flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                mid_nodes[mid_key].setCheckState(0, Qt.Unchecked)
                 roots[top].addChild(mid_nodes[mid_key])
             mid_nodes[mid_key].addChild(leaf)
 
     refresh_audio_tree_unread(table)
+    refresh_audio_tree_checks(table)
     return file_items

@@ -49,7 +49,7 @@ def create_audio_view(parent=None):
     btn_refresh = create_action_button(
         "刷新列表",
         "secondary",
-        parent._load_audio_list if parent is not None else None,
+        (lambda: parent._load_audio_list(force_reload=True)) if parent is not None else None,
         container,
     )
     ctrl_layout.addWidget(btn_refresh)
@@ -94,6 +94,7 @@ def create_audio_view(parent=None):
     hdr.setSectionResizeMode(4, QHeaderView.ResizeToContents)
     hdr.setSectionResizeMode(5, QHeaderView.ResizeToContents)
     audio_table.setAlternatingRowColors(True)
+    # 勾选状态承担文件管理选择，不使用蓝色选中态；Ctrl 多选由主窗口统一处理。
     audio_table.setSelectionMode(QAbstractItemView.NoSelection)
     audio_table.setSelectionBehavior(QAbstractItemView.SelectRows)
     audio_table.setEditTriggers(QTreeWidget.NoEditTriggers)
@@ -148,6 +149,8 @@ def create_audio_view(parent=None):
     audio_slider.setEnabled(False)
     if parent is not None:
         audio_slider.sliderMoved.connect(parent._on_audio_slider_moved)
+        audio_slider.sliderPressed.connect(parent._on_audio_slider_pressed)
+        audio_slider.sliderReleased.connect(parent._on_audio_slider_released)
     player_layout.addWidget(audio_slider, 1)
 
     vol_label = QLabel("音量")

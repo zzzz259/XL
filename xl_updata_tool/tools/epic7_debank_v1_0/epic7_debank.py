@@ -4,9 +4,11 @@ import concurrent.futures
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import psutil
 
@@ -14,6 +16,11 @@ try:
     from app.core.logger import logger
 except ImportError:
     logger = None
+
+try:
+    from .fsb_fallback import vgmstream_path
+except ImportError:
+    from fsb_fallback import vgmstream_path
 
 
 def _log(msg):
@@ -31,8 +38,10 @@ def _debug(msg):
         print(msg)
 
 
-DEFAULT_WORKERS = 2
+DEFAULT_WORKERS = 6
 AUDIO_EXTENSIONS = {".wav", ".ogg", ".mp3"}
+BANK_STATE_FILENAME = ".bank_state.json"
+BANK_CACHE_VERSION = 1
 
 '''
   Epic7 Bank File Decryptor (v2.1)
@@ -109,6 +118,180 @@ def collect_audio_files(result_dir):
     return audio_files
 
 
+def _bank_state_path(output_root):
+    return os.path.join(output_root, BANK_STATE_FILENAME)
+
+
+def _load_bank_state(output_root):
+    try:
+        with open(_bank_state_path(output_root), encoding="utf-8") as state_file:
+            state = json.load(state_file)
+    except (OSError, ValueError, TypeError):
+        return {"version": BANK_CACHE_VERSION, "banks": {}}
+    if not isinstance(state, dict) or state.get("version") != BANK_CACHE_VERSION:
+        return {"version": BANK_CACHE_VERSION, "banks": {}}
+    banks = state.get("banks")
+    return {"version": BANK_CACHE_VERSION, "banks": banks if isinstance(banks, dict) else {}}
+
+
+def _save_bank_state(output_root, state):
+    os.makedirs(output_root, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=".bank-state-", suffix=".json", dir=output_root
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as state_file:
+            json.dump(state, state_file, ensure_ascii=False, indent=2)
+            state_file.write("\n")
+        os.replace(temp_name, _bank_state_path(output_root))
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def _bank_fingerprint(bank_path, input_root):
+    stat = os.stat(bank_path)
+    relative = os.path.relpath(bank_path, input_root).replace("\\", "/")
+    return {"path": relative, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def _cache_record_valid(record, fingerprint, out_rel, output_root):
+    if not isinstance(record, dict):
+        return False
+    if record.get("fingerprint") != fingerprint or record.get("out_rel") != out_rel:
+        return False
+    files = record.get("files")
+    if not isinstance(files, list) or not files:
+        return False
+    for item in files:
+        if not isinstance(item, dict):
+            return False
+        relative = str(item.get("path", "")).replace("\\", "/")
+        path = os.path.join(output_root, relative.replace("/", os.sep))
+        if not os.path.isfile(path) or os.path.getsize(path) != item.get("size"):
+            return False
+    return True
+
+
+def _output_file_records(result, output_root):
+    records = []
+    for source in result.get("audio_files", []):
+        filename = os.path.basename(source)
+        destination = os.path.join(output_root, result["out_rel"], filename)
+        if os.path.isfile(destination):
+            records.append({
+                "path": os.path.relpath(destination, output_root).replace("\\", "/"),
+                "size": os.path.getsize(destination),
+            })
+    return records
+
+
+def _terminate_process_tree(process):
+    """终止 QuickBMS 及其通过 -S 拉起的 Python/解码器子进程。"""
+    try:
+        root = psutil.Process(process.pid)
+        descendants = root.children(recursive=True)
+    except (psutil.Error, OSError):
+        descendants = []
+        root = None
+
+    processes = list(reversed(descendants))
+    if root is not None:
+        processes.append(root)
+    for child in processes:
+        try:
+            child.terminate()
+        except (psutil.Error, OSError):
+            pass
+    if processes:
+        _, alive = psutil.wait_procs(processes, timeout=1)
+        for child in alive:
+            try:
+                child.kill()
+            except (psutil.Error, OSError):
+                pass
+        psutil.wait_procs(alive, timeout=1)
+    try:
+        process.wait(timeout=1)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
+def _run_process(command, cwd, timeout=None, cancel_check=None):
+    """可轮询取消的外部进程执行器，返回退出码或 ``cancelled``。"""
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creationflags,
+    )
+    deadline = time.monotonic() + timeout if timeout else None
+    while True:
+        returncode = process.poll()
+        if returncode is not None:
+            return returncode
+        if cancel_check and cancel_check():
+            _terminate_process_tree(process)
+            return "cancelled"
+        if deadline is not None and time.monotonic() >= deadline:
+            _terminate_process_tree(process)
+            raise subprocess.TimeoutExpired(command, timeout)
+        time.sleep(0.1)
+
+
+def _normalise_vgmstream_names(result_dir):
+    """去掉 vgmstream 为多子流添加的序号，保持旧提取器的文件名契约。"""
+    for source in collect_audio_files(result_dir):
+        filename = os.path.basename(source)
+        match = re.match(r"^\d+_(.+)$", filename)
+        if not match:
+            continue
+        destination = os.path.join(os.path.dirname(source), match.group(1))
+        if os.path.exists(destination):
+            stem, extension = os.path.splitext(destination)
+            index = 1
+            while os.path.exists(f"{stem}_{index}{extension}"):
+                index += 1
+            destination = f"{stem}_{index}{extension}"
+        os.replace(source, destination)
+
+
+def execute_vgmstream_bank_single(
+    bank_path,
+    folder_cur,
+    result_dir,
+    timeout=None,
+    cancel_check=None,
+):
+    """直接从 FMOD bank 解码，失败时由调用方回退 QuickBMS。"""
+    cli = vgmstream_path(folder_cur)
+    if not cli:
+        return False, "vgmstream_unavailable"
+    os.makedirs(result_dir, exist_ok=True)
+    output_pattern = os.path.join(result_dir, "?02s_?n.wav")
+    try:
+        returncode = _run_process(
+            [cli, "-i", "-S", "0", "-o", output_pattern, os.path.abspath(bank_path)],
+            cwd=os.path.dirname(cli),
+            timeout=timeout,
+            cancel_check=cancel_check,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    if returncode == "cancelled":
+        return False, "cancelled"
+    if returncode != 0:
+        shutil.rmtree(result_dir, ignore_errors=True)
+        os.makedirs(result_dir, exist_ok=True)
+        return False, returncode
+    _normalise_vgmstream_names(result_dir)
+    if not collect_audio_files(result_dir):
+        return False, "empty_output"
+    return True, returncode
+
+
 def _script_command(python_exe, script_path, folder_cur, result_dir):
     """构造 QuickBMS -S 命令，并把结果目录显式传给提取脚本。"""
     def quote(value):
@@ -128,6 +311,7 @@ def execute_quickbms_single(
     python_exe_,
     result_dir=None,
     timeout=None,
+    cancel_check=None,
 ):
     """对单个 .bank 文件执行 quickbms 解包，并返回 (是否成功, 退出码)。"""
     bank_name = os.path.basename(bank_path)
@@ -138,17 +322,20 @@ def execute_quickbms_single(
 
     try:
         script_path = os.path.join(folder_cur_, "_epic7_defsb.py")
-        proc = subprocess.run([
+        returncode = _run_process([
             folder4subcontractors_ + "/quickbms.exe", "-Y", "-K", "-d",
             "-F", '{}.bank',
             '-S', _script_command(python_exe_, script_path, folder_cur_, result_dir),
             folder4subcontractors_ + '/bank-files.bms',
             bank_path,
             bank_temp
-        ], cwd=bank_temp, check=False, timeout=timeout)
-        if proc.returncode != 0:
-            _log(f"[音频bank] quickbms 退出码 {proc.returncode}: {bank_name}")
-            return False, proc.returncode
+        ], cwd=bank_temp, timeout=timeout, cancel_check=cancel_check)
+        if returncode == "cancelled":
+            _log(f"[音频bank] 已取消: {bank_name}")
+            return False, "cancelled"
+        if returncode != 0:
+            _log(f"[音频bank] quickbms 退出码 {returncode}: {bank_name}")
+            return False, returncode
         status_path = os.path.join(result_dir, ".extract_status.json")
         if os.path.isfile(status_path):
             try:
@@ -161,7 +348,7 @@ def execute_quickbms_single(
                     returncode = status.get("returncode", "extractor_failed")
                     _log(f"[音频bank] FSB 提取失败: {bank_name}，退出码={returncode}")
                     return False, returncode
-        return True, proc.returncode
+        return True, returncode
     except subprocess.TimeoutExpired:
         _log(f"[音频bank] 超时（>{timeout:g}s）: {bank_name}")
         return False, "timeout"
@@ -197,19 +384,55 @@ def _safe_job_name(index, bank_stem):
     return f"{index:04d}_{safe_stem or 'bank'}"
 
 
-def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_timeout):
+def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_timeout,
+                      cancel_check=None):
     started = time.perf_counter()
-    success, returncode = execute_quickbms_single(
+    if cancel_check and cancel_check():
+        return {
+            **job,
+            "status": "cancelled",
+            "returncode": "cancelled",
+            "audio_files": [],
+            "elapsed": 0,
+        }
+    direct_success, direct_code = execute_vgmstream_bank_single(
         job["bank_path"],
-        folder4subcontractors,
-        job["extract_dir"],
         folder_cur,
-        python_exe,
-        result_dir=job["result_dir"],
+        job["result_dir"],
         timeout=bank_timeout,
+        cancel_check=cancel_check,
     )
+    method = "vgmstream" if direct_success else "quickbms"
+    if direct_success:
+        success, returncode = True, direct_code
+    else:
+        if direct_code == "cancelled":
+            return {
+                **job,
+                "status": "cancelled",
+                "returncode": direct_code,
+                "audio_files": [],
+                "method": "vgmstream",
+                "elapsed": time.perf_counter() - started,
+            }
+        execute_kwargs = {
+            "result_dir": job["result_dir"],
+            "timeout": bank_timeout,
+        }
+        if cancel_check is not None:
+            execute_kwargs["cancel_check"] = cancel_check
+        success, returncode = execute_quickbms_single(
+            job["bank_path"],
+            folder4subcontractors,
+            job["extract_dir"],
+            folder_cur,
+            python_exe,
+            **execute_kwargs,
+        )
     audio_files = collect_audio_files(job["result_dir"])
-    if not success:
+    if returncode == "cancelled" or (cancel_check and cancel_check()):
+        status = "cancelled"
+    elif not success:
         status = "failed"
     elif not audio_files:
         status = "empty"
@@ -220,6 +443,7 @@ def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_t
         "status": status,
         "returncode": returncode,
         "audio_files": audio_files,
+        "method": method,
         "elapsed": time.perf_counter() - started,
     }
 
@@ -257,8 +481,13 @@ def _copy_job_audio(result, output_root, before_copy_callback, audio_transform_c
                 _debug(f"跳过已存在: {os.path.relpath(dst, output_root)}")
                 skipped += 1
                 continue
-            shutil.copy2(src, dst)
-            _debug(f"[OK] {filename} → {os.path.relpath(dst, output_root)}")
+            try:
+                os.replace(src, dst)
+                _debug(f"[OK] 移动 {filename} → {os.path.relpath(dst, output_root)}")
+            except OSError:
+                # temp_dir 可能被调用方放在其他卷，跨卷时保留兼容复制路径。
+                shutil.copy2(src, dst)
+                _debug(f"[OK] 复制 {filename} → {os.path.relpath(dst, output_root)}")
             copied += 1
         except Exception as exc:
             _log(f"[音频bank] 复制失败: {filename}: {exc}")
@@ -268,7 +497,7 @@ def _copy_job_audio(result, output_root, before_copy_callback, audio_transform_c
 
 def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_fn=None,
         before_copy_callback=None, audio_transform_callback=None, workers=None,
-        temp_dir=None, bank_timeout=None):
+        temp_dir=None, bank_timeout=None, cancel_check=None, use_cache=True):
     """解密 .bank 文件，并把每个 bank 的结果隔离后汇总到输出目录。"""
     if folder_cur is None:
         folder_cur = os.path.dirname(os.path.abspath(__file__))
@@ -288,6 +517,10 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
 
     input_root = os.path.abspath(input_dir)
     output_root = os.path.abspath(output_dir)
+    bank_state = _load_bank_state(output_root) if use_cache else {
+        "version": BANK_CACHE_VERSION,
+        "banks": {},
+    }
 
     _log(f"输入目录: {input_root}")
     _log(f"输出目录: {output_root}")
@@ -302,22 +535,33 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
     if not bank_files:
         _log("未找到 .bank 文件")
         return {"total": 0, "success": 0, "empty": 0, "failed": 0,
-                "copied": 0, "skipped": 0, "copy_failed": 0}
+                "copied": 0, "skipped": 0, "copy_failed": 0,
+                "cancelled": bool(cancel_check and cancel_check())}
 
     _log(f"共找到 {len(bank_files)} 个 .bank 文件")
 
-    shutil.rmtree(folder4tempo, ignore_errors=True)
-    shutil.rmtree(legacy_result, ignore_errors=True)
-    pathlib.Path(folder4tempo).mkdir(parents=True, exist_ok=True)
+    if cancel_check and cancel_check():
+        _log("音频 bank 解包在启动前已取消")
+        return {"total": len(bank_files), "success": 0, "empty": 0, "failed": 0,
+                "copied": 0, "skipped": 0, "copy_failed": 0, "cancelled": True}
+
     os.makedirs(output_root, exist_ok=True)
 
     jobs = []
+    cached_count = 0
     for index, bank_path in enumerate(bank_files):
         bank_name = os.path.basename(bank_path)
         bank_stem = os.path.splitext(bank_name)[0]
         rel_path = os.path.relpath(bank_path, input_root)
         rel_dir = os.path.dirname(rel_path)
         out_rel = subdir_fn(rel_path, bank_stem) if subdir_fn else rel_dir
+        fingerprint = _bank_fingerprint(bank_path, input_root)
+        cache_key = fingerprint["path"]
+        if use_cache and _cache_record_valid(
+            bank_state["banks"].get(cache_key), fingerprint, out_rel, output_root
+        ):
+            cached_count += 1
+            continue
         job_dir = os.path.join(folder4tempo, _safe_job_name(index, bank_stem))
         jobs.append({
             "bank_path": bank_path,
@@ -327,7 +571,23 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
             "out_rel": out_rel or "",
             "extract_dir": os.path.join(job_dir, "extract"),
             "result_dir": os.path.join(job_dir, "result"),
+            "cache_key": cache_key,
+            "fingerprint": fingerprint,
         })
+
+    if cached_count:
+        _log(f"bank 缓存跳过: {cached_count} 个未变化 bank")
+    if not jobs:
+        _log("所有 bank 均命中增量缓存，无需重新解密")
+        return {
+            "total": len(bank_files), "success": 0, "empty": 0, "failed": 0,
+            "copied": 0, "skipped": 0, "copy_failed": 0,
+            "cached": cached_count, "cancelled": False,
+        }
+
+    shutil.rmtree(folder4tempo, ignore_errors=True)
+    shutil.rmtree(legacy_result, ignore_errors=True)
+    pathlib.Path(folder4tempo).mkdir(parents=True, exist_ok=True)
 
     total_success = 0
     total_empty = 0
@@ -335,6 +595,7 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
     total_copied = 0
     total_skipped = 0
     total_copy_failed = 0
+    total_cancelled = 0
     completed = 0
 
     try:
@@ -347,6 +608,7 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
                     folder_cur,
                     python_exe,
                     timeout,
+                    cancel_check,
                 ): job
                 for job in jobs
             }
@@ -366,26 +628,40 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
                     _log(f"[音频bank] worker 异常: {job['bank_name']}: {exc}")
 
                 if result["status"] == "success":
-                    total_success += 1
-                    copied, skipped, copy_failed = _copy_job_audio(
-                        result,
-                        output_root,
-                        before_copy_callback,
-                        audio_transform_callback,
-                    )
-                    total_copied += copied
-                    total_skipped += skipped
-                    total_copy_failed += copy_failed
-                    _debug(
-                        f"[音频bank] 成功: {result['bank_name']}，"
-                        f"产出 {len(result['audio_files'])}，耗时 {result['elapsed']:.2f}s"
-                    )
+                    if cancel_check and cancel_check():
+                        total_cancelled += 1
+                        _log(f"[音频bank] 已取消: {result['bank_name']}")
+                    else:
+                        total_success += 1
+                        copied, skipped, copy_failed = _copy_job_audio(
+                            result,
+                            output_root,
+                            before_copy_callback,
+                            audio_transform_callback,
+                        )
+                        total_copied += copied
+                        total_skipped += skipped
+                        total_copy_failed += copy_failed
+                        if copy_failed == 0:
+                            bank_state["banks"][result["cache_key"]] = {
+                                "fingerprint": result["fingerprint"],
+                                "out_rel": result["out_rel"],
+                                "files": _output_file_records(result, output_root),
+                            }
+                        _debug(
+                            f"[音频bank] 成功: {result['bank_name']}，"
+                            f"产出 {len(result['audio_files'])}，方式={result.get('method', 'unknown')}，"
+                            f"耗时 {result['elapsed']:.2f}s"
+                        )
                 elif result["status"] == "empty":
                     total_empty += 1
                     _log(
                         f"[音频bank] 空产出: {result['bank_name']} "
                         f"({result['rel_path']})，耗时 {result['elapsed']:.2f}s"
                     )
+                elif result["status"] == "cancelled":
+                    total_cancelled += 1
+                    _log(f"[音频bank] 已取消: {result['bank_name']}")
                 else:
                     total_failed += 1
                     _log(
@@ -398,8 +674,13 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
     finally:
         shutil.rmtree(folder4tempo, ignore_errors=True)
         shutil.rmtree(legacy_result, ignore_errors=True)
+        if use_cache:
+            _save_bank_state(output_root, bank_state)
 
     total_failed += total_copy_failed
+    cancelled = total_cancelled > 0 or bool(cancel_check and cancel_check())
+    if cancelled:
+        _log(f"音频 bank 解包已取消，已完成 bank {total_success} 个")
     _log(
         f"bank 统计: 成功 {total_success}, 空产出 {total_empty}, "
         f"失败 {total_failed}, 总数 {len(bank_files)}"
@@ -418,6 +699,8 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
         "copied": total_copied,
         "skipped": total_skipped,
         "copy_failed": total_copy_failed,
+        "cached": cached_count,
+        "cancelled": cancelled,
     }
 
 
