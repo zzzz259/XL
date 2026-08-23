@@ -280,3 +280,14 @@
 - [x] 复查 Lua BGM 配置与 output 音频产物的对应关系，配置内缺失 0 个。
 - [x] 修复 bank 清理索引、列表缓存、未读聚合、播放 seek 和树形层级选择。
 - [x] 补充回归测试、静态检查、编译和 diff 检查；已创建本地检查点提交。
+
+## 2026-08-23 Issue #38：日志可观测性第一轮
+
+- [x] 读取用户方案并建立持久化计划，创建 GitHub Issue #38。
+- [x] 新增 `RuntimeConfig`，将 `--debug` 解析提前到主窗口和业务模块导入之前。
+- [x] 重构日志会话：`logs/<session_id>/app.log`、`error.log`，Debug 额外生成 `debug.log`。
+- [x] 新增 task、parent task、component、stage 上下文，并接入导入、Lua、音频 Worker。
+- [x] 新增环境摘要、顶层/线程异常报告和 AssetStudio/Spine CLI 外部进程诊断包装。
+- [x] 保持 UI 布局、正式数据目录、导出结果、取消语义和现有 logger 调用方式不变。
+- [completed] 完成全量测试、静态检查、编译和差异审查：pytest 84 passed、Ruff 通过、compileall 通过、`git diff --check` 通过。
+- [pending] 用户分别启动普通模式和 Debug 模式，检查 `logs/<session_id>/`、`debug.log`、`environment.txt` 与任务标识；流式外部工具、Debug 数据隔离和 UI 标识留待后续阶段。

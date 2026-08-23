@@ -10,6 +10,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication
 
 from app.core.logger import logger
+from app.core.process_runner import run_external_process
 
 
 class BatchExportWorker(QThread):
@@ -85,8 +86,9 @@ class BatchExportWorker(QThread):
                 if fmt == "gif":
                     cmd.append("--loop")
 
-                proc = subprocess.run(
+                proc = run_external_process(
                     cmd,
+                    tool="spine-cli",
                     cwd=os.path.dirname(self.spine_cli),
                     capture_output=True,
                     text=True,

@@ -255,6 +255,14 @@
 - 未读聚合函数会递归父节点，但叶节点状态更新、批量标记和树重建之间没有统一的状态源，需要保证每个兄弟节点和所有祖先按“任一后代未读”刷新。
 - 音频配置当前由 `BaseSound.lua`、`BaseSoundChapter.lua`、`BaseWord_cn.lua` 组成专辑映射；现有实现只返回 bank 别名到专辑名，尚未输出配置期望清单，不能直接报告“Lua 配置有但 output 缺”的 bank。
 
+## 2026-08-23 Issue #38：日志与 Debug 模式根因调查
+
+- `app/core/logger.py` 在模块导入时立即执行 `setup_logger()`，logger 永远接受 DEBUG，文件处理器永远记录 DEBUG，控制台固定 INFO。
+- `main.py` 先导入 `MainWindow` 和业务模块，之后才通过 `--debug` 设置布尔值；该参数没有参与 logger 初始化，因此普通和 Debug 的日志策略实际相同。
+- 现有日志主要是自由文本，缺少一次导入/音频/Lua 操作的 task、父任务、组件和阶段上下文；缓存跳过和外部程序退出原因难以按一次操作重建。
+- 本轮采用会话目录和轻量 ContextVar，不改变现有 logger 调用契约；普通模式只保留 INFO 摘要，Debug 增加 debug.log、task/stage 和外部工具输出尾部。
+- UI 布局、Debug 数据目录隔离和失败 staging 保留属于后续边界，本轮只实现日志基础设施、启动顺序、核心 Worker 上下文和非流式外部进程包装。
+
 ### 本轮验证结果
 
 - 直接用当前 Lua 与 `.bank_state.json` 对照：`BaseSound.lua` 配置 70 个 BGM bank，已发布状态包含 79 个 BGM bank，配置内缺失 0 个；额外 bank 作为配置表之外的未分类项保留。

@@ -13,6 +13,7 @@ import time
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
+from app.core.task_context import stage_operation, task_operation
 from app.core.path_utils import get_base_dir, get_tools_dir
 from app.core.bundle_parser import fix_bundle_inplace
 from app.core.file_utils import replace_directory
@@ -94,6 +95,14 @@ class ImportASWorker(QThread):
             self._last_progress_emit = now
             self.progress_stage.emit(label, current, total)
 
+    @task_operation(
+        "IMPORT",
+        "import",
+        lambda self: {
+            "bundles": len(self.bundle_paths),
+            "categories": sorted(self.export_categories) if self.export_categories else ["all"],
+        },
+    )
     def run(self):
         try:
             sel = sorted(self.export_categories) if self.export_categories else (self.export_types or ["全部"])
@@ -157,6 +166,7 @@ class ImportASWorker(QThread):
         finally:
             self._cleanup_cli_bundle_dir()
 
+    @stage_operation("import.fix", "bundle_header")
     @timed("导入AS-修复文件头")
     def _stage_fix(self):
         """阶段 1: 直接修复原始 .bundle 文件头"""
@@ -183,6 +193,7 @@ class ImportASWorker(QThread):
         return success, fail
 
     @timed("导入AS-解析资源")
+    @stage_operation("import.assetstudio", "map")
     def _stage_map(self):
         """阶段 2: 调用 AssetStudio CLI 生成资源映射"""
         if not os.path.exists(self.as_cli):
@@ -228,6 +239,7 @@ class ImportASWorker(QThread):
             return None, str(e)
 
     @timed("导入AS-导出分类")
+    @stage_operation("import.export", "assets")
     def _stage_export(self, assets):
         """阶段 3: 先导出到 staging，成功后再替换 data/material/。"""
         if not os.path.exists(self.as_cli):

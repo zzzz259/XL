@@ -8,6 +8,7 @@ import tempfile
 import time
 from app.core.logger import logger
 from app.core.path_utils import get_base_dir, get_tools_dir
+from app.core.process_runner import run_external_process
 
 PROJECT_ROOT = get_base_dir()
 AS_CLI = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
@@ -86,13 +87,14 @@ def extract_manifest_hashes(category_path):
     logger.debug(f"提取 manifest hash: {os.path.basename(category_path)}")
     out_dir = tempfile.mkdtemp()
     try:
-        proc = subprocess.run([
+        proc = run_external_process([
             AS_CLI, category_path, out_dir,
             "--game", "UnityCN", "--key_index", "23",
             "--group_assets", "ByType",
             "--export_type", "Convert",
             "--silent",
-        ], cwd=os.path.dirname(AS_CLI),
+        ], tool="AssetStudio-manifest",
+            cwd=os.path.dirname(AS_CLI),
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             timeout=300,
@@ -143,13 +145,14 @@ def extract_manifest_from_dir(category_dir, log_cb=None):
     out_dir = tempfile.mkdtemp()
     result = {}
     try:
-        proc = subprocess.run([
+        proc = run_external_process([
             AS_CLI, category_dir, out_dir,
             "--game", "UnityCN", "--key_index", "23",
             "--group_assets", "ByType",
             "--export_type", "Convert",
             "--silent",
-        ], cwd=os.path.dirname(AS_CLI),
+        ], tool="AssetStudio-manifest-dir",
+            cwd=os.path.dirname(AS_CLI),
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             timeout=300,

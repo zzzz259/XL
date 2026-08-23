@@ -109,7 +109,7 @@ vgmstream 直解 bank 或 FSB 失败时，流程会回退到旧 QuickBMS/`fsb_au
 
 ### 调试模式
 
-开发测试时用 `debug.bat`（或 `python main.py --debug`）启动，会多出一排「调试模式」工具栏：选择性导出（只导出 Lua / 只导出贴图）+ 清空各数据区域按钮。正常使用 `run.bat` 不会显示。
+开发测试时用 `debug.bat`（或 `python main.py --debug`）启动，会多出一排「调试模式」工具栏：选择性导出（只导出 Lua / 只导出贴图）+ 清空各数据区域按钮。Debug 启动会额外记录任务 ID、阶段、外部工具退出信息和环境摘要；日志位于 `logs/<session_id>/`，包括 `app.log`、`error.log`、`debug.log` 和 `environment.txt`。未捕获的主线程/工作线程异常会在同一目录生成 `crash_*.log`。正常使用 `run.bat` 不会显示调试工具栏，也不会写入 DEBUG 级别日志。
 
 ## 目录结构
 
