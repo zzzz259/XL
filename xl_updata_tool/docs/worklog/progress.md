@@ -264,3 +264,12 @@
 - [completed] 同步 README、开发文档指南、版本历史和根目录开发计划。
 - [completed] 全量 pytest 72 项、Ruff、Python 编译门禁通过。
 - [in_progress] 等待进行小范围真实音频链路验证，确认 BGM、取消和缓存日志符合实机行为。
+
+### 2026-08-23 第三轮：debank 直解性能实测
+
+- [completed] 从本地版本 `134309118097910091` 按 `assets_map.json` 精准建立 1528 个音频 bundle 的独立 hardlink staging，并完成 1530 个 `.bytes` 的完整 AS 提取。
+- [completed] 完成 12 bank 对照基线：QuickBMS 29.539 秒，vgmstream 5.598 秒，125 条音频和输出字节数一致。
+- [completed] 完成 735 bank 的 vgmstream 全量直解基准：712 成功、23 失败、10423 条 WAV、约 7.20 GB、273.793 秒；失败样本属于 SFX，保留旧链路兜底。
+- [completed] 将 bank/FSB 解码策略调整为 vgmstream 直解优先、旧 QuickBMS/`fsb_aud_extr` 兼容回退，并补充直解优先、命名归一化和回退测试。
+- [completed] 默认并行度调整为 4；同盘成品优先 `os.replace`，跨盘自动回退复制；worker 2/4/6/8 已完成小样本对照。
+- [completed] 最终门禁通过：pytest 77 passed、Ruff 通过、compileall 通过、`git diff --check` 通过。

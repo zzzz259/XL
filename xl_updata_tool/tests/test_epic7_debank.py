@@ -215,7 +215,7 @@ def test_execute_quickbms_propagates_fsb_callback_failure(tmp_path, monkeypatch)
     assert code == 3221226519
 
 
-def test_fsb_fallback_uses_vgmstream_after_legacy_failure(tmp_path, monkeypatch):
+def test_fsb_direct_uses_vgmstream_without_legacy_process(tmp_path, monkeypatch):
     extract_dir = tmp_path / "extract"
     result_dir = tmp_path / "result"
     extract_dir.mkdir()
@@ -224,9 +224,7 @@ def test_fsb_fallback_uses_vgmstream_after_legacy_failure(tmp_path, monkeypatch)
     calls = []
 
     def fake_run(command, **_kwargs):
-        calls.append(command[0])
-        if len(calls) == 1:
-            return SimpleNamespace(returncode=3221226519)
+        calls.append(command)
         (result_dir / "01_e20.wav").write_bytes(b"wav")
         return SimpleNamespace(returncode=0, stdout="")
 
@@ -241,5 +239,90 @@ def test_fsb_fallback_uses_vgmstream_after_legacy_failure(tmp_path, monkeypatch)
     )
 
     assert (code, method) == (0, "vgmstream")
-    assert legacy_code == 3221226519
+    assert legacy_code is None
     assert fallback_code == 0
+    assert len(calls) == 1
+    assert calls[0][1:4] == ["-i", "-S", "0"]
+
+
+def test_fsb_fallback_uses_legacy_after_direct_failure(tmp_path, monkeypatch):
+    extract_dir = tmp_path / "extract"
+    result_dir = tmp_path / "result"
+    extract_dir.mkdir()
+    result_dir.mkdir()
+    (extract_dir / "00000000.fsb").write_bytes(b"fsb")
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        if "vgmstream-cli.exe" in str(command[0]):
+            return SimpleNamespace(returncode=1, stdout="")
+        (extract_dir / "01_e20.wav").write_bytes(b"wav")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(fsb_fallback.subprocess, "run", fake_run)
+    monkeypatch.setattr(fsb_fallback, "vgmstream_path", lambda _root: "vgmstream-cli.exe")
+
+    code, method, legacy_code, fallback_code = fsb_fallback.extract_fsb_with_fallback(
+        "00000000.fsb",
+        str(extract_dir),
+        str(tmp_path),
+        str(result_dir),
+    )
+
+    assert (code, method) == (0, "fsb_aud_extr")
+    assert legacy_code == 0
+    assert fallback_code == 1
+    assert len(calls) == 2
+
+
+def test_debank_direct_bank_decode_normalizes_subsong_names(tmp_path, monkeypatch):
+    bank = tmp_path / "064.bank"
+    bank.write_bytes(b"bank")
+    result_dir = tmp_path / "result"
+
+    monkeypatch.setattr(epic7_debank, "vgmstream_path", lambda _root: "vgmstream-cli.exe")
+
+    def fake_process(command, **_kwargs):
+        assert command[1:4] == ["-i", "-S", "0"]
+        result_dir.mkdir(parents=True, exist_ok=True)
+        (result_dir / "01_064_in_01.wav").write_bytes(b"audio")
+        return 0
+
+    monkeypatch.setattr(epic7_debank, "_run_process", fake_process)
+
+    ok, code = epic7_debank.execute_vgmstream_bank_single(
+        str(bank),
+        str(tmp_path),
+        str(result_dir),
+        timeout=10,
+    )
+
+    assert ok is True
+    assert code == 0
+    assert (result_dir / "064_in_01.wav").read_bytes() == b"audio"
+    assert not (result_dir / "01_064_in_01.wav").exists()
+
+
+def test_copy_job_audio_prefers_same_volume_move(tmp_path):
+    source = tmp_path / "temp" / "064_in_01.wav"
+    source.parent.mkdir()
+    source.write_bytes(b"audio")
+    output = tmp_path / "output"
+
+    result = {
+        "bank_stem": "064",
+        "rel_path": "assets/fmodassets/voice_cn/btl/064.bank",
+        "out_rel": "voice/064/cn",
+        "bank_name": "064.bank",
+        "audio_files": [str(source)],
+    }
+
+    copied, skipped, failed = epic7_debank._copy_job_audio(
+        result, str(output), None, None
+    )
+
+    destination = output / "voice" / "064" / "cn" / "064_in_01.wav"
+    assert (copied, skipped, failed) == (1, 0, 0)
+    assert destination.read_bytes() == b"audio"
+    assert not source.exists()

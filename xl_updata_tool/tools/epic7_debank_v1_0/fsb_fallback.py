@@ -49,13 +49,45 @@ def vgmstream_path(folder_root):
 
 
 def extract_fsb_with_fallback(file_fsb, folder_cur, folder_root, folder4result):
-    """返回 ``(code, method, legacy_code, fallback_code)``。"""
+    """优先直解 FSB，失败后回退旧提取器。
+
+    返回 ``(code, method, legacy_code, fallback_code)``。其中
+    ``fallback_code`` 保留 vgmstream 的退出码，便于兼容原有状态记录；
+    直解成功时不会再为每个 bank 额外等待旧版提取器的超时窗口。
+    """
     timeout = timeout_seconds()
     fsb_path = (
         file_fsb
         if os.path.isabs(file_fsb)
         else os.path.abspath(os.path.join(folder_cur, file_fsb))
     )
+    cli = vgmstream_path(folder_root)
+    fallback_code = None
+    if cli:
+        output_pattern = os.path.join(folder4result, "?02s_?n.wav")
+        try:
+            direct = subprocess.run(
+                [cli, "-i", "-S", "0", "-o", output_pattern, fsb_path],
+                cwd=os.path.dirname(cli),
+                check=False,
+                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if direct.stdout:
+                print(direct.stdout, end="")
+            fallback_code = direct.returncode
+        except subprocess.TimeoutExpired:
+            print(f"vgmstream-cli.exe timeout: {timeout}s")
+            fallback_code = "timeout"
+
+        if fallback_code == 0 and audio_files(folder4result):
+            print("FSB direct: vgmstream")
+            return 0, "vgmstream", None, fallback_code
+        clear_audio_files(folder4result)
+
     legacy_path = os.path.join(folder_root, "_subcontractors", "fsb_aud_extr.exe")
     try:
         legacy = subprocess.run(
@@ -70,34 +102,8 @@ def extract_fsb_with_fallback(file_fsb, folder_cur, folder_root, folder4result):
         legacy_code = "timeout"
 
     if legacy_code == 0 and audio_files(folder_cur):
-        return 0, "fsb_aud_extr", legacy_code, None
+        return 0, "fsb_aud_extr", legacy_code, fallback_code
 
     clear_audio_files(folder_cur)
     clear_audio_files(folder4result)
-    cli = vgmstream_path(folder_root)
-    if not cli:
-        return legacy_code or "extractor_failed", None, legacy_code, None
-
-    output_pattern = os.path.join(folder4result, "?02s_?n.wav")
-    try:
-        fallback = subprocess.run(
-            [cli, "-S", "0", "-o", output_pattern, fsb_path],
-            cwd=os.path.dirname(cli),
-            check=False,
-            timeout=timeout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if fallback.stdout:
-            print(fallback.stdout, end="")
-        fallback_code = fallback.returncode
-    except subprocess.TimeoutExpired:
-        print(f"vgmstream-cli.exe timeout: {timeout}s")
-        fallback_code = "timeout"
-
-    if fallback_code == 0 and audio_files(folder4result):
-        print("FSB fallback: vgmstream")
-        return 0, "vgmstream", legacy_code, fallback_code
-    return fallback_code or legacy_code, None, legacy_code, fallback_code
+    return fallback_code or legacy_code or "extractor_failed", None, legacy_code, fallback_code

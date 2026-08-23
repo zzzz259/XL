@@ -205,6 +205,16 @@ Phase 6 - Lua 与角色数据链路重构
 - [pending] 对照当天日志、`output/audio`、Lua 专辑映射和 bank 级统计，确认每个问题的实际根因与相互关系。
 - [pending] 由用户确认修复边界后，再拆分为可独立提交的小 commit，并补充回归测试与全量导出验收方案。
 
+### 2026-08-23 第三轮：debank 性能实测与直解方案
+
+- [completed] 读取用户提供的优化建议，并逐项对照当前 QuickBMS、FSB 提取、临时目录、复制和缓存实现。
+- [completed] 从本地完整 AB 版本建立独立 staging，验证 AssetStudio 能导出完整 FMOD `.bytes`，不污染项目现有产物。
+- [completed] 完成同批 12 bank 的旧链路/直解对照和 735 bank 直解全量基准，确认直解优先具备明确收益，SFX 失败需要旧链路兜底。
+- [completed] 修改 bank/FSB 解码为 vgmstream 直解优先，失败后回退 QuickBMS/旧 FSB 提取器；补充日志中的解码方式和 bank 级统计。
+- [completed] 根据 2/4/6/8 路样本结果将默认 worker 设为 4；同盘成品优先原子移动，跨盘回退复制。
+- [completed] 更新 README、开发指南、版本历史、根目录计划和工作记录；pytest 77 passed、Ruff、compileall、diff 检查全部通过。
+- [pending] 用户侧再执行一次正式音频导出，确认真实机器上的输出数量、BGM 专辑归类和 23 个 SFX 空产出是否符合预期。
+
 ### 当前只读证据
 
 - 最新日志：`logs/app_20260822_140730_100108.log`，约 3.34 MB。

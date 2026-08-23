@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,11 @@ try:
     from app.core.logger import logger
 except ImportError:
     logger = None
+
+try:
+    from .fsb_fallback import vgmstream_path
+except ImportError:
+    from fsb_fallback import vgmstream_path
 
 
 def _log(msg):
@@ -32,7 +38,7 @@ def _debug(msg):
         print(msg)
 
 
-DEFAULT_WORKERS = 2
+DEFAULT_WORKERS = 4
 AUDIO_EXTENSIONS = {".wav", ".ogg", ".mp3"}
 BANK_STATE_FILENAME = ".bank_state.json"
 BANK_CACHE_VERSION = 1
@@ -235,6 +241,57 @@ def _run_process(command, cwd, timeout=None, cancel_check=None):
         time.sleep(0.1)
 
 
+def _normalise_vgmstream_names(result_dir):
+    """去掉 vgmstream 为多子流添加的序号，保持旧提取器的文件名契约。"""
+    for source in collect_audio_files(result_dir):
+        filename = os.path.basename(source)
+        match = re.match(r"^\d+_(.+)$", filename)
+        if not match:
+            continue
+        destination = os.path.join(os.path.dirname(source), match.group(1))
+        if os.path.exists(destination):
+            stem, extension = os.path.splitext(destination)
+            index = 1
+            while os.path.exists(f"{stem}_{index}{extension}"):
+                index += 1
+            destination = f"{stem}_{index}{extension}"
+        os.replace(source, destination)
+
+
+def execute_vgmstream_bank_single(
+    bank_path,
+    folder_cur,
+    result_dir,
+    timeout=None,
+    cancel_check=None,
+):
+    """直接从 FMOD bank 解码，失败时由调用方回退 QuickBMS。"""
+    cli = vgmstream_path(folder_cur)
+    if not cli:
+        return False, "vgmstream_unavailable"
+    os.makedirs(result_dir, exist_ok=True)
+    output_pattern = os.path.join(result_dir, "?02s_?n.wav")
+    try:
+        returncode = _run_process(
+            [cli, "-i", "-S", "0", "-o", output_pattern, os.path.abspath(bank_path)],
+            cwd=os.path.dirname(cli),
+            timeout=timeout,
+            cancel_check=cancel_check,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    if returncode == "cancelled":
+        return False, "cancelled"
+    if returncode != 0:
+        shutil.rmtree(result_dir, ignore_errors=True)
+        os.makedirs(result_dir, exist_ok=True)
+        return False, returncode
+    _normalise_vgmstream_names(result_dir)
+    if not collect_audio_files(result_dir):
+        return False, "empty_output"
+    return True, returncode
+
+
 def _script_command(python_exe, script_path, folder_cur, result_dir):
     """构造 QuickBMS -S 命令，并把结果目录显式传给提取脚本。"""
     def quote(value):
@@ -338,20 +395,40 @@ def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_t
             "audio_files": [],
             "elapsed": 0,
         }
-    execute_kwargs = {
-        "result_dir": job["result_dir"],
-        "timeout": bank_timeout,
-    }
-    if cancel_check is not None:
-        execute_kwargs["cancel_check"] = cancel_check
-    success, returncode = execute_quickbms_single(
+    direct_success, direct_code = execute_vgmstream_bank_single(
         job["bank_path"],
-        folder4subcontractors,
-        job["extract_dir"],
         folder_cur,
-        python_exe,
-        **execute_kwargs,
+        job["result_dir"],
+        timeout=bank_timeout,
+        cancel_check=cancel_check,
     )
+    method = "vgmstream" if direct_success else "quickbms"
+    if direct_success:
+        success, returncode = True, direct_code
+    else:
+        if direct_code == "cancelled":
+            return {
+                **job,
+                "status": "cancelled",
+                "returncode": direct_code,
+                "audio_files": [],
+                "method": "vgmstream",
+                "elapsed": time.perf_counter() - started,
+            }
+        execute_kwargs = {
+            "result_dir": job["result_dir"],
+            "timeout": bank_timeout,
+        }
+        if cancel_check is not None:
+            execute_kwargs["cancel_check"] = cancel_check
+        success, returncode = execute_quickbms_single(
+            job["bank_path"],
+            folder4subcontractors,
+            job["extract_dir"],
+            folder_cur,
+            python_exe,
+            **execute_kwargs,
+        )
     audio_files = collect_audio_files(job["result_dir"])
     if returncode == "cancelled" or (cancel_check and cancel_check()):
         status = "cancelled"
@@ -366,6 +443,7 @@ def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_t
         "status": status,
         "returncode": returncode,
         "audio_files": audio_files,
+        "method": method,
         "elapsed": time.perf_counter() - started,
     }
 
@@ -403,8 +481,13 @@ def _copy_job_audio(result, output_root, before_copy_callback, audio_transform_c
                 _debug(f"跳过已存在: {os.path.relpath(dst, output_root)}")
                 skipped += 1
                 continue
-            shutil.copy2(src, dst)
-            _debug(f"[OK] {filename} → {os.path.relpath(dst, output_root)}")
+            try:
+                os.replace(src, dst)
+                _debug(f"[OK] 移动 {filename} → {os.path.relpath(dst, output_root)}")
+            except OSError:
+                # temp_dir 可能被调用方放在其他卷，跨卷时保留兼容复制路径。
+                shutil.copy2(src, dst)
+                _debug(f"[OK] 复制 {filename} → {os.path.relpath(dst, output_root)}")
             copied += 1
         except Exception as exc:
             _log(f"[音频bank] 复制失败: {filename}: {exc}")
@@ -567,7 +650,8 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
                             }
                         _debug(
                             f"[音频bank] 成功: {result['bank_name']}，"
-                            f"产出 {len(result['audio_files'])}，耗时 {result['elapsed']:.2f}s"
+                            f"产出 {len(result['audio_files'])}，方式={result.get('method', 'unknown')}，"
+                            f"耗时 {result['elapsed']:.2f}s"
                         )
                 elif result["status"] == "empty":
                     total_empty += 1
