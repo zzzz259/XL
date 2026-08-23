@@ -1,5 +1,5 @@
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -14,6 +14,8 @@ from app.ui.views.preview_view import create_preview_view
 from app.ui.views.version_view import create_version_header, create_version_table
 from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
 from app.core.audio_library import format_size
+from app.core.audio_repository import sync_audio_snapshot
+from app.ui.theme import TEXT_MUTED
 
 
 @pytest.fixture(scope="session")
@@ -200,3 +202,60 @@ def test_audio_unread_marker_propagates_to_outer_folders(qapp):
     voice_leaf.setData(0, Qt.UserRole, info)
     refresh_audio_tree_unread(table)
     assert all(item.text(5) == "" for item in [voice_root, voice_character, voice_language, voice_leaf])
+
+
+def test_mark_all_audio_read_updates_leaf_data_and_all_parent_markers(qapp, tmp_path):
+    audio_dir = tmp_path / "output" / "audio"
+    first_path = audio_dir / "voice" / "064" / "cn" / "064_in_01.wav"
+    second_path = audio_dir / "album" / "第五专辑" / "event.wav"
+    first_path.parent.mkdir(parents=True)
+    second_path.parent.mkdir(parents=True)
+    first_path.write_bytes(b"cn")
+    second_path.write_bytes(b"bgm")
+    audio_files = [
+        {
+            "name": "voice\\064\\cn\\064_in_01.wav",
+            "dir": "voice\\064\\cn",
+            "ext": "WAV",
+            "size": first_path.stat().st_size,
+            "path": str(first_path),
+        },
+        {
+            "name": "album\\第五专辑\\event.wav",
+            "dir": "album\\第五专辑",
+            "ext": "WAV",
+            "size": second_path.stat().st_size,
+            "path": str(second_path),
+        },
+    ]
+    sync_audio_snapshot(str(audio_dir), audio_files)
+
+    window = MainWindow.__new__(MainWindow)
+    window.audio_table = QTreeWidget()
+    window.audio_status = QLabel()
+    window.status_bar = MagicMock()
+    window._refresh_unread_badges = MagicMock()
+    window._audio_files = audio_files
+    window._audio_file_items = populate_audio_tree(
+        window.audio_table, audio_files, format_size
+    )
+
+    with patch("app.ui.main_window.get_base_dir", return_value=str(tmp_path)):
+        window._mark_all_audio_read()
+
+    assert all(not item.data(0, Qt.UserRole)["unread"] for item in window._audio_file_items)
+    assert all(item.text(5) == "" for item in _walk_tree(window.audio_table))
+    assert all(item.foreground(5).color().name() == TEXT_MUTED for item in _walk_tree(window.audio_table))
+
+
+def _walk_tree(table):
+    items = []
+
+    def visit(item):
+        items.append(item)
+        for index in range(item.childCount()):
+            visit(item.child(index))
+
+    for index in range(table.topLevelItemCount()):
+        visit(table.topLevelItem(index))
+    return items

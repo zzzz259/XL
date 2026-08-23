@@ -1402,7 +1402,7 @@ class MainWindow(QMainWindow):
         changed = mark_all_audio_read(audio_dir)
         for item in getattr(self, "_audio_file_items", []):
             info = item.data(0, Qt.UserRole) or {}
-            info["unread"] = False
+            item.setData(0, Qt.UserRole, {**info, "unread": False})
         refresh_audio_tree_unread(self.audio_table)
         self._refresh_unread_badges()
         self.status_bar.showMessage("已将全部音频标记为已读" if changed else "当前没有未读音频")

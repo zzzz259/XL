@@ -216,6 +216,8 @@ class AudioDecryptWorker(QThread):
             self._remove_legacy_voice_aliases(expected_dir, bank_stem, filenames)
         for filename in filenames:
             for root, _dirs, files in os.walk(self.audio_output_dir):
+                if self._is_audio_staging_root(root):
+                    continue
                 if filename not in files:
                     continue
                 if source_language and not self._is_same_voice_scope(
@@ -230,6 +232,11 @@ class AudioDecryptWorker(QThread):
                     logger.info("移除音频旧分类输出: bank=%s file=%s", bank_stem, candidate)
                 except OSError as e:
                     logger.warning("移除音频旧分类输出失败: %s (%s)", candidate, e)
+
+    def _is_audio_staging_root(self, root):
+        """临时解包目录只允许在最终复制完成后统一清理。"""
+        relative = os.path.relpath(root, self.audio_output_dir).replace("\\", "/")
+        return relative == ".debank-temp" or relative.startswith(".debank-temp/")
 
     def _normalize_voice_audio_files(self, bank_stem, rel_path, audio_files):
         """将提取器对同名事件生成的连续后缀归一化为标准事件编号。

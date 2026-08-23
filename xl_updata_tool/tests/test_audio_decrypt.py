@@ -137,6 +137,29 @@ def test_audio_worker_corrects_same_named_file_in_old_album(tmp_path):
     assert not old.exists()
 
 
+def test_audio_worker_does_not_delete_current_bgm_staging_file(tmp_path):
+    audio_root = tmp_path / "output" / "audio"
+    staging = audio_root / ".debank-temp" / "0001_bgm" / "result"
+    staging.mkdir(parents=True)
+    current = staging / "event.wav"
+    current.write_bytes(b"current")
+
+    worker = AudioDecryptWorker(
+        str(tmp_path / "material"),
+        str(audio_root),
+        str(tmp_path / "debank"),
+    )
+
+    worker._before_audio_copy(
+        "bgm_system_event_33",
+        "assets/fmodassets/bgm/bgm_system/bgm_system_event_33.bank",
+        os.path.join("album", "第五专辑"),
+        [current.name],
+    )
+
+    assert current.exists()
+
+
 def test_audio_worker_keeps_cn_file_when_processing_same_named_jp_file(tmp_path):
     cn_file = tmp_path / "output" / "audio" / "voice" / "116" / "cn" / "116_in_01.wav"
     jp_file = tmp_path / "output" / "audio" / "voice" / "116" / "jp" / "116_in_01.wav"
