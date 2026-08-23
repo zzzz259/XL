@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QObject, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTreeWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QSlider, QTableWidget, QTreeWidget
 
 from app.ui.main_window import MainWindow
 from app.ui.views.audio_view import create_audio_view
@@ -15,7 +15,7 @@ from app.ui.views.version_view import create_version_header, create_version_tabl
 from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
 from app.core.audio_library import format_size
 from app.core.audio_repository import sync_audio_snapshot
-from app.ui.theme import TEXT_MUTED
+from app.ui.theme import DANGER, TEXT_MUTED
 
 
 @pytest.fixture(scope="session")
@@ -165,6 +165,62 @@ def test_audio_rows_are_single_choice_when_clicked_anywhere(qapp):
     assert window.audio_table.selectedItems() == []
 
 
+def test_audio_directory_selection_checks_descendants_and_ctrl_adds(qapp):
+    window = MainWindow.__new__(MainWindow)
+    window.audio_table = QTreeWidget()
+    window.audio_status = QLabel()
+    window._audio_files = [
+        {"name": "album\\a\\one.wav", "dir": "album\\a", "ext": "WAV", "size": 1, "path": "one.wav"},
+        {"name": "album\\a\\two.wav", "dir": "album\\a", "ext": "WAV", "size": 1, "path": "two.wav"},
+        {"name": "album\\b\\three.wav", "dir": "album\\b", "ext": "WAV", "size": 1, "path": "three.wav"},
+    ]
+    window._audio_file_items = populate_audio_tree(
+        window.audio_table, window._audio_files, format_size
+    )
+
+    root = window.audio_table.topLevelItem(0)
+    first_album = root.child(0)
+    window._on_audio_item_pressed(first_album, 0)
+    window._on_audio_item_clicked(first_album, 0)
+    assert [item.checkState(0) for item in window._audio_file_items] == [
+        Qt.Checked, Qt.Checked, Qt.Unchecked
+    ]
+
+    second_album = root.child(1)
+    with patch("app.ui.main_window.QApplication.keyboardModifiers", return_value=Qt.ControlModifier):
+        window._on_audio_item_pressed(second_album, 0)
+        window._on_audio_item_clicked(second_album, 0)
+    assert all(item.checkState(0) == Qt.Checked for item in window._audio_file_items)
+
+
+def test_audio_slider_commits_seek_on_release(qapp):
+    class FakePlayer:
+        def __init__(self):
+            self.positions = []
+
+        def duration(self):
+            return 10000
+
+        def setPosition(self, position):
+            self.positions.append(position)
+
+    window = MainWindow.__new__(MainWindow)
+    window._audio_player = FakePlayer()
+    window.audio_slider = QSlider(Qt.Horizontal)
+    window.audio_slider.setRange(0, 10000)
+    window.audio_position_label = QLabel()
+    window._audio_slider_dragging = False
+
+    window._on_audio_slider_pressed()
+    window.audio_slider.setValue(4200)
+    window._on_audio_slider_moved(4200)
+    assert window._audio_player.positions == []
+    window._on_audio_slider_released()
+
+    assert window._audio_player.positions == [4200]
+    assert "00:04" in window.audio_position_label.text()
+
+
 def test_audio_unread_marker_propagates_to_outer_folders(qapp):
     table = QTreeWidget()
     files = [
@@ -174,6 +230,14 @@ def test_audio_unread_marker_propagates_to_outer_folders(qapp):
             "ext": "WAV",
             "size": 1,
             "path": "064_in_01.wav",
+            "unread": True,
+        },
+        {
+            "name": "voice\\064\\cn\\064_in_02.wav",
+            "dir": "voice\\064\\cn",
+            "ext": "WAV",
+            "size": 1,
+            "path": "064_in_02.wav",
             "unread": True,
         },
         {
@@ -195,11 +259,17 @@ def test_audio_unread_marker_propagates_to_outer_folders(qapp):
     assert voice_root.text(5) == "新"
     assert voice_character.text(5) == "新"
     assert voice_language.text(5) == "新"
-    assert voice_leaf.text(5) == "新"
+    assert all(voice_language.child(i).text(5) == "新" for i in range(voice_language.childCount()))
+    assert all(
+        voice_language.child(i).foreground(5).color().name() == DANGER
+        for i in range(voice_language.childCount())
+    )
 
-    info = dict(voice_leaf.data(0, Qt.UserRole))
-    info["unread"] = False
-    voice_leaf.setData(0, Qt.UserRole, info)
+    for index in range(voice_language.childCount()):
+        leaf = voice_language.child(index)
+        info = dict(leaf.data(0, Qt.UserRole))
+        info["unread"] = False
+        leaf.setData(0, Qt.UserRole, info)
     refresh_audio_tree_unread(table)
     assert all(item.text(5) == "" for item in [voice_root, voice_character, voice_language, voice_leaf])
 

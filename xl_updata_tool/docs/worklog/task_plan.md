@@ -245,3 +245,9 @@ Phase 6 - Lua 与角色数据链路重构
 | `compileall` 写入仓库 `__pycache__` 被拒绝 | 仓库已有缓存目录 ACL 不允许当前账户覆盖临时 `.pyc` | 将下一次编译缓存重定向到 Codex 工作目录 `tmp`，不修改仓库权限 |
 | 全量 pytest 固定 basetemp 无法清理、Ruff 写 `.ruff_cache` 被拒绝 | 仓库/旧临时目录 ACL 限制，验证工具默认写入受限位置 | 改用新的 Codex 临时目录，并设置 `RUFF_CACHE_DIR` 到 Codex 工作目录后重跑 |
 | 全量 pytest 暴露旧测试 fake `epic7_debank.run()` 不接受 `use_cache` | 生产调用新增了缓存控制参数，测试替身接口未同步 | 补齐测试替身参数后重跑全量门禁 |
+
+### 2026-08-23 用户实机反馈修复计划
+
+- [completed] 对照实机日志、Lua 音频配置和 output 产物，确认解码慢、缺失与未分类的真实边界。
+- [completed] 修复 bank 性能、列表重复加载、未读聚合、播放 seek 和树形层级选择。
+- [completed] 补充回归测试、静态检查、文档同步和本地检查点提交。

@@ -38,7 +38,7 @@ def _debug(msg):
         print(msg)
 
 
-DEFAULT_WORKERS = 4
+DEFAULT_WORKERS = 6
 AUDIO_EXTENSIONS = {".wav", ".ogg", ".mp3"}
 BANK_STATE_FILENAME = ".bank_state.json"
 BANK_CACHE_VERSION = 1

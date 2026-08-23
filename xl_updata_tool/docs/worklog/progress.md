@@ -273,3 +273,10 @@
 - [completed] 将 bank/FSB 解码策略调整为 vgmstream 直解优先、旧 QuickBMS/`fsb_aud_extr` 兼容回退，并补充直解优先、命名归一化和回退测试。
 - [completed] 默认并行度调整为 4；同盘成品优先 `os.replace`，跨盘自动回退复制；worker 2/4/6/8 已完成小样本对照。
 - [completed] 最终门禁通过：pytest 77 passed、Ruff 通过、compileall 通过、`git diff --check` 通过。
+
+### 2026-08-23 用户实机问题
+
+- [x] 读取 2026-08-23 实机日志并确认 503 bank、7211 音频、734.91 秒和重复列表加载证据。
+- [x] 复查 Lua BGM 配置与 output 音频产物的对应关系，配置内缺失 0 个。
+- [x] 修复 bank 清理索引、列表缓存、未读聚合、播放 seek 和树形层级选择。
+- [x] 补充回归测试、静态检查、编译和 diff 检查；已创建本地检查点提交。
