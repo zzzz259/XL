@@ -23,6 +23,7 @@ class AudioDecryptWorker(QThread):
     progress = Signal(str)
     progress_value = Signal(int, int, str)  # current, total, message
     finished_decrypt = Signal()
+    cancelled_decrypt = Signal()
     error = Signal(str)
 
     def __init__(self, material_dir, audio_output_dir, debank_dir, force=False,
@@ -51,9 +52,11 @@ class AudioDecryptWorker(QThread):
                 return
 
             # 步骤 2：解密 .bank 文件
-            self._decrypt_bank_files()
-
-            self.finished_decrypt.emit()
+            result = self._decrypt_bank_files()
+            if self._cancelled or (result and result.get("cancelled")):
+                self.cancelled_decrypt.emit()
+            else:
+                self.finished_decrypt.emit()
         except Exception as e:
             logger.error(f"音频解密线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
@@ -164,13 +167,15 @@ class AudioDecryptWorker(QThread):
             if self.debank_dir not in sys.path:
                 sys.path.insert(0, self.debank_dir)
             import epic7_debank
-            epic7_debank.run(
+            result = epic7_debank.run(
                 self.material_dir, self.audio_output_dir,
                 progress_callback=lambda c, t: self.progress_value.emit(c, t, f"正在解密 .bank: {c}/{t}"),
                 subdir_fn=self._audio_subdir,
                 before_copy_callback=self._before_audio_copy,
                 audio_transform_callback=self._normalize_voice_audio_files,
                 temp_dir=os.path.join(self.audio_output_dir, ".debank-temp"),
+                cancel_check=lambda: self._cancelled,
+                use_cache=not self.force,
             )
             # 统计输出目录中的音频文件数（递归扫描子目录）
             audio_count = 0
@@ -180,6 +185,7 @@ class AudioDecryptWorker(QThread):
                         audio_count += 1
             self.progress.emit(f"解密完成: 提取 {audio_count} 个音频文件")
             logger.info(f"解密完成: 输出 {audio_count} 个音频文件到 {self.audio_output_dir}")
+            return result
 
         except Exception as e:
             logger.error(f"解密异常: {e}", exc_info=True)

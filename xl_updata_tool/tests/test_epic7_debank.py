@@ -1,3 +1,5 @@
+import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -75,6 +77,109 @@ def test_debank_reports_bank_timeout(tmp_path, monkeypatch):
     assert summary["failed"] == 1
 
 
+def test_debank_cancellation_stops_copy_and_queued_banks(tmp_path, monkeypatch):
+    input_root = tmp_path / "material" / "assets" / "fmodassets" / "voice_cn" / "btl"
+    first = input_root / "064.bank"
+    second = input_root / "065.bank"
+    input_root.mkdir(parents=True)
+    first.write_bytes(b"bank")
+    second.write_bytes(b"bank")
+    cancelled = False
+
+    def fake_execute(
+        bank_path,
+        _subcontractors,
+        extract_dir,
+        _folder_cur,
+        _python,
+        result_dir=None,
+        timeout=None,
+        cancel_check=None,
+    ):
+        nonlocal cancelled
+        if Path(bank_path).name == "064.bank":
+            cancelled = True
+            result = Path(result_dir)
+            result.mkdir(parents=True, exist_ok=True)
+            (result / "064_in_01.wav").write_bytes(b"audio")
+            return True, 0
+        assert cancel_check is not None and cancel_check()
+        return False, "cancelled"
+
+    monkeypatch.setattr(epic7_debank, "execute_quickbms_single", fake_execute)
+    output_root = tmp_path / "output"
+    summary = epic7_debank.run(
+        str(tmp_path / "material"),
+        str(output_root),
+        folder_cur=str(tmp_path / "debank"),
+        subdir_fn=lambda _rel_path, stem: f"voice/{stem}/cn",
+        workers=1,
+        cancel_check=lambda: cancelled,
+    )
+
+    assert summary["cancelled"] is True
+    assert summary["copied"] == 0
+    assert not list(output_root.rglob("*.wav"))
+
+
+def test_external_process_is_terminated_when_cancelled(tmp_path):
+    started = time.monotonic()
+    result = epic7_debank._run_process(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        cwd=str(tmp_path),
+        timeout=10,
+        cancel_check=lambda: time.monotonic() - started >= 0.2,
+    )
+
+    assert result == "cancelled"
+    assert time.monotonic() - started < 5
+
+
+def test_debank_caches_unchanged_bank_and_validates_output(tmp_path, monkeypatch):
+    bank = tmp_path / "material" / "assets" / "fmodassets" / "bgm" / "track.bank"
+    bank.parent.mkdir(parents=True)
+    bank.write_bytes(b"bank")
+    calls = 0
+
+    def fake_execute(
+        _bank_path,
+        _subcontractors,
+        extract_dir,
+        _folder_cur,
+        _python,
+        result_dir=None,
+        timeout=None,
+    ):
+        nonlocal calls
+        calls += 1
+        Path(extract_dir).mkdir(parents=True, exist_ok=True)
+        result = Path(result_dir)
+        result.mkdir(parents=True, exist_ok=True)
+        (result / "track.wav").write_bytes(b"audio")
+        return True, 0
+
+    monkeypatch.setattr(epic7_debank, "execute_quickbms_single", fake_execute)
+    output_root = tmp_path / "output"
+    kwargs = {
+        "folder_cur": str(tmp_path / "debank"),
+        "subdir_fn": lambda _rel_path, _stem: "album/第五专辑",
+        "workers": 1,
+    }
+
+    first = epic7_debank.run(str(tmp_path / "material"), str(output_root), **kwargs)
+    second = epic7_debank.run(str(tmp_path / "material"), str(output_root), **kwargs)
+
+    assert first["cached"] == 0
+    assert second["cached"] == 1
+    assert second["copied"] == 0
+    assert calls == 1
+
+    (output_root / "album" / "第五专辑" / "track.wav").unlink()
+    third = epic7_debank.run(str(tmp_path / "material"), str(output_root), **kwargs)
+    assert third["cached"] == 0
+    assert calls == 2
+
+
 def test_execute_quickbms_propagates_fsb_callback_failure(tmp_path, monkeypatch):
     bank = tmp_path / "064.bank"
     bank.write_bytes(b"bank")
@@ -85,11 +190,16 @@ def test_execute_quickbms_propagates_fsb_callback_failure(tmp_path, monkeypatch)
         '{"status": "failed", "returncode": 3221226519}',
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        epic7_debank.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
-    )
+    class CompletedProcess:
+        pid = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(epic7_debank.subprocess, "Popen", lambda *_args, **_kwargs: CompletedProcess())
 
     ok, code = epic7_debank.execute_quickbms_single(
         str(bank),

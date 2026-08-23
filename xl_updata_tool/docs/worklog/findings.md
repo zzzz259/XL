@@ -229,3 +229,11 @@
 - BGM 回归测试先按真实目录结构复现失败：`_before_audio_copy()` 会递归进入 `output/audio/.debank-temp/.../result`，删除当前 bank 正准备复制的文件；加入临时目录跳过边界后，BGM staging 文件保留，旧专辑分类清理测试仍通过。
 - “新”标记回归测试复现了用户所说的混色现象根因：PySide 返回的 `QTreeWidgetItem.data()` 字典不能依赖原地修改，主窗口只执行 `info["unread"] = False`，树节点内部仍保留旧值。改为 `setData()` 写回新字典后，叶节点及所有父节点文字、颜色同步清除。
 - 本轮已完成的最小改动只涉及 BGM 临时目录保护、未读状态写回和对应回归测试；取消链路与 bank 缓存尚未开始修改。
+
+## 2026-08-23 第二轮修复验证
+
+- 取消链路新增 `cancel_check`：`AudioDecryptWorker` 将状态传给 `epic7_debank.run()`，bank job 在启动前和外部进程轮询期间检查；QuickBMS 及其 `-S` 拉起的 Python/FSB 子进程由 psutil 进程树一起终止。
+- 取消回归通过：真实长时间 Python 子进程在触发取消后 5 秒内退出；模拟 bank 队列取消后不复制当前临时结果，后续排队 bank 不再继续处理。
+- bank 增量缓存文件为 `output/audio/.bank_state.json`，缓存键是输入目录下的 bank 相对路径，记录大小、修改时间、分类目录和最终输出文件大小；第二次运行可命中，删除最终文件会使缓存失效。
+- 缓存不会把历史“有音频文件”当成完成条件：分类目录改变、任一成品缺失、来源指纹变化或 `force=True` 都会重新解码；取消时已完成 bank 的缓存状态仍在本轮结束时原子写回。
+- 全量门禁重新验证：pytest 72 项通过，Ruff 通过，`app`、`tests` 和 `tools/epic7_debank_v1_0` 编译通过。临时目录和 Ruff 缓存均位于 Codex 工作目录，未修改仓库 ACL。

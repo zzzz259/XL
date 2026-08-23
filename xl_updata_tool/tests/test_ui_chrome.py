@@ -248,6 +248,18 @@ def test_mark_all_audio_read_updates_leaf_data_and_all_parent_markers(qapp, tmp_
     assert all(item.foreground(5).color().name() == TEXT_MUTED for item in _walk_tree(window.audio_table))
 
 
+def test_cancel_audio_worker_waits_for_thread_before_replacement(qapp):
+    worker = MagicMock()
+    worker.wait.return_value = True
+    window = MainWindow.__new__(MainWindow)
+    window._audio_worker = worker
+
+    assert window._cancel_audio_worker() is True
+    worker.cancel.assert_called_once_with()
+    worker.wait.assert_called_once_with(30000)
+    assert window._audio_worker is None
+
+
 def _walk_tree(table):
     items = []
 

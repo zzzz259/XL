@@ -256,3 +256,11 @@
 - [completed] 修复“全部标为已读”只修改字典副本、导致叶节点和父节点仍显示旧红点的问题。
 - [completed] 新增 BGM staging 保留测试和完整音频树未读清除测试；定向测试通过。
 - [in_progress] 继续设计取消传播和 bank 指纹缓存，尚未进入第二轮代码修改。
+
+### 2026-08-23 第二轮修复
+
+- [completed] 将取消状态贯穿 `AudioDecryptWorker`、debank bank job 和 QuickBMS/FSB 子进程树；取消后保留已发布产物且不自动续跑。
+- [completed] 新增 `output/audio/.bank_state.json` bank 级增量缓存，并验证缓存命中与成品缺失失效。
+- [completed] 同步 README、开发文档指南、版本历史和根目录开发计划。
+- [completed] 全量 pytest 72 项、Ruff、Python 编译门禁通过。
+- [in_progress] 等待进行小范围真实音频链路验证，确认 BGM、取消和缓存日志符合实机行为。

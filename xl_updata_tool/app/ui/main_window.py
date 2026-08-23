@@ -997,7 +997,7 @@ class MainWindow(QMainWindow):
 
         self._finish_import(True, message)
 
-    def _finish_import(self, success, message, audio_error=None):
+    def _finish_import(self, success, message, audio_error=None, cancelled=False):
         """结束导入及其后处理阶段，统一关闭共享弹窗和恢复按钮状态。"""
         self.btn_browse.setEnabled(True)
         self.dl_progress.setVisible(False)
@@ -1006,6 +1006,11 @@ class MainWindow(QMainWindow):
             self._import_progress_dialog = None
         self._pending_import_message = None
         self._audio_uses_import_dialog = False
+
+        if cancelled:
+            self.status_bar.showMessage("导入已取消，已完成的文件已保留")
+            QMessageBox.information(self, "已取消", message)
+            return
 
         if success:
             self._auto_parse_after_lua_export()
@@ -1243,10 +1248,21 @@ class MainWindow(QMainWindow):
 
     def _cancel_audio_worker(self):
         """取消音频解密线程"""
-        if self._audio_worker is not None:
-            self._audio_worker.cancel()
-            self._audio_worker.wait(2000)
-            self._audio_worker = None
+        worker = self._audio_worker
+        if worker is None:
+            return True
+        worker.cancel()
+        if not worker.wait(30000):
+            logger.error("音频解密线程未能在取消超时内退出，不启动新的音频任务")
+            return False
+        try:
+            worker.cancelled_decrypt.disconnect(self._on_audio_decrypt_cancelled)
+            worker.finished_decrypt.disconnect(self._on_audio_decrypt_finished)
+            worker.error.disconnect(self._on_audio_decrypt_error)
+        except (TypeError, RuntimeError):
+            pass
+        self._audio_worker = None
+        return True
 
     def _start_audio_decrypt(self, force=False, shared_dialog=None):
         """启动后台线程执行音频后处理（仅由导出完成流程调用）。"""
@@ -1255,7 +1271,9 @@ class MainWindow(QMainWindow):
         audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
 
         # 取消已有的解密线程
-        self._cancel_audio_worker()
+        if not self._cancel_audio_worker():
+            self.status_bar.showMessage("上一轮音频处理尚未退出，已取消启动新的任务")
+            return
 
         self.status_bar.showMessage("正在处理音频文件...")
 
@@ -1266,6 +1284,7 @@ class MainWindow(QMainWindow):
         self._audio_worker.progress.connect(self._on_audio_decrypt_progress)
         self._audio_worker.progress_value.connect(self._on_audio_decrypt_progress_value)
         self._audio_worker.finished_decrypt.connect(self._on_audio_decrypt_finished)
+        self._audio_worker.cancelled_decrypt.connect(self._on_audio_decrypt_cancelled)
         self._audio_worker.error.connect(self._on_audio_decrypt_error)
         self._audio_worker.start()
 
@@ -1313,6 +1332,21 @@ class MainWindow(QMainWindow):
         self._load_audio_list()
         if shared and self._pending_import_message:
             self._finish_import(True, self._pending_import_message)
+
+    def _on_audio_decrypt_cancelled(self):
+        """音频解密取消回调：保留已发布产物，不自动续跑。"""
+        shared = self._audio_uses_import_dialog
+        if getattr(self, "_audio_progress_dialog", None) and not shared:
+            self._audio_progress_dialog.close()
+        self._audio_progress_dialog = None
+        self.status_bar.showMessage("音频处理已取消，已完成的文件已保留")
+        self._load_audio_list()
+        if shared and self._pending_import_message:
+            self._finish_import(
+                False,
+                "音频后处理已取消，已完成的文件已保留，可稍后重新处理音频。",
+                cancelled=True,
+            )
 
     def _on_audio_decrypt_error(self, err_msg):
         """音频解密错误回调"""

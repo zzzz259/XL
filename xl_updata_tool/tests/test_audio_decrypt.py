@@ -20,8 +20,8 @@ def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
 
     def fake_run(input_dir, output_dir, progress_callback=None, subdir_fn=None,
                  before_copy_callback=None, audio_transform_callback=None,
-                 workers=None, temp_dir=None):
-        calls.append((input_dir, output_dir, progress_callback, subdir_fn, workers, temp_dir))
+                 workers=None, temp_dir=None, cancel_check=None, use_cache=None):
+        calls.append((input_dir, output_dir, progress_callback, subdir_fn, workers, temp_dir, cancel_check, use_cache))
 
     monkeypatch.setitem(sys.modules, "epic7_debank", types.SimpleNamespace(run=fake_run))
     monkeypatch.setattr("app.ui.workers.audio_decrypt.build_album_map", lambda _: {})
@@ -35,6 +35,7 @@ def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
     worker._decrypt_bank_files()
 
     assert len(calls) == 1
+    assert calls[0][-1] is not None
 
 
 def test_audio_worker_normalizes_duplicate_battle_hit_names(tmp_path):
