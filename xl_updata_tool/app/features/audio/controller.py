@@ -22,7 +22,7 @@ except ImportError:
     QMediaPlayer = None
     QT_MULTIMEDIA_AVAILABLE = False
 
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 from app.features.audio.page import AudioPage
 from app.features.audio.service import AudioService
 from app.features.audio.tree import (

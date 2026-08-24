@@ -7,10 +7,10 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QTableWidgetItem
 
 from app.core.character_profile import build_character_profile
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 from app.features.characters.page import CharacterPage
 from app.features.characters.service import CharacterService
-from app.ui.theme import DANGER
+from app.shared.qt.tokens import DANGER
 
 
 class CharacterController(QObject):

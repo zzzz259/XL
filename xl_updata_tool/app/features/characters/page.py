@@ -18,9 +18,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.theme import get_color
+from app.shared.qt.tokens import get_color
 from app.ui.widgets.character_profile import CharacterProfileView
-from app.ui.widgets.view_chrome import (
+from app.shared.qt.chrome import (
     create_action_button,
     create_command_bar,
     create_empty_state,

@@ -13,8 +13,8 @@ from functools import partial
 
 from PySide6.QtWidgets import QMessageBox, QDialog, QApplication
 
-from app.core.logger import logger
-from app.core.path_utils import get_tools_dir, get_base_dir
+from app.platform.diagnostics import logger
+from app.platform.paths import get_tools_dir, get_base_dir
 from app.ui.dialogs.export_settings import ExportSettingsDialog
 from app.features.preview.worker import CompositeExportWorker, BatchExportWorker
 from app.features.preview.adapter import (

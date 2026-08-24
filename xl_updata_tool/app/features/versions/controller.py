@@ -14,12 +14,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 from app.ui.panels import ticks_to_date
 from app.features.versions.page import VersionPage
 from app.features.versions.service import VersionService
 from app.features.versions.worker import CheckUpdateThread, DownloadWorker
-from app.ui.theme import DANGER, INFO, SUCCESS, TEXT_MUTED, WARNING, get_color
+from app.shared.qt.tokens import DANGER, INFO, SUCCESS, TEXT_MUTED, WARNING, get_color
 
 
 class VersionController(QObject):

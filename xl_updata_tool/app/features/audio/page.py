@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QHeaderView
 
-from app.ui.widgets.view_chrome import (
+from app.shared.qt.chrome import (
     create_action_button,
     create_command_bar,
     create_empty_state,

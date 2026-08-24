@@ -7,7 +7,7 @@ import os
 from PySide6.QtCore import QPoint, QObject, Qt, Signal
 from PySide6.QtWidgets import QListWidgetItem
 
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 
 from .item import build_preview_item
 from .page import PreviewPage

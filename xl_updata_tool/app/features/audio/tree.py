@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QTreeWidgetItem
 
-from app.ui.theme import DANGER, TEXT_MUTED
+from app.shared.qt.tokens import DANGER, TEXT_MUTED
 
 
 def _set_unread_marker(item, unread):

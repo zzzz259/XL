@@ -32,9 +32,9 @@ from app.core.bundle_selector import (
 from app.core.audio_repository import unread_files as audio_unread_files
 from app.core.preview_catalog import scan_preview_roles
 from app.core.version_update import append_changelog
-from app.core import database as db
-from app.core.logger import logger, timed
-from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
+from app.platform import database as db
+from app.platform.diagnostics import logger, timed
+from app.platform.paths import get_data_dir, get_base_dir, get_tools_dir
 
 # 拆分后的模块导入
 from .dialogs.image_viewer import ImageViewerDialog

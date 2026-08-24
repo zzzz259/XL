@@ -32,7 +32,7 @@ def build_app_context(
     """构建运行时上下文；显式路径主要用于测试和未来的依赖注入。"""
 
     if base_dir is None or data_dir is None or output_dir is None or tools_dir is None:
-        from app.core.path_utils import (
+        from app.platform.paths import (
             get_base_dir,
             get_data_dir,
             get_output_dir,
