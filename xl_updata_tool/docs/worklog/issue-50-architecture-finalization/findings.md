@@ -20,7 +20,7 @@
 - 实施基线提交：`adf0a05941f0ebf0ee55a5d3e68a9880c1d69a51`（最新 `origin/main`）。
 - 生产入口 `main.py` 仍直接导入并创建 `app.ui.main_window.MainWindow`；`app/bootstrap/app_factory.py` 目前只是迁移期注册骨架。
 - MainWindow 仍直接导入并装配 Audio、Characters、Versions、Importer、Preview 具体类型；这是 P2/P3 的计划内迁移对象。
-- Preview 导出编排仍使用 `parent._...` 私有字段，旧 `app/ui/views/*` 仍公开 `controls_dict`；这是 P1 的计划内迁移对象。
+- Preview 导出编排已迁入 Feature-owned Controller 状态；旧 `app/ui/views/preview_view.py` 仍公开 `controls_dict`，仅作为尚有测试/兼容调用方的保留门面。
 - `app/features/audio/worker.py`、`importer/worker.py`、`preview/worker.py`、`versions/worker.py` 仍引用 `app.ui.workers`；这是 P4/P5 的计划内迁移对象。
 - 旧领域实现和兼容入口仍有 tracked 引用，当前不能删除；后续以逐文件引用归零清单为准。
 - 完整的旧层文件、直接引用关系、`controls_dict`/`parent._` 事实和删除前复核命令已固化在同目录 `references.md`；当前清单不是删除授权。
@@ -44,6 +44,19 @@
 - Qt offscreen smoke（授权环境）：`QT_SMOKE_OK True False False False`，版本页默认可见，预览/音频/角色页默认隐藏。
 - `git diff --check`：`DIFF_CHECK_OK`。
 - `compileall` 未作为通过依据：它只因尝试写入已有拒绝访问的 `__pycache__` 失败；不修改缓存权限，已由 AST 解析替代源码语法门禁。
+
+## P1 退出复核（2026-08-24）
+
+- `PreviewPage` 已直接构造并持有页面控件，不再调用旧 `create_preview_view()`，不再暴露 `controls` 字典。
+- `PreviewController` 已接管页面筛选、加载进度、重载角色选择、上下文菜单、双击图片、文件定位/复制和 GIF/视频导出编排。
+- `MainWindow` 已删除 Preview 控件镜像、预览加载/导出回调、上下文菜单、双击和文件操作实现；只保留页面切换和通用状态栏桥接。
+- 导出模块改为接收 `PreviewController`，其 worker、页面按钮、骨架映射和状态均由 Feature 自己持有；不再读取宿主窗口私有字段。
+- 旧 `app/ui/views/preview_view.py` 仍被现有测试和兼容入口使用，登记为保留门面，未删除。
+- P1 全量 `pytest -q`：127 项全部通过。
+- `ruff check --no-cache app tests`：通过。
+- 不落盘 AST：`AST_OK 149`。
+- Qt offscreen：`QT_SMOKE_OK True False False False False`；最后一项确认 `MainWindow.preview_controls` 不存在。
+- `git diff --check`：通过。
 
 ## 基线扫描中的探针错误
 

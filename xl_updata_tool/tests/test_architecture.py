@@ -112,11 +112,20 @@ def test_preview_service_and_main_window_respect_feature_boundary():
 
 def test_preview_export_and_compatibility_entrypoints_are_feature_owned():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+    page_text = (PREVIEW_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
+    controller_text = (PREVIEW_FEATURE_DIR / "controller.py").read_text(encoding="utf-8")
     legacy_text = (APP_DIR / "ui" / "features" / "export_controller.py").read_text(encoding="utf-8")
     feature_export_text = (PREVIEW_FEATURE_DIR / "export_controller.py").read_text(encoding="utf-8")
 
-    assert "app.features.preview.export_controller" in main_window_text
+    assert "PreviewController" in main_window_text
+    assert "preview_controller" in main_window_text
+    assert "create_preview_view" not in page_text
+    assert "self.controls" not in page_text
+    assert "show_context_menu" in controller_text
+    assert "open_item" in controller_text
+    assert "preview_controls" not in main_window_text
     assert "app.features.preview.export_controller" in legacy_text
+    assert "parent._" not in feature_export_text
     assert "CompositeExportWorker" in feature_export_text
     assert "BatchExportWorker" in feature_export_text
 

@@ -5,12 +5,12 @@ import sys
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
+    QProgressBar, QMessageBox, QToolBar, QStatusBar,
     QToolButton,
-    QCheckBox, QMenu, QComboBox, QProgressDialog,
-    QDialog, QSizePolicy,
+    QCheckBox, QComboBox, QProgressDialog,
+    QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings
+from PySide6.QtCore import Qt, QTimer, QSettings
 
 try:
     import qtawesome as qta
@@ -30,15 +30,12 @@ from app.core.bundle_selector import (
     select_lua_bundles,
 )
 from app.core.audio_repository import unread_files as audio_unread_files
-from app.core.preview_catalog import scan_preview_roles
 from app.core.version_update import append_changelog
 from app.platform import database as db
-from app.platform.diagnostics import logger, timed
+from app.platform.diagnostics import logger
 from app.platform.paths import get_data_dir, get_base_dir, get_tools_dir
 
 # 拆分后的模块导入
-from .dialogs.image_viewer import ImageViewerDialog
-from app.features.preview.adapter import extract_skin_name_from_png, is_composite_png
 from app.features.audio.page import AudioPage
 from app.features.audio.controller import AudioController
 from app.features.versions.page import VersionPage
@@ -53,12 +50,6 @@ from app.features.importer.service import ImporterService
 from app.features.preview.page import PreviewPage
 from app.features.preview.controller import PreviewController
 from app.features.preview.service import PreviewService
-from app.features.preview.export_controller import (
-    export_composite_video,
-    export_with_dialog,
-    batch_export_with_dialog,
-)
-from app.features.preview.item import build_preview_item
 
 DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
@@ -89,15 +80,10 @@ class MainWindow(QMainWindow):
         self.import_controller.stage_finished.connect(self._on_import_stage_finished)
         self.import_controller.category_finished.connect(self._on_import_category_finished)
         self.import_controller.all_finished.connect(self._on_import_all_finished)
-        # 后台工作线程实例（避免 AttributeError）
-        self._preview_worker = None
-        self._batch_worker = None
-        self._composite_worker = None
-        self._image_worker = None
+        # 仅保留 Shell 自己拥有的导入任务；Preview 任务由 PreviewController 管理。
         self._import_worker = None
         self._pending_import_message = None
         self._show_character = False
-        self._skel_map = {}
         self._init_db()
         logger.info(f"当前 DATA_DIR: {DATA_DIR}")
         self._seed_bundled_version()
@@ -150,9 +136,7 @@ class MainWindow(QMainWindow):
             ),
             parent=self,
         )
-        self.preview_container = self.preview_page
-        self.preview_controls = self.preview_page.controls
-        self.preview_container.setVisible(False)
+        self.preview_page.setVisible(False)
         content_layout.addWidget(self.preview_page, 1)
 
         # 音频管理器视图容器（默认隐藏）。页面自身拥有控件，主窗口只接收语义信号。
@@ -181,15 +165,6 @@ class MainWindow(QMainWindow):
         body.addWidget(content, 1)
         root.addLayout(body, 1)
 
-        # 暴露预览控件引用（供其他方法使用）
-        self.preview_title = self.preview_controls["preview_title"]
-        self.preview_progress = self.preview_controls["preview_progress"]
-        self.image_list = self.preview_controls["image_list"]
-        self.empty_label = self.preview_controls["empty_label"]
-        self.preview_status = self.preview_controls["preview_status"]
-        self.btn_reload = self.preview_controls["btn_reload"]
-        self.character_filter = self.preview_controls["character_filter"]
-
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet(f"""
             QStatusBar {{ background-color:{get_color('BG_SURFACE')}; border-top:1px solid {get_color('BORDER')};
@@ -200,13 +175,8 @@ class MainWindow(QMainWindow):
         self._connect_version_controller()
         self._connect_character_controller()
         self.preview_page.close_requested.connect(lambda: self._toggle_preview_mode(False))
-        self.preview_page.reload_requested.connect(self._force_reload_preview)
         self.preview_controller.progress_changed.connect(self._on_preview_controller_progress)
         self.preview_controller.status_changed.connect(self.status_bar.showMessage)
-        self.preview_controller.error.connect(self._on_preview_export_error)
-        self.preview_controller.export_finished.connect(self._on_preview_export_finished)
-        self.preview_controller.context_menu_requested.connect(self._show_context_menu)
-        self.preview_controller.item_double_clicked.connect(self._on_item_double_clicked)
         # 只恢复本地角色仓库/缓存，确保启动时顶层“角色”角标准确；绝不解析 Lua。
         self.character_controller.restore_local()
         self._refresh_unread_badges()
@@ -527,7 +497,7 @@ class MainWindow(QMainWindow):
     def _load_data(self):
         # 确保版本列表可见（隐藏图片预览、音频和角色视图）
         self._set_version_content_visible(True)
-        self.preview_container.setVisible(False)
+        self.preview_page.setVisible(False)
         self.audio_page.setVisible(False)
         self.character_page.setVisible(False)
         self._show_character = False
@@ -546,7 +516,7 @@ class MainWindow(QMainWindow):
     def _import_selected(self):
         # 确保版本列表可见（隐藏图片预览和音频视图）
         self._set_version_content_visible(True)
-        self.preview_container.setVisible(False)
+        self.preview_page.setVisible(False)
         self.audio_page.setVisible(False)
         ts = self._get_selected_ts()
         if not ts: QMessageBox.warning(self, "未选择", "请先选中一个版本."); return
@@ -804,93 +774,6 @@ class MainWindow(QMainWindow):
             logger.error(f"启动 SpineViewer 失败: {e}")
             QMessageBox.warning(self, "错误", f"启动 SpineViewer 失败:\n{e}")
 
-    # ========== PREVIEW ==========
-
-    def _preview_images(self):
-        """预览图片：检查缓存，有则直接加载，无则导出后加载"""
-        if self.preview_controller.service.has_images():
-            # 情况 A：已有图片，直接加载
-            logger.info(
-                "预览目录已存在 %s 张图片，直接加载",
-                len(self.preview_controller.service.image_paths()),
-            )
-            self._preview_source = "缓存"
-            self._toggle_preview_mode(True)
-            return
-
-        # 情况 B：没有图片，启动后台线程导出
-        logger.info("预览目录为空，开始导出 ...")
-        self._start_preview_export(force=False)
-
-    def _start_preview_export(self, force=False, selected_roles=None):
-        """启动后台线程执行 .skel → PNG 导出（含配对合成 + 皮肤导出）
-
-        force=True 时强制重新导出（跳过去重检查）。
-        selected_roles 非空时只导出这些角色（角色名集合）。
-        """
-        spine_cli = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewerCLI.exe")
-
-        # 切换到预览视图（显示进度条）
-        self._preview_source = "刚导出"
-        self._toggle_preview_mode(True)
-
-        self.status_bar.showMessage("正在处理..." if not force else "强制重新导出中...")
-        if hasattr(self, "preview_progress"):
-            self.preview_progress.setVisible(True)
-            self.preview_progress.setValue(0)
-
-        if not self.preview_controller.start_export(
-            spine_cli, force=force, selected_roles=selected_roles
-        ):
-            self.preview_progress.setVisible(False)
-
-    def _on_preview_export_progress(self, current, total):
-        """预览导出进度更新"""
-        if hasattr(self, "preview_progress") and self.preview_progress:
-            self.preview_progress.setMaximum(total)
-            self.preview_progress.setValue(current)
-            self.preview_progress.setFormat(f"导出中... {current}/{total}")
-        self.status_bar.showMessage(f"正在导出预览图片: {current}/{total}")
-
-    def _on_preview_export_finished(self, success, summary):
-        """预览导出完成回调"""
-        if hasattr(self, "preview_progress") and self.preview_progress:
-            self.preview_progress.setVisible(False)
-        self.status_bar.showMessage("导出完成" if success else "导出失败")
-        if self.preview_container.isVisible():
-            # 视图可见才弹窗 + 立即刷新；切走时不打扰（返回预览会自动 _load_preview_images）
-            QMessageBox.information(self, "导出完成", summary)
-            self._load_preview_images()
-
-    def _on_preview_export_error(self, err_msg):
-        """预览导出错误回调"""
-        if hasattr(self, "preview_progress") and self.preview_progress:
-            self.preview_progress.setVisible(False)
-        self.status_bar.showMessage("导出失败")
-        QMessageBox.warning(self, "错误", f"预览导出失败:\n{err_msg}")
-
-    def _force_reload_preview(self):
-        """重新加载预览图片：弹出角色选择对话框，只导出勾选的角色"""
-        roles = self._scan_cardspine_roles()
-        if not roles:
-            QMessageBox.warning(self, "提示", "未找到角色立绘，请先导入资源")
-            return
-        from .dialogs.character_select import CharacterSelectDialog
-        dialog = CharacterSelectDialog(roles, self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        selected = dialog.selected_roles()
-        if not selected:
-            QMessageBox.information(self, "提示", "未选择任何角色")
-            return
-        logger.info(f"重新加载预览图片，选中 {len(selected)} 个角色")
-        self.status_bar.showMessage(f"导出 {len(selected)} 个角色...")
-        self._start_preview_export(force=False, selected_roles=selected)
-
-    def _scan_cardspine_roles(self):
-        """扫描 material 的 cardspine .skel，返回角色名列表（去重排序，排除 _bg）"""
-        return self.preview_controller.service.cardspine_roles()
-
     # ========== IMAGE GALLERY PREVIEW ==========
 
     def _set_active_view_btn(self, active_btn):
@@ -908,12 +791,12 @@ class MainWindow(QMainWindow):
         self._set_active_view_btn(self.btn_image_preview if show_preview else self.btn_home)
         self._set_toolbars_visible(not show_preview)
         self._set_version_content_visible(not show_preview)
-        self.preview_container.setVisible(show_preview)
+        self.preview_page.setVisible(show_preview)
         self.character_page.setVisible(False)
         self._show_character = False
         if show_preview:
             self.audio_page.setVisible(False)
-            self._load_preview_images()
+            self.preview_controller.load()
 
     # ==================== 音频管理器 ====================
 
@@ -922,7 +805,7 @@ class MainWindow(QMainWindow):
         self._set_active_view_btn(self.btn_audio if show_audio else self.btn_home)
         self._set_toolbars_visible(not show_audio)
         self._set_version_content_visible(not show_audio)
-        self.preview_container.setVisible(False)
+        self.preview_page.setVisible(False)
         self.character_page.setVisible(False)
         self._show_character = False
         self.audio_page.setVisible(show_audio)
@@ -930,10 +813,6 @@ class MainWindow(QMainWindow):
             self.audio_controller.initialize_player()
             # 页面切换只读取最终产物；已加载过的树保留，用户可用“刷新列表”主动重建。
             self.audio_controller.load_catalog()
-
-    def _cancel_preview_worker(self):
-        """取消预览导出线程"""
-        self.preview_controller.cancel_export()
 
     # ========== 角色视图 ==========
 
@@ -946,7 +825,7 @@ class MainWindow(QMainWindow):
         self._set_active_view_btn(self.btn_lua if show_character else self.btn_home)
         self._set_toolbars_visible(not show_character)
         self._set_version_content_visible(not show_character)
-        self.preview_container.setVisible(False)
+        self.preview_page.setVisible(False)
         self.audio_page.setVisible(False)
         self.character_page.setVisible(show_character)
         self._show_character = show_character
@@ -964,261 +843,15 @@ class MainWindow(QMainWindow):
         if not self.character_controller.data_loaded:
             self.character_controller.restore_local()
 
-    def _populate_character_filter(self):
-        """扫描 output/character 的角色目录，填充图片预览的角色过滤下拉框"""
-        cb = getattr(self, "character_filter", None)
-        if cb is None:
-            return
-        preview_dir = os.path.join(get_base_dir(), "output", "character")
-        roles = scan_preview_roles(preview_dir)
-        cur = cb.currentText()
-        cb.blockSignals(True)
-        cb.clear()
-        cb.addItem("全部角色", "")
-        for r in roles:
-            cb.addItem(r, r)
-        idx = cb.findText(cur)
-        cb.setCurrentIndex(idx if idx >= 0 else 0)
-        cb.blockSignals(False)
-
-    def _on_character_filter_changed(self):
-        """角色过滤：只显示选中角色的图片"""
-        cb = getattr(self, "character_filter", None)
-        if cb is None:
-            return
-        role = cb.currentData()
-        for i in range(self.image_list.count()):
-            item = self.image_list.item(i)
-            info = item.data(Qt.UserRole)
-            png = info.get("png", "") if isinstance(info, dict) else ""
-            visible = True
-            if role:
-                visible = f"/{role}/" in png.replace("\\", "/")
-            item.setHidden(not visible)
-        self._update_preview_status()
-
-    def _on_preview_selection_changed(self):
-        """同步预览区的选择数量，帮助用户确认批量操作范围。"""
-        self._update_preview_status()
-
-    def _update_preview_status(self):
-        """更新预览图片总数与当前选择数。"""
-        if not hasattr(self, "preview_status"):
-            return
-        total = self.image_list.count()
-        selected = len(self.image_list.selectedItems())
-        self.preview_status.setText(f"共 {total} 张图片 · 已选 {selected}")
-
-    @timed("图片缩略图加载")
-    def _load_preview_images(self):
-        """通过 PreviewController 异步加载预览图片。"""
-        self.preview_controller.load()
-        self._skel_map = self.preview_controller.skel_map
-
     def _on_preview_controller_progress(self, current, total, stage):
         """接入 PreviewController 的统一进度语义。"""
         if total > 0:
-            self.preview_progress.setMaximum(total)
-            self.preview_progress.setValue(current)
-            self.preview_progress.setFormat(f"{stage}... {current}/{total}")
+            self.preview_page.preview_progress.setMaximum(total)
+            self.preview_page.preview_progress.setValue(current)
+            self.preview_page.preview_progress.setFormat(f"{stage}... {current}/{total}")
         self.status_bar.showMessage(
             f"{stage}: {current}/{total}" if total > 0 else f"{stage}: 处理中..."
         )
-
-    def _clear_list(self):
-        """清空 QListWidget"""
-        self.image_list.clear()
-        self._image_paths = []
-
-    def _on_load_progress(self, current, total):
-        """更新加载进度"""
-        self.preview_progress.setMaximum(total)
-        self.preview_progress.setValue(current)
-        self.preview_progress.setFormat(f"加载中... {current}/{total}")
-        self.preview_title.setText(f"角色预览器 · 共 {total} 张图片 · 加载中 {current}/{total}")
-
-    def _on_thumbnail_loaded(self, image_path, thumbnail):
-        """添加缩略图到 QListWidget，同时存储 skel/atlas 路径"""
-        self._thumb_cache[image_path] = thumbnail
-        self._image_paths.append(image_path)
-
-        item = build_preview_item(image_path, thumbnail, self._skel_map)
-        self.image_list.addItem(item)
-
-    def _on_load_finished(self, loaded_paths):
-        """加载完成回调"""
-        self.preview_progress.setVisible(False)
-        count = len(loaded_paths)
-        self._image_paths = loaded_paths
-        self.preview_title.setText(f"角色预览器 · 共 {count} 张图片")
-
-        if count == 0:
-            self.empty_label.setVisible(True)
-            self._update_preview_status()
-            logger.warning("预览目录为空")
-        else:
-            self.empty_label.setVisible(False)
-            self._update_preview_status()
-
-        logger.info(f"加载完成，共 {count} 张图片")
-        self.status_bar.showMessage(f"图片预览: 共 {count} 张图片")
-
-
-    def _show_context_menu(self, position):
-        """显示右键菜单（单选/多选自适应），支持仅有 PNG 无 skel/atlas 的项"""
-        # 如果右键的项未选中，先清空选择并选中该项
-        item_at_pos = self.image_list.itemAt(position)
-        if item_at_pos and not item_at_pos.isSelected():
-            self.image_list.clearSelection()
-            item_at_pos.setSelected(True)
-
-        selected_items = self.image_list.selectedItems()
-        if not selected_items:
-            return
-
-        # 收集所有选中项的 skel/atlas/png 数据
-        entries = []
-        png_only_entries = []
-        for item in selected_items:
-            data = item.data(Qt.UserRole)
-            if not data:
-                continue
-            png_path = data.get("png", "")
-            if not png_path or not os.path.exists(png_path):
-                continue
-            if data.get("skel") and data.get("atlas"):
-                entries.append((data["skel"], data["atlas"], png_path))
-            else:
-                png_only_entries.append(png_path)
-
-        has_skel = len(entries) > 0
-        has_png = len(png_only_entries) > 0
-
-        if not has_skel and not has_png:
-            return
-
-        menu = QMenu(self)
-        menu.setObjectName("contextMenu")
-
-        is_multi = len(selected_items) > 1
-
-        if is_multi:
-            # 多选
-            if has_skel:
-                act_batch_gif = menu.addAction(f"批量导出 GIF（{len(entries)} 个）")
-                act_batch_video = menu.addAction(f"批量导出视频（{len(entries)} 个）")
-                if has_png:
-                    menu.addSeparator()
-            if has_png:
-                act_open = menu.addAction("打开文件所在目录")
-                act_copy = menu.addAction("复制文件")
-
-            action = menu.exec(self.image_list.mapToGlobal(position))
-            if has_skel and action == act_batch_gif:
-                batch_export_with_dialog(self, entries, "GIF")
-            elif has_skel and action == act_batch_video:
-                batch_export_with_dialog(self, entries, "MP4")
-            elif has_png and action == act_open:
-                png_path = png_only_entries[0] if png_only_entries else entries[0][2]
-                self._open_file_location(png_path)
-            elif has_png and action == act_copy:
-                png_path = png_only_entries[0] if png_only_entries else entries[0][2]
-                self._copy_file_to_clipboard(png_path)
-        else:
-            # 单选
-            data = selected_items[0].data(Qt.UserRole)
-            png_path = data.get("png", "")
-
-            act_open = menu.addAction("打开文件所在目录")
-            act_copy = menu.addAction("复制文件")
-
-            if has_skel:
-                menu.addSeparator()
-                skel_path, atlas_path, _ = entries[0]
-                is_composite = is_composite_png(png_path)
-                if is_composite:
-                    act_export_gif = menu.addAction("导出合成 GIF")
-                    act_export_video = menu.addAction("导出合成视频")
-                else:
-                    act_export_gif = menu.addAction("导出 GIF")
-                    act_export_video = menu.addAction("导出视频")
-
-            action = menu.exec(self.image_list.mapToGlobal(position))
-            if action == act_open:
-                self._open_file_location(png_path)
-            elif action == act_copy:
-                self._copy_file_to_clipboard(png_path)
-            elif has_skel and action == act_export_gif:
-                skin_name = extract_skin_name_from_png(png_path)
-                if is_composite:
-                    export_composite_video(self, png_path, "GIF", skin_name=skin_name)
-                else:
-                    export_with_dialog(self, skel_path, atlas_path, "GIF", skin_name=skin_name)
-            elif has_skel and action == act_export_video:
-                skin_name = extract_skin_name_from_png(png_path)
-                if is_composite:
-                    export_composite_video(self, png_path, "MP4", skin_name=skin_name)
-                else:
-                    export_with_dialog(self, skel_path, atlas_path, "MP4", skin_name=skin_name)
-
-    def _on_item_clicked(self, item):
-        """左键点击缩略图 → 不做任何操作（仅选中）"""
-        pass
-
-    def _on_item_double_clicked(self, item):
-        """双击缩略图 → 打开独立预览窗口"""
-        data = item.data(Qt.UserRole)
-        if not data:
-            return
-        png_path = data.get("png", "")
-        if not png_path or not os.path.exists(png_path):
-            return
-
-        # 获取 output/character/ 目录下所有 PNG 文件列表，用于上下导航
-        output_dir = os.path.dirname(png_path)
-        all_pngs = []
-        current_index = 0
-        if os.path.isdir(output_dir):
-            for fname in sorted(os.listdir(output_dir)):
-                if fname.lower().endswith(".png"):
-                    full_path = os.path.join(output_dir, fname)
-                    all_pngs.append(full_path)
-                    if os.path.normpath(full_path) == os.path.normpath(png_path):
-                        current_index = len(all_pngs) - 1
-
-        if not all_pngs:
-            all_pngs = [png_path]
-            current_index = 0
-
-        logger.debug(f"双击预览: {png_path}, 索引 {current_index}/{len(all_pngs)}")
-        dialog = ImageViewerDialog(all_pngs, current_index, self)
-        dialog.exec()
-
-    def _open_file_location(self, file_path):
-        """打开文件所在目录并选中该文件"""
-        logger.info(f"打开文件所在目录: {file_path}")
-        try:
-            subprocess.Popen(
-                ['explorer', '/select,', os.path.normpath(file_path)]
-            )
-        except Exception as e:
-            logger.error(f"打开文件位置失败: {e}")
-            QMessageBox.warning(self, "错误", f"打开文件位置失败:\n{e}")
-
-    def _copy_file_to_clipboard(self, file_path):
-        """复制文件到系统剪贴板"""
-        logger.info(f"复制文件: {file_path}")
-        try:
-            mime_data = QMimeData()
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(file_path))])
-            QApplication.clipboard().setMimeData(mime_data)
-            self.status_bar.showMessage(f"已复制文件: {os.path.basename(file_path)}")
-        except Exception as e:
-            logger.error(f"复制文件失败: {e}")
-            QMessageBox.warning(self, "错误", f"复制文件失败:\n{e}")
-
-
-
 
     # ========== DELETE ==========
 

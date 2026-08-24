@@ -28,3 +28,12 @@
 - Qt offscreen smoke：`QT_SMOKE_OK True False False False`。
 - `git diff --check`：通过。
 - `compileall` 受仓库已有 `__pycache__` 权限限制未通过；未修改权限，使用 AST 解析完成等价的源码语法门禁。
+
+## P1 退出门
+
+- [x] Preview 加载、筛选、选择、上下文菜单、双击、导出、取消、进度、错误和空状态已有针对性/全量测试保护。
+- [x] PreviewPage 不再依赖旧 View 的 `controls` 字典。
+- [x] MainWindow 不再拥有 Preview 控件镜像或 Preview Worker 状态。
+- [x] 导出编排依赖 PreviewController 的显式状态，不再依赖宿主窗口私有字段。
+- [x] 旧 `preview_view.py` 的保留原因与调用方已登记；未执行无证据删除。
+- [x] P1 全量 pytest 127 passed、Ruff、AST 149、Qt offscreen 和 diff check 通过。

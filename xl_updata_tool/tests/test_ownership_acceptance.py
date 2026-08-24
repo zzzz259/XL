@@ -33,7 +33,7 @@ def test_shell_uses_platform_entrypoints_for_infrastructure():
     text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
     assert "from app.platform import database as db" in text
-    assert "from app.platform.diagnostics import logger, timed" in text
+    assert "from app.platform.diagnostics import logger" in text
     assert "from app.platform.paths import" in text
     assert "from app.core.database" not in text
     assert "from app.core.logger" not in text
