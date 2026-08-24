@@ -291,3 +291,33 @@
 - [x] 保持 UI 布局、正式数据目录、导出结果、取消语义和现有 logger 调用方式不变。
 - [completed] 完成全量测试、静态检查、编译和差异审查：pytest 84 passed、Ruff 通过、compileall 通过、`git diff --check` 通过。
 - [pending] 用户分别启动普通模式和 Debug 模式，检查 `logs/<session_id>/`、`debug.log`、`environment.txt` 与任务标识；流式外部工具、Debug 数据隔离和 UI 标识留待后续阶段。
+
+## 2026-08-23 项目结构与多人协作架构审查
+
+- [completed] 盘点 `app/core`、`app/ui/views`、`app/ui/features`、`app/ui/workers`、`app/ui/adapters`、旧 AssetBrowser 和测试目录。
+- [completed] 统计公共热点：`main_window.py` 约 2331 行，项目 73 个提交中按文件历史出现 27 次；确认高风险辅助热点和跨领域 Worker。
+- [completed] 梳理依赖方向：主窗口直接组装多个领域，Worker/feature 混合 Qt、文件系统、外部工具和业务流程，core 仍有外部进程副作用。
+- [completed] 对照架构基线确认当前强项与偏差：core 无 Qt、纯逻辑已有测试；但应用服务层、ownership 门禁、依赖方向测试和外部工具统一适配尚未建立。
+- [completed] 形成渐进式目标结构和 P0-P4 迁移计划，决定先加稳定入口和门禁，再迁移调用方，最后清理旧实现。
+- [pending] 等用户确认计划后创建结构调整 Issue；确认前不修改源代码、不移动目录、不改变运行时契约。
+
+## 2026-08-23 第三方所有权审查复核
+
+- [completed] 读取第三方审查报告并拆分为 17 个可核验要点。
+- [completed] 复核 `main.py`、`MainWindow`、页面工厂、Audio/Import Worker、角色解析器、导入分类和文档热点。
+- [completed] 确认第三方报告中的核心判断成立：当前是技术分层，尚未形成 Feature ownership 分层。
+- [completed] 确认报告建议的 Feature-first、Composition Root、Page 自有控件、Worker 薄化、PostProcessorRegistry、parser 拆分、依赖门禁和 Change Fragment 均具有实际价值。
+- [completed] 对报告方案做风险收口：不一次性搬迁全仓，采用兼容迁移；Audio 作为模板，随后 Characters、Versions、Importer、Preview。
+- [completed] 将逐条复核报告和完整 P0-P8 计划写入 `ownership-review-2026-08-23.md` 与 `task_plan.md`。
+- [pending] 等用户确认后创建架构迁移 Issue；当前不改源代码、不移动目录、不创建 GitHub Issue。
+
+## 2026-08-24 Issue #39：P0 架构契约与 ownership 基线
+
+- [completed] 按 XL 协作流程读取计划、检查工作区和确认当前分支状态。
+- [completed] 验证 GitHub keyring 认证有效，创建 Issue #39：架构迁移 P0：建立 Feature ownership 与依赖门禁。
+- [completed] 新增无 Qt 的 Feature/Page/Controller/Service/Worker/ImportResult 契约、AppContext 和 Feature 装配入口。
+- [completed] 新增架构 AST 测试、ownership 文档，并保留现有实现作为迁移期兼容层。
+- [completed] 全量 pytest 84 项通过，Python 编译 103 个文件通过；Ruff 初次发现并记录 1 个未使用导入，已修正。
+- [completed] 重新运行 P0 定向 pytest 8 项、Ruff 和 Python 编译 103 个文件；全部通过。
+- [in_progress] 运行全量 pytest、最终 diff 审查并创建本地 P0 检查点。
+- [pending] 用户用正常模式启动 XL 验证启动、页面和现有功能不变；确认后再进入 Audio Feature 迁移。

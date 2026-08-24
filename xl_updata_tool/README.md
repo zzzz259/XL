@@ -8,6 +8,7 @@
 - [开发文档指南](docs/开发文档指南.md)：面向开发者的架构、模块职责、调用链、运行目录契约和验证方法。
 - [版本历史](docs/版本历史.md)：按新版本到旧版本记录功能和修复变更。
 - [架构与协作基线](docs/架构与协作基线.md)：多人协作边界、失败恢复要求和提交前检查。
+- [代码所有权与边界](docs/代码所有权与边界.md)：功能域认领范围、公共架构区和迁移期修改规则。
 - [开发过程记录](docs/worklog/)：任务计划、调查发现和进度记录，仅供开发过程追踪。
 
 ## 项目简介
@@ -124,8 +125,10 @@ xl_updata_tool/
 ├── pyproject.toml      pytest 与 Ruff 配置
 ├── build.spec          PyInstaller 打包配置
 ├── app/                源代码
-│   ├── core/           核心逻辑（下载、解析、数据库）
-│   └── ui/             UI 界面（workers/dialogs/features/views/adapters）
+    │   ├── bootstrap/      迁移期应用上下文与 Feature 装配入口
+    │   ├── shared/         与 Qt 无关的跨 Feature 契约
+    │   ├── core/           迁移期核心逻辑兼容层
+    │   └── ui/             迁移期 UI 界面（workers/dialogs/features/views/adapters）
 ├── tests/              项目测试（与 app/ 平级）
 ├── tools/              外部工具（AssetStudio 等）
 ├── docs/               开发文档
@@ -162,8 +165,8 @@ A: 浏览已下载的资源和查看版本历史可以离线，但检查更新�
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
-python -m ruff check --no-cache tests app/core app/ui
+python -m ruff check --no-cache tests app/core app/ui app/bootstrap app/shared
 python -B -c "from pathlib import Path; files=list(Path('app').rglob('*.py'))+list(Path('tests').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
 ```
 
-提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md)。
+提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md) 和 [代码所有权与边界](docs/代码所有权与边界.md)。

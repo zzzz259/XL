@@ -269,3 +269,63 @@
 - 新增审计回归覆盖：配置 bank 缺失、状态文件存在但成品失效、额外未跟踪 BGM 不误报为配置缺失。
 - 新增界面回归覆盖：同级多个“新”同时显示、目录递归勾选、Ctrl 追加选择和释放进度条提交 seek。
 - 最终门禁：全量 pytest 通过，Ruff、compileall、`git diff --check` 全部通过；pytest 使用 Codex 工作目录临时缓存，仓库现有 `.pytest_cache` ACL 警告未纳入业务变更。
+
+## 2026-08-23 项目结构与多人协作架构审查：初步事实
+
+- 当前 `app/ui/main_window.py` 仍承担窗口壳、视图切换、版本下载/导入协调、进度弹窗、音频后处理回调、调试工具和若干路径/状态拼接，是最明显的多人修改热点。
+- `app/core/` 虽已拆出多个仓库和解析器，但共享状态、路径契约、日志、外部工具调用和业务规则仍分散在 core、ui worker、feature 和旧兼容入口之间；“改一个领域需要碰公共文件”的风险仍存在。
+- `ui/workers/` 当前以后台线程为边界，但不少 Worker 同时拥有业务编排、外部进程控制、文件提交和 UI 信号协议，领域服务与 Qt 生命周期尚未完全分离。
+- 测试目录已与源码平级，但主要按模块/历史 Issue 组织，尚缺少围绕“领域服务、端口适配器、应用编排”和跨模块契约的稳定测试分层。
+- 本轮审查目标不是立即移动文件，而是先建立职责地图、依赖方向、公共热点和协作边界，再按可回滚的小阶段迁移；现有运行目录和最终产物契约暂不改变。
+
+## 2026-08-23 项目结构与多人协作架构审查：证据与结论
+
+### 公共热点证据
+
+- 当前 `app/ui/main_window.py` 约 2331 行，定义了 100 个以上的方法；同一文件同时包含窗口组装、导航、主题、版本同步/下载、AS 导入、Lua/角色、音频解密与播放、图片预览、Spine 工具启动、调试清理和文件操作。
+- 项目历史共 73 个提交，按 Git 文件历史统计 `main_window.py` 出现 27 次；从 2026-08-17 的拆分工作到最近的 Lua、音频和日志任务，多个不同领域的改动都需要回到该文件接线。
+- 其他高风险热点包括 `app/core/character_loader.py`（约 1365 行）、`app/ui/theme.py`（约 914 行）、`app/ui/asset_browser.py`（约 748 行）、`app/ui/workers/import_as.py`（约 545 行）和 `app/ui/workers/audio_decrypt.py`（约 483 行）。这说明冲突面不只在主窗口，也在“解析引擎、主题系统、导入 Worker、音频 Worker”这些跨领域模块。
+
+### 依赖与职责证据
+
+- `main_window.py` 直接依赖 30 个以上的 `core` 模块、5 个以上的视图/功能模块和多个 Worker，并直接拼接 `data/`、`output/`、`tools/` 路径；它既是 Qt 组合根，又是应用服务、状态仓库和领域控制器。
+- `ui/workers/import_as.py`、`audio_decrypt.py`、`lua_decrypt.py`、`preview_export.py` 同时负责 Qt 线程生命周期、文件扫描/提交、外部工具调用、取消传播和业务结果整理。Worker 因此不是薄适配器，领域规则改变时容易同时修改 Worker 与主窗口。
+- `ui/features/export_controller.py` 直接依赖 `QMessageBox`、`QApplication`、导出 Worker 和 Spine 适配器；`features` 当前不是纯业务编排层，而是 UI、任务启动和外部工具之间的混合层。
+- `core/bundle_parser.py` 仍直接调用 AssetStudio 外部进程；`ui/adapters/spine_adapter.py` 和旧 `ui/asset_browser.py` 也各自直接调用外部程序。现有“外部工具应集中在 adapter/service”文档约束尚未完全落实。
+- 旧 `AssetBrowser` 虽通过 `ui/legacy/asset_browser_entry.py` 暴露，但 `MainWindow._browse_version()` 仍可触达它；它仍保留独立的线程、子进程和临时目录实现，是兼容入口也是潜在的重复流程。
+- 当前架构测试只检查 `core` 不导入 Qt、兼容入口可导入和少量功能入口可调用；尚未检查 `main_window` 的依赖白名单、`core/ui/workers` 的方向、应用层是否调用 Qt、外部工具调用是否统一，也没有按领域组织测试目录。
+- 仓库没有 `CODEOWNERS` 或等价的目录 ownership 文件。现有协作基线按领域列出了建议目录，但没有把“谁负责审查哪个边界”和“哪些公共文件需要特殊审批”落实为仓库门禁。
+
+### 审查结论
+
+当前的根因不是单纯文件过长，而是缺少独立的“应用服务/用例编排层”。`MainWindow` 被迫成为所有领域的组合根、协调器和最终状态持有者；`core` 又同时容纳领域逻辑、基础设施、仓库和外部工具适配；Worker 与 `features` 进一步把 Qt 生命周期和业务副作用混在一起。因此每个新功能即使已有局部模块，也经常需要修改公共入口才能接通。
+
+现有拆分并非无效：`core` 无 Qt 依赖、多个纯逻辑仓库已经存在，版本视图、音频树和预览项也已有局部入口。这些是后续迁移的安全落脚点。下一步应采用“先加稳定入口、再迁移调用方、最后删除旧实现”的渐进式方式，而不是一次性重命名整个 `core/ui` 目录。
+
+### 目标边界草案
+
+长期结构建议形成四层，先以新增目录和兼容导出过渡，不立即大规模移动现有文件：
+
+```text
+app/
+  domain/          # 版本、资源、Lua/角色、音频等纯规则和数据模型
+  application/     # 面向用例的流程编排，不依赖 Qt
+  infrastructure/  # 路径、数据库、文件提交、外部工具和持久化适配
+  ui/
+    shell/         # MainWindow 最终只保留窗口生命周期、导航和信号绑定
+    views/         # 页面构造与展示
+    workers/       # QThread 生命周期、取消/进度/结果信号适配
+    legacy/        # 明确隔离、只保留兼容入口
+```
+
+迁移期间可以保留 `app/core` 作为兼容层；真正的判断标准是依赖方向和职责，而不是目录名称。最终要求是 `domain →` 无 Qt 纯逻辑，`application → domain/infrastructure ports`，`infrastructure → 外部系统`，`ui → application`，而不是 UI 直接跨层拼接路径、操作数据库和启动工具。
+
+## 2026-08-23 第三方代码所有权审查报告复核
+
+- 第三方报告的主判断与本地复核一致：当前已完成技术分层，但尚未完成按 Feature 划分代码所有权；`MainWindow`、Worker、`core` 和页面工厂仍是跨领域汇合点。
+- 报告中的规模数据得到复核：`main.py` 2035 bytes、`main_window.py` 109460 bytes、`AudioDecryptWorker` 22427 bytes、`ImportASWorker` 26412 bytes、`character_loader.py` 63378 bytes、`版本历史.md` 80940 bytes。
+- 报告关于 Page 远程控件的判断得到复核：音频、角色、预览、版本 View 均通过 `parent._xxx` 连接事件，并向 `MainWindow` 返回 `controls_dict`；这不是独立 Page，而是主窗口持有的控件集合。
+- 报告关于 Worker 过重的判断得到复核：音频 Worker 同时包含 debank、分类、清理、审计、文件索引和 Qt 生命周期；导入 Worker 同时包含 Bundle 修复、AssetStudio、分类导出、staging、事务提交和 Lua 发布。
+- 报告关于 `main.py` 的判断得到复核：当前入口本身职责集中，后续应保持轻量；Composition Root 更适合新增到 `app/bootstrap/app_factory.py`，而不是继续扩展 `main.py`。
+- 报告提出的 feature-first 结构、Page 自有控件、显式 PostProcessorRegistry、Worker 薄化、parser 子域拆分、依赖 AST 门禁、Change Fragment 和按 Issue 分隔 worklog 均纳入后续计划。
+- 本地修正：不直接执行“全仓搬家”，不以 `MainWindow` 行数作为唯一指标；先建立过渡层和兼容导出，再按 Audio → Characters → Versions → Importer → Preview 的顺序迁移。
