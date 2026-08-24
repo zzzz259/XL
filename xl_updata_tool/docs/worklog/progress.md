@@ -359,3 +359,12 @@
 - [completed] 新增 `ExportSpec`、`ImporterService`、`ImportController`、`PostProcessorRegistry` 和兼容 Worker 入口；MainWindow 已改为通过控制器启动导入。
 - [completed] `ImportResult` 已传递 Lua 发布结果和后处理分类；旧 `ImportASWorker` 仍负责实际 AssetStudio 执行，保持输出、取消和暂存事务兼容。
 - [completed] 全量 pytest、Ruff、AST 解析、实际 Qt 启动冒烟、文档同步和 diff 检查通过；待建立本地检查点并请用户验证。
+
+## 2026-08-24 Issue #44：Preview Feature 与外部工具边界
+
+- [in_progress] 已创建 Issue #44，开始审查图片预览、FGUI、Spine 和视频导出流程。
+- [in_progress] 本阶段先建立兼容 Feature 边界，不改变三个 output 目录、导出算法和旧 Worker 行为。
+
+- [completed] 新增 `PreviewPage`、`PreviewService`、`PreviewController`、预览项构造和功能域 Worker 入口。
+- [completed] MainWindow 已切换图片预览页面、目录扫描、角色筛选、缩略图加载和立绘导出任务到 Preview Feature；旧页面/Worker 保留兼容。
+- [completed] 定向测试、全量 pytest、Ruff、实际 Qt 启动冒烟和 diff 检查通过；等待用户验证 P5a 后继续 FGUI/Spine/视频导出边界。

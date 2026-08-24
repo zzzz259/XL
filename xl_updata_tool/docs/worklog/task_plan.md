@@ -584,3 +584,16 @@ app/features/audio/
 - [completed] `ImportResult` 已携带 Lua 发布结果与后处理分类；MainWindow 通过控制器接收进度和结果，旧导出、取消、暂存发布和精准 Bundle 筛选契约保持不变。
 - [completed] 完成导入规格/结果/后处理/架构测试、全量 pytest、Ruff、AST 解析 98 个 Python 文件、实际 Qt 启动冒烟和 `git diff --check`。
 - [completed] 本地检查点提交待完成；提交后进入用户验证，下一阶段为 Preview Feature。
+
+## 2026-08-24 Issue #44：Preview Feature 与外部工具边界
+
+- [in_progress] 审查图片预览、FGUI 图集、Spine 合成和视频导出之间的实际调用关系。
+- [pending] 建立 Preview Page、Controller、Service、Worker 入口，收口预览目录、筛选、导出和外部工具结果。
+- [pending] 保持 `output/character`、`output/fgui`、`output/video`、取消语义和旧入口兼容；不在本阶段重写算法或删除旧 Worker。
+
+### P5a 检查点：Preview 页面与图片链路
+
+- [completed] 新增 `PreviewPage`、`PreviewService`、`PreviewController`、预览项构造和功能域 Worker 入口。
+- [completed] MainWindow 已改为装配 Preview Feature；图片目录扫描、角色筛选、缩略图加载、立绘导出任务生命周期由 Feature 控制器管理。
+- [completed] 保留 `preview_view.py`、`preview_controller.py`、四类旧 Worker 作为兼容入口；未改变 `output/character` 和 Spine 导出行为。
+- [completed] 完成 Preview 目录/架构测试、全量 pytest、Ruff、Qt 启动冒烟和 diff 检查；用户验证通过后继续 P5b 的 FGUI/Spine/视频导出边界收口。

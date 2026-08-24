@@ -30,7 +30,7 @@ from app.core.bundle_selector import (
     select_lua_bundles,
 )
 from app.core.audio_repository import unread_files as audio_unread_files
-from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
+from app.core.preview_catalog import scan_preview_roles
 from app.core.version_update import append_changelog
 from app.core import database as db
 from app.core.logger import logger, timed
@@ -38,10 +38,7 @@ from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
 
 # 拆分后的模块导入
 from .dialogs.image_viewer import ImageViewerDialog
-from .workers.image_loader import ImageLoadWorker
-from .workers.preview_export import PreviewExportWorker
 from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
-from .views.preview_view import create_preview_view
 from app.features.audio.page import AudioPage
 from app.features.audio.controller import AudioController
 from app.features.versions.page import VersionPage
@@ -53,12 +50,15 @@ from app.features.characters.service import CharacterService
 from app.features.importer.controller import ImportController
 from app.features.importer.postprocessing import PostProcessorRegistry
 from app.features.importer.service import ImporterService
+from app.features.preview.page import PreviewPage
+from app.features.preview.controller import PreviewController
+from app.features.preview.service import PreviewService
 from .features.export_controller import (
     export_composite_video,
     export_with_dialog,
     batch_export_with_dialog,
 )
-from .features.preview_controller import build_preview_item
+from app.features.preview.item import build_preview_item
 
 DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
@@ -141,9 +141,19 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.version_page, 1)
 
         # 预览视图容器（默认隐藏）
-        self.preview_container, self.preview_controls = create_preview_view(self)
+        self.preview_page = PreviewPage(self)
+        self.preview_controller = PreviewController(
+            page=self.preview_page,
+            service=PreviewService(
+                os.path.join(DATA_DIR, "material"),
+                os.path.join(get_base_dir(), "output", "character"),
+            ),
+            parent=self,
+        )
+        self.preview_container = self.preview_page
+        self.preview_controls = self.preview_page.controls
         self.preview_container.setVisible(False)
-        content_layout.addWidget(self.preview_container, 1)
+        content_layout.addWidget(self.preview_page, 1)
 
         # 音频管理器视图容器（默认隐藏）。页面自身拥有控件，主窗口只接收语义信号。
         self.audio_page = AudioPage(self)
@@ -178,6 +188,7 @@ class MainWindow(QMainWindow):
         self.empty_label = self.preview_controls["empty_label"]
         self.preview_status = self.preview_controls["preview_status"]
         self.btn_reload = self.preview_controls["btn_reload"]
+        self.character_filter = self.preview_controls["character_filter"]
 
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet(f"""
@@ -188,6 +199,14 @@ class MainWindow(QMainWindow):
         self._connect_audio_controller()
         self._connect_version_controller()
         self._connect_character_controller()
+        self.preview_page.close_requested.connect(lambda: self._toggle_preview_mode(False))
+        self.preview_page.reload_requested.connect(self._force_reload_preview)
+        self.preview_controller.progress_changed.connect(self._on_preview_controller_progress)
+        self.preview_controller.status_changed.connect(self.status_bar.showMessage)
+        self.preview_controller.error.connect(self._on_preview_export_error)
+        self.preview_controller.export_finished.connect(self._on_preview_export_finished)
+        self.preview_controller.context_menu_requested.connect(self._show_context_menu)
+        self.preview_controller.item_double_clicked.connect(self._on_item_double_clicked)
         # 只恢复本地角色仓库/缓存，确保启动时顶层“角色”角标准确；绝不解析 Lua。
         self.character_controller.restore_local()
         self._refresh_unread_badges()
@@ -787,18 +806,12 @@ class MainWindow(QMainWindow):
 
     def _preview_images(self):
         """预览图片：检查缓存，有则直接加载，无则导出后加载"""
-        output_dir = os.path.join(get_base_dir(), "output", "character")
-
-        os.makedirs(output_dir, exist_ok=True)
-
-        # 检查已有图片（递归：角色图按编号分目录）
-        existing_pngs = []
-        for root, _dirs, files in os.walk(output_dir):
-            existing_pngs.extend(f for f in files if f.lower().endswith(".png"))
-
-        if existing_pngs:
+        if self.preview_controller.service.has_images():
             # 情况 A：已有图片，直接加载
-            logger.info(f"预览目录已存在 {len(existing_pngs)} 张图片，直接加载")
+            logger.info(
+                "预览目录已存在 %s 张图片，直接加载",
+                len(self.preview_controller.service.image_paths()),
+            )
             self._preview_source = "缓存"
             self._toggle_preview_mode(True)
             return
@@ -813,23 +826,7 @@ class MainWindow(QMainWindow):
         force=True 时强制重新导出（跳过去重检查）。
         selected_roles 非空时只导出这些角色（角色名集合）。
         """
-        material_dir = os.path.join(DATA_DIR, "material")
-        output_dir = os.path.join(get_base_dir(), "output", "character")
         spine_cli = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewerCLI.exe")
-
-        # 前置校验（UI 线程中执行，可弹窗）
-        if not os.path.isdir(material_dir):
-            logger.warning(f"素材目录不存在: {material_dir}")
-            QMessageBox.warning(self, "错误", f"素材目录不存在:\n{material_dir}\n\n请先点击【导入AS】导出资源.")
-            return
-
-        if not os.path.exists(spine_cli):
-            logger.warning(f"SpineViewerCLI 不存在: {spine_cli}")
-            QMessageBox.warning(self, "错误", f"SpineViewerCLI 不存在:\n{spine_cli}")
-            return
-
-        # 取消已有的导出线程
-        self._cancel_preview_worker()
 
         # 切换到预览视图（显示进度条）
         self._preview_source = "刚导出"
@@ -840,14 +837,10 @@ class MainWindow(QMainWindow):
             self.preview_progress.setVisible(True)
             self.preview_progress.setValue(0)
 
-        # 启动后台线程
-        self._preview_worker = PreviewExportWorker(
-            material_dir, output_dir, spine_cli, force=force, selected_roles=selected_roles, parent=self
-        )
-        self._preview_worker.progress.connect(self._on_preview_export_progress)
-        self._preview_worker.export_finished.connect(self._on_preview_export_finished)
-        self._preview_worker.error.connect(self._on_preview_export_error)
-        self._preview_worker.start()
+        if not self.preview_controller.start_export(
+            spine_cli, force=force, selected_roles=selected_roles
+        ):
+            self.preview_progress.setVisible(False)
 
     def _on_preview_export_progress(self, current, total):
         """预览导出进度更新"""
@@ -894,8 +887,7 @@ class MainWindow(QMainWindow):
 
     def _scan_cardspine_roles(self):
         """扫描 material 的 cardspine .skel，返回角色名列表（去重排序，排除 _bg）"""
-        material_dir = os.path.join(DATA_DIR, "material", "assets", "art", "models", "cardspine")
-        return scan_cardspine_roles(material_dir)
+        return self.preview_controller.service.cardspine_roles()
 
     # ========== IMAGE GALLERY PREVIEW ==========
 
@@ -939,10 +931,7 @@ class MainWindow(QMainWindow):
 
     def _cancel_preview_worker(self):
         """取消预览导出线程"""
-        if self._preview_worker is not None:
-            self._preview_worker.cancel()
-            self._preview_worker.wait(2000)
-            self._preview_worker = None
+        self.preview_controller.cancel_export()
 
     # ========== 角色视图 ==========
 
@@ -1020,37 +1009,19 @@ class MainWindow(QMainWindow):
 
     @timed("图片缩略图加载")
     def _load_preview_images(self):
-        """异步加载预览图片"""
-        preview_dir = os.path.join(get_base_dir(), "output", "character")
-        material_dir = os.path.join(DATA_DIR, "material")
+        """通过 PreviewController 异步加载预览图片。"""
+        self.preview_controller.load()
+        self._skel_map = self.preview_controller.skel_map
 
-        logger.info(f"开始加载预览图片: {preview_dir}")
-        self._populate_character_filter()
-
-        if not os.path.isdir(preview_dir):
-            os.makedirs(preview_dir, exist_ok=True)
-            logger.warning(f"预览目录不存在，已创建: {preview_dir}")
-
-        # 预扫描 material 目录，建立 文件名→skel路径 映射
-        self._skel_map = build_skel_map(material_dir)
-        logger.debug(f"扫描到 {len(self._skel_map)} 个 .skel 文件用于路径匹配")
-
-        self._clear_list()
-        self._thumb_cache = {}
-
-        if hasattr(self, "_image_worker") and self._image_worker is not None:
-            self._image_worker.cancel()
-            self._image_worker.wait(2000)
-
-        self.preview_progress.setVisible(True)
-        self.preview_progress.setValue(0)
-        self.empty_label.setVisible(False)
-
-        self._image_worker = ImageLoadWorker(preview_dir, 150)
-        self._image_worker.progress.connect(self._on_load_progress)
-        self._image_worker.image_loaded.connect(self._on_thumbnail_loaded)
-        self._image_worker.finished_loading.connect(self._on_load_finished)
-        self._image_worker.start()
+    def _on_preview_controller_progress(self, current, total, stage):
+        """接入 PreviewController 的统一进度语义。"""
+        if total > 0:
+            self.preview_progress.setMaximum(total)
+            self.preview_progress.setValue(current)
+            self.preview_progress.setFormat(f"{stage}... {current}/{total}")
+        self.status_bar.showMessage(
+            f"{stage}: {current}/{total}" if total > 0 else f"{stage}: 处理中..."
+        )
 
     def _clear_list(self):
         """清空 QListWidget"""

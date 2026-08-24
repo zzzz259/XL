@@ -130,6 +130,8 @@ xl_updata_tool/
     │   ├── features/audio/ 音频 Feature 页面、控制器、目录服务、Worker 和树逻辑（P1）
     │   ├── features/characters/ 角色 Feature 页面、控制器和 Qt-free 数据服务（P2）
     │   ├── features/versions/ 版本工作区、更新检查、下载计划和 Bundle 状态（P3）
+    │   ├── features/importer/ 导入规格、精准 Bundle 筛选和后处理结果（P4）
+    │   ├── features/preview/  图片预览页面、目录服务、加载/导出控制（P5a）
     │   ├── core/           迁移期核心逻辑兼容层
     │   └── ui/             迁移期 UI 界面（workers/dialogs/features/views/adapters）
 ├── tests/              项目测试（与 app/ 平级）

@@ -115,6 +115,7 @@ def create_preview_view(parent=None):
 
     controls = {
         "preview_title": preview_title,
+        "btn_close_preview": btn_close_preview,
         "preview_progress": preview_progress,
         "image_list": image_list,
         "empty_label": empty_label,
