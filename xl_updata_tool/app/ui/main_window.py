@@ -6,18 +6,11 @@ import sys
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
-    QTableWidgetItem, QToolButton,
-    QFileDialog, QCheckBox, QMenu, QComboBox, QProgressDialog,
+    QToolButton,
+    QCheckBox, QMenu, QComboBox, QProgressDialog,
     QDialog, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings, QEvent
-from PySide6.QtGui import QColor, QBrush
-
-try:
-    from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-    QT_MULTIMEDIA_AVAILABLE = True
-except ImportError:
-    QT_MULTIMEDIA_AVAILABLE = False
+from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings
 
 try:
     import qtawesome as qta
@@ -27,28 +20,8 @@ except ImportError:
     QT_AWESOME_AVAILABLE = False
 
 from .theme import (
-    ACCENT, TEXT_PRIMARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
+    ACCENT, TEXT_PRIMARY,
     FORMAL_THEME, THEME_LABEL, apply_theme, get_color, normalize_theme_name,
-)
-from .panels import ticks_to_date
-from app.core.version_manager import VersionManager
-from .workers.download import CheckUpdateThread, DownloadWorker
-from app.core.version_data import compute_download_hashes, compute_version_delta_map
-from app.core.local_bundle_sync import sync_local_bundles
-from app.core.character_cache import (
-    derive_character_index,
-    load_cache as load_character_cache_file,
-    save_cache as save_character_cache_file,
-    source_mtime,
-)
-from app.core.character_repository import (
-    clear_all_unread as clear_all_character_unread,
-    clear_unread as clear_character_unread,
-    current_characters as repository_characters,
-    load_repository as load_character_repository,
-    merge_snapshot as merge_character_snapshot,
-    repository_path as character_repository_path,
-    unread_status as character_unread_status,
 )
 from app.core.bundle_selector import (
     audio_assets_map_path,
@@ -56,61 +29,41 @@ from app.core.bundle_selector import (
     select_audio_bundles,
     select_lua_bundles,
 )
-from app.core.character_presenter import export_characters_csv
-from app.core.character_profile import build_character_profile
-from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
-from app.core.audio_repository import mark_all_read as mark_all_audio_read, mark_read as mark_audio_read, sync_audio_snapshot, unread_files as audio_unread_files
-from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
-from app.core.seed_versions import seed_bundled_versions
-from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
-from app.core.version_update import append_changelog, record_downloaded_bundle, register_checked_version
-from app.core.version_download import calculate_missing_downloads
-from app.core import database as db
-from app.core.logger import logger, timed
-from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
-from app.core.lua_repository import (
-    has_character_sources,
-    latest_lua_version,
-    should_auto_parse,
-    version_directory,
-)
+from app.core.audio_repository import unread_files as audio_unread_files
+from app.core.preview_catalog import scan_preview_roles
+from app.core.version_update import append_changelog
+from app.platform import database as db
+from app.platform.diagnostics import logger, timed
+from app.platform.paths import get_data_dir, get_base_dir, get_tools_dir
 
 # 拆分后的模块导入
 from .dialogs.image_viewer import ImageViewerDialog
-from .workers.image_loader import ImageLoadWorker
-from .workers.preview_export import PreviewExportWorker
-from .workers.audio_decrypt import AudioDecryptWorker
-from .workers.import_as import ImportASWorker
-from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
-from .views.preview_view import create_preview_view
-from .views.audio_view import create_audio_view
-from .views.character_view import create_character_view
-from .views.version_view import create_version_header, create_version_table
-from .features.export_controller import (
+from app.features.preview.adapter import extract_skin_name_from_png, is_composite_png
+from app.features.audio.page import AudioPage
+from app.features.audio.controller import AudioController
+from app.features.versions.page import VersionPage
+from app.features.versions.controller import VersionController
+from app.features.versions.service import VersionService
+from app.features.characters.page import CharacterPage
+from app.features.characters.controller import CharacterController
+from app.features.characters.service import CharacterService
+from app.features.importer.controller import ImportController
+from app.features.importer.postprocessing import PostProcessorRegistry
+from app.features.importer.service import ImporterService
+from app.features.preview.page import PreviewPage
+from app.features.preview.controller import PreviewController
+from app.features.preview.service import PreviewService
+from app.features.preview.export_controller import (
     export_composite_video,
     export_with_dialog,
     batch_export_with_dialog,
 )
-from .features.audio_controller import (
-    iter_audio_leaves,
-    populate_audio_tree,
-    refresh_audio_tree_checks,
-    refresh_audio_tree_unread,
-)
-from .features.preview_controller import build_preview_item
-from app.core.character_loader import load_character_data
+from app.features.preview.item import build_preview_item
 
 DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
 LUA_OUTPUT_DIR = os.path.join(get_base_dir(), "output", "lua")
 CHARACTER_DATA_DIR = os.path.join(get_base_dir(), "output", "character_data")
-CHARACTER_REPOSITORY_PATH = character_repository_path(CHARACTER_DATA_DIR)
-# 角色数据解析依赖的源文件（用于缓存失效判断）
-CHARACTER_SOURCE_FILES = [
-    "BaseWord_cn.lua", "BaseCvNameCn.lua", "BaseCardLevelUp.lua",
-    "BaseCardQualityUp.lua", "BaseSkill.lua", "BaseSkillLevelUp.lua",
-    "BaseBadgeSuitGroup.lua", "BaseItem.lua", "BaseCard.lua",
-]
 
 
 class MainWindow(QMainWindow):
@@ -126,34 +79,24 @@ class MainWindow(QMainWindow):
         _theme = normalize_theme_name(settings.value("theme", FORMAL_THEME))
         settings.setValue("theme", _theme)
         apply_theme(self, _theme)
-        self.version_mgr = VersionManager()
+        self.version_service = VersionService(BUNDLES_DIR)
+        self.importer_service = ImporterService(
+            os.path.join(DATA_DIR, "material"), LUA_OUTPUT_DIR
+        )
+        self.import_controller = ImportController(self.importer_service, self)
+        self.postprocessor_registry = PostProcessorRegistry(("lua", "audio"))
+        self.import_controller.progress_stage.connect(self._on_import_progress)
+        self.import_controller.stage_finished.connect(self._on_import_stage_finished)
+        self.import_controller.category_finished.connect(self._on_import_category_finished)
+        self.import_controller.all_finished.connect(self._on_import_all_finished)
         # 后台工作线程实例（避免 AttributeError）
         self._preview_worker = None
-        self._audio_worker = None
-        self._audio_player = None
-        self._audio_output = None
         self._batch_worker = None
         self._composite_worker = None
         self._image_worker = None
         self._import_worker = None
         self._pending_import_message = None
-        self._audio_uses_import_dialog = False
-        # 音频播放器相关属性（避免首次访问 AttributeError）
-        self._audio_player = None
-        self._audio_output = None
-        self._audio_files = []
-        self._audio_list_loaded = False
-        self._audio_slider_dragging = False
-        self._audio_current_path = None
         self._show_character = False
-        self._character_data_loaded = False
-        self._character_loading = False
-        self.character_unread = {}
-        self.character_source_version = None
-        self.character_base = []      # 角色基础信息：{raw_id, name, display_index}
-        self.characters = []           # 角色完整数据：{name, element_type, max_hp, atk, def, skills, raw_text}
-        self.characters_full = {}      # 角色完整数据字典：char_id -> 完整数据
-        self.word_map = {}            # BaseWord_cn.lua 中的文本映射：id->文本
         self._skel_map = {}
         self._init_db()
         logger.info(f"当前 DATA_DIR: {DATA_DIR}")
@@ -190,28 +133,50 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        self.version_header, self.version_summary = create_version_header(self)
-        content_layout.addWidget(self.version_header)
-        self.table = create_version_table(self)
-        self._hover_row = -1
-        self._checkbox_containers = {}
-        self._checked_ts = set()
-        content_layout.addWidget(self.table, 1)
+        self.version_page = VersionPage(self)
+        self.version_controller = VersionController(self.version_page, self.version_service, self)
+        self.version_header = self.version_page.version_header
+        self.version_summary = self.version_page.version_summary
+        self.table = self.version_page.table
+        content_layout.addWidget(self.version_page, 1)
 
         # 预览视图容器（默认隐藏）
-        self.preview_container, self.preview_controls = create_preview_view(self)
+        self.preview_page = PreviewPage(self)
+        self.preview_controller = PreviewController(
+            page=self.preview_page,
+            service=PreviewService(
+                os.path.join(DATA_DIR, "material"),
+                os.path.join(get_base_dir(), "output", "character"),
+            ),
+            parent=self,
+        )
+        self.preview_container = self.preview_page
+        self.preview_controls = self.preview_page.controls
         self.preview_container.setVisible(False)
-        content_layout.addWidget(self.preview_container, 1)
+        content_layout.addWidget(self.preview_page, 1)
 
-        # 音频管理器视图容器（默认隐藏）
-        self.audio_container, self.audio_controls = create_audio_view(self)
-        self.audio_container.setVisible(False)
-        content_layout.addWidget(self.audio_container, 1)
+        # 音频管理器视图容器（默认隐藏）。页面自身拥有控件，主窗口只接收语义信号。
+        self.audio_page = AudioPage(self)
+        self.audio_controller = AudioController(
+            page=self.audio_page,
+            material_dir=os.path.join(DATA_DIR, "material"),
+            debank_dir=os.path.join(get_tools_dir(), "epic7_debank_v1_0"),
+            lua_output_dir=LUA_OUTPUT_DIR,
+            output_dir=os.path.join(get_base_dir(), "output"),
+            parent=self,
+        )
+        self.audio_page.setVisible(False)
+        content_layout.addWidget(self.audio_page, 1)
 
-        # 角色视图容器（默认隐藏）
-        self.character_container, self.character_controls = create_character_view(self)
-        self.character_container.setVisible(False)
-        content_layout.addWidget(self.character_container, 1)
+        # 角色功能域（页面拥有控件，控制器拥有数据和行为）
+        self.character_page = CharacterPage(self)
+        self.character_controller = CharacterController(
+            page=self.character_page,
+            service=CharacterService(CHARACTER_DATA_DIR, LUA_OUTPUT_DIR),
+            parent=self,
+        )
+        self.character_page.setVisible(False)
+        content_layout.addWidget(self.character_page, 1)
 
         body.addWidget(content, 1)
         root.addLayout(body, 1)
@@ -223,27 +188,7 @@ class MainWindow(QMainWindow):
         self.empty_label = self.preview_controls["empty_label"]
         self.preview_status = self.preview_controls["preview_status"]
         self.btn_reload = self.preview_controls["btn_reload"]
-
-        # 暴露音频控件引用
-        self.audio_title = self.audio_controls["audio_title"]
-        self.audio_table = self.audio_controls["audio_table"]
-        self.audio_play_btn = self.audio_controls["audio_play_btn"]
-        self.audio_now_playing = self.audio_controls["audio_now_playing"]
-        self.audio_position_label = self.audio_controls["audio_position_label"]
-        self.audio_slider = self.audio_controls["audio_slider"]
-        self.audio_volume = self.audio_controls["audio_volume"]
-        self.audio_status = self.audio_controls["audio_status"]
-        self.audio_empty = self.audio_controls["audio_empty"]
-
-        # 暴露角色控件引用
-        self.character_title = self.character_controls["character_title"]
-        self.character_search = self.character_controls["character_search"]
-        self.character_table = self.character_controls["character_table"]
-        self.character_detail = self.character_controls["character_detail"]
-        self.character_profile_view = self.character_controls["character_profile_view"]
-        self.character_status = self.character_controls["character_status"]
-        self.character_empty = self.character_controls["character_empty"]
-        self._refresh_unread_badges()
+        self.character_filter = self.preview_controls["character_filter"]
 
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet(f"""
@@ -251,8 +196,73 @@ class MainWindow(QMainWindow):
                          padding:4px 12px; color:{get_color('TEXT_SECONDARY')}; font-size:14px; }}
         """)
         self.setStatusBar(self.status_bar)
+        self._connect_audio_controller()
+        self._connect_version_controller()
+        self._connect_character_controller()
+        self.preview_page.close_requested.connect(lambda: self._toggle_preview_mode(False))
+        self.preview_page.reload_requested.connect(self._force_reload_preview)
+        self.preview_controller.progress_changed.connect(self._on_preview_controller_progress)
+        self.preview_controller.status_changed.connect(self.status_bar.showMessage)
+        self.preview_controller.error.connect(self._on_preview_export_error)
+        self.preview_controller.export_finished.connect(self._on_preview_export_finished)
+        self.preview_controller.context_menu_requested.connect(self._show_context_menu)
+        self.preview_controller.item_double_clicked.connect(self._on_item_double_clicked)
+        # 只恢复本地角色仓库/缓存，确保启动时顶层“角色”角标准确；绝不解析 Lua。
+        self.character_controller.restore_local()
+        self._refresh_unread_badges()
         self._anim_timer = QTimer()
         self._anim_dots = 0
+
+    def _connect_audio_controller(self):
+        """连接音频功能域的任务结果与全局 Shell 状态。"""
+        self.audio_page.close_requested.connect(lambda: self._toggle_audio_mode(False))
+        self.audio_controller.status_changed.connect(self.status_bar.showMessage)
+        self.audio_controller.unread_changed.connect(self._refresh_unread_badges)
+        self.audio_controller.processing_finished.connect(self._on_audio_processing_finished)
+        self.audio_controller.processing_cancelled.connect(self._on_audio_processing_cancelled)
+        self.audio_controller.processing_error.connect(self._on_audio_processing_error)
+
+    def _connect_version_controller(self):
+        """连接版本功能域状态到全局状态栏和下载进度条。"""
+        self.version_controller.status_changed.connect(self.status_bar.showMessage)
+        self.version_controller.progress_changed.connect(self._on_version_progress)
+
+    def _on_version_progress(self, current, total, message):
+        if total <= 0:
+            self.dl_progress.setVisible(False)
+            return
+        self.dl_progress.setVisible(True)
+        self.dl_progress.setMaximum(total)
+        self.dl_progress.setValue(current)
+        self.dl_progress.setFormat(message)
+
+    def _connect_character_controller(self):
+        """连接角色功能域的状态信号到应用壳层。"""
+        self.character_controller.status_changed.connect(self.status_bar.showMessage)
+        self.character_controller.unread_changed.connect(self._refresh_unread_badges)
+
+    def _on_audio_processing_finished(self, shared):
+        """导入流程使用共享弹窗时，接收 AudioController 的完成结果。"""
+        if shared and self._pending_import_message:
+            self._finish_import(True, self._pending_import_message)
+
+    def _on_audio_processing_cancelled(self, shared):
+        """导入流程中的音频任务取消后结束导入流程。"""
+        if shared and self._pending_import_message:
+            self._finish_import(
+                False,
+                "音频后处理已取消，已完成的文件已保留，可稍后重新处理音频。",
+                cancelled=True,
+            )
+
+    def _on_audio_processing_error(self, error_message, shared):
+        """导入流程中的音频任务失败后保留导入结果并提示用户。"""
+        if shared and self._pending_import_message:
+            self._finish_import(
+                True,
+                self._pending_import_message,
+                audio_error=error_message,
+            )
 
     def _view_toolbar(self):
         """顶部视图切换工具栏（版本列表 / 图片预览 / 音频 / 角色）"""
@@ -311,9 +321,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_unread_badges(self):
         """把各功能模块的未读状态同步到对应顶层工作区标签。"""
-        repository = load_character_repository(CHARACTER_REPOSITORY_PATH)
-        unread = character_unread_status(repository)
-        character_has_unread = bool(unread) or bool(self.character_unread)
+        character_has_unread = bool(
+            getattr(getattr(self, "character_controller", None), "has_unread", False)
+        )
         audio_dir = os.path.join(get_base_dir(), "output", "audio")
         audio_has_unread = bool(audio_unread_files(audio_dir))
         for key, badge in getattr(self, "_unread_badges", {}).items():
@@ -347,7 +357,7 @@ class MainWindow(QMainWindow):
 
         self.btn_check = _side_btn("检查更新", "arrows-rotate")
         self.btn_check.setProperty("fluentAppearance", "primary")
-        self.btn_check.clicked.connect(self._check_update)
+        self.btn_check.clicked.connect(lambda: self.version_controller.check_update())
         layout.addWidget(self.btn_check)
         self.btn_browse = _side_btn("导入AS", "file-import")
         self.btn_browse.setProperty("fluentAppearance", "primary")
@@ -457,8 +467,7 @@ class MainWindow(QMainWindow):
 
     def _set_version_content_visible(self, visible):
         """整体切换版本工作区，避免页面切换留下单独的工作区标题。"""
-        self.version_header.setVisible(visible)
-        self.table.setVisible(visible)
+        self.version_page.set_visible(visible)
 
     def _clear_dir(self, target_dir):
         """确认后清空目录（rmtree + 重建）"""
@@ -488,13 +497,7 @@ class MainWindow(QMainWindow):
 
     def _compute_delta_hashes(self, ts):
         """返回本版本相对上一版本的增量 hash 集合（新增/修改的 bundle）；无上一版本时返回全量"""
-        vs = self.version_mgr.get_versions()
-        hashes_by_version = {
-            row[0]: (r[0] for r in (db.get_sub_bundles(row[0]) or []))
-            for row in vs
-            if "(delta" not in (row[10] or "")
-        }
-        return compute_download_hashes(ts, (row[0] for row in vs), hashes_by_version)
+        return self.version_service.delta_hashes(ts)
 
     def _row_btn(self, text, color, tooltip=""):
         b = QPushButton(text)
@@ -519,321 +522,24 @@ class MainWindow(QMainWindow):
         磁盘是事实来源：磁盘有但 DB 未记录 → 标记已下载；DB 有记录但磁盘无 → 清除。
         ts 非空时只同步该版本，否则同步全部版本。
         """
-        return sync_local_bundles(BUNDLES_DIR, ts)
+        return self.version_service.sync_local(ts)
 
     def _load_data(self):
         # 确保版本列表可见（隐藏图片预览、音频和角色视图）
         self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
-        self.character_container.setVisible(False)
+        self.audio_page.setVisible(False)
+        self.character_page.setVisible(False)
         self._show_character = False
         self._set_active_view_btn(self.btn_home)
         self._set_toolbars_visible(True)
-        self._sync_local_bundles()
-        versions = self.version_mgr.refresh()
-        delta_map = self._compute_version_deltas(versions)
-        self._populate_table(versions, delta_map)
-        self.status_bar.showMessage(f"已追踪 {len(versions)} 个版本")
-
-    def _compute_version_deltas(self, versions):
-        """计算每个版本相对上一版本的 bundle 差异，返回 {ts: (added, removed, common)}"""
-        hashes_by_version = {
-            row[0]: (r[0] for r in (db.get_sub_bundles(row[0]) or []))
-            for row in versions
-        }
-        return compute_version_delta_map((row[0] for row in versions), hashes_by_version)
-
-    def _populate_table(self, versions, delta_map=None):
-        self.table.setSortingEnabled(False)
-        # 捕获当前勾选态（刷新后恢复，保持用户选择不丢失）
-        self._checked_ts = {ts for _r, (ts, cb) in getattr(self, "_version_checkboxes", {}).items() if cb.isChecked()}
-        # fully clear old widgets and rows
-        self.table.clearContents()
-        self.table.setRowCount(0)
-        self.table.setRowCount(len(versions))
-        self._version_checkboxes = {}  # row -> (ts, checkbox)
-        self._checkbox_containers = {}
-        self._hover_row = -1
-        downloaded_versions = 0
-        for i, v in enumerate(versions):
-            ts, arts, data, other, video, apk, manifest, is_cur, dl, created, notes = v
-            # checkbox 列（第 0 列，打勾选中；单选冲突，Ctrl 多选）
-            cb = QCheckBox()
-            cb.setStyleSheet("background:transparent; border:none;")
-            cb.setChecked(ts in self._checked_ts)
-            cb.clicked.connect(lambda checked, r=i: self._set_version_checked(r, checked))
-            cb_widget = QWidget()
-            cb_widget.setAttribute(Qt.WA_StyledBackground, True)
-            cb_layout = QHBoxLayout(cb_widget)
-            cb_layout.addWidget(cb)
-            cb_layout.setAlignment(Qt.AlignCenter)
-            cb_layout.setContentsMargins(0, 0, 0, 0)
-            self.table.setCellWidget(i, 0, cb_widget)
-            self._version_checkboxes[i] = (ts, cb)
-            self._checkbox_containers[i] = cb_widget
-            # 版本列（第 1 列）
-            dt = ticks_to_date(ts); date_str = dt.strftime("%Y-%m-%d")
-            label = date_str
-            if is_cur: label += "  [最新]"
-            vi = QTableWidgetItem(label); vi.setData(Qt.UserRole, ts)
-            if is_cur: vi.setForeground(QColor("#f0a040")); f = vi.font(); f.setBold(True); vi.setFont(f)
-            self.table.setItem(i, 1, vi)
-            sub = db.get_sub_bundles(ts); total = len(sub) if sub else 0
-            down = sum(1 for r in sub if r[2]) if sub else 0
-            if total == 0: status = "无Bundle"
-            elif down >= total: status = "已下载"
-            elif down > 0: status = f"部分 ({down}/{total})"
-            else: status = "未下载"
-            if status == "已下载":
-                downloaded_versions += 1
-            si = QTableWidgetItem(status)
-            if status == "已下载": si.setForeground(QColor(SUCCESS))
-            elif "部分" in status: si.setForeground(QColor(WARNING))
-            else: si.setForeground(QColor(TEXT_MUTED))
-            self.table.setItem(i, 2, si)
-            self.table.setItem(i, 3, QTableWidgetItem(f"{total:,}" if total else "-"))
-            # 备注：优先显示相对上一版本的增量/删除
-            if delta_map and ts in delta_map:
-                added, removed, common = delta_map[ts]
-                display_notes = f"新增 {added} | 移除 {removed} | 未变 {common}"
-            else:
-                display_notes = notes or ""
-            self.table.setItem(i, 4, QTableWidgetItem(display_notes))
-            # per-row buttons: delta, full, delete
-            for col, (txt, clr, action) in enumerate([
-                ("增量下载", SUCCESS, lambda c, t=ts: self._download_version(t, True)),
-                ("全量下载", INFO, lambda c, t=ts: self._download_version(t, False)),
-                ("删除已下载", DANGER, lambda c, t=ts: self._delete_version(t)),
-            ], start=5):
-                btn = self._row_btn(txt, clr)
-                btn.clicked.connect(action)
-                self.table.setCellWidget(i, col, btn)
-        self.table.setSortingEnabled(True)
-        self._version_count = len(versions)
-        self._downloaded_version_count = downloaded_versions
-        self._update_version_summary()
-
-    def _update_version_summary(self):
-        """刷新版本工作区摘要，补充选择与下载状态的文字信息。"""
-        selected = sum(
-            1 for _ts, checkbox in getattr(self, "_version_checkboxes", {}).values()
-            if checkbox.isChecked()
-        )
-        self.version_summary.setText(
-            f"{getattr(self, '_version_count', 0)} 个版本 · "
-            f"已下载 {getattr(self, '_downloaded_version_count', 0)} · "
-            f"已选择 {selected}"
-        )
+        self.version_controller.load()
+        # 版本列表优先可用；音频目录在事件循环空闲后后台预热，避免首次进入音频页卡顿。
+        QTimer.singleShot(0, self.audio_controller.preload_catalog)
 
     def _get_selected_ts(self):
-        """返回第一个勾选的版本 ts（导入 AS 等单版本操作用）"""
-        for _row, (ts, cb) in getattr(self, "_version_checkboxes", {}).items():
-            if cb.isChecked():
-                return ts
-        return None
-
-    def _set_version_checked(self, row, checked):
-        """设置某行勾选态；默认单选冲突（点一个取消另一个），按住 Ctrl 多选"""
-        if row not in self._version_checkboxes:
-            return
-        ts, cb = self._version_checkboxes[row]
-        ctrl = bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
-        if checked and not ctrl:
-            for r, (_t, other) in self._version_checkboxes.items():
-                if r != row and other.isChecked():
-                    other.blockSignals(True)
-                    other.setChecked(False)
-                    other.blockSignals(False)
-        cb.blockSignals(True)
-        cb.setChecked(checked)
-        cb.blockSignals(False)
-        if checked:
-            self._checked_ts.add(ts)
-        else:
-            self._checked_ts.discard(ts)
-        self._update_version_summary()
-
-    def _on_cell_clicked(self, row, col):
-        """点击整行任意位置（除勾选列/按钮列）→ 翻转该行勾选"""
-        if col == 0:
-            return  # 勾选框自己处理
-        if row in self._version_checkboxes:
-            _ts, cb = self._version_checkboxes[row]
-            self._set_version_checked(row, not cb.isChecked())
-
-    def _clear_row_hover(self):
-        """清掉上一悬停行的背景，恢复交替行色"""
-        r = self._hover_row
-        if r < 0:
-            return
-        for c in range(self.table.columnCount()):
-            it = self.table.item(r, c)
-            if it is not None:
-                it.setBackground(QBrush())
-        if r in self._checkbox_containers:
-            self._checkbox_containers[r].setStyleSheet("")
-
-    def _highlight_row(self, row):
-        """整行悬停高亮（中性色，非蓝非单格）；row=-1 时清除"""
-        if row == self._hover_row:
-            return
-        self._clear_row_hover()
-        self._hover_row = row
-        hover = get_color('BG_HOVER')
-        for c in range(self.table.columnCount()):
-            it = self.table.item(row, c)
-            if it is not None:
-                it.setBackground(QColor(hover))
-        if row in self._checkbox_containers:
-            self._checkbox_containers[row].setStyleSheet(f"background-color:{hover};")
-
-    def eventFilter(self, obj, event):
-        """viewport 上跟踪鼠标：MouseMove 高亮整行，Leave 清除"""
-        if obj is self.table.viewport():
-            if event.type() == QEvent.MouseMove:
-                pos = event.position().toPoint()
-                idx = self.table.indexAt(pos)
-                self._highlight_row(idx.row() if idx.isValid() else -1)
-            elif event.type() == QEvent.Leave:
-                self._clear_row_hover()
-                self._hover_row = -1
-        return super().eventFilter(obj, event)
-
-    def _on_row_select(self, current, prev):
-        if current:
-            it = self.table.item(current.row(), 1)
-            if it and it.data(Qt.UserRole):
-                self._sel_ts = it.data(Qt.UserRole)
-
-    # ========== CHECK UPDATE ==========
-
-    def _check_update(self):
-        # 确保版本列表可见（隐藏图片预览和音频视图）
-        self._set_version_content_visible(True)
-        self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
-        self.btn_check.setEnabled(False)
-        self.table.insertRow(0)
-        self.table.setItem(0, 0, QTableWidgetItem("正在检查更新"))
-        anim_item = self.table.item(0, 0)
-        for c in range(1, 7):
-            self.table.setItem(0, c, QTableWidgetItem(""))
-        def animate():
-            self._anim_dots = (self._anim_dots + 1) % 4
-            try: anim_item.setText("正在检查更新" + "." * (self._anim_dots + 1))
-            except: pass
-            self._anim_timer.start(400)
-        self._anim_timer.timeout.connect(animate)
-        self._anim_timer.start(400)
-        self.status_bar.showMessage("正在检查更新...")
-        pv = self.version_mgr.get_current(); oh = []
-        if pv:
-            or_ = db.get_sub_bundles(pv[0]); oh = [r[0] for r in or_] if or_ else []
-        logger.info(f"开始检查更新：当前版本 {pv[0] if pv else '无'}，已有 {len(oh)} 个 hash")
-        out_dir = os.path.join(BUNDLES_DIR, "current")
-        self.thread = CheckUpdateThread(out_dir, oh)
-        self.thread.finished.connect(self._on_update_checked)
-        self.thread.error.connect(self._on_check_error)
-        self.thread.start()
-
-    def _on_update_checked(self, info, versions, new_hashes, delta):
-        self._anim_timer.stop()
-        self.btn_check.setEnabled(True)
-        result = register_checked_version(self.version_mgr, info, versions, new_hashes, delta)
-        if result:
-            self.status_bar.showMessage(f"发现新版本! 新增 {result['added']} 个 bundle.")
-            QMessageBox.information(self, "更新完成", f"发现新版本!\n\n{result['notes']}")
-        else:
-            logger.info(f"检查更新：版本 {versions['timestamp']} 已存在，无需更新")
-            self.status_bar.showMessage("已是最新版本.")
-            QMessageBox.information(self, "已是最新", "当前已是最新版本，无需更新。")
-        self._load_data()
-
-    def _on_check_error(self, err):
-        self._anim_timer.stop(); self.btn_check.setEnabled(True)
-        self._load_data()
-        self.status_bar.showMessage(f"错误: {err}")
-        QMessageBox.warning(self, "错误", f"检查更新失败:\n{err}")
-
-    # ========== DOWNLOAD ==========
-
-    def _download_version(self, ts, delta_only=True):
-        if not ts: return
-        ah = [r[0] for r in db.get_sub_bundles(ts)]
-        if not ah: QMessageBox.information(self, "无Bundle", "此版本无 bundle."); return
-        sub = db.get_sub_bundles(ts)
-        label = "增量下载"
-        if delta_only:
-            target = self._compute_delta_hashes(ts)
-        else:
-            rp = QMessageBox.question(self, "全量下载确认",
-                f"全量下载将下载此版本的全部 {len(ah)} 个 bundle 文件.\n\n"
-                "通常只需「增量下载」即可获取本版本新增/修改的文件.\n"
-                "全量下载耗时较长且占用大量磁盘空间.\n\n"
-                "建议: 先尝试增量下载.\n\n"
-                "是否仍然进行全量下载?",
-                QMessageBox.Yes|QMessageBox.No, QMessageBox.No)
-            if rp != QMessageBox.Yes: return
-            target = set(ah); label = "全量下载"
-        missing = calculate_missing_downloads(sub, target)
-        if not missing: QMessageBox.information(self, "已下载", "全部已下载."); return
-
-        self._dl_ts = ts; self._dl_total = len(missing); self._dl_size = 0
-        self._dl_count = 0; self._dl_label = label
-
-        # update status cell for this version
-        self._update_row_status(ts, f"下载中 0/{len(missing)}")
-
-        self.dl_progress.setVisible(True)
-        self.dl_progress.setMaximum(len(missing)); self.dl_progress.setValue(0)
-        self.dl_progress.setFormat(f"{label}: 0/{len(missing)}")
-        self.status_bar.showMessage(f"{label}: 准备下载 {len(missing)} 个文件...")
-        downloaded_count = len(sub) - len(calculate_missing_downloads(sub, set(ah)))
-        logger.info(f"开始{label}版本 {ts}：待下载 {len(missing)} 个文件（已下载 {downloaded_count} 个）")
-
-        out_dir = os.path.join(BUNDLES_DIR, str(ts))
-        self.dl_worker = DownloadWorker(missing, out_dir)
-        self.dl_worker.progress.connect(lambda n, d, t: (
-            setattr(self, '_dl_count', d),
-            self.dl_progress.setValue(d),
-            self.dl_progress.setFormat(f"{label}: {d}/{len(missing)}"),
-            self._update_row_status(ts, f"下载中 {d}/{len(missing)} | {self._dl_size/1048576:.1f}MB"),
-            self.status_bar.showMessage(f"{label}: {d}/{len(missing)} | {self._dl_size/1048576:.1f}MB | {n[:30]}")))
-        self.dl_worker.item_done.connect(lambda n, f, p: (
-            self._dl_done(n, f, p, ts),
-            setattr(self, '_dl_size', self._dl_size + (os.path.getsize(p) if os.path.exists(p) else 0))))
-        self.dl_worker.item_fail.connect(lambda h, msg: logger.error(f"文件下载失败: {h[:16]}... - {msg}"))
-        self.dl_worker.all_done.connect(self._dl_complete)
-        self.dl_worker.error.connect(lambda e: (
-            logger.error(f"下载错误: {e}"),
-            self.status_bar.showMessage(f"下载出错: {e}")))
-        self.dl_worker.start()
-
-    def _update_row_status(self, ts, text):
-        self.table.blockSignals(True)
-        for i in range(self.table.rowCount()):
-            it = self.table.item(i, 1)
-            if it and it.data(Qt.UserRole) == ts:
-                si = QTableWidgetItem(text)
-                si.setForeground(QColor(SUCCESS))
-                self.table.setItem(i, 2, si)
-                break
-        self.table.blockSignals(False)
-
-    def _dl_done(self, n, f, p, ts):
-        try:
-            record_downloaded_bundle(ts, n, p)
-            logger.debug(f"文件下载完成并更新数据库: {n[:16]}...")
-        except Exception as e:
-            logger.error(f"更新数据库失败: {n[:16]}... - {e}", exc_info=True)
-
-    def _dl_complete(self):
-        self.dl_progress.setVisible(False)
-        self._load_data()
-        self.status_bar.showMessage("下载完成!")
-        logger.info("下载完成")
-        QMessageBox.information(self, "完成", "下载完毕!")
+        """迁移期导入适配：返回版本功能域当前选中的版本。"""
+        return self.version_controller.selected_version
 
     # ========== BROWSE ==========
 
@@ -841,7 +547,7 @@ class MainWindow(QMainWindow):
         # 确保版本列表可见（隐藏图片预览和音频视图）
         self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
+        self.audio_page.setVisible(False)
         ts = self._get_selected_ts()
         if not ts: QMessageBox.warning(self, "未选择", "请先选中一个版本."); return
         export_categories = self._get_export_categories()
@@ -899,8 +605,6 @@ class MainWindow(QMainWindow):
                 )
                 self.status_bar.showMessage("未找到资源映射，将扫描已下载 bundle")
         as_cli = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
-        material_dir = os.path.join(DATA_DIR, "material")
-
         if not os.path.exists(as_cli):
             logger.error(f"AssetStudio.CLI.exe 不存在: {as_cli}")
             QMessageBox.warning(self, "错误", f"AssetStudio CLI 不存在:\n{as_cli}")
@@ -931,18 +635,13 @@ class MainWindow(QMainWindow):
                 self.dl_progress.setVisible(False)
                 return
         logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件，勾选导出分类 {sorted(export_categories)}")
-        self._import_worker = ImportASWorker(
-            fs, bundle_dir, material_dir, as_cli, self,
+        self._import_worker = self.import_controller.start(
+            fs, bundle_dir, as_cli,
             export_categories=export_categories,
             version_timestamp=ts,
             lua_output_dir=LUA_OUTPUT_DIR,
             isolate_bundle_dir=isolate_bundle_dir,
         )
-        self._import_worker.progress_stage.connect(self._on_import_progress)
-        self._import_worker.stage_finished.connect(self._on_import_stage_finished)
-        self._import_worker.category_finished.connect(self._on_import_category_finished)
-        self._import_worker.all_finished.connect(self._on_import_all_finished)
-        self._import_worker.start()
 
         # 进度弹窗（非模态，可取消）
         self._import_progress_dialog = QProgressDialog("正在导入 AS...", "取消", 0, 100, self)
@@ -991,12 +690,11 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("导入AS: 文件已分类完成，准备执行后处理")
         self._append_changelog(message)
-        worker = getattr(self, "_import_worker", None)
-        categories = getattr(worker, "export_categories", set()) or set()
+        result = getattr(self.import_controller, "last_result", None)
         self._pending_import_message = message
-        if "audio" in categories:
+        if "audio" in self.postprocessor_registry.pending(result):
             # 音频解密是导出后的必经步骤，复用导入弹窗，避免用户误以为已经完成。
-            self._start_audio_decrypt(
+            self.audio_controller.start_decrypt(
                 force=False,
                 shared_dialog=getattr(self, "_import_progress_dialog", None),
             )
@@ -1008,19 +706,30 @@ class MainWindow(QMainWindow):
         """结束导入及其后处理阶段，统一关闭共享弹窗和恢复按钮状态。"""
         self.btn_browse.setEnabled(True)
         self.dl_progress.setVisible(False)
-        if getattr(self, "_import_progress_dialog", None):
-            self._import_progress_dialog.close()
-            self._import_progress_dialog = None
+        progress_dialog = getattr(self, "_import_progress_dialog", None)
         self._pending_import_message = None
-        self._audio_uses_import_dialog = False
 
         if cancelled:
+            if progress_dialog:
+                progress_dialog.close()
+                self._import_progress_dialog = None
             self.status_bar.showMessage("导入已取消，已完成的文件已保留")
             QMessageBox.information(self, "已取消", message)
             return
 
         if success:
-            self._auto_parse_after_lua_export()
+            result = getattr(self.import_controller, "last_result", None)
+            lua_result = result.lua_export_result if result else getattr(
+                getattr(self, "_import_worker", None), "lua_export_result", None
+            )
+            if result is None or "lua" in self.postprocessor_registry.pending(result):
+                self.character_controller.auto_parse_after_lua_export(
+                    lua_result,
+                    progress_dialog=progress_dialog,
+                )
+            if progress_dialog:
+                progress_dialog.close()
+                self._import_progress_dialog = None
             if audio_error:
                 self.status_bar.showMessage("导入完成，但音频后处理失败")
                 QMessageBox.warning(
@@ -1033,6 +742,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "完成", message)
             return
 
+        if progress_dialog:
+            progress_dialog.close()
+            self._import_progress_dialog = None
         self.status_bar.showMessage("导入AS: 失败")
         QMessageBox.warning(
             self, "失败",
@@ -1096,18 +808,12 @@ class MainWindow(QMainWindow):
 
     def _preview_images(self):
         """预览图片：检查缓存，有则直接加载，无则导出后加载"""
-        output_dir = os.path.join(get_base_dir(), "output", "character")
-
-        os.makedirs(output_dir, exist_ok=True)
-
-        # 检查已有图片（递归：角色图按编号分目录）
-        existing_pngs = []
-        for root, _dirs, files in os.walk(output_dir):
-            existing_pngs.extend(f for f in files if f.lower().endswith(".png"))
-
-        if existing_pngs:
+        if self.preview_controller.service.has_images():
             # 情况 A：已有图片，直接加载
-            logger.info(f"预览目录已存在 {len(existing_pngs)} 张图片，直接加载")
+            logger.info(
+                "预览目录已存在 %s 张图片，直接加载",
+                len(self.preview_controller.service.image_paths()),
+            )
             self._preview_source = "缓存"
             self._toggle_preview_mode(True)
             return
@@ -1122,23 +828,7 @@ class MainWindow(QMainWindow):
         force=True 时强制重新导出（跳过去重检查）。
         selected_roles 非空时只导出这些角色（角色名集合）。
         """
-        material_dir = os.path.join(DATA_DIR, "material")
-        output_dir = os.path.join(get_base_dir(), "output", "character")
         spine_cli = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewerCLI.exe")
-
-        # 前置校验（UI 线程中执行，可弹窗）
-        if not os.path.isdir(material_dir):
-            logger.warning(f"素材目录不存在: {material_dir}")
-            QMessageBox.warning(self, "错误", f"素材目录不存在:\n{material_dir}\n\n请先点击【导入AS】导出资源.")
-            return
-
-        if not os.path.exists(spine_cli):
-            logger.warning(f"SpineViewerCLI 不存在: {spine_cli}")
-            QMessageBox.warning(self, "错误", f"SpineViewerCLI 不存在:\n{spine_cli}")
-            return
-
-        # 取消已有的导出线程
-        self._cancel_preview_worker()
 
         # 切换到预览视图（显示进度条）
         self._preview_source = "刚导出"
@@ -1149,14 +839,10 @@ class MainWindow(QMainWindow):
             self.preview_progress.setVisible(True)
             self.preview_progress.setValue(0)
 
-        # 启动后台线程
-        self._preview_worker = PreviewExportWorker(
-            material_dir, output_dir, spine_cli, force=force, selected_roles=selected_roles, parent=self
-        )
-        self._preview_worker.progress.connect(self._on_preview_export_progress)
-        self._preview_worker.export_finished.connect(self._on_preview_export_finished)
-        self._preview_worker.error.connect(self._on_preview_export_error)
-        self._preview_worker.start()
+        if not self.preview_controller.start_export(
+            spine_cli, force=force, selected_roles=selected_roles
+        ):
+            self.preview_progress.setVisible(False)
 
     def _on_preview_export_progress(self, current, total):
         """预览导出进度更新"""
@@ -1203,8 +889,7 @@ class MainWindow(QMainWindow):
 
     def _scan_cardspine_roles(self):
         """扫描 material 的 cardspine .skel，返回角色名列表（去重排序，排除 _bg）"""
-        material_dir = os.path.join(DATA_DIR, "material", "assets", "art", "models", "cardspine")
-        return scan_cardspine_roles(material_dir)
+        return self.preview_controller.service.cardspine_roles()
 
     # ========== IMAGE GALLERY PREVIEW ==========
 
@@ -1224,10 +909,10 @@ class MainWindow(QMainWindow):
         self._set_toolbars_visible(not show_preview)
         self._set_version_content_visible(not show_preview)
         self.preview_container.setVisible(show_preview)
-        self.character_container.setVisible(False)
+        self.character_page.setVisible(False)
         self._show_character = False
         if show_preview:
-            self.audio_container.setVisible(False)
+            self.audio_page.setVisible(False)
             self._load_preview_images()
 
     # ==================== 音频管理器 ====================
@@ -1238,243 +923,17 @@ class MainWindow(QMainWindow):
         self._set_toolbars_visible(not show_audio)
         self._set_version_content_visible(not show_audio)
         self.preview_container.setVisible(False)
-        self.character_container.setVisible(False)
+        self.character_page.setVisible(False)
         self._show_character = False
-        self.audio_container.setVisible(show_audio)
+        self.audio_page.setVisible(show_audio)
         if show_audio:
-            self._init_audio_player()
+            self.audio_controller.initialize_player()
             # 页面切换只读取最终产物；已加载过的树保留，用户可用“刷新列表”主动重建。
-            self._load_audio_list()
+            self.audio_controller.load_catalog()
 
     def _cancel_preview_worker(self):
         """取消预览导出线程"""
-        if self._preview_worker is not None:
-            self._preview_worker.cancel()
-            self._preview_worker.wait(2000)
-            self._preview_worker = None
-
-    def _cancel_audio_worker(self):
-        """取消音频解密线程"""
-        worker = self._audio_worker
-        if worker is None:
-            return True
-        worker.cancel()
-        if not worker.wait(30000):
-            logger.error("音频解密线程未能在取消超时内退出，不启动新的音频任务")
-            return False
-        try:
-            worker.cancelled_decrypt.disconnect(self._on_audio_decrypt_cancelled)
-            worker.finished_decrypt.disconnect(self._on_audio_decrypt_finished)
-            worker.error.disconnect(self._on_audio_decrypt_error)
-        except (TypeError, RuntimeError):
-            pass
-        self._audio_worker = None
-        return True
-
-    def _start_audio_decrypt(self, force=False, shared_dialog=None):
-        """启动后台线程执行音频后处理（仅由导出完成流程调用）。"""
-        material_dir = os.path.join(DATA_DIR, "material")
-        debank_dir = os.path.join(get_tools_dir(), "epic7_debank_v1_0")
-        audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
-
-        # 取消已有的解密线程
-        if not self._cancel_audio_worker():
-            self.status_bar.showMessage("上一轮音频处理尚未退出，已取消启动新的任务")
-            return
-
-        self.status_bar.showMessage("正在处理音频文件...")
-
-        self._audio_worker = AudioDecryptWorker(
-            material_dir, audio_output_dir, debank_dir,
-            force=force, lua_output_dir=LUA_OUTPUT_DIR, parent=self
-        )
-        self._audio_worker.progress.connect(self._on_audio_decrypt_progress)
-        self._audio_worker.progress_value.connect(self._on_audio_decrypt_progress_value)
-        self._audio_worker.finished_decrypt.connect(self._on_audio_decrypt_finished)
-        self._audio_worker.cancelled_decrypt.connect(self._on_audio_decrypt_cancelled)
-        self._audio_worker.error.connect(self._on_audio_decrypt_error)
-        self._audio_worker.start()
-
-        # 导入后的自动处理复用导入弹窗；兼容性调用才创建独立弹窗。
-        self._audio_uses_import_dialog = shared_dialog is not None
-        if shared_dialog is not None:
-            self._audio_progress_dialog = shared_dialog
-            shared_dialog.setLabelText("正在处理音频...\n准备转换音频中间文件")
-            shared_dialog.setRange(0, 0)
-        else:
-            self._audio_progress_dialog = QProgressDialog("正在处理音频...", "取消", 0, 100, self)
-            self._audio_progress_dialog.setWindowTitle("音频处理")
-            self._audio_progress_dialog.setWindowModality(Qt.NonModal)
-            self._audio_progress_dialog.setMinimumDuration(0)
-            self._audio_progress_dialog.setAutoClose(False)
-            self._audio_progress_dialog.setAutoReset(False)
-            self._audio_progress_dialog.setMinimumWidth(520)
-            self._audio_progress_dialog.setMinimumHeight(160)
-        self._audio_progress_dialog.canceled.connect(self._audio_worker.cancel)
-        self._audio_progress_dialog.show()
-
-    def _on_audio_decrypt_progress(self, msg):
-        """音频解密进度更新"""
-        self.status_bar.showMessage(msg)
-
-    def _on_audio_decrypt_progress_value(self, current, total, msg):
-        """音频解密数值进度（两行：消息 + 进度/处理中，避免来回跳）"""
-        if getattr(self, "_audio_progress_dialog", None):
-            if total > 0:
-                self._audio_progress_dialog.setLabelText(f"{msg}\n已处理 {current}/{total}")
-                self._audio_progress_dialog.setRange(0, total)
-                self._audio_progress_dialog.setValue(current)
-            else:
-                self._audio_progress_dialog.setLabelText(f"{msg}\n处理中...")
-                self._audio_progress_dialog.setRange(0, 0)
-        self.status_bar.showMessage(msg)
-
-    def _on_audio_decrypt_finished(self):
-        """音频解密完成回调，自动加载音频列表"""
-        shared = self._audio_uses_import_dialog
-        if getattr(self, "_audio_progress_dialog", None) and not shared:
-            self._audio_progress_dialog.close()
-        self._audio_progress_dialog = None
-        self.status_bar.showMessage("音频处理完成")
-        self._load_audio_list(force_reload=True)
-        if shared and self._pending_import_message:
-            self._finish_import(True, self._pending_import_message)
-
-    def _on_audio_decrypt_cancelled(self):
-        """音频解密取消回调：保留已发布产物，不自动续跑。"""
-        shared = self._audio_uses_import_dialog
-        if getattr(self, "_audio_progress_dialog", None) and not shared:
-            self._audio_progress_dialog.close()
-        self._audio_progress_dialog = None
-        self.status_bar.showMessage("音频处理已取消，已完成的文件已保留")
-        self._load_audio_list(force_reload=True)
-        if shared and self._pending_import_message:
-            self._finish_import(
-                False,
-                "音频后处理已取消，已完成的文件已保留，可稍后重新处理音频。",
-                cancelled=True,
-            )
-
-    def _on_audio_decrypt_error(self, err_msg):
-        """音频解密错误回调"""
-        self.status_bar.showMessage("音频处理失败")
-        logger.error(f"音频解密失败: {err_msg}")
-        # 即使解密失败也尝试加载已有文件
-        self._load_audio_list(force_reload=True)
-        shared = self._audio_uses_import_dialog
-        if shared and self._pending_import_message:
-            self._audio_progress_dialog = None
-            self._finish_import(True, self._pending_import_message, audio_error=err_msg)
-        elif getattr(self, "_audio_progress_dialog", None):
-            self._audio_progress_dialog.close()
-            self._audio_progress_dialog = None
-
-    def _init_audio_player(self):
-        """初始化音频播放器"""
-        if self._audio_player is not None:
-            return
-        if not QT_MULTIMEDIA_AVAILABLE:
-            logger.warning("QtMultimedia 不可用，音频播放功能受限")
-            return
-        self._audio_player = QMediaPlayer()
-        self._audio_output = QAudioOutput()
-        self._audio_player.setAudioOutput(self._audio_output)
-        self._audio_output.setVolume(0.8)
-        self._audio_player.positionChanged.connect(self._update_audio_position)
-        self._audio_player.durationChanged.connect(self._update_audio_duration)
-        self._audio_player.playbackStateChanged.connect(self._on_audio_state_changed)
-
-    @timed("音频列表加载")
-    def _load_audio_list(self, force_reload=False):
-        """扫描 output/audio/ 目录，加载已解密的音频文件列表"""
-        if getattr(self, "_audio_list_loaded", False) and not force_reload:
-            return
-        audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
-        self._audio_files = scan_audio_files(audio_output_dir)
-        sync_audio_snapshot(audio_output_dir, self._audio_files)
-        self._audio_file_items = []
-
-        if not os.path.isdir(audio_output_dir):
-            self.audio_title.setText("音频管理器 · 共 0 个音频文件")
-            self.audio_status.setText("已选: 0 个 | 共 0 个音频文件")
-            self.audio_table.clear()
-            self.audio_empty.setVisible(True)
-            self._audio_list_loaded = True
-            self._refresh_unread_badges()
-            logger.info(f"音频输出目录不存在: {audio_output_dir}")
-            return
-
-        self._audio_file_items = populate_audio_tree(
-            self.audio_table, self._audio_files, self._format_size
-        )
-
-        total = len(self._audio_files)
-        self.audio_title.setText(f"音频管理器 · 共 {total} 个音频文件")
-        self.audio_status.setText(f"已选: 0 个 | 共 {total} 个音频文件")
-        self.audio_empty.setVisible(total == 0)
-        self._audio_list_loaded = True
-        self._refresh_unread_badges()
-        logger.info(f"音频列表加载完成: 共 {total} 个文件")
-        self.status_bar.showMessage(f"音频列表加载完成: {total} 个文件")
-
-    def _on_audio_item_pressed(self, item, _column):
-        """记录点击前状态，目录和叶节点都支持任意列点击。"""
-        self._audio_pressed_check_state = item.checkState(0)
-
-    def _on_audio_item_clicked(self, item, _column):
-        """按文件管理器语义处理勾选：普通点击单选，Ctrl 点击追加/取消，目录递归作用。"""
-        before = getattr(self, "_audio_pressed_check_state", None)
-        self._audio_pressed_check_state = None
-        if before is None:
-            before = item.checkState(0)
-        leaves = iter_audio_leaves(item)
-        if not leaves:
-            return
-        modifiers = QApplication.keyboardModifiers()
-        ctrl = bool(modifiers & Qt.ControlModifier)
-        should_check = before != Qt.Checked
-        self.audio_table.blockSignals(True)
-        try:
-            if not ctrl:
-                for other in getattr(self, "_audio_file_items", []):
-                    other.setCheckState(0, Qt.Unchecked)
-                for root_index in range(self.audio_table.topLevelItemCount()):
-                    self._set_audio_directory_state(
-                        self.audio_table.topLevelItem(root_index), Qt.Unchecked
-                    )
-            state = Qt.Checked if should_check else Qt.Unchecked
-            for leaf in leaves:
-                leaf.setCheckState(0, state)
-            refresh_audio_tree_checks(self.audio_table)
-        finally:
-            self.audio_table.blockSignals(False)
-        self.audio_table.clearSelection()
-        checked = sum(
-            item.checkState(0) == Qt.Checked
-            for item in getattr(self, "_audio_file_items", [])
-        )
-        self.audio_status.setText(f"已选: {checked} 个 | 共 {len(self._audio_files)} 个音频文件")
-
-    @staticmethod
-    def _set_audio_directory_state(item, state):
-        """设置目录节点及其后代的状态，叶节点由调用方计数。"""
-        if item.data(0, Qt.UserRole) is not None:
-            item.setCheckState(0, state)
-            return
-        item.setCheckState(0, state)
-        for index in range(item.childCount()):
-            MainWindow._set_audio_directory_state(item.child(index), state)
-
-    def _mark_all_audio_read(self):
-        """清除全部音频未读状态，并同步当前树和顶部角标。"""
-        audio_dir = os.path.join(get_base_dir(), "output", "audio")
-        changed = mark_all_audio_read(audio_dir)
-        for item in getattr(self, "_audio_file_items", []):
-            info = item.data(0, Qt.UserRole) or {}
-            item.setData(0, Qt.UserRole, {**info, "unread": False})
-        refresh_audio_tree_unread(self.audio_table)
-        self._refresh_unread_badges()
-        self.status_bar.showMessage("已将全部音频标记为已读" if changed else "当前没有未读音频")
+        self.preview_controller.cancel_export()
 
     # ========== 角色视图 ==========
 
@@ -1488,302 +947,12 @@ class MainWindow(QMainWindow):
         self._set_toolbars_visible(not show_character)
         self._set_version_content_visible(not show_character)
         self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
-        self.character_container.setVisible(show_character)
+        self.audio_page.setVisible(False)
+        self.character_page.setVisible(show_character)
         self._show_character = show_character
         if show_character:
-            self.character_container.raise_()
-            self.character_container.show()
-
-    @timed("角色数据加载")
-    def _load_character_data(self, lua_dir=None, version_timestamp=None, force=False, automatic=False):
-        """加载最新有效 Lua，并把解析结果增量写入角色数据仓库。"""
-        if lua_dir is None and version_timestamp is None and not force:
-            if self._restore_character_data():
-                return True
-        if lua_dir is None:
-            version_timestamp, lua_dir = self._latest_lua_source()
-        if not lua_dir or not self._has_character_source(lua_dir):
-            self.status_bar.showMessage("未找到完整角色 Lua 数据，请先导出包含 BaseCard/BaseWord 的最新版本")
-            self._character_loading = False
-            return False
-
-        repository = load_character_repository(CHARACTER_REPOSITORY_PATH)
-        if (
-            not force
-            and version_timestamp is not None
-            and repository.get("current_version") == int(version_timestamp)
-            and repository.get("current_characters")
-        ):
-            self._apply_character_repository(repository)
-            self._character_data_loaded = bool(self.characters)
-            self._character_loading = False
-            self.status_bar.showMessage(f"角色数据从版本仓库加载: {len(self.characters)} 个角色")
-            return True
-
-        self._character_loading = True
-        source_label = f"版本 {version_timestamp}" if version_timestamp is not None else "当前 Lua"
-        self.status_bar.showMessage(f"正在解析角色数据（{source_label}）...")
-        if automatic and getattr(self, "_import_progress_dialog", None):
-            self._import_progress_dialog.setLabelText("自动解析角色数据\n准备读取 Lua...")
-            self._import_progress_dialog.setRange(0, 100)
-            self._import_progress_dialog.setValue(0)
-        QApplication.processEvents()
-        logger.info(f"开始加载角色数据，version={version_timestamp}, lua_dir: {lua_dir}")
-
-        def on_progress(prog, msg):
-            self.dl_progress.setValue(prog)
-            self.status_bar.showMessage(msg)
-            if automatic and getattr(self, "_import_progress_dialog", None):
-                self._import_progress_dialog.setLabelText(f"自动解析角色数据\n{msg}")
-                self._import_progress_dialog.setRange(0, 100)
-                self._import_progress_dialog.setValue(prog)
-            QApplication.processEvents()
-
-        # 实际解析委托给 app.core.character_loader.load_character_data（纯解析引擎）
-        characters, characters_full, word_map = load_character_data(lua_dir, on_progress)
-        if not characters_full:
-            self._character_loading = False
-            self.status_bar.showMessage("角色 Lua 未解析出有效数据，保留已有角色数据")
-            return False
-        self.word_map = word_map
-        if version_timestamp is not None:
-            baseline = None
-            if not repository.get("current_characters"):
-                baseline = self._load_character_cache(validate_source=False)
-            merged = merge_character_snapshot(
-                CHARACTER_DATA_DIR,
-                version_timestamp,
-                characters_full,
-                source_dir=lua_dir,
-                baseline_characters=baseline,
-            )
-            self.characters_full = merged["characters_full"]
-            self.character_unread = merged["unread"]
-            self.character_source_version = int(version_timestamp)
-        else:
-            # 兼容升级前的根目录 output/lua，不阻断旧用户第一次启动。
-            self.characters_full = characters_full
-            self.character_unread = {}
-            self._save_character_cache(characters_full, lua_dir)
-        self.characters = self._derive_character_index(self.characters_full)
-
-        self.dl_progress.setValue(100)
-        self._populate_character_table()
-        self._character_data_loaded = len(self.characters) > 0
-        self._character_loading = False
-
-        if len(self.characters) > 0:
-            action = "自动解析完成" if automatic else "角色数据加载完成"
-            unread_count = len(self.character_unread)
-            self.status_bar.showMessage(
-                f"{action}: {len(self.characters)} 个角色，{unread_count} 个新/变更"
-            )
-        else:
-            self.status_bar.showMessage("角色数据加载完成: 无匹配角色")
-
-        # 保留旧缓存文件作为迁移期兼容产物；正式状态以角色仓库为准。
-        self._save_character_cache(self.characters_full, lua_dir)
-        self._refresh_unread_badges()
-        return True
-
-    def _restore_character_data(self):
-        """只从本地仓库/缓存恢复角色数据，不触发 Lua 解析。"""
-        repository = load_character_repository(CHARACTER_REPOSITORY_PATH)
-        if repository_characters(repository):
-            self._apply_character_repository(repository)
-            self._character_data_loaded = bool(self.characters)
-            self._character_loading = False
-            self.status_bar.showMessage(f"角色数据从本地仓库加载: {len(self.characters)} 个角色")
-            return True
-
-        # 旧版本只有 characters_full.json，没有版本仓库。这里宁可显示本地
-        # 缓存，也不在切换页面时现场解析；用户可用“开始解析”主动刷新。
-        cached = self._load_character_cache(validate_source=False)
-        if not cached:
-            return False
-        self.characters_full = cached
-        self.character_unread = character_unread_status(repository)
-        self.character_source_version = None
-        self.characters = self._derive_character_index(self.characters_full)
-        self._character_data_loaded = bool(self.characters)
-        self._character_loading = False
-        self._populate_character_table()
-        self._refresh_unread_badges()
-        self.status_bar.showMessage(f"角色数据从本地缓存加载: {len(self.characters)} 个角色")
-        return self._character_data_loaded
-
-    def _latest_lua_source(self):
-        """返回最新版本 Lua 目录；兼容升级前的 output/lua 根目录。"""
-        version = latest_lua_version(LUA_OUTPUT_DIR)
-        if version is not None:
-            return version, version_directory(LUA_OUTPUT_DIR, version)
-        if has_character_sources(LUA_OUTPUT_DIR):
-            return None, LUA_OUTPUT_DIR
-        return None, None
-
-    def _has_character_source(self, lua_dir=None):
-        """检查指定 Lua 目录是否具备自动角色解析所需的 Base 文件。"""
-        if lua_dir is None:
-            _version, lua_dir = self._latest_lua_source()
-        return bool(lua_dir and has_character_sources(lua_dir))
-
-    def _apply_character_repository(self, repository):
-        """从角色仓库恢复当前数据和未读状态。"""
-        self.characters_full = repository_characters(repository)
-        self.character_unread = character_unread_status(repository)
-        version = repository.get("current_version")
-        self.character_source_version = int(version) if version is not None else None
-        self.characters = self._derive_character_index(self.characters_full)
-        self._character_data_loaded = bool(self.characters)
-        self._populate_character_table()
-        self._refresh_unread_badges()
-
-    def _character_source_mtime(self, lua_dir=LUA_OUTPUT_DIR):
-        """返回角色源文件的最大 mtime（用于缓存失效）；缺失返回 0"""
-        return source_mtime(lua_dir, CHARACTER_SOURCE_FILES)
-
-    def _derive_character_index(self, characters_full):
-        """从完整角色数据派生表格索引列表（复用 load_character_data 的过滤逻辑）"""
-        characters = derive_character_index(characters_full)
-        for item in characters:
-            item["change_status"] = self.character_unread.get(str(item.get("char_id")))
-        return characters
-
-    def _save_character_cache(self, characters_full, lua_dir=LUA_OUTPUT_DIR):
-        """留存完整角色数据到 output/character_data/characters_full.json"""
-        try:
-            out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
-            save_character_cache_file(out_json, characters_full, self._character_source_mtime(lua_dir))
-            logger.info(f"已留存完整角色数据到 {out_json}")
-        except Exception as e:
-            logger.warning(f"留存角色数据失败: {e}")
-
-    def _load_character_cache(self, lua_dir=LUA_OUTPUT_DIR, validate_source=True):
-        """读完整角色数据缓存；源文件 mtime 变化时返回 None 触发重解析"""
-        out_json = os.path.join(CHARACTER_DATA_DIR, "characters_full.json")
-        return load_character_cache_file(
-            out_json,
-            self._character_source_mtime(lua_dir),
-            validate_source=validate_source,
-        )
-
-    def _auto_parse_after_lua_export(self):
-        """Lua 导出完成后，仅对最新版本且 Base 文件齐全的结果自动解析。"""
-        worker = getattr(self, "_import_worker", None)
-        result = getattr(worker, "lua_export_result", None)
-        if not result:
-            return
-        version = result.get("version")
-        lua_dir = result.get("directory")
-        latest_version = latest_lua_version(LUA_OUTPUT_DIR)
-        if not should_auto_parse(version, latest_version, lua_dir):
-            if not result.get("character_sources"):
-                self.status_bar.showMessage("Lua 已按版本留存，但缺少角色 Base 文件，未自动解析")
-                logger.info("跳过 Lua 自动角色解析：版本 %s 缺少必要 Base 文件", version)
-                return
-            self.status_bar.showMessage(f"历史 Lua 已留存（版本 {version}），非最新版本，不自动解析角色")
-            logger.info("跳过 Lua 自动角色解析：导出版本 %s 不是最新版本 %s", version, latest_version)
-            return
-        self._load_character_data(lua_dir, version, force=True, automatic=True)
-
-    def _populate_character_table(self):
-        """填充角色表格"""
-        self.character_table.setSortingEnabled(False)
-        self.character_table.setRowCount(0)
-        self.character_profile_view.clear_profile()
-        count = len(self.characters)
-        if count == 0:
-            self.character_empty.setVisible(True)
-            self.character_status.setText("暂无角色数据")
-            return
-        self.character_empty.setVisible(False)
-        self.character_table.setRowCount(count)
-        for i, char in enumerate(self.characters):
-            idx_item = QTableWidgetItem(str(char.get("display_index", i + 1)))
-            idx_item.setTextAlignment(Qt.AlignCenter)
-            self.character_table.setItem(i, 0, idx_item)
-            name_item = QTableWidgetItem(char.get("name", "未知"))
-            self.character_table.setItem(i, 1, name_item)
-            badge_item = QTableWidgetItem("新" if char.get("change_status") else "")
-            badge_item.setTextAlignment(Qt.AlignCenter)
-            if char.get("change_status"):
-                badge_item.setForeground(QBrush(QColor(DANGER)))
-                badge_item.setToolTip("新版本新增或数据发生变化，打开详情后清除")
-            self.character_table.setItem(i, 2, badge_item)
-        self.character_status.setText(f"共 {count} 个角色")
-
-    def _filter_character_table(self, text):
-        """根据搜索文本过滤角色表格"""
-        for i in range(self.character_table.rowCount()):
-            name_item = self.character_table.item(i, 1)
-            if name_item:
-                match = text.lower() in name_item.text().lower()
-                self.character_table.setRowHidden(i, not match)
-
-    def _refresh_character_list(self):
-        """刷新角色列表（重新加载 Lua 文件，不重新解密）"""
-        self._load_character_data(force=True)
-
-    def _on_character_select(self):
-        """角色表格选中行时更新详情卡片"""
-        rows = self.character_table.selectionModel().selectedRows()
-        if not rows:
-            self.character_profile_view.clear_profile()
-            return
-        row = rows[0].row()
-        if row < 0 or row >= len(self.characters):
-            return
-        # 从 self.characters 获取角色信息
-        char_item = self.characters[row]
-        # 优先使用 char_id 查找
-        char_id = char_item.get("char_id", 0)
-        char_data = self.characters_full.get(char_id, {})
-        # 如果 char_id 找不到，尝试用 raw_id 查找
-        if not char_data:
-            raw_id = char_item.get("raw_id", 0)
-            for cid, cinfo in self.characters_full.items():
-                if cinfo.get("raw_id") == raw_id:
-                    char_data = cinfo
-                    break
-        if char_data:
-            if clear_character_unread(CHARACTER_DATA_DIR, char_id):
-                self.character_unread.pop(str(char_id), None)
-                char_item["change_status"] = None
-                badge_item = self.character_table.item(row, 2)
-                if badge_item:
-                    badge_item.setText("")
-                self._refresh_unread_badges()
-            self._update_character_detail(char_data)
-
-    def _update_character_detail(self, char):
-        """把角色资料模型交给 Wiki 详情视图。"""
-        self.character_profile_view.set_profile(build_character_profile(char))
-
-    def _export_characters_csv(self):
-        """弹出保存对话框并委托无 Qt 的 CSV 导出逻辑。"""
-        if not self.characters_full:
-            QMessageBox.information(self, "提示", "没有角色数据可导出，请先加载角色视图。")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存 CSV 文件", "characters.csv", "CSV 文件 (*.csv)"
-        )
-        if not file_path:
-            return
-
-        self.status_bar.showMessage("正在生成角色数据...")
-        QApplication.processEvents()
-        count = export_characters_csv(file_path, self.characters_full)
-        if not count:
-            QMessageBox.information(self, "提示", "未找到匹配的角色数据。")
-            self.status_bar.showMessage("CSV 导出失败：无匹配角色")
-            return
-
-        logger.info(f"CSV 导出完成: {file_path} ({count} 个角色)")
-        self.status_bar.showMessage(f"CSV 导出完成: {count} 个角色")
-
-    # ========== Lua Decrypt ==========
+            self.character_page.raise_()
+            self.character_page.show()
 
     def _start_lua_decrypt(self):
         """点击【角色】按钮：只切换视图并读取本地数据，不现场解析 Lua。"""
@@ -1792,235 +961,8 @@ class MainWindow(QMainWindow):
             self._toggle_character_mode(False)
             return
         self._toggle_character_mode(True)
-        if not self._character_data_loaded:
-            self._restore_character_data()
-
-    def _manual_load_character(self):
-        """手动开始：读 output/lua 并加载角色数据（AS 导入已反编译）"""
-        if self._character_loading:
-            return
-        if not self._has_character_source():
-            QMessageBox.information(self, "提示", "未找到完整角色 Lua 数据。\n\n请先导出包含 BaseCard/BaseWord 的版本后再解析。")
-            self.status_bar.showMessage("请先导入AS")
-            return
-        self._load_character_data(force=True)
-
-    def _mark_all_characters_read(self):
-        """清除角色仓库中的全部未读状态，并同步所有顶层标签。"""
-        cleared = clear_all_character_unread(CHARACTER_DATA_DIR)
-        self.character_unread.clear()
-        for item in self.characters:
-            item["change_status"] = None
-        for row in range(self.character_table.rowCount()):
-            badge = self.character_table.item(row, 2)
-            if badge:
-                badge.setText("")
-        self._refresh_unread_badges()
-        self.status_bar.showMessage("已将全部角色数据标记为已读" if cleared else "当前没有未读角色数据")
-
-    def _export_selected_audio(self):
-        """导出选中的音频文件"""
-        selected = []
-        for item in getattr(self, "_audio_file_items", []):
-            if item.checkState(0) == Qt.Checked:
-                info = item.data(0, Qt.UserRole)
-                if info:
-                    selected.append(info)
-
-        if not selected:
-            QMessageBox.information(self, "提示", "请先勾选要导出的音频文件")
-            return
-
-        dst_dir = QFileDialog.getExistingDirectory(self, "选择导出目录")
-        if not dst_dir:
-            return
-
-        logger.info(f"导出音频：选中 {len(selected)} 个文件 → {dst_dir}")
-        success, failures = export_audio_files(selected, dst_dir)
-        for filename in failures:
-            logger.error(f"导出失败 {filename}")
-
-        QMessageBox.information(self, "导出完成", f"成功导出 {success} 个音频文件到:\n{dst_dir}")
-        logger.info(f"导出 {success} 个音频文件到 {dst_dir}")
-
-    def _play_selected_audio(self):
-        """播放选中的音频文件（取第一个勾选，否则当前选中项）"""
-        for item in getattr(self, "_audio_file_items", []):
-            if item.checkState(0) == Qt.Checked:
-                info = item.data(0, Qt.UserRole)
-                if info:
-                    self._play_audio_file(info["path"], info["name"])
-                    return
-
-        cur = self.audio_table.currentItem()
-        if cur:
-            info = cur.data(0, Qt.UserRole)
-            if info:
-                self._play_audio_file(info["path"], info["name"])
-
-    def _on_audio_double_click(self, item, column):
-        """双击播放音频"""
-        if item:
-            info = item.data(0, Qt.UserRole)
-            if info:
-                self._play_audio_file(info["path"], info["name"])
-
-    def _play_audio_file(self, filepath, filename):
-        """播放指定音频文件"""
-        if not QT_MULTIMEDIA_AVAILABLE or self._audio_player is None:
-            QMessageBox.warning(self, "错误", "音频播放器不可用（QtMultimedia 未安装）")
-            return
-
-        if not os.path.exists(filepath):
-            QMessageBox.warning(self, "错误", f"文件不存在: {filepath}")
-            return
-
-        self._audio_current_path = filepath
-        self._audio_player.setSource(QUrl.fromLocalFile(filepath))
-        self._audio_player.play()
-        audio_dir = os.path.join(get_base_dir(), "output", "audio")
-        relative_name = os.path.relpath(filepath, audio_dir)
-        mark_audio_read(audio_dir, relative_name)
-        for item in getattr(self, "_audio_file_items", []):
-            info = item.data(0, Qt.UserRole) or {}
-            if info.get("path") == filepath:
-                info["unread"] = False
-                break
-        refresh_audio_tree_unread(self.audio_table)
-        self._refresh_unread_badges()
-        self.audio_now_playing.setText(f"正在播放：{filename}")
-        self.audio_play_btn.setText("暂停")
-        self.audio_play_btn.setEnabled(True)
-        self.audio_slider.setEnabled(True)
-        logger.info(f"播放音频: {filename}")
-
-    def _toggle_play(self):
-        """播放/暂停切换"""
-        if not self._audio_player:
-            return
-        if self._audio_player.playbackState() == QMediaPlayer.PlayingState:
-            self._audio_player.pause()
-        else:
-            self._audio_player.play()
-
-    def _on_audio_state_changed(self, state):
-        """播放状态变化"""
-        if state == QMediaPlayer.PlayingState:
-            self.audio_play_btn.setText("暂停")
-        elif state in (QMediaPlayer.PausedState, QMediaPlayer.StoppedState):
-            self.audio_play_btn.setText("播放")
-
-    def _update_audio_position(self, position):
-        """更新播放进度"""
-        duration = self._audio_player.duration() if self._audio_player else 0
-        if duration > 0 and not getattr(self, "_audio_slider_dragging", False):
-            self.audio_slider.setRange(0, duration)
-            self.audio_slider.setValue(position)
-        pos_str = self._format_duration(position)
-        dur_str = self._format_duration(duration)
-        self.audio_position_label.setText(f"{pos_str} / {dur_str}")
-
-    def _update_audio_duration(self, duration):
-        """总时长变化"""
-        if duration > 0:
-            self.audio_slider.setRange(0, duration)
-
-    def _on_audio_slider_moved(self, position):
-        """拖动过程中只更新预览位置，释放时再提交给播放器。"""
-        duration = self._audio_player.duration() if self._audio_player else 0
-        self.audio_position_label.setText(
-            f"{self._format_duration(position)} / {self._format_duration(duration)}"
-        )
-
-    def _on_audio_slider_pressed(self):
-        """锁定播放器回调，避免 positionChanged 把用户拖动位置抢回去。"""
-        self._audio_slider_dragging = True
-
-    def _on_audio_slider_released(self):
-        """提交用户拖动后的位置。"""
-        self._audio_slider_dragging = False
-        if self._audio_player:
-            self._audio_player.setPosition(self.audio_slider.value())
-
-    def _set_audio_volume(self, volume):
-        """设置音量"""
-        if self._audio_output:
-            self._audio_output.setVolume(volume / 100.0)
-
-    def _show_audio_context_menu(self, position):
-        """音频列表右键菜单"""
-        item = self.audio_table.itemAt(position)
-        if not item:
-            return
-        info = item.data(0, Qt.UserRole)
-        if not info:
-            return  # 目录节点，无音频信息
-        filepath = info["path"]
-
-        menu = QMenu(self)
-        menu.setObjectName("contextMenu")
-
-        act_open = menu.addAction("打开文件所在目录")
-        act_copy = menu.addAction("复制文件")
-        act_play = menu.addAction("播放")
-
-        action = menu.exec(self.audio_table.mapToGlobal(position))
-        if action == act_open:
-            self._open_audio_file_location(filepath)
-        elif action == act_copy:
-            self._copy_audio_file(filepath)
-        elif action == act_play:
-            self._play_audio_file(filepath, info["name"])
-
-    def _open_audio_file_location(self, file_path):
-        """打开文件所在目录"""
-        logger.info(f"打开文件所在目录: {file_path}")
-        try:
-            if sys.platform == "win32":
-                subprocess.Popen(['explorer', '/select,', file_path],
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                folder = os.path.dirname(file_path)
-                subprocess.Popen(['xdg-open', folder] if sys.platform.startswith('linux') else ['open', folder])
-        except Exception as e:
-            logger.error(f"打开目录失败: {e}")
-
-    def _copy_audio_file(self, file_path):
-        """复制文件到剪贴板"""
-        if not os.path.exists(file_path):
-            return
-        try:
-            from PySide6.QtGui import QGuiApplication
-            clipboard = QGuiApplication.clipboard()
-            url = QUrl.fromLocalFile(file_path)
-            data = QMimeData()
-            data.setUrls([url])
-            clipboard.setMimeData(data)
-            logger.info(f"已复制文件到剪贴板: {file_path}")
-        except Exception as e:
-            logger.error(f"复制文件失败: {e}")
-
-    def _get_audio_duration(self, filepath):
-        """获取音频时长（毫秒），失败返回 None"""
-        try:
-            if not QT_MULTIMEDIA_AVAILABLE:
-                return None
-            # 使用 QMediaPlayer 临时探测（非阻塞方式不可行，这里用文件大小估算）
-            # 对于 WAV: duration ≈ filesize / (sample_rate * channels * bits_per_sample/8) * 1000
-            # 简化：返回 None，让用户播放时显示实际时长
-            return None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _format_duration(ms):
-        """毫秒转 mm:ss"""
-        return format_duration(ms)
-
-    @staticmethod
-    def _format_size(size):
-        """字节转可读大小"""
-        return format_size(size)
+        if not self.character_controller.data_loaded:
+            self.character_controller.restore_local()
 
     def _populate_character_filter(self):
         """扫描 output/character 的角色目录，填充图片预览的角色过滤下拉框"""
@@ -2069,37 +1011,19 @@ class MainWindow(QMainWindow):
 
     @timed("图片缩略图加载")
     def _load_preview_images(self):
-        """异步加载预览图片"""
-        preview_dir = os.path.join(get_base_dir(), "output", "character")
-        material_dir = os.path.join(DATA_DIR, "material")
+        """通过 PreviewController 异步加载预览图片。"""
+        self.preview_controller.load()
+        self._skel_map = self.preview_controller.skel_map
 
-        logger.info(f"开始加载预览图片: {preview_dir}")
-        self._populate_character_filter()
-
-        if not os.path.isdir(preview_dir):
-            os.makedirs(preview_dir, exist_ok=True)
-            logger.warning(f"预览目录不存在，已创建: {preview_dir}")
-
-        # 预扫描 material 目录，建立 文件名→skel路径 映射
-        self._skel_map = build_skel_map(material_dir)
-        logger.debug(f"扫描到 {len(self._skel_map)} 个 .skel 文件用于路径匹配")
-
-        self._clear_list()
-        self._thumb_cache = {}
-
-        if hasattr(self, "_image_worker") and self._image_worker is not None:
-            self._image_worker.cancel()
-            self._image_worker.wait(2000)
-
-        self.preview_progress.setVisible(True)
-        self.preview_progress.setValue(0)
-        self.empty_label.setVisible(False)
-
-        self._image_worker = ImageLoadWorker(preview_dir, 150)
-        self._image_worker.progress.connect(self._on_load_progress)
-        self._image_worker.image_loaded.connect(self._on_thumbnail_loaded)
-        self._image_worker.finished_loading.connect(self._on_load_finished)
-        self._image_worker.start()
+    def _on_preview_controller_progress(self, current, total, stage):
+        """接入 PreviewController 的统一进度语义。"""
+        if total > 0:
+            self.preview_progress.setMaximum(total)
+            self.preview_progress.setValue(current)
+            self.preview_progress.setFormat(f"{stage}... {current}/{total}")
+        self.status_bar.showMessage(
+            f"{stage}: {current}/{total}" if total > 0 else f"{stage}: 处理中..."
+        )
 
     def _clear_list(self):
         """清空 QListWidget"""
@@ -2299,33 +1223,21 @@ class MainWindow(QMainWindow):
     # ========== DELETE ==========
 
     def _delete_version(self, ts):
-        sub = db.get_sub_bundles(ts)
-        down = count_downloaded_bundles(sub)
-        if down == 0:
-            QMessageBox.information(self, "无文件", "没有已下载的 bundle.")
-            return
-        reply = QMessageBox.question(
-            self, "确认删除", f"删除此版本 {down} 个文件?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            return
-        logger.info(f"删除版本 {ts}：共 {down} 个已下载文件")
-        delete_downloaded_bundles(ts, sub)
-        self._load_data()
-        logger.info(f"已删除版本 {ts} 的 {down} 个文件，并清空数据库下载状态")
-        self.status_bar.showMessage(f"已删除 {down} 个文件.")
-        QMessageBox.information(self, "完成", f"已删除 {down} 个文件.")
+        self.version_controller.delete_version(ts)
 
     # ========== SEED ==========
 
     def _seed_bundled_version(self):
-        seed_bundled_versions(self.version_mgr, BUNDLES_DIR)
+        self.version_service.seed()
 
     def _check_auto(self):
-        cur = self.version_mgr.get_current()
+        cur = self.version_service.current()
         if not cur:
             self.status_bar.showMessage("首次启动, 自动检查更新...")
             QTimer.singleShot(1500, self._check_update)
         else:
             QTimer.singleShot(500, lambda: self.status_bar.showMessage("就绪"))
+
+    def closeEvent(self, event):
+        self.audio_controller.close()
+        super().closeEvent(event)

@@ -8,6 +8,7 @@
 - [开发文档指南](docs/开发文档指南.md)：面向开发者的架构、模块职责、调用链、运行目录契约和验证方法。
 - [版本历史](docs/版本历史.md)：按新版本到旧版本记录功能和修复变更。
 - [架构与协作基线](docs/架构与协作基线.md)：多人协作边界、失败恢复要求和提交前检查。
+- [代码所有权与边界](docs/代码所有权与边界.md)：功能域认领范围、公共架构区和迁移期修改规则。
 - [开发过程记录](docs/worklog/)：任务计划、调查发现和进度记录，仅供开发过程追踪。
 
 ## 项目简介
@@ -70,6 +71,7 @@
 版本列表刷新时会以 `data/bundles/` 的实际文件校准数据库下载状态。
 Lua 成品按版本留存在 `output/lua/<版本时间戳>/`，不会再把多个版本合并到同一个目录；`data/material/assets/lua/` 只作为导出过程中的临时目录，Lua 成功发布后会自动清理。
 音频导出完成后会自动执行后处理，`data/material/assets/fmodassets/`、debank 输入目录和 `output/audio/.debank-temp/` 只作为临时中间态并在流程结束后清理；最终音频增量写入 `output/audio/`，不会按版本拆目录。`output/audio/.bank_state.json` 保存 bank 来源指纹、分类目录和最终文件清单，未变化且成品完整的 bank 会跳过重复解密，分类变化或成品缺失会自动重新处理。debank 对每个 bank 使用隔离临时目录并默认 6 路受控并行，优先由 vgmstream 直接读取 bank，失败时再回退 QuickBMS/FSB 链路；旧分类清理使用一次性文件索引，避免大批量导出反复递归扫描；同盘成品优先移动、跨盘自动复制。日志会分别记录成功、空产出、失败和复制失败，便于定位活动音乐缺口；完成后还会对照最新 Lua 的 BaseSound/BaseSoundChapter 与 bank 状态，报告缺失 BGM 和配置表之外的未分类 BGM。语音成品按角色和语言分别写入 `voice/<角色ID>/cn`、`voice/<角色ID>/jp`，中日同名文件不会互相覆盖或删除；旧的错位角色文件会在重新导出时清理，提取器生成的连续重复事件后缀会归一化；文件夹层级会沿未读音频递归显示红色“新”标记。点击处理弹窗的“取消”会终止当前 bank 解包及其子进程，保留已经发布的最终文件，不会自动续跑。仅勾选音频导出时，若版本存在 `assets_map.json`，程序会只把含音频资源的 AB 包交给 AssetStudio。
+音频目录会在启动后后台预热，不阻塞版本列表；进入音频页时优先使用已准备的索引。音频树按 `album/voice → 专辑或角色 → 音频文件` 分层懒加载，只有展开目录才构造下一层节点；目录勾选、Ctrl 多选和文件勾选由统一选择状态驱动。
 vgmstream 直解 bank 或 FSB 失败时，流程会回退到旧 QuickBMS/`fsb_aud_extr.exe`；回退成功仍计为成功，失败会在日志中记录 bank 级状态，不再被 QuickBMS 的 0 退出码掩盖。
 角色数据仓库位于 `output/character_data/`：每个已解析版本保留一份快照，当前角色数据做增量合并，新角色和数值变化会在角色列表及“角色”顶部标签显示“新”角标，打开详情后清除。应用启动和切换角色页优先读取本地仓库/缓存，不会因为切换页面现场解析 Lua；可在角色页点击“开始解析”主动刷新，或由最新 Lua 导出完成后自动触发。
 角色详情展示和 CSV 导出由无 Qt 的 `app/core/character_presenter.py` 负责，便于测试和后续扩展。
@@ -87,6 +89,7 @@ vgmstream 直解 bank 或 FSB 失败时，流程会回退到旧 QuickBMS/`fsb_au
 工具栏分两处：
 
 当前正式界面采用统一的蓝灰深色主题，历史主题配置会自动兼容迁移；图片预览、音频和角色页面共享一致的页头、操作栏、状态栏和空状态结构。角色详情以 Wiki 分区展示，技能数字支持一键高亮；图片预览显示总数与选择数，音频页在空目录时提供下一步提示；图片查看器、角色选择和导出设置对话框也复用同一套视觉令牌。
+顶部视图切换时，版本列表、图片预览、音频和角色页面会整体互斥显示，当前页面从内容区顶部完整展开，不会残留其他页面的空白占位。
 
 **顶部视图栏**（切换当前显示界面）：
 
@@ -109,7 +112,7 @@ vgmstream 直解 bank 或 FSB 失败时，流程会回退到旧 QuickBMS/`fsb_au
 
 ### 调试模式
 
-开发测试时用 `debug.bat`（或 `python main.py --debug`）启动，会多出一排「调试模式」工具栏：选择性导出（只导出 Lua / 只导出贴图）+ 清空各数据区域按钮。正常使用 `run.bat` 不会显示。
+开发测试时用 `debug.bat`（或 `python main.py --debug`）启动，会多出一排「调试模式」工具栏：选择性导出（只导出 Lua / 只导出贴图）+ 清空各数据区域按钮。Debug 启动会额外记录任务 ID、阶段、外部工具退出信息和环境摘要；日志位于 `logs/<session_id>/`，包括 `app.log`、`error.log`、`debug.log` 和 `environment.txt`。未捕获的主线程/工作线程异常会在同一目录生成 `crash_*.log`。正常使用 `run.bat` 不会显示调试工具栏，也不会写入 DEBUG 级别日志。
 
 ## 目录结构
 
@@ -124,8 +127,15 @@ xl_updata_tool/
 ├── pyproject.toml      pytest 与 Ruff 配置
 ├── build.spec          PyInstaller 打包配置
 ├── app/                源代码
-│   ├── core/           核心逻辑（下载、解析、数据库）
-│   └── ui/             UI 界面（workers/dialogs/features/views/adapters）
+    │   ├── bootstrap/      迁移期应用上下文与 Feature 装配入口
+    │   ├── shared/         与 Qt 无关的跨 Feature 契约
+    │   ├── features/audio/ 音频 Feature 页面、控制器、目录服务、Worker 和树逻辑（P1）
+    │   ├── features/characters/ 角色 Feature 页面、控制器和 Qt-free 数据服务（P2）
+    │   ├── features/versions/ 版本工作区、更新检查、下载计划和 Bundle 状态（P3）
+    │   ├── features/importer/ 导入规格、精准 Bundle 筛选和后处理结果（P4）
+    │   ├── features/preview/  图片预览、FGUI、Spine/视频导出功能域（P5）
+    │   ├── core/           迁移期核心逻辑兼容层
+    │   └── ui/             迁移期 UI 界面（workers/dialogs/features/views/adapters）
 ├── tests/              项目测试（与 app/ 平级）
 ├── tools/              外部工具（AssetStudio 等）
 ├── docs/               开发文档
@@ -162,8 +172,8 @@ A: 浏览已下载的资源和查看版本历史可以离线，但检查更新�
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
-python -m ruff check --no-cache tests app/core app/ui
+python -m ruff check --no-cache tests app/core app/ui app/bootstrap app/shared
 python -B -c "from pathlib import Path; files=list(Path('app').rglob('*.py'))+list(Path('tests').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
 ```
 
-提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md)。
+提交 PR 前还应执行一次导入 smoke，并人工确认正常启动、AssetStudio 导入和 Lua 导出流程；完整验收清单见 [架构与协作基线](docs/架构与协作基线.md) 和 [代码所有权与边界](docs/代码所有权与边界.md)。

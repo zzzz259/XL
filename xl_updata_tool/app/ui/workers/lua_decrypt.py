@@ -19,6 +19,7 @@ import tempfile
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger
+from app.core.task_context import task_operation
 
 
 FIXED_HEAD = (b'\x1B\x4C\x75\x61\x54\x00\x19\x93\x0D\x0A\x1A\x0A\x04\x08\x08\x78'
@@ -313,6 +314,7 @@ class LuaDecryptWorker(QThread):
     def cancel(self):
         self._cancelled = True
 
+    @task_operation("LUA", "lua", lambda self: {"lua_dir": self.lua_dir})
     def run(self):
         try:
             logger.info(f"Lua 反编译线程开始：{self.lua_dir}")

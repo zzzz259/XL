@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.widgets.drag_list import DragListWidget
-from app.ui.widgets.view_chrome import (
+from app.shared.qt.chrome import (
     create_action_button,
     create_command_bar,
     create_empty_state,
@@ -115,6 +115,7 @@ def create_preview_view(parent=None):
 
     controls = {
         "preview_title": preview_title,
+        "btn_close_preview": btn_close_preview,
         "preview_progress": preview_progress,
         "image_list": image_list,
         "empty_label": empty_label,

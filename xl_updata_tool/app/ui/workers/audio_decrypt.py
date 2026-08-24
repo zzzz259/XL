@@ -9,6 +9,7 @@ import sys
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
+from app.core.task_context import stage_operation, task_operation
 from app.core.album_map import audit_bgm_exports, build_album_map
 from app.core.lua_repository import latest_lua_version, version_directory
 from app.core.path_utils import get_base_dir
@@ -41,6 +42,11 @@ class AudioDecryptWorker(QThread):
     def cancel(self):
         self._cancelled = True
 
+    @task_operation(
+        "AUDIO",
+        "audio",
+        lambda self: {"force": self.force, "material": self.material_dir, "output": self.audio_output_dir},
+    )
     def run(self):
         try:
             logger.info(f"音频解密开始：material={self.material_dir}, output={self.audio_output_dir}, force={self.force}")
@@ -65,6 +71,7 @@ class AudioDecryptWorker(QThread):
             self._cleanup_material_audio()
             self._cleanup_debank_input()
 
+    @stage_operation("audio.scan", "bytes_to_bank")
     @timed("音频-转换bytes")
     def _convert_bytes_to_bank(self):
         """扫描 data/material/ 目录，将符合条件的 .bytes 文件重命名为 .bank，并复制到解密工具的 input 目录
@@ -117,6 +124,7 @@ class AudioDecryptWorker(QThread):
             self.progress.emit(f"已转换 {count} 个 .bytes → .bank")
         return count
 
+    @stage_operation("audio.decrypt", "bank")
     @timed("音频-解密bank")
     def _decrypt_bank_files(self):
         """通过导入 epic7_debank 模块解密 .bank 文件（递归扫描 data/material/，输出到 output/audio/）"""

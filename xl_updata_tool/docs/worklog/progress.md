@@ -280,3 +280,119 @@
 - [x] 复查 Lua BGM 配置与 output 音频产物的对应关系，配置内缺失 0 个。
 - [x] 修复 bank 清理索引、列表缓存、未读聚合、播放 seek 和树形层级选择。
 - [x] 补充回归测试、静态检查、编译和 diff 检查；已创建本地检查点提交。
+
+## 2026-08-23 Issue #38：日志可观测性第一轮
+
+- [x] 读取用户方案并建立持久化计划，创建 GitHub Issue #38。
+- [x] 新增 `RuntimeConfig`，将 `--debug` 解析提前到主窗口和业务模块导入之前。
+- [x] 重构日志会话：`logs/<session_id>/app.log`、`error.log`，Debug 额外生成 `debug.log`。
+- [x] 新增 task、parent task、component、stage 上下文，并接入导入、Lua、音频 Worker。
+- [x] 新增环境摘要、顶层/线程异常报告和 AssetStudio/Spine CLI 外部进程诊断包装。
+- [x] 保持 UI 布局、正式数据目录、导出结果、取消语义和现有 logger 调用方式不变。
+- [completed] 完成全量测试、静态检查、编译和差异审查：pytest 84 passed、Ruff 通过、compileall 通过、`git diff --check` 通过。
+- [pending] 用户分别启动普通模式和 Debug 模式，检查 `logs/<session_id>/`、`debug.log`、`environment.txt` 与任务标识；流式外部工具、Debug 数据隔离和 UI 标识留待后续阶段。
+
+## 2026-08-23 项目结构与多人协作架构审查
+
+- [completed] 盘点 `app/core`、`app/ui/views`、`app/ui/features`、`app/ui/workers`、`app/ui/adapters`、旧 AssetBrowser 和测试目录。
+- [completed] 统计公共热点：`main_window.py` 约 2331 行，项目 73 个提交中按文件历史出现 27 次；确认高风险辅助热点和跨领域 Worker。
+- [completed] 梳理依赖方向：主窗口直接组装多个领域，Worker/feature 混合 Qt、文件系统、外部工具和业务流程，core 仍有外部进程副作用。
+- [completed] 对照架构基线确认当前强项与偏差：core 无 Qt、纯逻辑已有测试；但应用服务层、ownership 门禁、依赖方向测试和外部工具统一适配尚未建立。
+- [completed] 形成渐进式目标结构和 P0-P4 迁移计划，决定先加稳定入口和门禁，再迁移调用方，最后清理旧实现。
+- [pending] 等用户确认计划后创建结构调整 Issue；确认前不修改源代码、不移动目录、不改变运行时契约。
+
+## 2026-08-23 第三方所有权审查复核
+
+- [completed] 读取第三方审查报告并拆分为 17 个可核验要点。
+- [completed] 复核 `main.py`、`MainWindow`、页面工厂、Audio/Import Worker、角色解析器、导入分类和文档热点。
+- [completed] 确认第三方报告中的核心判断成立：当前是技术分层，尚未形成 Feature ownership 分层。
+- [completed] 确认报告建议的 Feature-first、Composition Root、Page 自有控件、Worker 薄化、PostProcessorRegistry、parser 拆分、依赖门禁和 Change Fragment 均具有实际价值。
+- [completed] 对报告方案做风险收口：不一次性搬迁全仓，采用兼容迁移；Audio 作为模板，随后 Characters、Versions、Importer、Preview。
+- [completed] 将逐条复核报告和完整 P0-P8 计划写入 `ownership-review-2026-08-23.md` 与 `task_plan.md`。
+- [pending] 等用户确认后创建架构迁移 Issue；当前不改源代码、不移动目录、不创建 GitHub Issue。
+
+## 2026-08-24 Issue #39：P0 架构契约与 ownership 基线
+
+- [completed] 按 XL 协作流程读取计划、检查工作区和确认当前分支状态。
+- [completed] 验证 GitHub keyring 认证有效，创建 Issue #39：架构迁移 P0：建立 Feature ownership 与依赖门禁。
+- [completed] 新增无 Qt 的 Feature/Page/Controller/Service/Worker/ImportResult 契约、AppContext 和 Feature 装配入口。
+- [completed] 新增架构 AST 测试、ownership 文档，并保留现有实现作为迁移期兼容层。
+- [completed] 全量 pytest 84 项通过，Python 编译 103 个文件通过；Ruff 初次发现并记录 1 个未使用导入，已修正。
+- [completed] 重新运行 P0 定向 pytest 8 项、Ruff 和 Python 编译 103 个文件；全部通过。
+- [completed] 全量 pytest 84 项、Ruff、Python 编译 103 个文件和 `git diff --check` 通过。
+- [completed] 创建本地 P0 检查点：`a0e8301 refactor: 建立功能域所有权架构基线`。
+- [completed] 用户已用正常模式启动 XL，确认启动、页面和现有功能无异常。
+
+## 2026-08-24 Issue #40：P1 Audio Feature ownership 模板
+
+- [completed] 创建 Issue #40《架构迁移 P1：Audio Feature ownership 模板》。
+- [completed] 盘点音频页面、控制器、播放器、缓存、AudioDecryptWorker 和现有 MainWindow 音频状态，设计兼容迁移切片。
+- [completed] 建立 `AudioPage`、`AudioService` 和 Audio tree Feature 入口；页面自持控件并通过语义信号连接迁移期 Shell。
+- [completed] 将音频树逻辑和目录扫描/快照/导出服务迁入 `app/features/audio/`，旧 `ui/features/audio_controller.py` 保留兼容转发。
+- [completed] 迁移播放器、选择状态、右键菜单、选中导出、解密任务生命周期和进度弹窗到 `AudioController`；新增功能域 Worker 入口。
+- [completed] 接入 MainWindow，保留音频输出、导出、播放、取消、分类和未读状态契约；旧模块暂不删除。
+- [completed] 全量 pytest 100 项通过，Ruff、AST 解析 111 个 Python 文件和 `git diff --check` 通过。
+- [pending] 用户正常启动验证 P1；确认后创建本地检查点并进入 Characters Feature。
+
+## 2026-08-24 Issue #41：Characters Feature ownership 迁移
+
+- [completed] 创建 Issue #41《架构迁移 P2：Characters Feature ownership》。
+- [completed] 盘点角色页面工厂、MainWindow 角色状态、Lua 解析、缓存、角色仓库、Wiki 详情和 CSV 导出调用链。
+- [completed] 设计 CharacterPage、CharacterController、CharacterService 的兼容迁移切片。
+- [completed] 迁移角色页面控件与语义信号，移出 MainWindow 的列表/筛选/详情状态。
+- [completed] 迁移角色数据恢复、手动解析、自动解析结果、未读和 CSV 导出协调；自动解析继续复用导入进度弹窗。
+- [completed] 保留 `app/ui/views/character_view.py` 兼容工厂，调用方已切换到 Feature 页面，未改变旧导入入口。
+- [completed] 完成全量 pytest 100 passed、Ruff、AST 解析 116 个 Python 文件、真实 MainWindow smoke 和 `git diff --check`；下一步由用户正常启动确认后创建本地检查点。
+
+## 2026-08-24 Issue #42：Versions/Download Feature ownership 迁移
+
+- [completed] 创建 Issue #42，范围限定为版本工作区、更新检查、下载计划、Bundle 状态同步、删除和导入选中版本适配。
+- [completed] 新增 `app/features/versions/page.py`、`controller.py`、`service.py`、`worker.py`；页面自持版本表格和工作区摘要。
+- [completed] 版本差异、增量/全量下载目标、磁盘状态校准、更新检查注册和版本删除已进入 VersionService/Controller。
+- [completed] MainWindow 已切换页面与版本操作入口；全量 pytest、Ruff、AST 解析 122 个 Python 文件、真实 MainWindow smoke、文档同步和 diff 检查均通过，待用户正常启动验证后建立本地检查点。
+
+## 2026-08-24 Issue #43：Importer Feature 与后处理注册表
+
+- [in_progress] 开始拆分导入流程的规格、服务、控制器和兼容 Worker。
+- [in_progress] 目标是收口分类规则、精准 Bundle 选择、AssetStudio 暂存发布与 `ImportResult` 结果契约；保持既有 Lua、音频、角色、FGUI 导出行为不变。
+
+- [completed] 新增 `ExportSpec`、`ImporterService`、`ImportController`、`PostProcessorRegistry` 和兼容 Worker 入口；MainWindow 已改为通过控制器启动导入。
+- [completed] `ImportResult` 已传递 Lua 发布结果和后处理分类；旧 `ImportASWorker` 仍负责实际 AssetStudio 执行，保持输出、取消和暂存事务兼容。
+- [completed] 全量 pytest、Ruff、AST 解析、实际 Qt 启动冒烟、文档同步和 diff 检查通过；待建立本地检查点并请用户验证。
+
+## 2026-08-24 Issue #44：Preview Feature 与外部工具边界
+
+- [in_progress] 已创建 Issue #44，开始审查图片预览、FGUI、Spine 和视频导出流程。
+- [in_progress] 本阶段先建立兼容 Feature 边界，不改变三个 output 目录、导出算法和旧 Worker 行为。
+
+- [completed] 新增 `PreviewPage`、`PreviewService`、`PreviewController`、预览项构造和功能域 Worker 入口。
+- [completed] MainWindow 已切换图片预览页面、目录扫描、角色筛选、缩略图加载和立绘导出任务到 Preview Feature；旧页面/Worker 保留兼容。
+- [completed] 定向测试、全量 pytest、Ruff、实际 Qt 启动冒烟和 diff 检查通过；等待用户验证 P5a 后继续 FGUI/Spine/视频导出边界。
+
+- [in_progress] 开始 P5b：收口 FGUI 图集、Spine 合成和视频导出入口；先移动编排 ownership，不改外部工具算法。
+
+- [completed] 导出编排已切换到 `app/features/preview/export_controller.py`，旧 UI 入口改为兼容转发。
+- [completed] FGUI、Spine/FFmpeg 适配和批量/合成 Worker 已增加 Preview Feature 入口；全量 pytest、Ruff、AST、Qt smoke 和 diff 检查通过。
+- [completed] Preview P5 迁移完成，下一阶段进入 Platform/Shared 收缩；外部工具适配器暂保留旧实现作为兼容底层。
+
+## 2026-08-24 Issue #45：P6-P8 Platform/Shared 收缩与 ownership 最终验收
+
+- [completed] 已创建 Issue #45，完成 Platform/Shared、文档降冲突和 ownership 验收阶段。
+- [completed] 采用新增稳定入口、调用方门禁和兼容导出，不删除旧 core/ui，不改变运行时数据与输出契约。
+- [completed] 详细记录已拆至 `docs/worklog/issue-45-platform-shared/`，并新增 `docs/changes/issue-45-platform-shared.md`。
+
+## 2026-08-24 Issue #46：多页面切换布局修复
+
+- [completed] 已定位并修复 `VersionPage` 外层页面未随内部标题/表格一起隐藏的问题。
+- [completed] 已完成页面可见性回归测试、文档同步和 Qt 布局冒烟。
+
+## 2026-08-24 Issue #47：音频后台预热、树懒加载与稳定勾选
+
+- [completed] 已确认复选框事件竞争根因：`itemClicked` 中的手动状态修改会与 Qt 默认复选框切换互相覆盖。
+- [completed] 已确认首次音频页加载在 GUI 线程同步执行目录扫描、状态快照和完整树构造；本轮采用后台预热与按层级懒加载组合方案。
+- [completed] 已实现 Qt-free 目录索引、启动后台预热、按层级懒加载、逻辑选择集、目录递归勾选和稳定 Ctrl 多选。
+- [completed] 已完成全量测试、Ruff、AST、Qt 启动冒烟、性能基准和差异检查；等待用户真实音频页面验收。
+
+### P5b 调查错误
+
+- [completed] Feature 导出适配器初版漏转发部分旧 Spine 函数，导致兼容导入失败；已根据旧 Worker 实际导入清单补齐入口，并通过导入 smoke 与全量测试。

@@ -13,40 +13,22 @@ import time
 from PySide6.QtCore import QThread, Signal
 
 from app.core.logger import logger, timed
+from app.core.task_context import stage_operation, task_operation
 from app.core.path_utils import get_base_dir, get_tools_dir
 from app.core.bundle_parser import fix_bundle_inplace
 from app.core.file_utils import replace_directory
 from app.core.lua_repository import cleanup_lua_staging, publish_lua_version
 from app.ui.workers.lua_decrypt import decompile_lua_dir
+from app.features.importer.spec import CATEGORY_DIRS, EXPORT_SPECS, build_category_commands
 
 
-# 导出分类：类名 -> [(type, name_regex, container_regex), ...]
-# 经全量 assets_map.json 分析，四类按 Container 前缀严格区分、互不重叠：
-#   lua=assets/lua，角色立绘=assets/art/models，FGUI=assets/fairygui，音频=assets/fmodassets
-# type=None 不按类型过滤；name_regex/container_regex 为 None 表示不过滤该维度
-# 角色立绘贴图排除 _e/_n 结尾（法线/发光贴图，Unity 用，Spine 拼图用不上）
+# 兼容旧调用方；新的分类定义统一维护在 Importer Feature 的 ExportSpec 中。
 EXPORT_CATEGORIES = {
-    "lua":       [("TextAsset", None, r"assets/lua")],
-    "character": [("TextAsset",  None, r"assets/art/models/cardspine"),
-                  ("Texture2D",  r"^(?!.*_[en]$)", r"assets/art/models/cardspine"),
-                  ("TextAsset",  r"battlespine_1\d{4}", r"assets/art/models/battlespine"),
-                  ("Texture2D",  r"battlespine_1\d{4}(?!.*_[en]$)", r"assets/art/models/battlespine")],
-    "fgui":      [("TextAsset", None, r"assets/fairygui"),
-                  ("Texture2D", None, r"assets/fairygui")],
-    "audio":     [("TextAsset", None, r"assets/fmodassets/voice_cn/btl"),
-                  ("TextAsset", None, r"assets/fmodassets/voice_cn/system"),
-                  ("TextAsset", None, r"assets/fmodassets/voice_jp/btl"),
-                  ("TextAsset", None, r"assets/fmodassets/voice_jp/system"),
-                  ("TextAsset", None, r"assets/fmodassets/bgm")],
-}
-
-
-# 分类 -> material 子目录（用于只清空本次勾选分类，保留其他分类产物）
-CATEGORY_DIRS = {
-    "lua":       "assets/lua",
-    "character": "assets/art/models",
-    "fgui":      "assets/fairygui",
-    "audio":     "assets/fmodassets",
+    category: [
+        (rule.asset_type, rule.name_regex, rule.container_regex)
+        for rule in spec.rules
+    ]
+    for category, spec in EXPORT_SPECS.items()
 }
 
 
@@ -94,6 +76,14 @@ class ImportASWorker(QThread):
             self._last_progress_emit = now
             self.progress_stage.emit(label, current, total)
 
+    @task_operation(
+        "IMPORT",
+        "import",
+        lambda self: {
+            "bundles": len(self.bundle_paths),
+            "categories": sorted(self.export_categories) if self.export_categories else ["all"],
+        },
+    )
     def run(self):
         try:
             sel = sorted(self.export_categories) if self.export_categories else (self.export_types or ["全部"])
@@ -157,6 +147,7 @@ class ImportASWorker(QThread):
         finally:
             self._cleanup_cli_bundle_dir()
 
+    @stage_operation("import.fix", "bundle_header")
     @timed("导入AS-修复文件头")
     def _stage_fix(self):
         """阶段 1: 直接修复原始 .bundle 文件头"""
@@ -183,6 +174,7 @@ class ImportASWorker(QThread):
         return success, fail
 
     @timed("导入AS-解析资源")
+    @stage_operation("import.assetstudio", "map")
     def _stage_map(self):
         """阶段 2: 调用 AssetStudio CLI 生成资源映射"""
         if not os.path.exists(self.as_cli):
@@ -228,6 +220,7 @@ class ImportASWorker(QThread):
             return None, str(e)
 
     @timed("导入AS-导出分类")
+    @stage_operation("import.export", "assets")
     def _stage_export(self, assets):
         """阶段 3: 先导出到 staging，成功后再替换 data/material/。"""
         if not os.path.exists(self.as_cli):
@@ -443,18 +436,7 @@ class ImportASWorker(QThread):
 
     def _build_category_commands(self):
         """根据勾选的分类构建 CLI 导出命令（label, extra_args）列表"""
-        commands = []
-        for cat in sorted(self.export_categories):
-            for type_filter, name_regex, container_regex in EXPORT_CATEGORIES.get(cat, []):
-                extra = []
-                if type_filter:
-                    extra += ["--types", type_filter]
-                if name_regex:
-                    extra += ["--names", name_regex]
-                if container_regex:
-                    extra += ["--containers", container_regex]
-                commands.append((f"导出 {cat}", extra))
-        return commands
+        return list(build_category_commands(self.export_categories))
 
     @timed("导入AS-反编译Lua")
     def _decompile_lua(self):

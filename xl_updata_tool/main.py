@@ -1,22 +1,33 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QFont, QFontDatabase
-from app.ui.main_window import MainWindow
-from app.core.logger import logger
+from app.core.crash_reporter import install_crash_reporter
+from app.core.environment import write_environment_report
+from app.core.logger import configure_logging, logger
 from app.core.path_utils import get_base_dir
+from app.core.runtime_config import parse_runtime_config
 
 
-def main():
-    debug_mode = '--debug' in sys.argv
+def main(argv=None):
+    runtime = parse_runtime_config(sys.argv[1:] if argv is None else argv)
+    session = configure_logging(runtime)
+    crash_reporter = install_crash_reporter(session.directory)
+    debug_mode = runtime.debug
+    logger.info("application.start mode=%s session=%s", runtime.name, session.session_id)
     if debug_mode:
-        logger.info("========== XL Update Tool 启动（DEBUG 模式） ==========")
-    else:
-        logger.info("========== XL Update Tool 启动（正常模式） ==========")
+        try:
+            write_environment_report(session.directory)
+        except (OSError, PermissionError) as error:
+            logger.warning("environment.report_unavailable error=%s", error, exc_info=True)
+
     try:
+        # 运行模式和日志在导入主窗口前就绪，避免业务模块导入时错过 Debug 配置。
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QFont, QFontDatabase
+        from app.ui.main_window import MainWindow
+
         app = QApplication(sys.argv)
         app.setApplicationName("XL Update Tool")
         app.setApplicationVersion("1.0.0")
@@ -28,12 +39,13 @@ def main():
             if os.path.exists(font_path):
                 QFontDatabase.addApplicationFont(font_path)
         except Exception as e:
-            logger.warning(f"字体加载失败: {e}")
+            logger.warning("font.load_failed error=%s", e, exc_info=True)
         window = MainWindow(debug_mode=debug_mode)
         window.show()
         sys.exit(app.exec())
     except Exception as e:
-        logger.error(f"应用启动失败: {e}", exc_info=True)
+        crash_reporter.write(*sys.exc_info(), source="startup")
+        logger.error("application.start_failed error=%s", e, exc_info=True)
         sys.exit(1)
 
 
