@@ -4,10 +4,10 @@
 在不破坏现有功能、数据契约和多人协作边界的前提下，重新审视 XL 的桌面应用视觉系统：保留可用的新蓝灰主题，去除明显的 AI 生成感，建立统一、可维护、可渐进落地的主题、布局、组件和交互视觉规范，并分阶段完成界面优化。
 
 ## Next Step
-维护 Issue #32 及后续 XL 开发任务的计划、发现和验证记录；当前 Issue #32 已提交 PR #33。
+P0-P8 架构收口及 Issue #38-#47 已随 PR #48 合并；后续任务在新 Issue 建立后再登记到本计划。
 
 ## Current Phase
-Phase 6 - Lua 与角色数据链路重构
+合并后正式基线（2026-08-24）
 
 ## Phases
 
@@ -598,11 +598,11 @@ app/features/audio/
 - [completed] 保留 `preview_view.py`、`preview_controller.py`、四类旧 Worker 作为兼容入口；未改变 `output/character` 和 Spine 导出行为。
 - [completed] 完成 Preview 目录/架构测试、全量 pytest、Ruff、Qt 启动冒烟和 diff 检查；用户验证通过后继续 P5b 的 FGUI/Spine/视频导出边界收口。
 
-### P5b 当前执行：FGUI / Spine / 视频导出入口
+### P5b 完成记录：FGUI / Spine / 视频导出入口
 
-- [in_progress] 将 `export_controller.py` 的导出编排切换到 Preview Feature，旧 UI 路径保留兼容转发。
-- [pending] 将 FGUI 图集切割、Spine/FFmpeg 适配和批量 Worker 入口纳入 Preview ownership。
-- [pending] 补充导出计划、输出路径、取消和兼容入口测试；不改变 `output/fgui`、`output/video` 和角色图片输出契约。
+- [completed] 将 `export_controller.py` 的导出编排切换到 Preview Feature，旧 UI 路径保留兼容转发。
+- [completed] 将 FGUI 图集切割、Spine/FFmpeg 适配和批量 Worker 入口纳入 Preview ownership。
+- [completed] 补充导出计划、输出路径、取消和兼容入口测试；不改变 `output/fgui`、`output/video` 和角色图片输出契约。
 
 ### P5b 检查点结果
 
