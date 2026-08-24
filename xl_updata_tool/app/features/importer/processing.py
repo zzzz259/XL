@@ -14,11 +14,10 @@ import sys
 import tempfile
 import time
 
-from app.core.logger import logger, timed
-from app.core.task_context import stage_operation, task_operation
-from app.core.path_utils import get_base_dir, get_tools_dir
+from app.platform.diagnostics import logger, timed, stage_operation, task_operation
+from app.platform.paths import get_base_dir, get_tools_dir
 from app.platform.bundle_parser import fix_bundle_inplace
-from app.core.file_utils import replace_directory
+from app.platform.files import replace_directory
 from app.core.lua_repository import cleanup_lua_staging, publish_lua_version
 from app.ui.workers.lua_decrypt import decompile_lua_dir
 from app.features.importer.spec import CATEGORY_DIRS, EXPORT_SPECS, build_category_commands

@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .logging_context import get_log_context
-from .path_utils import get_logs_dir
+from .paths import get_logs_dir
 
 
 LOGGER_NAME = "xl_updata_tool"

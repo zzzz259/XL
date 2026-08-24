@@ -11,7 +11,7 @@
 
 import os
 
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 
 try:
     import UnityPy

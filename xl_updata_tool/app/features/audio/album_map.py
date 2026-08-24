@@ -15,7 +15,7 @@ import os
 import re
 
 from app.core.character_loader import parse_word_file
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 
 
 def _normalise_bank_key(value):

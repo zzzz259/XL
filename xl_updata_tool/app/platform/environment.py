@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from .logger import logger
-from .path_utils import get_base_dir, get_data_dir, get_output_dir, get_tools_dir
+from .paths import get_base_dir, get_data_dir, get_output_dir, get_tools_dir
 
 
 def collect_environment() -> dict[str, object]:

@@ -8,7 +8,7 @@
 import os
 import re
 
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 
 
 # 元素（属性）映射

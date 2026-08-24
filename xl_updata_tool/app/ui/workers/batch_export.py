@@ -9,8 +9,8 @@ from datetime import datetime
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication
 
-from app.core.logger import logger
-from app.core.process_runner import run_external_process
+from app.platform.diagnostics import logger
+from app.platform.processes import run_external_process
 
 
 class BatchExportWorker(QThread):

@@ -7,7 +7,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal
 
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 from app.ui.adapters.spine_adapter import (
     ffmpeg_composite_videos,
     cleanup_temp,

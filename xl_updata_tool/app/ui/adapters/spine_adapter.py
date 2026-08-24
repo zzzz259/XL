@@ -19,8 +19,8 @@ try:
 except ImportError:
     PILLOW_AVAILABLE = False
 
-from app.core.logger import logger
-from app.core.path_utils import get_tools_dir
+from app.platform.diagnostics import logger
+from app.platform.paths import get_tools_dir
 
 
 def extract_character_id(base_name):

@@ -3,7 +3,7 @@ from pathlib import Path
 from app.bootstrap.app_factory import FeatureDefinition, create_features
 from app.bootstrap.context import build_app_context
 from app.bootstrap.runtime import FeatureRuntimeRegistry
-from app.core.file_utils import atomic_write_bytes, replace_directory
+from app.platform.files import atomic_write_bytes, replace_directory
 from app.shared.contracts import FeatureDescriptor, FeatureRuntime, ImportResult
 
 CORE_DIR = Path(__file__).parents[1] / "app" / "core"
@@ -153,6 +153,24 @@ def test_character_domain_implementations_live_in_feature_directory():
         assert "PySide6" not in text
         assert len(text) > 100
     assert "app.features.characters.repository" in (CORE_DIR / "character_repository.py").read_text(encoding="utf-8")
+
+
+def test_platform_implementations_do_not_depend_on_core_compatibility_modules():
+    platform_dir = APP_DIR / "platform"
+    implementation_names = (
+        "database.py", "files.py", "paths.py", "processes.py", "downloader.py",
+        "logger.py", "logging_context.py", "task_context.py", "environment.py",
+        "crash_reporter.py", "runtime_config.py",
+    )
+    forbidden = (
+        "app.core.database", "app.core.file_utils", "app.core.path_utils",
+        "app.core.process_runner", "app.core.downloader", "app.core.logger",
+        "app.core.logging_context", "app.core.task_context", "app.core.environment",
+        "app.core.crash_reporter", "app.core.runtime_config",
+    )
+    for filename in implementation_names:
+        text = (platform_dir / filename).read_text(encoding="utf-8")
+        assert not any(module in text for module in forbidden), filename
 
 
 def test_characters_page_and_service_respect_feature_boundaries():

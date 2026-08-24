@@ -11,9 +11,9 @@ import time
 from PySide6.QtCore import QThread, Signal
 
 from app.core.bundle_parser import compute_delta, extract_manifest_hashes, fix_bundle_inplace
-from app.core.file_utils import atomic_write_bytes
-from app.core.downloader import BUNDLES_URL, check_update, http_get
-from app.core.logger import logger
+from app.platform.files import atomic_write_bytes
+from app.platform.downloader import BUNDLES_URL, check_update, http_get
+from app.platform.diagnostics import logger
 
 
 class CheckUpdateThread(QThread):

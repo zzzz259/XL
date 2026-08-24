@@ -18,8 +18,7 @@ import tempfile
 
 from PySide6.QtCore import QThread, Signal
 
-from app.core.logger import logger
-from app.core.task_context import task_operation
+from app.platform.diagnostics import logger, task_operation
 
 
 FIXED_HEAD = (b'\x1B\x4C\x75\x61\x54\x00\x19\x93\x0D\x0A\x1A\x0A\x04\x08\x08\x78'

@@ -7,7 +7,7 @@ import struct
 from enum import Enum
 from PIL import Image
 
-from app.core.logger import logger
+from app.platform.diagnostics import logger
 
 
 class PackageItemType(Enum):

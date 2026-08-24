@@ -5,8 +5,8 @@ import os
 
 from PySide6.QtCore import QThread, Signal
 
-from app.core.logger import logger, timed
-from app.core.path_utils import DATA_DIR, get_base_dir
+from app.platform.diagnostics import logger, timed
+from app.platform.paths import DATA_DIR, get_base_dir
 
 from app.features.preview.fgui import UIPackageTool
 from app.features.preview.adapter import (

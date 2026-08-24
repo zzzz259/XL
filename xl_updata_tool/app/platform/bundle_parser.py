@@ -6,9 +6,9 @@ import shutil
 import subprocess
 import tempfile
 import time
-from app.core.logger import logger
-from app.core.path_utils import get_base_dir, get_tools_dir
-from app.core.process_runner import run_external_process
+from app.platform.diagnostics import logger
+from app.platform.paths import get_base_dir, get_tools_dir
+from app.platform.processes import run_external_process
 
 PROJECT_ROOT = get_base_dir()
 AS_CLI = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
