@@ -6,12 +6,11 @@ import sys
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar, QApplication,
-    QTableWidgetItem, QToolButton,
+    QToolButton,
     QCheckBox, QMenu, QComboBox, QProgressDialog,
     QDialog, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings, QEvent
-from PySide6.QtGui import QColor, QBrush
+from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings
 
 try:
     import qtawesome as qta
@@ -21,14 +20,9 @@ except ImportError:
     QT_AWESOME_AVAILABLE = False
 
 from .theme import (
-    ACCENT, TEXT_PRIMARY, TEXT_MUTED, SUCCESS, WARNING, DANGER, INFO,
+    ACCENT, TEXT_PRIMARY,
     FORMAL_THEME, THEME_LABEL, apply_theme, get_color, normalize_theme_name,
 )
-from .panels import ticks_to_date
-from app.core.version_manager import VersionManager
-from .workers.download import CheckUpdateThread, DownloadWorker
-from app.core.version_data import compute_download_hashes, compute_version_delta_map
-from app.core.local_bundle_sync import sync_local_bundles
 from app.core.bundle_selector import (
     audio_assets_map_path,
     lua_assets_map_path,
@@ -37,10 +31,7 @@ from app.core.bundle_selector import (
 )
 from app.core.audio_repository import unread_files as audio_unread_files
 from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
-from app.core.seed_versions import seed_bundled_versions
-from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
-from app.core.version_update import append_changelog, record_downloaded_bundle, register_checked_version
-from app.core.version_download import calculate_missing_downloads
+from app.core.version_update import append_changelog
 from app.core import database as db
 from app.core.logger import logger, timed
 from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
@@ -54,10 +45,12 @@ from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
 from .views.preview_view import create_preview_view
 from app.features.audio.page import AudioPage
 from app.features.audio.controller import AudioController
+from app.features.versions.page import VersionPage
+from app.features.versions.controller import VersionController
+from app.features.versions.service import VersionService
 from app.features.characters.page import CharacterPage
 from app.features.characters.controller import CharacterController
 from app.features.characters.service import CharacterService
-from .views.version_view import create_version_header, create_version_table
 from .features.export_controller import (
     export_composite_video,
     export_with_dialog,
@@ -84,7 +77,7 @@ class MainWindow(QMainWindow):
         _theme = normalize_theme_name(settings.value("theme", FORMAL_THEME))
         settings.setValue("theme", _theme)
         apply_theme(self, _theme)
-        self.version_mgr = VersionManager()
+        self.version_service = VersionService(BUNDLES_DIR)
         # 后台工作线程实例（避免 AttributeError）
         self._preview_worker = None
         self._batch_worker = None
@@ -129,13 +122,12 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        self.version_header, self.version_summary = create_version_header(self)
-        content_layout.addWidget(self.version_header)
-        self.table = create_version_table(self)
-        self._hover_row = -1
-        self._checkbox_containers = {}
-        self._checked_ts = set()
-        content_layout.addWidget(self.table, 1)
+        self.version_page = VersionPage(self)
+        self.version_controller = VersionController(self.version_page, self.version_service, self)
+        self.version_header = self.version_page.version_header
+        self.version_summary = self.version_page.version_summary
+        self.table = self.version_page.table
+        content_layout.addWidget(self.version_page, 1)
 
         # 预览视图容器（默认隐藏）
         self.preview_container, self.preview_controls = create_preview_view(self)
@@ -183,6 +175,7 @@ class MainWindow(QMainWindow):
         """)
         self.setStatusBar(self.status_bar)
         self._connect_audio_controller()
+        self._connect_version_controller()
         self._connect_character_controller()
         # 只恢复本地角色仓库/缓存，确保启动时顶层“角色”角标准确；绝不解析 Lua。
         self.character_controller.restore_local()
@@ -198,6 +191,20 @@ class MainWindow(QMainWindow):
         self.audio_controller.processing_finished.connect(self._on_audio_processing_finished)
         self.audio_controller.processing_cancelled.connect(self._on_audio_processing_cancelled)
         self.audio_controller.processing_error.connect(self._on_audio_processing_error)
+
+    def _connect_version_controller(self):
+        """连接版本功能域状态到全局状态栏和下载进度条。"""
+        self.version_controller.status_changed.connect(self.status_bar.showMessage)
+        self.version_controller.progress_changed.connect(self._on_version_progress)
+
+    def _on_version_progress(self, current, total, message):
+        if total <= 0:
+            self.dl_progress.setVisible(False)
+            return
+        self.dl_progress.setVisible(True)
+        self.dl_progress.setMaximum(total)
+        self.dl_progress.setValue(current)
+        self.dl_progress.setFormat(message)
 
     def _connect_character_controller(self):
         """连接角色功能域的状态信号到应用壳层。"""
@@ -320,7 +327,7 @@ class MainWindow(QMainWindow):
 
         self.btn_check = _side_btn("检查更新", "arrows-rotate")
         self.btn_check.setProperty("fluentAppearance", "primary")
-        self.btn_check.clicked.connect(self._check_update)
+        self.btn_check.clicked.connect(lambda: self.version_controller.check_update())
         layout.addWidget(self.btn_check)
         self.btn_browse = _side_btn("导入AS", "file-import")
         self.btn_browse.setProperty("fluentAppearance", "primary")
@@ -430,8 +437,7 @@ class MainWindow(QMainWindow):
 
     def _set_version_content_visible(self, visible):
         """整体切换版本工作区，避免页面切换留下单独的工作区标题。"""
-        self.version_header.setVisible(visible)
-        self.table.setVisible(visible)
+        self.version_page.set_visible(visible)
 
     def _clear_dir(self, target_dir):
         """确认后清空目录（rmtree + 重建）"""
@@ -461,13 +467,7 @@ class MainWindow(QMainWindow):
 
     def _compute_delta_hashes(self, ts):
         """返回本版本相对上一版本的增量 hash 集合（新增/修改的 bundle）；无上一版本时返回全量"""
-        vs = self.version_mgr.get_versions()
-        hashes_by_version = {
-            row[0]: (r[0] for r in (db.get_sub_bundles(row[0]) or []))
-            for row in vs
-            if "(delta" not in (row[10] or "")
-        }
-        return compute_download_hashes(ts, (row[0] for row in vs), hashes_by_version)
+        return self.version_service.delta_hashes(ts)
 
     def _row_btn(self, text, color, tooltip=""):
         b = QPushButton(text)
@@ -492,7 +492,7 @@ class MainWindow(QMainWindow):
         磁盘是事实来源：磁盘有但 DB 未记录 → 标记已下载；DB 有记录但磁盘无 → 清除。
         ts 非空时只同步该版本，否则同步全部版本。
         """
-        return sync_local_bundles(BUNDLES_DIR, ts)
+        return self.version_service.sync_local(ts)
 
     def _load_data(self):
         # 确保版本列表可见（隐藏图片预览、音频和角色视图）
@@ -503,310 +503,11 @@ class MainWindow(QMainWindow):
         self._show_character = False
         self._set_active_view_btn(self.btn_home)
         self._set_toolbars_visible(True)
-        self._sync_local_bundles()
-        versions = self.version_mgr.refresh()
-        delta_map = self._compute_version_deltas(versions)
-        self._populate_table(versions, delta_map)
-        self.status_bar.showMessage(f"已追踪 {len(versions)} 个版本")
-
-    def _compute_version_deltas(self, versions):
-        """计算每个版本相对上一版本的 bundle 差异，返回 {ts: (added, removed, common)}"""
-        hashes_by_version = {
-            row[0]: (r[0] for r in (db.get_sub_bundles(row[0]) or []))
-            for row in versions
-        }
-        return compute_version_delta_map((row[0] for row in versions), hashes_by_version)
-
-    def _populate_table(self, versions, delta_map=None):
-        self.table.setSortingEnabled(False)
-        # 捕获当前勾选态（刷新后恢复，保持用户选择不丢失）
-        self._checked_ts = {ts for _r, (ts, cb) in getattr(self, "_version_checkboxes", {}).items() if cb.isChecked()}
-        # fully clear old widgets and rows
-        self.table.clearContents()
-        self.table.setRowCount(0)
-        self.table.setRowCount(len(versions))
-        self._version_checkboxes = {}  # row -> (ts, checkbox)
-        self._checkbox_containers = {}
-        self._hover_row = -1
-        downloaded_versions = 0
-        for i, v in enumerate(versions):
-            ts, arts, data, other, video, apk, manifest, is_cur, dl, created, notes = v
-            # checkbox 列（第 0 列，打勾选中；单选冲突，Ctrl 多选）
-            cb = QCheckBox()
-            cb.setStyleSheet("background:transparent; border:none;")
-            cb.setChecked(ts in self._checked_ts)
-            cb.clicked.connect(lambda checked, r=i: self._set_version_checked(r, checked))
-            cb_widget = QWidget()
-            cb_widget.setAttribute(Qt.WA_StyledBackground, True)
-            cb_layout = QHBoxLayout(cb_widget)
-            cb_layout.addWidget(cb)
-            cb_layout.setAlignment(Qt.AlignCenter)
-            cb_layout.setContentsMargins(0, 0, 0, 0)
-            self.table.setCellWidget(i, 0, cb_widget)
-            self._version_checkboxes[i] = (ts, cb)
-            self._checkbox_containers[i] = cb_widget
-            # 版本列（第 1 列）
-            dt = ticks_to_date(ts); date_str = dt.strftime("%Y-%m-%d")
-            label = date_str
-            if is_cur: label += "  [最新]"
-            vi = QTableWidgetItem(label); vi.setData(Qt.UserRole, ts)
-            if is_cur: vi.setForeground(QColor("#f0a040")); f = vi.font(); f.setBold(True); vi.setFont(f)
-            self.table.setItem(i, 1, vi)
-            sub = db.get_sub_bundles(ts); total = len(sub) if sub else 0
-            down = sum(1 for r in sub if r[2]) if sub else 0
-            if total == 0: status = "无Bundle"
-            elif down >= total: status = "已下载"
-            elif down > 0: status = f"部分 ({down}/{total})"
-            else: status = "未下载"
-            if status == "已下载":
-                downloaded_versions += 1
-            si = QTableWidgetItem(status)
-            if status == "已下载": si.setForeground(QColor(SUCCESS))
-            elif "部分" in status: si.setForeground(QColor(WARNING))
-            else: si.setForeground(QColor(TEXT_MUTED))
-            self.table.setItem(i, 2, si)
-            self.table.setItem(i, 3, QTableWidgetItem(f"{total:,}" if total else "-"))
-            # 备注：优先显示相对上一版本的增量/删除
-            if delta_map and ts in delta_map:
-                added, removed, common = delta_map[ts]
-                display_notes = f"新增 {added} | 移除 {removed} | 未变 {common}"
-            else:
-                display_notes = notes or ""
-            self.table.setItem(i, 4, QTableWidgetItem(display_notes))
-            # per-row buttons: delta, full, delete
-            for col, (txt, clr, action) in enumerate([
-                ("增量下载", SUCCESS, lambda c, t=ts: self._download_version(t, True)),
-                ("全量下载", INFO, lambda c, t=ts: self._download_version(t, False)),
-                ("删除已下载", DANGER, lambda c, t=ts: self._delete_version(t)),
-            ], start=5):
-                btn = self._row_btn(txt, clr)
-                btn.clicked.connect(action)
-                self.table.setCellWidget(i, col, btn)
-        self.table.setSortingEnabled(True)
-        self._version_count = len(versions)
-        self._downloaded_version_count = downloaded_versions
-        self._update_version_summary()
-
-    def _update_version_summary(self):
-        """刷新版本工作区摘要，补充选择与下载状态的文字信息。"""
-        selected = sum(
-            1 for _ts, checkbox in getattr(self, "_version_checkboxes", {}).values()
-            if checkbox.isChecked()
-        )
-        self.version_summary.setText(
-            f"{getattr(self, '_version_count', 0)} 个版本 · "
-            f"已下载 {getattr(self, '_downloaded_version_count', 0)} · "
-            f"已选择 {selected}"
-        )
+        self.version_controller.load()
 
     def _get_selected_ts(self):
-        """返回第一个勾选的版本 ts（导入 AS 等单版本操作用）"""
-        for _row, (ts, cb) in getattr(self, "_version_checkboxes", {}).items():
-            if cb.isChecked():
-                return ts
-        return None
-
-    def _set_version_checked(self, row, checked):
-        """设置某行勾选态；默认单选冲突（点一个取消另一个），按住 Ctrl 多选"""
-        if row not in self._version_checkboxes:
-            return
-        ts, cb = self._version_checkboxes[row]
-        ctrl = bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
-        if checked and not ctrl:
-            for r, (_t, other) in self._version_checkboxes.items():
-                if r != row and other.isChecked():
-                    other.blockSignals(True)
-                    other.setChecked(False)
-                    other.blockSignals(False)
-        cb.blockSignals(True)
-        cb.setChecked(checked)
-        cb.blockSignals(False)
-        if checked:
-            self._checked_ts.add(ts)
-        else:
-            self._checked_ts.discard(ts)
-        self._update_version_summary()
-
-    def _on_cell_clicked(self, row, col):
-        """点击整行任意位置（除勾选列/按钮列）→ 翻转该行勾选"""
-        if col == 0:
-            return  # 勾选框自己处理
-        if row in self._version_checkboxes:
-            _ts, cb = self._version_checkboxes[row]
-            self._set_version_checked(row, not cb.isChecked())
-
-    def _clear_row_hover(self):
-        """清掉上一悬停行的背景，恢复交替行色"""
-        r = self._hover_row
-        if r < 0:
-            return
-        for c in range(self.table.columnCount()):
-            it = self.table.item(r, c)
-            if it is not None:
-                it.setBackground(QBrush())
-        if r in self._checkbox_containers:
-            self._checkbox_containers[r].setStyleSheet("")
-
-    def _highlight_row(self, row):
-        """整行悬停高亮（中性色，非蓝非单格）；row=-1 时清除"""
-        if row == self._hover_row:
-            return
-        self._clear_row_hover()
-        self._hover_row = row
-        hover = get_color('BG_HOVER')
-        for c in range(self.table.columnCount()):
-            it = self.table.item(row, c)
-            if it is not None:
-                it.setBackground(QColor(hover))
-        if row in self._checkbox_containers:
-            self._checkbox_containers[row].setStyleSheet(f"background-color:{hover};")
-
-    def eventFilter(self, obj, event):
-        """viewport 上跟踪鼠标：MouseMove 高亮整行，Leave 清除"""
-        if obj is self.table.viewport():
-            if event.type() == QEvent.MouseMove:
-                pos = event.position().toPoint()
-                idx = self.table.indexAt(pos)
-                self._highlight_row(idx.row() if idx.isValid() else -1)
-            elif event.type() == QEvent.Leave:
-                self._clear_row_hover()
-                self._hover_row = -1
-        return super().eventFilter(obj, event)
-
-    def _on_row_select(self, current, prev):
-        if current:
-            it = self.table.item(current.row(), 1)
-            if it and it.data(Qt.UserRole):
-                self._sel_ts = it.data(Qt.UserRole)
-
-    # ========== CHECK UPDATE ==========
-
-    def _check_update(self):
-        # 确保版本列表可见（隐藏图片预览和音频视图）
-        self._set_version_content_visible(True)
-        self.preview_container.setVisible(False)
-        self.audio_page.setVisible(False)
-        self.btn_check.setEnabled(False)
-        self.table.insertRow(0)
-        self.table.setItem(0, 0, QTableWidgetItem("正在检查更新"))
-        anim_item = self.table.item(0, 0)
-        for c in range(1, 7):
-            self.table.setItem(0, c, QTableWidgetItem(""))
-        def animate():
-            self._anim_dots = (self._anim_dots + 1) % 4
-            try: anim_item.setText("正在检查更新" + "." * (self._anim_dots + 1))
-            except: pass
-            self._anim_timer.start(400)
-        self._anim_timer.timeout.connect(animate)
-        self._anim_timer.start(400)
-        self.status_bar.showMessage("正在检查更新...")
-        pv = self.version_mgr.get_current(); oh = []
-        if pv:
-            or_ = db.get_sub_bundles(pv[0]); oh = [r[0] for r in or_] if or_ else []
-        logger.info(f"开始检查更新：当前版本 {pv[0] if pv else '无'}，已有 {len(oh)} 个 hash")
-        out_dir = os.path.join(BUNDLES_DIR, "current")
-        self.thread = CheckUpdateThread(out_dir, oh)
-        self.thread.finished.connect(self._on_update_checked)
-        self.thread.error.connect(self._on_check_error)
-        self.thread.start()
-
-    def _on_update_checked(self, info, versions, new_hashes, delta):
-        self._anim_timer.stop()
-        self.btn_check.setEnabled(True)
-        result = register_checked_version(self.version_mgr, info, versions, new_hashes, delta)
-        if result:
-            self.status_bar.showMessage(f"发现新版本! 新增 {result['added']} 个 bundle.")
-            QMessageBox.information(self, "更新完成", f"发现新版本!\n\n{result['notes']}")
-        else:
-            logger.info(f"检查更新：版本 {versions['timestamp']} 已存在，无需更新")
-            self.status_bar.showMessage("已是最新版本.")
-            QMessageBox.information(self, "已是最新", "当前已是最新版本，无需更新。")
-        self._load_data()
-
-    def _on_check_error(self, err):
-        self._anim_timer.stop(); self.btn_check.setEnabled(True)
-        self._load_data()
-        self.status_bar.showMessage(f"错误: {err}")
-        QMessageBox.warning(self, "错误", f"检查更新失败:\n{err}")
-
-    # ========== DOWNLOAD ==========
-
-    def _download_version(self, ts, delta_only=True):
-        if not ts: return
-        ah = [r[0] for r in db.get_sub_bundles(ts)]
-        if not ah: QMessageBox.information(self, "无Bundle", "此版本无 bundle."); return
-        sub = db.get_sub_bundles(ts)
-        label = "增量下载"
-        if delta_only:
-            target = self._compute_delta_hashes(ts)
-        else:
-            rp = QMessageBox.question(self, "全量下载确认",
-                f"全量下载将下载此版本的全部 {len(ah)} 个 bundle 文件.\n\n"
-                "通常只需「增量下载」即可获取本版本新增/修改的文件.\n"
-                "全量下载耗时较长且占用大量磁盘空间.\n\n"
-                "建议: 先尝试增量下载.\n\n"
-                "是否仍然进行全量下载?",
-                QMessageBox.Yes|QMessageBox.No, QMessageBox.No)
-            if rp != QMessageBox.Yes: return
-            target = set(ah); label = "全量下载"
-        missing = calculate_missing_downloads(sub, target)
-        if not missing: QMessageBox.information(self, "已下载", "全部已下载."); return
-
-        self._dl_ts = ts; self._dl_total = len(missing); self._dl_size = 0
-        self._dl_count = 0; self._dl_label = label
-
-        # update status cell for this version
-        self._update_row_status(ts, f"下载中 0/{len(missing)}")
-
-        self.dl_progress.setVisible(True)
-        self.dl_progress.setMaximum(len(missing)); self.dl_progress.setValue(0)
-        self.dl_progress.setFormat(f"{label}: 0/{len(missing)}")
-        self.status_bar.showMessage(f"{label}: 准备下载 {len(missing)} 个文件...")
-        downloaded_count = len(sub) - len(calculate_missing_downloads(sub, set(ah)))
-        logger.info(f"开始{label}版本 {ts}：待下载 {len(missing)} 个文件（已下载 {downloaded_count} 个）")
-
-        out_dir = os.path.join(BUNDLES_DIR, str(ts))
-        self.dl_worker = DownloadWorker(missing, out_dir)
-        self.dl_worker.progress.connect(lambda n, d, t: (
-            setattr(self, '_dl_count', d),
-            self.dl_progress.setValue(d),
-            self.dl_progress.setFormat(f"{label}: {d}/{len(missing)}"),
-            self._update_row_status(ts, f"下载中 {d}/{len(missing)} | {self._dl_size/1048576:.1f}MB"),
-            self.status_bar.showMessage(f"{label}: {d}/{len(missing)} | {self._dl_size/1048576:.1f}MB | {n[:30]}")))
-        self.dl_worker.item_done.connect(lambda n, f, p: (
-            self._dl_done(n, f, p, ts),
-            setattr(self, '_dl_size', self._dl_size + (os.path.getsize(p) if os.path.exists(p) else 0))))
-        self.dl_worker.item_fail.connect(lambda h, msg: logger.error(f"文件下载失败: {h[:16]}... - {msg}"))
-        self.dl_worker.all_done.connect(self._dl_complete)
-        self.dl_worker.error.connect(lambda e: (
-            logger.error(f"下载错误: {e}"),
-            self.status_bar.showMessage(f"下载出错: {e}")))
-        self.dl_worker.start()
-
-    def _update_row_status(self, ts, text):
-        self.table.blockSignals(True)
-        for i in range(self.table.rowCount()):
-            it = self.table.item(i, 1)
-            if it and it.data(Qt.UserRole) == ts:
-                si = QTableWidgetItem(text)
-                si.setForeground(QColor(SUCCESS))
-                self.table.setItem(i, 2, si)
-                break
-        self.table.blockSignals(False)
-
-    def _dl_done(self, n, f, p, ts):
-        try:
-            record_downloaded_bundle(ts, n, p)
-            logger.debug(f"文件下载完成并更新数据库: {n[:16]}...")
-        except Exception as e:
-            logger.error(f"更新数据库失败: {n[:16]}... - {e}", exc_info=True)
-
-    def _dl_complete(self):
-        self.dl_progress.setVisible(False)
-        self._load_data()
-        self.status_bar.showMessage("下载完成!")
-        logger.info("下载完成")
-        QMessageBox.information(self, "完成", "下载完毕!")
+        """迁移期导入适配：返回版本功能域当前选中的版本。"""
+        return self.version_controller.selected_version
 
     # ========== BROWSE ==========
 
@@ -1541,31 +1242,15 @@ class MainWindow(QMainWindow):
     # ========== DELETE ==========
 
     def _delete_version(self, ts):
-        sub = db.get_sub_bundles(ts)
-        down = count_downloaded_bundles(sub)
-        if down == 0:
-            QMessageBox.information(self, "无文件", "没有已下载的 bundle.")
-            return
-        reply = QMessageBox.question(
-            self, "确认删除", f"删除此版本 {down} 个文件?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            return
-        logger.info(f"删除版本 {ts}：共 {down} 个已下载文件")
-        delete_downloaded_bundles(ts, sub)
-        self._load_data()
-        logger.info(f"已删除版本 {ts} 的 {down} 个文件，并清空数据库下载状态")
-        self.status_bar.showMessage(f"已删除 {down} 个文件.")
-        QMessageBox.information(self, "完成", f"已删除 {down} 个文件.")
+        self.version_controller.delete_version(ts)
 
     # ========== SEED ==========
 
     def _seed_bundled_version(self):
-        seed_bundled_versions(self.version_mgr, BUNDLES_DIR)
+        self.version_service.seed()
 
     def _check_auto(self):
-        cur = self.version_mgr.get_current()
+        cur = self.version_service.current()
         if not cur:
             self.status_bar.showMessage("首次启动, 自动检查更新...")
             QTimer.singleShot(1500, self._check_update)

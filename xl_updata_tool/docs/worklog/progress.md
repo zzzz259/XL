@@ -343,3 +343,10 @@
 - [completed] 迁移角色数据恢复、手动解析、自动解析结果、未读和 CSV 导出协调；自动解析继续复用导入进度弹窗。
 - [completed] 保留 `app/ui/views/character_view.py` 兼容工厂，调用方已切换到 Feature 页面，未改变旧导入入口。
 - [completed] 完成全量 pytest 100 passed、Ruff、AST 解析 116 个 Python 文件、真实 MainWindow smoke 和 `git diff --check`；下一步由用户正常启动确认后创建本地检查点。
+
+## 2026-08-24 Issue #42：Versions/Download Feature ownership 迁移
+
+- [completed] 创建 Issue #42，范围限定为版本工作区、更新检查、下载计划、Bundle 状态同步、删除和导入选中版本适配。
+- [completed] 新增 `app/features/versions/page.py`、`controller.py`、`service.py`、`worker.py`；页面自持版本表格和工作区摘要。
+- [completed] 版本差异、增量/全量下载目标、磁盘状态校准、更新检查注册和版本删除已进入 VersionService/Controller。
+- [completed] MainWindow 已切换页面与版本操作入口；全量 pytest、Ruff、AST 解析 122 个 Python 文件、真实 MainWindow smoke、文档同步和 diff 检查均通过，待用户正常启动验证后建立本地检查点。

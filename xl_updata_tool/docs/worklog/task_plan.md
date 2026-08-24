@@ -564,3 +564,10 @@ app/features/audio/
 - [completed] 迁移角色数据恢复、手动解析、自动解析结果、未读和 CSV 导出协调；自动解析继续复用导入进度弹窗。
 - [completed] 保留 `app/ui/views/character_view.py` 兼容工厂，调用方已切换到 Feature 页面，未改变旧导入入口。
 - [completed] 完成全量 pytest 100 passed、Ruff、AST 解析 116 个 Python 文件、真实 MainWindow smoke 和 `git diff --check`；下一步由用户正常启动确认后创建本地检查点。
+
+## 2026-08-24 Issue #42：Versions/Download Feature ownership 迁移
+
+- [completed] 创建 Issue #42，明确版本工作区、更新检查、下载、Bundle 状态和删除的 ownership 边界。
+- [completed] 建立 `VersionPage`、`VersionController`、`VersionService` 和功能域 Worker 入口。
+- [completed] 将 MainWindow 的版本页面、下载计划、更新检查和删除入口切换到 Versions Feature；保留导入流程所需的选中版本适配。
+- [completed] 完成全量测试、Ruff、AST 解析 122 个 Python 文件、Windows smoke、文档同步和 diff 检查；待用户正常启动验证后建立本地检查点。
