@@ -15,6 +15,14 @@
 
 本工具面向需要跟进游戏资源更新的场景，提供「检查更新 → 下载 bundle → 导入解析」的完整流程。
 
+## 当前架构基线
+
+项目已完成 P0-P8 的功能域 ownership 与协作架构收口：Audio、Characters、Versions、Importer 和 Preview 各自拥有页面、控制器、服务和任务入口；Platform 与 Shared 提供路径、文件、进程、数据库、诊断和通用 UI 的稳定入口。
+
+MainWindow 继续作为兼容期 Shell，旧 `app/core`、`app/ui` 和兼容转发入口暂时保留。新增功能应归属对应 Feature，跨域修改需要单独 Issue、影响说明和 worklog，不再把领域业务状态或后台任务直接堆回主窗口。
+
+正式架构与模块职责见[开发文档指南](docs/开发文档指南.md)和[代码所有权与边界](docs/代码所有权与边界.md)；版本变更见[版本历史](docs/版本历史.md)，过程性调查和验证记录见 [docs/worklog/](docs/worklog/)。
+
 ## 环境要求
 
 - Windows 10/11 64 位
