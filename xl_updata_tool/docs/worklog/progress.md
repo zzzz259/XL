@@ -375,6 +375,12 @@
 - [completed] FGUI、Spine/FFmpeg 适配和批量/合成 Worker 已增加 Preview Feature 入口；全量 pytest、Ruff、AST、Qt smoke 和 diff 检查通过。
 - [completed] Preview P5 迁移完成，下一阶段进入 Platform/Shared 收缩；外部工具适配器暂保留旧实现作为兼容底层。
 
+## 2026-08-24 Issue #45：P6-P8 Platform/Shared 收缩与 ownership 最终验收
+
+- [completed] 已创建 Issue #45，完成 Platform/Shared、文档降冲突和 ownership 验收阶段。
+- [completed] 采用新增稳定入口、调用方门禁和兼容导出，不删除旧 core/ui，不改变运行时数据与输出契约。
+- [completed] 详细记录已拆至 `docs/worklog/issue-45-platform-shared/`，并新增 `docs/changes/issue-45-platform-shared.md`。
+
 ### P5b 调查错误
 
 - [completed] Feature 导出适配器初版漏转发部分旧 Spine 函数，导致兼容导入失败；已根据旧 Worker 实际导入清单补齐入口，并通过导入 smoke 与全量测试。

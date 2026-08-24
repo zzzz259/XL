@@ -610,3 +610,11 @@ app/features/audio/
 - [completed] FGUI 图集和 Spine/FFmpeg 适配新增 Preview Feature 入口，批量/合成 Worker 通过 Feature Worker 入口装配；不改变外部工具参数与 output 契约。
 - [completed] 完成兼容导入、架构边界、全量 pytest、Ruff、AST 解析 139 个 Python 文件、实际 Qt 启动冒烟和 diff 检查。
 - [completed] P5 主要 UI/导出 ownership 迁移完成；外部工具 Platform 适配的最终下沉列入下一阶段 Platform/Shared 收缩。
+
+## 2026-08-24 Issue #45：P6-P8 Platform/Shared 收缩与 ownership 最终验收
+
+- [completed] P6：建立 Platform 与 Shared Qt 的稳定入口和依赖方向门禁，保留旧模块兼容。
+- [completed] P7：按 Issue 整理 worklog/change fragment，收口 README、开发指南、版本历史和根计划索引。
+- [completed] P8：执行 Feature ownership 场景验收、公共文件冲突审查和最终全量质量门禁。
+
+详细调查、进度和验证记录见 `docs/worklog/issue-45-platform-shared/`；面向评审的变更摘要见 `docs/changes/issue-45-platform-shared.md`。
