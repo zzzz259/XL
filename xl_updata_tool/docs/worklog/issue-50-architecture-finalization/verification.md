@@ -37,3 +37,11 @@
 - [x] 导出编排依赖 PreviewController 的显式状态，不再依赖宿主窗口私有字段。
 - [x] 旧 `preview_view.py` 的保留原因与调用方已登记；未执行无证据删除。
 - [x] P1 全量 pytest 127 passed、Ruff、AST 149、Qt offscreen 和 diff check 通过。
+
+## P2 退出门
+
+- [x] 五个 Feature 工厂可在隔离 `AppContext` 中创建。
+- [x] `FeatureRuntimeRegistry` 覆盖顺序、重复 key、页面激活、status/progress/badge binding 和逆序关闭。
+- [x] shared/bootstrap 保持 Qt-free；signal 作为 opaque port 传递。
+- [x] P2 全量 pytest 156 passed、Ruff、AST 156、import smoke、Qt offscreen 和 diff check 通过。
+- [x] 生产启动仍走旧装配路径，未把 P2 装配变化误认为用户行为变化；正式切换留到 P3。

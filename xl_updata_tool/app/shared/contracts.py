@@ -58,11 +58,18 @@ class FeatureDescriptor:
 
 @dataclass(frozen=True)
 class FeatureRuntime:
-    """一个已经装配完成、可交给 Shell 注册的 Feature。"""
+    """一个已经装配完成、可交给 Shell 注册的 Feature。
+
+    三个 signal 字段是可选的 opaque ports。shared/bootstrap 不知道 Qt
+    signal 的具体类型，Shell 只通过它们绑定通用状态、进度和角标。
+    """
 
     descriptor: FeatureDescriptor
     page: PagePort
     controller: ControllerPort
+    status_signal: object | None = None
+    progress_signal: object | None = None
+    badge_signal: object | None = None
 
 
 @dataclass(frozen=True)

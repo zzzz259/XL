@@ -58,6 +58,15 @@
 - Qt offscreen：`QT_SMOKE_OK True False False False False`；最后一项确认 `MainWindow.preview_controls` 不存在。
 - `git diff --check`：通过。
 
+## P2 退出复核（2026-08-24）
+
+- 新增 `features/{versions,preview,audio,characters,importer}/factory.py`，集中描述页面、Controller、Service 和路径装配；五个 Feature 的 descriptor 顺序固定为版本、预览、音频、角色、导入。
+- `app/bootstrap/app_factory.py` 新增 `default_feature_definitions()`；生产入口暂不切换，保留迁移期旧装配作为行为对照。
+- `app/bootstrap/runtime.py` 新增 Qt-free `FeatureRuntimeRegistry`，统一提供 descriptor 查找、页面激活、状态/进度/角标 binding 和逆序资源关闭。
+- `FeatureRuntime` 增加 opaque 的 `status_signal`、`progress_signal`、`badge_signal`，shared/bootstrap 不导入 Qt。
+- P2 工厂隔离测试、Runtime registry 测试、全量 pytest：156 项收集，全部通过。
+- `ruff check --no-cache app tests`：通过；不落盘 AST：`AST_OK 156`；import smoke：`IMPORT_SMOKE_OK`；Qt offscreen：`QT_SMOKE_OK True False False False`；diff check：通过。
+
 ## 基线扫描中的探针错误
 
 - 初次文件行数命令在仓库根目录误使用了 `app/...` 相对路径，得到不存在路径；已用 `xl_updata_tool/app/...` 重跑并取得正确数值。

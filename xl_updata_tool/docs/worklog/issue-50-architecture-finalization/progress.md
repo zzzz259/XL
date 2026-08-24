@@ -9,7 +9,8 @@
 - [completed] 将 P0 基线、现有行为保护范围和 tracked 引用归零清单固化到 worklog；终态架构约束保留到对应迁移阶段升级，避免提前锁死迁移态。
 - [completed] P0 退出复核：pytest、Ruff、AST、import smoke、授权 Qt smoke 和 diff check 通过；compileall 的缓存写权限问题已记录，不影响源码门禁。
 - [completed] P1：PreviewPage、PreviewController 和导出编排已收回 Feature ownership；页面行为保护网、全量门禁和 Qt smoke 通过。
-- [pending] P2：建立 Composition Root、Runtime 与 ShellPort；旧 Preview View 兼容门面继续保留并登记。
+- [completed] P2：五个 Feature 工厂、opaque 状态/进度/角标端口和 Qt-free Runtime registry 已建立；生产装配暂未切换。
+- [pending] P3：启用正式 Composition Root 与跨 Feature workflow；保留 `main.py` 日志初始化时序和现有 Shell 行为。
 
 ## 偏差
 

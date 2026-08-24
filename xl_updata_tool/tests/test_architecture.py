@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.bootstrap.app_factory import FeatureDefinition, create_features
 from app.bootstrap.context import build_app_context
+from app.bootstrap.runtime import FeatureRuntimeRegistry
 from app.core.file_utils import atomic_write_bytes, replace_directory
 from app.shared.contracts import FeatureDescriptor, FeatureRuntime, ImportResult
 
@@ -253,3 +254,59 @@ def test_replace_directory_swaps_staged_output(tmp_path):
 
     assert (destination / "new.txt").read_text(encoding="utf-8") == "new"
     assert not (destination / "old.txt").exists()
+
+
+def test_feature_runtime_registry_binds_generic_ports_and_lifecycle():
+    class Signal:
+        def __init__(self):
+            self.handlers = []
+
+        def connect(self, handler):
+            self.handlers.append(handler)
+
+        def emit(self, *args):
+            for handler in self.handlers:
+                handler(*args)
+
+    class Page:
+        def __init__(self):
+            self.visible = None
+
+        def set_visible(self, visible):
+            self.visible = visible
+
+    class Controller:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    first_page, second_page = Page(), Page()
+    first_controller, second_controller = Controller(), Controller()
+    status, progress, badges = Signal(), Signal(), Signal()
+    features = (
+        FeatureRuntime(
+            FeatureDescriptor("first", "第一项"), first_page, first_controller,
+            status_signal=status, progress_signal=progress, badge_signal=badges,
+        ),
+        FeatureRuntime(
+            FeatureDescriptor("second", "第二项"), second_page, second_controller,
+        ),
+    )
+    registry = FeatureRuntimeRegistry(features)
+
+    received = []
+    registry.bind_status(lambda value: received.append(("status", value)))
+    registry.bind_progress(lambda *value: received.append(("progress", value)))
+    registry.bind_badge(lambda: received.append(("badge",)))
+    registry.activate("second")
+    status.emit("ready")
+    progress.emit(1, 2, "loading")
+    badges.emit()
+    registry.close()
+
+    assert registry.keys() == ("first", "second")
+    assert first_page.visible is False and second_page.visible is True
+    assert received == [("status", "ready"), ("progress", (1, 2, "loading")), ("badge",)]
+    assert first_controller.closed and second_controller.closed

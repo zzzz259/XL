@@ -1,8 +1,7 @@
-"""应用组合根的迁移期骨架。
+"""应用组合根与 Feature 注册工厂。
 
-当前仍由旧 MainWindow 负责实际页面装配；本模块先提供稳定的 Feature
-注册协议。后续各 Feature 完成迁移后，只需在这里注册工厂，不再把领域
-依赖继续添加到 MainWindow。
+生产 Shell 仍处于迁移期，但具体 Feature 已可由这里集中注册和隔离装配。
+P3 再切换生产启动路径，避免在同一阶段同时改变装配和 Shell 行为。
 """
 
 from __future__ import annotations
@@ -43,3 +42,38 @@ def create_features(
         keys.add(key)
         features.append(feature)
     return tuple(features)
+
+
+def default_feature_definitions(parent=None) -> tuple[FeatureDefinition, ...]:
+    """返回 XL 当前五个 Feature 的正式注册顺序。
+
+    `parent` 只由组合根作为 Qt 生命周期宿主传入；共享契约和 AppContext
+    不持有 Qt 对象。生产启动切换前，MainWindow 仍可继续使用旧装配路径。
+    """
+
+    from app.features.audio.factory import DESCRIPTOR as AUDIO, create_feature as create_audio
+    from app.features.characters.factory import (
+        DESCRIPTOR as CHARACTER,
+        create_feature as create_character,
+    )
+    from app.features.importer.factory import (
+        DESCRIPTOR as IMPORTER,
+        create_feature as create_importer,
+    )
+    from app.features.preview.factory import DESCRIPTOR as PREVIEW, create_feature as create_preview
+    from app.features.versions.factory import DESCRIPTOR as VERSIONS, create_feature as create_versions
+
+    creators = (
+        (VERSIONS, create_versions),
+        (PREVIEW, create_preview),
+        (AUDIO, create_audio),
+        (CHARACTER, create_character),
+        (IMPORTER, create_importer),
+    )
+    return tuple(
+        FeatureDefinition(
+            descriptor,
+            lambda context, creator=creator: creator(context, parent=parent),
+        )
+        for descriptor, creator in creators
+    )
