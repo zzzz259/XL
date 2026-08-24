@@ -333,3 +333,13 @@
 - [completed] 接入 MainWindow，保留音频输出、导出、播放、取消、分类和未读状态契约；旧模块暂不删除。
 - [completed] 全量 pytest 100 项通过，Ruff、AST 解析 111 个 Python 文件和 `git diff --check` 通过。
 - [pending] 用户正常启动验证 P1；确认后创建本地检查点并进入 Characters Feature。
+
+## 2026-08-24 Issue #41：Characters Feature ownership 迁移
+
+- [completed] 创建 Issue #41《架构迁移 P2：Characters Feature ownership》。
+- [completed] 盘点角色页面工厂、MainWindow 角色状态、Lua 解析、缓存、角色仓库、Wiki 详情和 CSV 导出调用链。
+- [completed] 设计 CharacterPage、CharacterController、CharacterService 的兼容迁移切片。
+- [completed] 迁移角色页面控件与语义信号，移出 MainWindow 的列表/筛选/详情状态。
+- [completed] 迁移角色数据恢复、手动解析、自动解析结果、未读和 CSV 导出协调；自动解析继续复用导入进度弹窗。
+- [completed] 保留 `app/ui/views/character_view.py` 兼容工厂，调用方已切换到 Feature 页面，未改变旧导入入口。
+- [completed] 完成全量 pytest 100 passed、Ruff、AST 解析 116 个 Python 文件、真实 MainWindow smoke 和 `git diff --check`；下一步由用户正常启动确认后创建本地检查点。

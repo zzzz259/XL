@@ -421,6 +421,13 @@ Phase 6 - Lua 与角色数据链路重构
 - 旧 `audio_view.py`、`ui/features/audio_controller.py` 和 `ui/workers/audio_decrypt.py` 暂保留兼容入口，后续确认调用方全部切换后再删除。
 - P1 代码门禁：全量 pytest 100 项通过，Ruff、AST 解析 111 个 Python 文件和 `git diff --check` 通过。
 
+### 阶段 2 当前执行边界
+
+- Issue #41 已创建，开始 Characters Feature ownership 迁移。
+- 本轮先迁移 CharacterPage、角色列表/筛选/详情控制器和本地数据恢复服务；Lua parser、仓库 JSON 契约和 Wiki 展示模型保持兼容。
+- 角色解析入口、Lua 导出后的自动解析、全部标为已读、打开详情清除未读和 CSV 导出均保持行为不变。
+- 未经用户验证不删除 `app/ui/views/character_view.py`、`app/core/character_*` 或 MainWindow 的兼容入口。
+
 ### Errors Encountered
 
 | Error | Attempt | Resolution |
@@ -549,3 +556,11 @@ app/features/audio/
 - 迁移期间保留旧模块兼容导出；每次切换调用方后运行全量测试和 Windows smoke。
 - 发现输出、日志、取消或外部工具行为变化时，先回滚调用方切换，不删除旧实现，保留双入口排查。
 - 最终所有阶段完成后，再统一做文档收口、差异审查和一个完整 PR。
+
+## 2026-08-24 Issue #41：Characters Feature ownership 迁移
+
+- [completed] 设计 CharacterPage、CharacterController、CharacterService 的兼容迁移切片。
+- [completed] 迁移角色页面控件与语义信号，移出 MainWindow 的列表、筛选和详情状态。
+- [completed] 迁移角色数据恢复、手动解析、自动解析结果、未读和 CSV 导出协调；自动解析继续复用导入进度弹窗。
+- [completed] 保留 `app/ui/views/character_view.py` 兼容工厂，调用方已切换到 Feature 页面，未改变旧导入入口。
+- [completed] 完成全量 pytest 100 passed、Ruff、AST 解析 116 个 Python 文件、真实 MainWindow smoke 和 `git diff --check`；下一步由用户正常启动确认后创建本地检查点。

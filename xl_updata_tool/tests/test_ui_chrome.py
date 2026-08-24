@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -97,7 +98,7 @@ def test_main_view_toolbar_builds_qicons_for_navigation(qapp):
 
 def test_character_unread_only_marks_character_tab(qapp):
     window = MainWindow.__new__(MainWindow)
-    window.character_unread = {}
+    window.character_controller = SimpleNamespace(has_unread=True)
     window._unread_badges = {
         "home": QLabel(),
         "preview": QLabel(),
@@ -105,11 +106,7 @@ def test_character_unread_only_marks_character_tab(qapp):
         "character": QLabel(),
     }
 
-    with patch(
-        "app.ui.main_window.load_character_repository",
-        return_value={"unread": {"80100001": "new"}},
-    ):
-        window._refresh_unread_badges()
+    window._refresh_unread_badges()
 
     assert window._unread_badges["character"].isVisible()
     assert not window._unread_badges["home"].isVisible()
@@ -119,7 +116,7 @@ def test_character_unread_only_marks_character_tab(qapp):
 
 def test_audio_unread_only_marks_audio_tab(qapp):
     window = MainWindow.__new__(MainWindow)
-    window.character_unread = {}
+    window.character_controller = SimpleNamespace(has_unread=False)
     window._unread_badges = {
         "home": QLabel(),
         "preview": QLabel(),
@@ -128,9 +125,6 @@ def test_audio_unread_only_marks_audio_tab(qapp):
     }
 
     with patch(
-        "app.ui.main_window.load_character_repository",
-        return_value={"unread": {}},
-    ), patch(
         "app.ui.main_window.audio_unread_files",
         return_value={"album/第五专辑/event.wav"},
     ):

@@ -10,6 +10,7 @@ APP_DIR = Path(__file__).parents[1] / "app"
 BOOTSTRAP_DIR = APP_DIR / "bootstrap"
 SHARED_DIR = APP_DIR / "shared"
 AUDIO_FEATURE_DIR = APP_DIR / "features" / "audio"
+CHARACTERS_FEATURE_DIR = APP_DIR / "features" / "characters"
 
 
 def test_core_layer_does_not_import_qt():
@@ -60,6 +61,15 @@ def test_audio_page_and_service_respect_feature_boundaries():
     assert "PySide6" not in service_text
 
 
+def test_characters_page_and_service_respect_feature_boundaries():
+    page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
+    service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+
+    assert "parent._" not in page_text
+    assert "controls =" not in page_text
+    assert "PySide6" not in service_text
+
+
 def test_main_window_delegates_audio_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
@@ -69,6 +79,18 @@ def test_main_window_delegates_audio_runtime_to_feature_controller():
     assert "QMediaPlayer" not in main_window_text
     assert "self._audio_worker" not in main_window_text
     assert "self.audio_table" not in main_window_text
+
+
+def test_main_window_delegates_character_runtime_to_feature_controller():
+    main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+    assert "CharacterController" in main_window_text
+    assert "CharacterService" in main_window_text
+    assert "create_character_view" not in main_window_text
+    assert "load_character_data" not in main_window_text
+    assert "merge_character_snapshot" not in main_window_text
+    assert "self.characters" not in main_window_text
+    assert "self.character_table" not in main_window_text
 
 
 def test_feature_factory_preserves_registration_order_and_rejects_duplicates(tmp_path):
