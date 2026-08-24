@@ -1,5 +1,5 @@
-from app.core import database as db
-from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
+from app.platform import database as db
+from app.features.versions.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
 
 
 def test_delete_downloaded_bundles_removes_files_and_clears_state(tmp_path):

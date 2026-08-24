@@ -19,6 +19,8 @@
 - [completed] P6c：归位角色缓存、展示模型、Wiki Profile 和增量仓库实现；`character_loader.py` 留待 P7。
 - [completed] P6d：收口平台与诊断基础设施；`app/core` 对应路径降为兼容转发，平台实现与诊断契约已稳定。
 - [completed] P7：拆分角色 Lua 解析器；按通用参数、基础表、养成消耗、技能、BaseCard 聚合和整体装配归位，保留旧 core re-export 入口并加入脱敏 fixture/golden 保护。
+- [completed] P8a：收回 Preview 的 Worker、适配器、FGUI、专属对话框和拖拽控件；Shared 页面壳层归位，Shell 的导入筛选、音频未读和版本日志改为稳定 Feature API。
+- [completed] P8b：收回 Lua 成品仓库和剩余生产入口；完成 `app/core` 零引用清理，更新终态架构测试与使用/开发文档。
 
 ## 偏差
 

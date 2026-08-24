@@ -17,7 +17,7 @@ from .theme import (
     ACCENT, BG_SURFACE, BG_ELEVATED, BG_HOVER, BORDER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, SUCCESS, INFO,
 )
-from app.core.bundle_parser import fix_bundle_inplace
+from app.platform.bundle_parser import fix_bundle_inplace
 from app.platform.diagnostics import logger
 from app.platform.paths import get_base_dir, get_tools_dir
 

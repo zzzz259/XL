@@ -67,6 +67,10 @@ def test_p0_contract_layers_are_framework_free():
     assert offenders == []
 
 
+def test_migrated_core_compatibility_layer_has_no_python_modules():
+    assert list(CORE_DIR.glob("*.py")) == []
+
+
 def test_audio_page_and_service_respect_feature_boundaries():
     page_text = (AUDIO_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
     service_text = (AUDIO_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
@@ -99,8 +103,9 @@ def test_audio_and_preview_domain_implementations_live_in_feature_directories():
         assert "PySide6" not in text
         assert len(text) > 100
 
-    assert "app.features.audio.audio_library" in (CORE_DIR / "audio_library.py").read_text(encoding="utf-8")
-    assert "app.features.preview.catalog" in (CORE_DIR / "preview_catalog.py").read_text(encoding="utf-8")
+    assert not (CORE_DIR / "audio_library.py").exists()
+    assert not (CORE_DIR / "preview_catalog.py").exists()
+    assert not (CORE_DIR / "prefab_parser.py").exists()
 
 
 def test_versions_domain_implementations_live_in_feature_directory():
@@ -121,7 +126,7 @@ def test_versions_domain_implementations_live_in_feature_directory():
         text = (VERSIONS_FEATURE_DIR / filename).read_text(encoding="utf-8")
         assert "PySide6" not in text
         assert len(text) > 100
-    assert "app.features.versions.version_manager" in (CORE_DIR / "version_manager.py").read_text(encoding="utf-8")
+    assert not (CORE_DIR / "version_manager.py").exists()
 
 
 def test_bundle_boundaries_match_consuming_domains():
@@ -136,9 +141,9 @@ def test_bundle_boundaries_match_consuming_domains():
     assert "app.core.bundle_parser" not in versions_data
     assert "app.core.bundle_parser" not in versions_seed
     assert "PySide6" not in platform_parser
-    assert "app.platform.bundle_parser" in (CORE_DIR / "bundle_parser.py").read_text(encoding="utf-8")
-    assert "app.features.importer.bundle_selector" in (CORE_DIR / "bundle_selector.py").read_text(encoding="utf-8")
-    assert "app.features.versions.bundle_manager" in (CORE_DIR / "bundle_manager.py").read_text(encoding="utf-8")
+    assert not (CORE_DIR / "bundle_parser.py").exists()
+    assert not (CORE_DIR / "bundle_selector.py").exists()
+    assert not (CORE_DIR / "bundle_manager.py").exists()
 
 
 def test_character_domain_implementations_live_in_feature_directory():
@@ -152,7 +157,7 @@ def test_character_domain_implementations_live_in_feature_directory():
         text = (CHARACTERS_FEATURE_DIR / filename).read_text(encoding="utf-8")
         assert "PySide6" not in text
         assert len(text) > 100
-    assert "app.features.characters.repository" in (CORE_DIR / "character_repository.py").read_text(encoding="utf-8")
+    assert not (CORE_DIR / "character_repository.py").exists()
 
 
 def test_character_parser_is_split_and_qt_free():
@@ -261,6 +266,30 @@ def test_preview_export_and_compatibility_entrypoints_are_feature_owned():
     assert "parent._" not in feature_export_text
     assert "CompositeExportWorker" in feature_export_text
     assert "BatchExportWorker" in feature_export_text
+
+
+def test_preview_workers_dialogs_and_adapters_are_feature_owned():
+    preview_worker_text = (PREVIEW_FEATURE_DIR / "worker.py").read_text(encoding="utf-8")
+    preview_adapter_text = (PREVIEW_FEATURE_DIR / "adapter.py").read_text(encoding="utf-8")
+    preview_fgui_text = (PREVIEW_FEATURE_DIR / "fgui.py").read_text(encoding="utf-8")
+    preview_controller_text = (PREVIEW_FEATURE_DIR / "controller.py").read_text(encoding="utf-8")
+    preview_export_text = (PREVIEW_FEATURE_DIR / "export_controller.py").read_text(encoding="utf-8")
+    characters_page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
+
+    for text in (
+        preview_worker_text,
+        preview_adapter_text,
+        preview_fgui_text,
+        preview_controller_text,
+        preview_export_text,
+        characters_page_text,
+    ):
+        assert "app.ui.workers" not in text
+        assert "app.ui.adapters" not in text
+        assert "app.ui.dialogs" not in text
+        assert "app.ui.widgets" not in text
+    assert "app.platform.lua_repository" in (APP_DIR / "features" / "importer" / "processing.py").read_text(encoding="utf-8")
+    assert "app.platform.lua_repository" in (APP_DIR / "features" / "characters" / "service.py").read_text(encoding="utf-8")
 
 
 def test_main_window_delegates_audio_runtime_to_feature_controller():

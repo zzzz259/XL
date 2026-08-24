@@ -91,6 +91,13 @@ class AudioController(QObject):
     def audio_files(self) -> list[dict]:
         return list(self._audio_files)
 
+    @property
+    def has_unread(self) -> bool:
+        """向 Shell 暴露领域无关的未读状态，不暴露仓库实现。"""
+        if self._audio_files:
+            return any(bool(info.get("unread")) for info in self._audio_files)
+        return self.service.has_unread
+
     def _connect_page(self) -> None:
         self.page.refresh_requested.connect(lambda: self.load_catalog(force_reload=True))
         self.page.export_requested.connect(self.export_selected)

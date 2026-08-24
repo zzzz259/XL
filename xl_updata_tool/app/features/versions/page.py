@@ -1,9 +1,45 @@
 """版本功能域页面。"""
 
 from PySide6.QtCore import QEvent, Signal
-from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QFrame,
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from app.ui.views.version_view import create_version_header
+
+def create_version_header(parent=None):
+    """创建版本工作区的说明和统计摘要。"""
+    frame = QFrame(parent)
+    frame.setObjectName("workspaceHeader")
+    layout = QHBoxLayout(frame)
+    layout.setContentsMargins(16, 12, 16, 10)
+    layout.setSpacing(12)
+
+    text_box = QWidget(frame)
+    text_layout = QVBoxLayout(text_box)
+    text_layout.setContentsMargins(0, 0, 0, 0)
+    text_layout.setSpacing(2)
+    title = QLabel("版本工作区", text_box)
+    title.setObjectName("workspaceTitle")
+    title.setAccessibleName("版本工作区")
+    text_layout.addWidget(title)
+    description = QLabel("管理版本、下载状态与增量关系", text_box)
+    description.setObjectName("workspaceDescription")
+    text_layout.addWidget(description)
+    layout.addWidget(text_box)
+    layout.addStretch()
+
+    summary = QLabel("0 个版本 · 尚未选择", frame)
+    summary.setObjectName("workspaceSummary")
+    summary.setAccessibleName("版本工作区统计")
+    layout.addWidget(summary)
+    return frame, summary
 
 
 class VersionPage(QWidget):

@@ -112,3 +112,11 @@
 - [x] 针对性测试、全量 pytest 141 项、Ruff、AST `AST_OK 193` 通过；删除/引用检查确认生产代码不再依赖旧 core 实现。
 - [x] `P7_IMPORT_SMOKE_OK`、`RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')` 和 `git diff --check` 通过。
 - [x] 本阶段源码引用检查确认 `app`、`tests`、`tools`、`scripts` 不再直接依赖 `app.core.character_loader`；兼容入口仍可导入。
+
+## P8 退出门
+
+- [x] Preview Feature 不再依赖 `app.ui.workers`、`app.ui.adapters`、`app.ui.dialogs` 或 `app.ui.widgets`；Preview 专属实现、Shared 壳层和角色详情控件均已归位，旧路径仅保留薄转发。
+- [x] Importer/Versions Worker 实现不再依赖旧 UI Worker；Lua 成品仓库位于 `app/platform/lua_repository.py`，应用内部不再依赖 `app.core`。
+- [x] `app/core` 下全部纯转发 Python 文件已在引用归零后删除；终态测试强制确保无 Python 模块残留。
+- [x] 全量 pytest 180 项、Ruff、AST `AST_OK 179`、`P8_IMPORT_SMOKE_OK`、runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')` 和 core import zero 检查通过。
+- [x] 针对性测试曾发现旧测试 patch 迁移前内部变量，已按稳定 Controller API 修正并重新通过；未改变产品行为。

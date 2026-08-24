@@ -7,8 +7,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from .file_utils import replace_directory
-from .logger import logger
+from .files import replace_directory
+from .diagnostics import logger
 
 
 # 角色自动解析的最小前置文件。其他 Base 文件缺失时，解析器会按已有能力降级。

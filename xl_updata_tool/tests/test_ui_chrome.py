@@ -164,6 +164,7 @@ def test_character_unread_only_marks_character_tab(qapp):
 def test_audio_unread_only_marks_audio_tab(qapp):
     window = MainWindow.__new__(MainWindow)
     window.character_controller = SimpleNamespace(has_unread=False)
+    window.audio_controller = SimpleNamespace(has_unread=True)
     window._unread_badges = {
         "home": QLabel(),
         "preview": QLabel(),
@@ -171,11 +172,7 @@ def test_audio_unread_only_marks_audio_tab(qapp):
         "character": QLabel(),
     }
 
-    with patch(
-        "app.ui.main_window.audio_unread_files",
-        return_value={"album/第五专辑/event.wav"},
-    ):
-        window._refresh_unread_badges()
+    window._refresh_unread_badges()
 
     assert window._unread_badges["audio"].isVisible()
     assert not window._unread_badges["character"].isVisible()

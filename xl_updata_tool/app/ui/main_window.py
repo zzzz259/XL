@@ -24,14 +24,6 @@ from .theme import (
     FORMAL_THEME, THEME_LABEL, apply_theme, get_color, normalize_theme_name,
 )
 from app.bootstrap import build_app_context, create_application_runtime
-from app.core.bundle_selector import (
-    audio_assets_map_path,
-    lua_assets_map_path,
-    select_audio_bundles,
-    select_lua_bundles,
-)
-from app.core.audio_repository import unread_files as audio_unread_files
-from app.core.version_update import append_changelog
 from app.platform import database as db
 from app.platform.diagnostics import logger
 from app.platform.paths import get_data_dir, get_base_dir, get_tools_dir
@@ -235,8 +227,9 @@ class MainWindow(QMainWindow):
         character_has_unread = bool(
             getattr(getattr(self, "character_controller", None), "has_unread", False)
         )
-        audio_dir = os.path.join(get_base_dir(), "output", "audio")
-        audio_has_unread = bool(audio_unread_files(audio_dir))
+        audio_has_unread = bool(
+            getattr(getattr(self, "audio_controller", None), "has_unread", False)
+        )
         for key, badge in getattr(self, "_unread_badges", {}).items():
             badge.setVisible(
                 (key == "character" and character_has_unread)
@@ -478,13 +471,10 @@ class MainWindow(QMainWindow):
         bundle_dir = os.path.dirname(fs[0])
         isolate_bundle_dir = False
         if export_categories in ({"lua"}, {"audio"}):
-            map_path = (
-                lua_assets_map_path(bundle_dir)
-                if export_categories == {"lua"}
-                else audio_assets_map_path(bundle_dir)
+            category = "lua" if export_categories == {"lua"} else "audio"
+            selected_fs, mapped, asset_count, map_path = self.import_controller.select_bundles(
+                category, fs, bundle_dir
             )
-            selector = select_lua_bundles if export_categories == {"lua"} else select_audio_bundles
-            selected_fs, mapped, asset_count = selector(fs, map_path)
             if mapped:
                 fs = selected_fs
                 isolate_bundle_dir = True
@@ -642,7 +632,7 @@ class MainWindow(QMainWindow):
         """追加导入更新日志到 output/CHANGELOG.md（像 git 提交记录）"""
         try:
             out_log = os.path.join(get_base_dir(), "output", "CHANGELOG.md")
-            append_changelog(out_log, message)
+            self.version_service.append_changelog(out_log, message)
             logger.info(f"已写更新日志: {out_log}")
         except Exception as e:
             logger.warning(f"写更新日志失败: {e}")

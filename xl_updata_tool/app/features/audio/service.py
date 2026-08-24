@@ -12,7 +12,7 @@ from .audio_library import (
     format_size,
     scan_audio_files,
 )
-from .audio_repository import mark_all_read, mark_read, sync_audio_snapshot
+from .audio_repository import mark_all_read, mark_read, sync_audio_snapshot, unread_files
 
 
 def _normalise_directory(value: str | os.PathLike[str] | None) -> str:
@@ -134,6 +134,11 @@ class AudioService:
                     info["unread"] = False
                     break
         return changed
+
+    @property
+    def has_unread(self) -> bool:
+        """返回音频输出目录是否存在未读成品，不触发目录扫描。"""
+        return bool(unread_files(str(self.audio_dir)))
 
     def export_selected(
         self,

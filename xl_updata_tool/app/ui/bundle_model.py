@@ -1,5 +1,5 @@
 from PySide6.QtCore import QAbstractTableModel, Qt, QModelIndex
-from app.core import database as db
+from app.platform import database as db
 
 
 class BundleTableModel(QAbstractTableModel):

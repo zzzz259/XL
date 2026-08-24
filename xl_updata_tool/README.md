@@ -8,7 +8,7 @@
 - [开发文档指南](docs/开发文档指南.md)：面向开发者的架构、模块职责、调用链、运行目录契约和验证方法。
 - [版本历史](docs/版本历史.md)：按新版本到旧版本记录功能和修复变更。
 - [架构与协作基线](docs/架构与协作基线.md)：多人协作边界、失败恢复要求和提交前检查。
-- [代码所有权与边界](docs/代码所有权与边界.md)：功能域认领范围、公共架构区和迁移期修改规则。
+- [代码所有权与边界](docs/代码所有权与边界.md)：功能域认领范围、公共架构区和多人协作修改规则。
 - [开发过程记录](docs/worklog/)：任务计划、调查发现和进度记录，仅供开发过程追踪。
 
 ## 项目简介
@@ -19,7 +19,7 @@
 
 项目已完成 P0-P8 的功能域 ownership 与协作架构收口：Audio、Characters、Versions、Importer 和 Preview 各自拥有页面、控制器、服务和任务入口；Platform 与 Shared 提供路径、文件、进程、数据库、诊断和通用 UI 的稳定入口。
 
-MainWindow 继续作为兼容期 Shell，旧 `app/core`、`app/ui` 和兼容转发入口暂时保留。新增功能应归属对应 Feature，跨域修改需要单独 Issue、影响说明和 worklog，不再把领域业务状态或后台任务直接堆回主窗口。
+MainWindow 作为 Shell 负责导航、页面宿主和通用任务状态；`app/core` 已退出生产结构，旧 `app/ui` 仅保留明确登记的兼容入口。新增功能应归属对应 Feature，跨域修改需要单独 Issue、影响说明和 worklog，不再把领域业务状态或后台任务直接堆回主窗口。
 
 正式架构与模块职责见[开发文档指南](docs/开发文档指南.md)和[代码所有权与边界](docs/代码所有权与边界.md)；版本变更见[版本历史](docs/版本历史.md)，过程性调查和验证记录见 [docs/worklog/](docs/worklog/)。
 
@@ -73,7 +73,7 @@ MainWindow 继续作为兼容期 Shell，旧 `app/core`、`app/ui` 和兼容转�
 
 其中「备注」列显示该版本相对上一版本的差异：`新增 X | 移除 Y | 未变 Z`。
 
-开发者请先阅读：[架构与协作基线](docs/架构与协作基线.md)。其中记录了 core/ui 边界、运行时目录契约、失败恢复要求和后续拆分路线。
+开发者请先阅读：[架构与协作基线](docs/架构与协作基线.md)。其中记录了 Feature/Platform/Shared/Shell 边界、运行时目录契约和失败恢复要求。
 
 旧版资源浏览器仅作为兼容入口保留，正常导入流程使用主界面的 AssetStudio 后台任务。
 版本列表刷新时会以 `data/bundles/` 的实际文件校准数据库下载状态。
@@ -82,7 +82,7 @@ Lua 成品按版本留存在 `output/lua/<版本时间戳>/`，不会再把多�
 音频目录会在启动后后台预热，不阻塞版本列表；进入音频页时优先使用已准备的索引。音频树按 `album/voice → 专辑或角色 → 音频文件` 分层懒加载，只有展开目录才构造下一层节点；目录勾选、Ctrl 多选和文件勾选由统一选择状态驱动。
 vgmstream 直解 bank 或 FSB 失败时，流程会回退到旧 QuickBMS/`fsb_aud_extr.exe`；回退成功仍计为成功，失败会在日志中记录 bank 级状态，不再被 QuickBMS 的 0 退出码掩盖。
 角色数据仓库位于 `output/character_data/`：每个已解析版本保留一份快照，当前角色数据做增量合并，新角色和数值变化会在角色列表及“角色”顶部标签显示“新”角标，打开详情后清除。应用启动和切换角色页优先读取本地仓库/缓存，不会因为切换页面现场解析 Lua；可在角色页点击“开始解析”主动刷新，或由最新 Lua 导出完成后自动触发。
-角色详情展示和 CSV 导出由无 Qt 的 `app/core/character_presenter.py` 负责，便于测试和后续扩展。
+角色详情展示和 CSV 导出由无 Qt 的 `app/features/characters/presenter.py` 负责，便于测试和后续扩展。
 
 每行有三个操作按钮：
 
@@ -135,15 +135,14 @@ xl_updata_tool/
 ├── pyproject.toml      pytest 与 Ruff 配置
 ├── build.spec          PyInstaller 打包配置
 ├── app/                源代码
-    │   ├── bootstrap/      迁移期应用上下文与 Feature 装配入口
+    │   ├── bootstrap/      应用上下文与 Feature 装配入口
     │   ├── shared/         与 Qt 无关的跨 Feature 契约
     │   ├── features/audio/ 音频 Feature 页面、控制器、目录服务、Worker 和树逻辑（P1）
-    │   ├── features/characters/ 角色 Feature 页面、控制器和 Qt-free 数据服务（P2）
+    │   ├── features/characters/ 角色 Feature 页面、控制器、parser 和 Qt-free 数据服务（P2/P7）
     │   ├── features/versions/ 版本工作区、更新检查、下载计划和 Bundle 状态（P3）
     │   ├── features/importer/ 导入规格、精准 Bundle 筛选和后处理结果（P4）
-    │   ├── features/preview/  图片预览、FGUI、Spine/视频导出功能域（P5）
-    │   ├── core/           迁移期核心逻辑兼容层
-    │   └── ui/             迁移期 UI 界面（workers/dialogs/features/views/adapters）
+    │   ├── features/preview/  图片、FGUI、Spine/视频导出及其 Worker/对话框（P5/P8）
+    │   └── ui/             Shell 与登记的兼容入口
 ├── tests/              项目测试（与 app/ 平级）
 ├── tools/              外部工具（AssetStudio 等）
 ├── docs/               开发文档
@@ -180,7 +179,7 @@ A: 浏览已下载的资源和查看版本历史可以离线，但检查更新�
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
-python -m ruff check --no-cache tests app/core app/ui app/bootstrap app/shared
+python -m ruff check --no-cache tests app app/bootstrap app/shared
 python -B -c "from pathlib import Path; files=list(Path('app').rglob('*.py'))+list(Path('tests').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
 ```
 

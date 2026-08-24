@@ -32,6 +32,16 @@ class ImporterService:
             return list(bundle_paths), False, 0
         return selector(list(bundle_paths), map_path)
 
+    def asset_map_path(self, category: str, bundle_dir: str | os.PathLike[str]) -> str:
+        """返回分类对应的资源映射路径，集中维护导入筛选规则。"""
+        from .bundle_selector import audio_assets_map_path, lua_assets_map_path
+
+        if category == "lua":
+            return lua_assets_map_path(bundle_dir)
+        if category == "audio":
+            return audio_assets_map_path(bundle_dir)
+        return ""
+
     def result(
         self,
         categories,

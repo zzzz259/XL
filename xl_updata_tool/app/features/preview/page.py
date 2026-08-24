@@ -22,7 +22,7 @@ from app.shared.qt.chrome import (
     create_page_header,
     create_status_label,
 )
-from app.ui.widgets.drag_list import DragListWidget
+from .drag_list import DragListWidget
 
 
 class PreviewPage(QWidget):

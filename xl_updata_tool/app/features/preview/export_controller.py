@@ -20,7 +20,7 @@ from app.features.preview.adapter import (
 from app.features.preview.worker import BatchExportWorker, CompositeExportWorker
 from app.platform.diagnostics import logger
 from app.platform.paths import get_base_dir, get_tools_dir
-from app.ui.dialogs.export_settings import ExportSettingsDialog
+from .dialogs.export_settings import ExportSettingsDialog
 
 
 def _page(controller):

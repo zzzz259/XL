@@ -12,7 +12,7 @@ from .version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
 from .version_data import compute_download_hashes, compute_version_delta_map
 from .version_download import calculate_missing_downloads
 from .version_manager import VersionManager
-from .version_update import register_checked_version
+from .version_update import append_changelog, register_checked_version
 
 
 class VersionService:
@@ -70,3 +70,7 @@ class VersionService:
 
     def downloaded_count(self, timestamp) -> int:
         return count_downloaded_bundles(self.bundles(timestamp))
+
+    def append_changelog(self, output_path: str, message: str) -> None:
+        """写入版本工作区的变更日志。"""
+        append_changelog(output_path, message)

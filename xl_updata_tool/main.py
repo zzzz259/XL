@@ -3,11 +3,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app.core.crash_reporter import install_crash_reporter
-from app.core.environment import write_environment_report
-from app.core.logger import configure_logging, logger
-from app.core.path_utils import get_base_dir
-from app.core.runtime_config import parse_runtime_config
+from app.platform.crash_reporter import install_crash_reporter
+from app.platform.environment import write_environment_report
+from app.platform.logger import configure_logging, logger
+from app.platform.paths import get_base_dir
+from app.platform.runtime_config import parse_runtime_config
 
 
 def main(argv=None):

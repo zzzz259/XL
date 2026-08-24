@@ -26,7 +26,7 @@ from .repository import (
     repository_path,
     unread_status,
 )
-from app.core.lua_repository import (
+from app.platform.lua_repository import (
     has_character_sources,
     latest_lua_version,
     should_auto_parse,

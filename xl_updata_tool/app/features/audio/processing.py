@@ -12,7 +12,7 @@ import sys
 
 from app.platform.diagnostics import logger, timed, stage_operation, task_operation
 from .album_map import audit_bgm_exports, build_album_map
-from app.core.lua_repository import latest_lua_version, version_directory
+from app.platform.lua_repository import latest_lua_version, version_directory
 from app.platform.paths import get_base_dir
 
 

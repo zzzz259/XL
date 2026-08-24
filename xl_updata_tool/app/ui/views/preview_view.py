@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QListWidget, QComboBox,
 )
 
-from app.ui.widgets.drag_list import DragListWidget
+from app.features.preview.drag_list import DragListWidget
 from app.shared.qt.chrome import (
     create_action_button,
     create_command_bar,

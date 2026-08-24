@@ -4,7 +4,7 @@ import pytest
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QApplication
 
-from app.core import database as db
+from app.platform import database as db
 from app.features.versions.controller import VersionController
 from app.features.versions.page import VersionPage
 from app.features.versions.service import VersionService

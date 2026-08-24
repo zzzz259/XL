@@ -141,7 +141,7 @@ class PreviewController(QObject):
 
     def reload_requested(self):
         """重新选择角色并导出预览图片。"""
-        from app.ui.dialogs.character_select import CharacterSelectDialog
+        from .dialogs.character_select import CharacterSelectDialog
 
         roles = self.service.cardspine_roles()
         if not roles:
@@ -346,7 +346,7 @@ class PreviewController(QObject):
         if not all_pngs:
             all_pngs = [png_path]
             current_index = 0
-        from app.ui.dialogs.image_viewer import ImageViewerDialog
+        from .dialogs.image_viewer import ImageViewerDialog
 
         logger.debug("双击预览: %s, 索引 %s/%s", png_path, current_index, len(all_pngs))
         ImageViewerDialog(all_pngs, current_index, self.page).exec()

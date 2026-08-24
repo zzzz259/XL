@@ -137,3 +137,11 @@
 - `CharacterService`、音频专辑映射和角色解析测试已切到 Feature Parser 公共入口；`app/core/character_loader.py` 仅保留 re-export 兼容入口，不维护第二份实现。
 - 新增脱敏的最小 Lua fixture 和完整结果形状测试，覆盖文本、CV、等级/品质属性、技能、角色卡、语音、故事、徽章和消耗装配；另用 `19f0268` 中的旧实现对同一临时 fixture 做深度等价核对，结果为 `P7_GOLDEN_EQUIVALENCE_OK`。
 - 解析器模块不依赖 PySide6/PyQt；无真实游戏数据进入版本库。
+
+## P8 引用归零与终态收口（2026-08-24）
+
+- Shell 已停止直接依赖 Bundle Selector、音频未读仓库和版本日志实现，改由 ImportController、AudioController 和 VersionService 提供稳定能力；MainWindow 不再导入 `app.core` 或具体 Feature 内部实现。
+- Preview 的 Spine/FFmpeg、FGUI、拖拽列表、图片/导出/角色选择对话框和四类 Preview Worker 已归入 Preview Feature；Characters Wiki 详情控件归入 Characters Feature；Shared 页面壳层归入 `app/shared/qt/view_chrome.py`。旧 `app/ui` 路径仅保留薄兼容入口。
+- Lua 成品仓库归入 `app/platform/lua_repository.py`；Importer、Characters、Audio 均已切换到 platform 入口。
+- 对 `app`、`tests`、`tools` 的生产导入引用归零核对通过后，删除了 `app/core` 下全部纯转发 Python 文件；无用户数据、数据库或 output 目录变更。
+- P8 期间一次针对性测试发现旧 UI chrome 测试仍 patch 已移除的 `audio_unread_files` 模块变量；根因是测试绑定了迁移前内部实现，已改为通过 `AudioController.has_unread` 验证同一用户行为，未修改产品行为。
