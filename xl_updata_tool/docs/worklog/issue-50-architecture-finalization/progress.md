@@ -13,6 +13,8 @@
 - [completed] P3：生产入口、descriptor 导航和 ImportResult 后处理 workflow 已切换；全量门禁和 runtime Qt smoke 通过。
 - [completed] P4：迁移 Audio 处理 Worker；Qt-free 音频处理进入 Feature，生产 Feature Worker 不再依赖旧 `app/ui/workers/audio_decrypt.py`，旧路径保留薄兼容门面。
 - [pending] P5：迁移 Importer / AssetStudio Worker，去除 Feature 对旧导入 Worker 的生产依赖。
+- [completed] P5：迁移 Importer / AssetStudio Worker；Qt-free 导入处理进入 Feature，生产 Feature Worker 不再依赖旧 `app/ui/workers/import_as.py`，旧路径保留薄兼容门面。
+- [pending] P6：按 Feature 归位领域代码并清场基础设施旧门面。
 
 ## 偏差
 

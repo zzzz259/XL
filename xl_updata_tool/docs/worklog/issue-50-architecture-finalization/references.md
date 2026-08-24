@@ -35,7 +35,7 @@
 
 - Feature Worker → 旧 Worker：
   - `features/audio/worker.py` 已不再引用旧音频 Worker；Qt-free 处理位于 `features/audio/processing.py`
-  - `features/importer/worker.py` → `app.ui.workers.import_as`
+  - `features/importer/worker.py` 已不再引用旧导入 Worker；Qt-free 处理位于 `features/importer/processing.py`
   - `features/preview/worker.py` → `app.ui.workers.image_loader`、`preview_export`、`batch_export`、`composite_export`
   - `features/versions/worker.py` → `app.ui.workers.download`
 - Feature Page/Adapter → 旧 View/UI：
@@ -55,6 +55,13 @@
 - `app/features/audio/worker.py` 只承载 QThread 生命周期、取消请求和处理器回调到既有信号的映射；生产 Controller 只引用该 Feature Worker。
 - `app/ui/workers/audio_decrypt.py` 保留为兼容入口，仅转发 `AudioDecryptProcessor` 和 `AudioDecryptWorker`，没有第二份实现。
 - P4 暂不删除旧入口：它仍属于登记过的外部/测试兼容面；删除前必须重新证明 tracked 代码、测试、工具和正式文档引用归零。
+
+## P5 Importer Worker 迁移后事实
+
+- `app/features/importer/processing.py` 是 Qt-free AssetStudio 导入处理器，承载 Bundle 修复、资源映射、分类导出、staging 提交/回滚、Lua 发布、精准 Bundle 输入和取消检查。
+- `app/features/importer/worker.py` 只承载 QThread 生命周期、取消请求和既有进度/阶段/分类/完成信号映射；ImporterController 的结果组装契约未改变。
+- `app/ui/workers/import_as.py` 保留为 `ImportASWorker` 旧类名兼容门面，没有第二份导入实现。
+- P5 暂不删除旧入口：它仍属于登记过的外部/测试兼容面；删除前必须重新证明 tracked 代码、测试、工具和正式文档引用归零。
 
 ## 当前 `controls_dict` / `parent._` 事实
 

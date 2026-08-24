@@ -89,3 +89,10 @@
 - 初次 import smoke 使用了不存在的 `app.main`；已改为导入根入口 `main` 后通过。
 - 初次 Qt smoke 读取了不存在的 `view_stack` 属性；已改为读取现有页面可见性属性后通过。
 - 一次 `rg` 命令携带 Windows 不支持的 `tests/test_*_feature.py` 通配参数；不影响扫描结果，改用目录扫描完成核对。
+
+## P5 退出复核（2026-08-24）
+
+- `app/features/importer/processing.py` 已接管 Bundle 修复、AssetStudio 资源映射、分类导出、staging 提交/回滚、Lua 发布、精准 Bundle 输入和取消检查。
+- `app/features/importer/worker.py` 已收回 Importer Worker ownership，只把 Qt 线程生命周期、取消、进度、阶段、分类和完成回调映射为既有信号。
+- 旧 `app/ui/workers/import_as.py` 保留为 `ImportASWorker` 薄兼容门面；生产 Feature 不再反向引用旧路径。
+- P5 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（134 项）；Ruff 通过；不落盘 AST `AST_OK 161`；Importer import smoke `IMPORTER_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。

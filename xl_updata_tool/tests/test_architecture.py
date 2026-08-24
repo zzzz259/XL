@@ -114,6 +114,17 @@ def test_importer_service_and_specs_respect_feature_boundaries():
     assert "ImportResult" in service_text
 
 
+def test_importer_processing_is_qt_free_and_feature_worker_does_not_use_legacy_worker():
+    processing_text = (IMPORTER_FEATURE_DIR / "processing.py").read_text(encoding="utf-8")
+    worker_text = (IMPORTER_FEATURE_DIR / "worker.py").read_text(encoding="utf-8")
+    legacy_text = (APP_DIR / "ui" / "workers" / "import_as.py").read_text(encoding="utf-8")
+
+    assert "PySide6" not in processing_text
+    assert "app.ui.workers.import_as" not in worker_text
+    assert "ImportProcessor" in worker_text
+    assert "app.features.importer.worker" in legacy_text
+
+
 def test_main_window_delegates_import_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 

@@ -61,3 +61,10 @@
 - [x] bytes/bank 筛选、debank、分类、增量路径索引、语音命名修正、旧产物清理、BGM 审计和取消检查均保留在单一处理器中。
 - [x] 音频处理、Audio Feature、Audio Repository、专辑映射、epic7_debank 和架构边界针对性测试通过。
 - [x] P4 全量 pytest 133 passed、Ruff、AST 160、import smoke、runtime Qt smoke 和 diff check 通过；首次 Qt smoke 的真实数据库目录权限失败已改用任务临时目录复核通过。
+
+## P5 退出门
+
+- [x] Importer processing 不依赖 PySide6，Feature Worker 不依赖旧 `app.ui.workers.import_as`。
+- [x] Bundle 修复、AssetStudio 映射、分类导出、staging 提交/回滚、Lua 发布、精准 Bundle 输入和取消语义由单一处理器承载。
+- [x] 旧导入入口保留为薄兼容门面，没有第二份实现；删除前的引用归零条件仍未满足。
+- [x] 全量 pytest 134 passed、Ruff、AST 161、Importer import smoke、runtime Qt smoke 和 diff check 通过。
