@@ -120,3 +120,12 @@
 - [x] `app/core` 下全部纯转发 Python 文件已在引用归零后删除；终态测试强制确保无 Python 模块残留。
 - [x] 全量 pytest 180 项、Ruff、AST `AST_OK 179`、`P8_IMPORT_SMOKE_OK`、runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')` 和 core import zero 检查通过。
 - [x] 针对性测试曾发现旧测试 patch 迁移前内部变量，已按稳定 Controller API 修正并重新通过；未改变产品行为。
+
+## P8 终态复核（2026-08-24）
+
+- [x] 独立复跑 `pytest -q`：180 项通过；仅出现仓库既有 `.pytest_cache` ACL 警告，未修改权限。
+- [x] 独立复跑 `ruff check --no-cache app tests`：通过。
+- [x] 不落盘 AST 复核：`AST_OK 183`；Feature/Platform 导入 smoke：`P8_IMPORT_SMOKE_OK`。
+- [x] `app`、`tests`、`tools` 中实际 `from/import app.core` 引用归零，`app/core` 无 Python 模块：`P8_CORE_IMPORT_ZERO_OK`。
+- [x] 使用临时运行时目录执行 Qt offscreen Feature Runtime 装配：`RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`。
+- [x] `git diff --check`：通过。
