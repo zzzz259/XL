@@ -12,6 +12,7 @@ SHARED_DIR = APP_DIR / "shared"
 AUDIO_FEATURE_DIR = APP_DIR / "features" / "audio"
 CHARACTERS_FEATURE_DIR = APP_DIR / "features" / "characters"
 VERSIONS_FEATURE_DIR = APP_DIR / "features" / "versions"
+IMPORTER_FEATURE_DIR = APP_DIR / "features" / "importer"
 
 
 def test_core_layer_does_not_import_qt():
@@ -78,6 +79,23 @@ def test_versions_page_and_service_respect_feature_boundaries():
     assert "parent._" not in page_text
     assert "controls =" not in page_text
     assert "PySide6" not in service_text
+
+
+def test_importer_service_and_specs_respect_feature_boundaries():
+    service_text = (IMPORTER_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    spec_text = (IMPORTER_FEATURE_DIR / "spec.py").read_text(encoding="utf-8")
+
+    assert "PySide6" not in service_text
+    assert "PySide6" not in spec_text
+    assert "ImportResult" in service_text
+
+
+def test_main_window_delegates_import_runtime_to_feature_controller():
+    main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+    assert "ImportController" in main_window_text
+    assert "ImporterService" in main_window_text
+    assert "ImportASWorker" not in main_window_text
 
 
 def test_main_window_delegates_audio_runtime_to_feature_controller():

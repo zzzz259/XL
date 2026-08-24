@@ -350,3 +350,12 @@
 - [completed] 新增 `app/features/versions/page.py`、`controller.py`、`service.py`、`worker.py`；页面自持版本表格和工作区摘要。
 - [completed] 版本差异、增量/全量下载目标、磁盘状态校准、更新检查注册和版本删除已进入 VersionService/Controller。
 - [completed] MainWindow 已切换页面与版本操作入口；全量 pytest、Ruff、AST 解析 122 个 Python 文件、真实 MainWindow smoke、文档同步和 diff 检查均通过，待用户正常启动验证后建立本地检查点。
+
+## 2026-08-24 Issue #43：Importer Feature 与后处理注册表
+
+- [in_progress] 开始拆分导入流程的规格、服务、控制器和兼容 Worker。
+- [in_progress] 目标是收口分类规则、精准 Bundle 选择、AssetStudio 暂存发布与 `ImportResult` 结果契约；保持既有 Lua、音频、角色、FGUI 导出行为不变。
+
+- [completed] 新增 `ExportSpec`、`ImporterService`、`ImportController`、`PostProcessorRegistry` 和兼容 Worker 入口；MainWindow 已改为通过控制器启动导入。
+- [completed] `ImportResult` 已传递 Lua 发布结果和后处理分类；旧 `ImportASWorker` 仍负责实际 AssetStudio 执行，保持输出、取消和暂存事务兼容。
+- [completed] 全量 pytest、Ruff、AST 解析、实际 Qt 启动冒烟、文档同步和 diff 检查通过；待建立本地检查点并请用户验证。

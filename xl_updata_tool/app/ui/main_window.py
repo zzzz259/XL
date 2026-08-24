@@ -40,7 +40,6 @@ from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
 from .dialogs.image_viewer import ImageViewerDialog
 from .workers.image_loader import ImageLoadWorker
 from .workers.preview_export import PreviewExportWorker
-from .workers.import_as import ImportASWorker
 from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
 from .views.preview_view import create_preview_view
 from app.features.audio.page import AudioPage
@@ -51,6 +50,9 @@ from app.features.versions.service import VersionService
 from app.features.characters.page import CharacterPage
 from app.features.characters.controller import CharacterController
 from app.features.characters.service import CharacterService
+from app.features.importer.controller import ImportController
+from app.features.importer.postprocessing import PostProcessorRegistry
+from app.features.importer.service import ImporterService
 from .features.export_controller import (
     export_composite_video,
     export_with_dialog,
@@ -78,6 +80,15 @@ class MainWindow(QMainWindow):
         settings.setValue("theme", _theme)
         apply_theme(self, _theme)
         self.version_service = VersionService(BUNDLES_DIR)
+        self.importer_service = ImporterService(
+            os.path.join(DATA_DIR, "material"), LUA_OUTPUT_DIR
+        )
+        self.import_controller = ImportController(self.importer_service, self)
+        self.postprocessor_registry = PostProcessorRegistry(("lua", "audio"))
+        self.import_controller.progress_stage.connect(self._on_import_progress)
+        self.import_controller.stage_finished.connect(self._on_import_stage_finished)
+        self.import_controller.category_finished.connect(self._on_import_category_finished)
+        self.import_controller.all_finished.connect(self._on_import_all_finished)
         # 后台工作线程实例（避免 AttributeError）
         self._preview_worker = None
         self._batch_worker = None
@@ -573,8 +584,6 @@ class MainWindow(QMainWindow):
                 )
                 self.status_bar.showMessage("未找到资源映射，将扫描已下载 bundle")
         as_cli = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
-        material_dir = os.path.join(DATA_DIR, "material")
-
         if not os.path.exists(as_cli):
             logger.error(f"AssetStudio.CLI.exe 不存在: {as_cli}")
             QMessageBox.warning(self, "错误", f"AssetStudio CLI 不存在:\n{as_cli}")
@@ -605,18 +614,13 @@ class MainWindow(QMainWindow):
                 self.dl_progress.setVisible(False)
                 return
         logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件，勾选导出分类 {sorted(export_categories)}")
-        self._import_worker = ImportASWorker(
-            fs, bundle_dir, material_dir, as_cli, self,
+        self._import_worker = self.import_controller.start(
+            fs, bundle_dir, as_cli,
             export_categories=export_categories,
             version_timestamp=ts,
             lua_output_dir=LUA_OUTPUT_DIR,
             isolate_bundle_dir=isolate_bundle_dir,
         )
-        self._import_worker.progress_stage.connect(self._on_import_progress)
-        self._import_worker.stage_finished.connect(self._on_import_stage_finished)
-        self._import_worker.category_finished.connect(self._on_import_category_finished)
-        self._import_worker.all_finished.connect(self._on_import_all_finished)
-        self._import_worker.start()
 
         # 进度弹窗（非模态，可取消）
         self._import_progress_dialog = QProgressDialog("正在导入 AS...", "取消", 0, 100, self)
@@ -665,10 +669,9 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("导入AS: 文件已分类完成，准备执行后处理")
         self._append_changelog(message)
-        worker = getattr(self, "_import_worker", None)
-        categories = getattr(worker, "export_categories", set()) or set()
+        result = getattr(self.import_controller, "last_result", None)
         self._pending_import_message = message
-        if "audio" in categories:
+        if "audio" in self.postprocessor_registry.pending(result):
             # 音频解密是导出后的必经步骤，复用导入弹窗，避免用户误以为已经完成。
             self.audio_controller.start_decrypt(
                 force=False,
@@ -694,10 +697,15 @@ class MainWindow(QMainWindow):
             return
 
         if success:
-            self.character_controller.auto_parse_after_lua_export(
-                getattr(getattr(self, "_import_worker", None), "lua_export_result", None),
-                progress_dialog=progress_dialog,
+            result = getattr(self.import_controller, "last_result", None)
+            lua_result = result.lua_export_result if result else getattr(
+                getattr(self, "_import_worker", None), "lua_export_result", None
             )
+            if result is None or "lua" in self.postprocessor_registry.pending(result):
+                self.character_controller.auto_parse_after_lua_export(
+                    lua_result,
+                    progress_dialog=progress_dialog,
+                )
             if progress_dialog:
                 progress_dialog.close()
                 self._import_progress_dialog = None

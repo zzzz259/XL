@@ -571,3 +571,16 @@ app/features/audio/
 - [completed] 建立 `VersionPage`、`VersionController`、`VersionService` 和功能域 Worker 入口。
 - [completed] 将 MainWindow 的版本页面、下载计划、更新检查和删除入口切换到 Versions Feature；保留导入流程所需的选中版本适配。
 - [completed] 完成全量测试、Ruff、AST 解析 122 个 Python 文件、Windows smoke、文档同步和 diff 检查；待用户正常启动验证后建立本地检查点。
+
+## 2026-08-24 Issue #43：Importer Feature 与后处理注册表
+
+- [in_progress] 建立导出规格、ImporterService、ImportController 和兼容 Worker 边界。
+- [pending] 将导入结果统一为 `ImportResult`，明确成功分类、失败分类、取消状态、发布产物和 Lua/音频后处理输入。
+- [pending] 保持精准 Bundle 筛选、AssetStudio 暂存发布、Lua 版本隔离、音频后处理和取消语义不变。
+
+### P4 检查点结果
+
+- [completed] 新增 `ExportSpec`、`ImporterService`、`ImportController`、`PostProcessorRegistry` 和功能域 Worker 兼容入口；分类规则不再由 MainWindow 或旧 Worker 独占。
+- [completed] `ImportResult` 已携带 Lua 发布结果与后处理分类；MainWindow 通过控制器接收进度和结果，旧导出、取消、暂存发布和精准 Bundle 筛选契约保持不变。
+- [completed] 完成导入规格/结果/后处理/架构测试、全量 pytest、Ruff、AST 解析 98 个 Python 文件、实际 Qt 启动冒烟和 `git diff --check`。
+- [completed] 本地检查点提交待完成；提交后进入用户验证，下一阶段为 Preview Feature。

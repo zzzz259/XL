@@ -75,6 +75,8 @@ class ImportResult:
     published_outputs: tuple[str, ...] = ()
     cancelled: bool = False
     message: str = ""
+    lua_export_result: object | None = None
+    postprocess_categories: frozenset[str] = field(default_factory=frozenset)
 
     def has_category(self, category: str) -> bool:
         """返回本次导入是否包含指定分类。"""
