@@ -34,7 +34,7 @@
 ## 当前直接引用关系
 
 - Feature Worker → 旧 Worker：
-  - `features/audio/worker.py` → `app.ui.workers.audio_decrypt`
+  - `features/audio/worker.py` 已不再引用旧音频 Worker；Qt-free 处理位于 `features/audio/processing.py`
   - `features/importer/worker.py` → `app.ui.workers.import_as`
   - `features/preview/worker.py` → `app.ui.workers.image_loader`、`preview_export`、`batch_export`、`composite_export`
   - `features/versions/worker.py` → `app.ui.workers.download`
@@ -47,7 +47,14 @@
   - `shared/qt/chrome.py` → `app.ui.widgets.view_chrome`
 - Shell → 具体 Feature Page/Controller/Service 以及多个 `app.core` 领域入口；这正是 P2 的 Composition Root/ShellPort 迁移目标，当前不能伪装成已完成。
 - Platform → 旧 `app.core` 基础设施门面；这些是 P6 的收口对象，不属于本阶段删除范围。
-- 工具/测试仍直接使用多个 `app.core.*` 与 `app.ui.workers.*` 入口，必须在迁移和兼容策略明确后再处理。
+- 工具/测试仍直接使用多个 `app.core.*` 与 `app.ui.workers.*` 入口；音频旧入口目前是薄兼容门面，其他领域必须在迁移和兼容策略明确后再处理。
+
+## P4 音频 Worker 迁移后事实
+
+- `app/features/audio/processing.py` 是 Qt-free 音频处理器，承载 bytes/bank 筛选、debank 调用、分类映射、增量路径索引、语音命名修正、旧产物清理、BGM 审计和取消检查。
+- `app/features/audio/worker.py` 只承载 QThread 生命周期、取消请求和处理器回调到既有信号的映射；生产 Controller 只引用该 Feature Worker。
+- `app/ui/workers/audio_decrypt.py` 保留为兼容入口，仅转发 `AudioDecryptProcessor` 和 `AudioDecryptWorker`，没有第二份实现。
+- P4 暂不删除旧入口：它仍属于登记过的外部/测试兼容面；删除前必须重新证明 tracked 代码、测试、工具和正式文档引用归零。
 
 ## 当前 `controls_dict` / `parent._` 事实
 

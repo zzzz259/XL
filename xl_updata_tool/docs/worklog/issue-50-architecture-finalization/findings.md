@@ -76,6 +76,13 @@
 - P2 工厂隔离测试、Runtime registry 测试、全量 pytest：156 项收集，全部通过。
 - `ruff check --no-cache app tests`：通过；不落盘 AST：`AST_OK 156`；import smoke：`IMPORT_SMOKE_OK`；Qt offscreen：`QT_SMOKE_OK True False False False`；diff check：通过。
 
+## P4 实施记录（2026-08-24）
+
+- `app/features/audio/processing.py` 已接管原音频 Worker 中的 Qt-free 处理：bytes/bank 筛选、debank 调用、Lua 专辑分类、最终路径索引、语音文件名归一化、旧分类清理、临时目录清理和 BGM 审计。
+- `app/features/audio/worker.py` 现在只负责 QThread 生命周期、取消请求、处理器回调和既有 `progress`/`finished_decrypt`/`cancelled_decrypt`/`error` 信号映射；AudioController 的现有信号契约未改变。
+- `app/ui/workers/audio_decrypt.py` 改为单一实现的薄兼容入口；没有删除它，因为旧测试/脚本入口仍受保护。
+- P4 退出门新鲜证据：`pytest -q -p no:cacheprovider` 通过（133 项）；Ruff 通过；不落盘 AST `AST_OK 160`；import smoke `IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。首次 Qt smoke 的数据库权限失败已用任务临时目录复跑通过，未修改仓库权限。
+
 ## 基线扫描中的探针错误
 
 - 初次文件行数命令在仓库根目录误使用了 `app/...` 相对路径，得到不存在路径；已用 `xl_updata_tool/app/...` 重跑并取得正确数值。

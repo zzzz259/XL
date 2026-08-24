@@ -76,6 +76,17 @@ def test_audio_page_and_service_respect_feature_boundaries():
     assert "PySide6" not in service_text
 
 
+def test_audio_processing_is_qt_free_and_feature_worker_does_not_use_legacy_worker():
+    processing_text = (AUDIO_FEATURE_DIR / "processing.py").read_text(encoding="utf-8")
+    worker_text = (AUDIO_FEATURE_DIR / "worker.py").read_text(encoding="utf-8")
+    legacy_text = (APP_DIR / "ui" / "workers" / "audio_decrypt.py").read_text(encoding="utf-8")
+
+    assert "PySide6" not in processing_text
+    assert "app.ui.workers.audio_decrypt" not in worker_text
+    assert "AudioDecryptProcessor" in worker_text
+    assert "app.features.audio.worker" in legacy_text
+
+
 def test_characters_page_and_service_respect_feature_boundaries():
     page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
     service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")

@@ -75,6 +75,24 @@ def test_feature_views_use_shared_page_chrome(qapp):
     assert any(button.text() == "全部标为已读" for button in views[2].findChildren(QPushButton))
 
 
+def test_auto_update_routes_through_version_controller(monkeypatch):
+    window = MainWindow.__new__(MainWindow)
+    window.version_service = SimpleNamespace(current=lambda: None)
+    window.version_controller = SimpleNamespace(check_update=MagicMock())
+    window.status_bar = SimpleNamespace(showMessage=MagicMock())
+    callbacks = []
+    monkeypatch.setattr(
+        "app.ui.main_window.QTimer.singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+
+    window._check_auto()
+
+    assert len(callbacks) == 1
+    callbacks[0]()
+    window.version_controller.check_update.assert_called_once_with()
+
+
 def test_version_page_visibility_controls_whole_page(qapp):
     page = VersionPage()
     page.show()

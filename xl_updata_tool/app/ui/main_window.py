@@ -780,7 +780,7 @@ class MainWindow(QMainWindow):
         cur = self.version_service.current()
         if not cur:
             self.status_bar.showMessage("首次启动, 自动检查更新...")
-            QTimer.singleShot(1500, self._check_update)
+            QTimer.singleShot(1500, self.version_controller.check_update)
         else:
             QTimer.singleShot(500, lambda: self.status_bar.showMessage("就绪"))
 

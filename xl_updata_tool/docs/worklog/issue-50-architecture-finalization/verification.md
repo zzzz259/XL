@@ -53,3 +53,11 @@
 - [x] ImportResult → Audio/Characters 后处理由 Composition Root workflow 显式路由，覆盖成功、取消和音频失败路径。
 - [x] 159 项全量 pytest、Ruff、AST 159、import smoke、runtime Qt offscreen smoke 和 diff check 通过。
 - [x] 既有 MainWindow 作为迁移期公共入口仍可无 runtime 参数启动，兼容旧测试/脚本调用。
+
+## P4 退出门
+
+- [x] Audio processing 不依赖 PySide6，Feature Worker 不依赖旧 `app.ui.workers.audio_decrypt`。
+- [x] 旧音频入口保留为薄兼容转发，没有第二份处理实现；删除前的引用归零条件仍未满足。
+- [x] bytes/bank 筛选、debank、分类、增量路径索引、语音命名修正、旧产物清理、BGM 审计和取消检查均保留在单一处理器中。
+- [x] 音频处理、Audio Feature、Audio Repository、专辑映射、epic7_debank 和架构边界针对性测试通过。
+- [x] P4 全量 pytest 133 passed、Ruff、AST 160、import smoke、runtime Qt smoke 和 diff check 通过；首次 Qt smoke 的真实数据库目录权限失败已改用任务临时目录复核通过。
