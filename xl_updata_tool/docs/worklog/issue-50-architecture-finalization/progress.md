@@ -10,7 +10,8 @@
 - [completed] P0 退出复核：pytest、Ruff、AST、import smoke、授权 Qt smoke 和 diff check 通过；compileall 的缓存写权限问题已记录，不影响源码门禁。
 - [completed] P1：PreviewPage、PreviewController 和导出编排已收回 Feature ownership；页面行为保护网、全量门禁和 Qt smoke 通过。
 - [completed] P2：五个 Feature 工厂、opaque 状态/进度/角标端口和 Qt-free Runtime registry 已建立；生产装配暂未切换。
-- [pending] P3：启用正式 Composition Root 与跨 Feature workflow；保留 `main.py` 日志初始化时序和现有 Shell 行为。
+- [completed] P3：生产入口、descriptor 导航和 ImportResult 后处理 workflow 已切换；全量门禁和 runtime Qt smoke 通过。
+- [pending] P4：迁移 Audio 处理 Worker，去除 Feature 对旧 `app/ui/workers/audio_decrypt.py` 的生产依赖。
 
 ## 偏差
 

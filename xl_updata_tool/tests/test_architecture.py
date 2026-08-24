@@ -17,6 +17,17 @@ IMPORTER_FEATURE_DIR = APP_DIR / "features" / "importer"
 PREVIEW_FEATURE_DIR = APP_DIR / "features" / "preview"
 
 
+def test_production_entrypoint_builds_runtime_before_shell():
+    main_text = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+    shell_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+    assert "build_app_context" in main_text
+    assert "create_application_runtime" in main_text
+    assert main_text.index("configure_logging") < main_text.index("QApplication")
+    assert main_text.index("create_application_runtime") < main_text.index("MainWindow(")
+    assert "from app.features." not in shell_text
+
+
 def test_core_layer_does_not_import_qt():
     """Keep the core layer usable in CLI/tests without a Qt runtime."""
     offenders = []
@@ -95,8 +106,8 @@ def test_importer_service_and_specs_respect_feature_boundaries():
 def test_main_window_delegates_import_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "ImportController" in main_window_text
-    assert "ImporterService" in main_window_text
+    assert 'self._features["importer"]' in main_window_text
+    assert "create_application_runtime" in main_window_text
     assert "ImportASWorker" not in main_window_text
 
 
@@ -105,8 +116,8 @@ def test_preview_service_and_main_window_respect_feature_boundary():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
     assert "PySide6" not in service_text
-    assert "PreviewPage" in main_window_text
-    assert "PreviewController" in main_window_text
+    assert 'self._features["preview"]' in main_window_text
+    assert "create_application_runtime" in main_window_text
     assert "PreviewExportWorker" not in main_window_text
     assert "ImageLoadWorker" not in main_window_text
 
@@ -118,7 +129,7 @@ def test_preview_export_and_compatibility_entrypoints_are_feature_owned():
     legacy_text = (APP_DIR / "ui" / "features" / "export_controller.py").read_text(encoding="utf-8")
     feature_export_text = (PREVIEW_FEATURE_DIR / "export_controller.py").read_text(encoding="utf-8")
 
-    assert "PreviewController" in main_window_text
+    assert 'self._features["preview"]' in main_window_text
     assert "preview_controller" in main_window_text
     assert "create_preview_view" not in page_text
     assert "self.controls" not in page_text
@@ -134,7 +145,8 @@ def test_preview_export_and_compatibility_entrypoints_are_feature_owned():
 def test_main_window_delegates_audio_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "AudioController" in main_window_text
+    assert 'self._features["audio"]' in main_window_text
+    assert "from app.features.audio" not in main_window_text
     assert "AudioService" not in main_window_text
     assert "AudioDecryptWorker" not in main_window_text
     assert "QMediaPlayer" not in main_window_text
@@ -145,8 +157,9 @@ def test_main_window_delegates_audio_runtime_to_feature_controller():
 def test_main_window_delegates_character_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "CharacterController" in main_window_text
-    assert "CharacterService" in main_window_text
+    assert 'self._features["character"]' in main_window_text
+    assert "CharacterController" not in main_window_text
+    assert "CharacterService" not in main_window_text
     assert "create_character_view" not in main_window_text
     assert "load_character_data" not in main_window_text
     assert "merge_character_snapshot" not in main_window_text
@@ -157,8 +170,9 @@ def test_main_window_delegates_character_runtime_to_feature_controller():
 def test_main_window_delegates_version_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "VersionController" in main_window_text
-    assert "VersionService" in main_window_text
+    assert 'self._features["versions"]' in main_window_text
+    assert "VersionController" not in main_window_text
+    assert "VersionService" not in main_window_text
     assert "create_version_table" not in main_window_text
     assert "CheckUpdateThread" not in main_window_text
     assert "DownloadWorker" not in main_window_text

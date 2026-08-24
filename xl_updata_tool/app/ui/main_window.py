@@ -23,6 +23,7 @@ from .theme import (
     ACCENT, TEXT_PRIMARY,
     FORMAL_THEME, THEME_LABEL, apply_theme, get_color, normalize_theme_name,
 )
+from app.bootstrap import build_app_context, create_application_runtime
 from app.core.bundle_selector import (
     audio_assets_map_path,
     lua_assets_map_path,
@@ -35,22 +36,6 @@ from app.platform import database as db
 from app.platform.diagnostics import logger
 from app.platform.paths import get_data_dir, get_base_dir, get_tools_dir
 
-# 拆分后的模块导入
-from app.features.audio.page import AudioPage
-from app.features.audio.controller import AudioController
-from app.features.versions.page import VersionPage
-from app.features.versions.controller import VersionController
-from app.features.versions.service import VersionService
-from app.features.characters.page import CharacterPage
-from app.features.characters.controller import CharacterController
-from app.features.characters.service import CharacterService
-from app.features.importer.controller import ImportController
-from app.features.importer.postprocessing import PostProcessorRegistry
-from app.features.importer.service import ImporterService
-from app.features.preview.page import PreviewPage
-from app.features.preview.controller import PreviewController
-from app.features.preview.service import PreviewService
-
 DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
 LUA_OUTPUT_DIR = os.path.join(get_base_dir(), "output", "lua")
@@ -58,7 +43,7 @@ CHARACTER_DATA_DIR = os.path.join(get_base_dir(), "output", "character_data")
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, debug_mode=False):
+    def __init__(self, debug_mode=False, runtime=None):
         super().__init__()
         self.debug_mode = debug_mode
         self.setWindowTitle("XL 更新管理工具")
@@ -70,21 +55,31 @@ class MainWindow(QMainWindow):
         _theme = normalize_theme_name(settings.value("theme", FORMAL_THEME))
         settings.setValue("theme", _theme)
         apply_theme(self, _theme)
-        self.version_service = VersionService(BUNDLES_DIR)
-        self.importer_service = ImporterService(
-            os.path.join(DATA_DIR, "material"), LUA_OUTPUT_DIR
+        # 仅保留 Shell 自己拥有的导入任务；各 Feature 的任务由各自 Runtime 管理。
+        self._import_worker = None
+        self._show_character = False
+        self._init_db()
+        self.runtime = runtime or create_application_runtime(
+            build_app_context(), parent=self
         )
-        self.import_controller = ImportController(self.importer_service, self)
-        self.postprocessor_registry = PostProcessorRegistry(("lua", "audio"))
+        self._features = {
+            feature.descriptor.key: feature for feature in self.runtime.features
+        }
+        self.version_controller = self._features["versions"].controller
+        self.version_page = self._features["versions"].page
+        self.version_service = self.version_controller.service
+        self.preview_controller = self._features["preview"].controller
+        self.preview_page = self._features["preview"].page
+        self.audio_controller = self._features["audio"].controller
+        self.audio_page = self._features["audio"].page
+        self.character_controller = self._features["character"].controller
+        self.character_page = self._features["character"].page
+        self.import_controller = self._features["importer"].controller
+        self.importer_service = self.import_controller.service
         self.import_controller.progress_stage.connect(self._on_import_progress)
         self.import_controller.stage_finished.connect(self._on_import_stage_finished)
         self.import_controller.category_finished.connect(self._on_import_category_finished)
         self.import_controller.all_finished.connect(self._on_import_all_finished)
-        # 仅保留 Shell 自己拥有的导入任务；Preview 任务由 PreviewController 管理。
-        self._import_worker = None
-        self._pending_import_message = None
-        self._show_character = False
-        self._init_db()
         logger.info(f"当前 DATA_DIR: {DATA_DIR}")
         self._seed_bundled_version()
         self._setup_ui()
@@ -119,46 +114,20 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        self.version_page = VersionPage(self)
-        self.version_controller = VersionController(self.version_page, self.version_service, self)
         self.version_header = self.version_page.version_header
         self.version_summary = self.version_page.version_summary
         self.table = self.version_page.table
         content_layout.addWidget(self.version_page, 1)
 
         # 预览视图容器（默认隐藏）
-        self.preview_page = PreviewPage(self)
-        self.preview_controller = PreviewController(
-            page=self.preview_page,
-            service=PreviewService(
-                os.path.join(DATA_DIR, "material"),
-                os.path.join(get_base_dir(), "output", "character"),
-            ),
-            parent=self,
-        )
         self.preview_page.setVisible(False)
         content_layout.addWidget(self.preview_page, 1)
 
         # 音频管理器视图容器（默认隐藏）。页面自身拥有控件，主窗口只接收语义信号。
-        self.audio_page = AudioPage(self)
-        self.audio_controller = AudioController(
-            page=self.audio_page,
-            material_dir=os.path.join(DATA_DIR, "material"),
-            debank_dir=os.path.join(get_tools_dir(), "epic7_debank_v1_0"),
-            lua_output_dir=LUA_OUTPUT_DIR,
-            output_dir=os.path.join(get_base_dir(), "output"),
-            parent=self,
-        )
         self.audio_page.setVisible(False)
         content_layout.addWidget(self.audio_page, 1)
 
         # 角色功能域（页面拥有控件，控制器拥有数据和行为）
-        self.character_page = CharacterPage(self)
-        self.character_controller = CharacterController(
-            page=self.character_page,
-            service=CharacterService(CHARACTER_DATA_DIR, LUA_OUTPUT_DIR),
-            parent=self,
-        )
         self.character_page.setVisible(False)
         content_layout.addWidget(self.character_page, 1)
 
@@ -173,10 +142,10 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self._connect_audio_controller()
         self._connect_version_controller()
-        self._connect_character_controller()
         self.preview_page.close_requested.connect(lambda: self._toggle_preview_mode(False))
         self.preview_controller.progress_changed.connect(self._on_preview_controller_progress)
-        self.preview_controller.status_changed.connect(self.status_bar.showMessage)
+        self.runtime.registry.bind_status(self.status_bar.showMessage)
+        self.runtime.registry.bind_badge(self._refresh_unread_badges)
         # 只恢复本地角色仓库/缓存，确保启动时顶层“角色”角标准确；绝不解析 Lua。
         self.character_controller.restore_local()
         self._refresh_unread_badges()
@@ -186,15 +155,9 @@ class MainWindow(QMainWindow):
     def _connect_audio_controller(self):
         """连接音频功能域的任务结果与全局 Shell 状态。"""
         self.audio_page.close_requested.connect(lambda: self._toggle_audio_mode(False))
-        self.audio_controller.status_changed.connect(self.status_bar.showMessage)
-        self.audio_controller.unread_changed.connect(self._refresh_unread_badges)
-        self.audio_controller.processing_finished.connect(self._on_audio_processing_finished)
-        self.audio_controller.processing_cancelled.connect(self._on_audio_processing_cancelled)
-        self.audio_controller.processing_error.connect(self._on_audio_processing_error)
 
     def _connect_version_controller(self):
         """连接版本功能域状态到全局状态栏和下载进度条。"""
-        self.version_controller.status_changed.connect(self.status_bar.showMessage)
         self.version_controller.progress_changed.connect(self._on_version_progress)
 
     def _on_version_progress(self, current, total, message):
@@ -205,34 +168,6 @@ class MainWindow(QMainWindow):
         self.dl_progress.setMaximum(total)
         self.dl_progress.setValue(current)
         self.dl_progress.setFormat(message)
-
-    def _connect_character_controller(self):
-        """连接角色功能域的状态信号到应用壳层。"""
-        self.character_controller.status_changed.connect(self.status_bar.showMessage)
-        self.character_controller.unread_changed.connect(self._refresh_unread_badges)
-
-    def _on_audio_processing_finished(self, shared):
-        """导入流程使用共享弹窗时，接收 AudioController 的完成结果。"""
-        if shared and self._pending_import_message:
-            self._finish_import(True, self._pending_import_message)
-
-    def _on_audio_processing_cancelled(self, shared):
-        """导入流程中的音频任务取消后结束导入流程。"""
-        if shared and self._pending_import_message:
-            self._finish_import(
-                False,
-                "音频后处理已取消，已完成的文件已保留，可稍后重新处理音频。",
-                cancelled=True,
-            )
-
-    def _on_audio_processing_error(self, error_message, shared):
-        """导入流程中的音频任务失败后保留导入结果并提示用户。"""
-        if shared and self._pending_import_message:
-            self._finish_import(
-                True,
-                self._pending_import_message,
-                audio_error=error_message,
-            )
 
     def _view_toolbar(self):
         """顶部视图切换工具栏（版本列表 / 图片预览 / 音频 / 角色）"""
@@ -246,15 +181,21 @@ class MainWindow(QMainWindow):
         bar.addWidget(brand)
         bar.addSeparator()
         self._unread_badges = {}
+        self._nav_buttons = {}
 
-        def add_nav_button(key, text, icon, callback):
+        def add_nav_button(feature):
+            key = feature.descriptor.key
+            badge_key = "home" if key == "versions" else key
             wrapper = QWidget()
             wrapper_layout = QHBoxLayout(wrapper)
             wrapper_layout.setContentsMargins(0, 0, 2, 0)
             wrapper_layout.setSpacing(0)
-            button = self._tbtn(text, icon=self._icon(icon))
+            button = self._tbtn(
+                feature.descriptor.title,
+                icon=self._icon(feature.descriptor.icon),
+            )
             button.setCheckable(True)
-            button.clicked.connect(callback)
+            button.clicked.connect(lambda _checked=False, key=key: self._activate_feature(key))
             badge = QLabel("●")
             badge.setFixedWidth(14)
             badge.setAlignment(Qt.AlignCenter)
@@ -266,17 +207,17 @@ class MainWindow(QMainWindow):
             wrapper_layout.addWidget(button)
             wrapper_layout.addWidget(badge)
             bar.addWidget(wrapper)
-            self._unread_badges[key] = badge
+            self._unread_badges[badge_key] = badge
+            self._nav_buttons[key] = button
             return button
 
-        self.btn_home = add_nav_button("home", "版本列表", "list", self._load_data)
-        self.btn_image_preview = add_nav_button(
-            "preview", "图片预览", "image", lambda: self._toggle_preview_mode(True)
-        )
-        self.btn_audio = add_nav_button(
-            "audio", "音频", "music", lambda: self._toggle_audio_mode(True)
-        )
-        self.btn_lua = add_nav_button("character", "角色", "users", self._start_lua_decrypt)
+        for feature in self.runtime.features:
+            if feature.descriptor.key != "importer":
+                add_nav_button(feature)
+        self.btn_home = self._nav_buttons["versions"]
+        self.btn_image_preview = self._nav_buttons["preview"]
+        self.btn_audio = self._nav_buttons["audio"]
+        self.btn_lua = self._nav_buttons["character"]
         bar.addSeparator()
         self.dl_progress = QProgressBar()
         self.dl_progress.setFixedHeight(28); self.dl_progress.setFixedWidth(260)
@@ -495,17 +436,7 @@ class MainWindow(QMainWindow):
         return self.version_service.sync_local(ts)
 
     def _load_data(self):
-        # 确保版本列表可见（隐藏图片预览、音频和角色视图）
-        self._set_version_content_visible(True)
-        self.preview_page.setVisible(False)
-        self.audio_page.setVisible(False)
-        self.character_page.setVisible(False)
-        self._show_character = False
-        self._set_active_view_btn(self.btn_home)
-        self._set_toolbars_visible(True)
-        self.version_controller.load()
-        # 版本列表优先可用；音频目录在事件循环空闲后后台预热，避免首次进入音频页卡顿。
-        QTimer.singleShot(0, self.audio_controller.preload_catalog)
+        self._activate_feature("versions")
 
     def _get_selected_ts(self):
         """迁移期导入适配：返回版本功能域当前选中的版本。"""
@@ -515,9 +446,11 @@ class MainWindow(QMainWindow):
 
     def _import_selected(self):
         # 确保版本列表可见（隐藏图片预览和音频视图）
+        self.runtime.registry.activate("versions")
+        self._set_active_view_btn(self._nav_buttons["versions"])
+        self._set_toolbars_visible(True)
         self._set_version_content_visible(True)
-        self.preview_page.setVisible(False)
-        self.audio_page.setVisible(False)
+        self._show_character = False
         ts = self._get_selected_ts()
         if not ts: QMessageBox.warning(self, "未选择", "请先选中一个版本."); return
         export_categories = self._get_export_categories()
@@ -660,25 +593,18 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("导入AS: 文件已分类完成，准备执行后处理")
         self._append_changelog(message)
-        result = getattr(self.import_controller, "last_result", None)
-        self._pending_import_message = message
-        if "audio" in self.postprocessor_registry.pending(result):
-            # 音频解密是导出后的必经步骤，复用导入弹窗，避免用户误以为已经完成。
-            self.audio_controller.start_decrypt(
-                force=False,
-                shared_dialog=getattr(self, "_import_progress_dialog", None),
-            )
-            return
-
-        self._finish_import(True, message)
+        self.runtime.import_workflow.handle_import_finished(
+            success,
+            message,
+            getattr(self, "_import_progress_dialog", None),
+            self._finish_import,
+        )
 
     def _finish_import(self, success, message, audio_error=None, cancelled=False):
         """结束导入及其后处理阶段，统一关闭共享弹窗和恢复按钮状态。"""
         self.btn_browse.setEnabled(True)
         self.dl_progress.setVisible(False)
         progress_dialog = getattr(self, "_import_progress_dialog", None)
-        self._pending_import_message = None
-
         if cancelled:
             if progress_dialog:
                 progress_dialog.close()
@@ -688,15 +614,6 @@ class MainWindow(QMainWindow):
             return
 
         if success:
-            result = getattr(self.import_controller, "last_result", None)
-            lua_result = result.lua_export_result if result else getattr(
-                getattr(self, "_import_worker", None), "lua_export_result", None
-            )
-            if result is None or "lua" in self.postprocessor_registry.pending(result):
-                self.character_controller.auto_parse_after_lua_export(
-                    lua_result,
-                    progress_dialog=progress_dialog,
-                )
             if progress_dialog:
                 progress_dialog.close()
                 self._import_progress_dialog = None
@@ -778,8 +695,33 @@ class MainWindow(QMainWindow):
 
     def _set_active_view_btn(self, active_btn):
         """高亮当前激活的视图按钮（取消其他）"""
-        for btn in (self.btn_home, self.btn_image_preview, self.btn_audio, self.btn_lua):
+        for btn in self._nav_buttons.values():
             btn.setChecked(btn is active_btn)
+
+    def _activate_feature(self, key):
+        """按 Runtime descriptor 激活页面，并执行该页面的首次加载动作。"""
+        if key not in self._nav_buttons:
+            return
+        self.runtime.registry.activate(key)
+        self._set_active_view_btn(self._nav_buttons[key])
+        self._set_toolbars_visible(key == "versions")
+        self._show_character = key == "character"
+        if key == "versions":
+            self._set_version_content_visible(True)
+            self.version_controller.load()
+            QTimer.singleShot(0, self.audio_controller.preload_catalog)
+        else:
+            self._set_version_content_visible(False)
+        if key == "preview":
+            self.preview_controller.load()
+        elif key == "audio":
+            self.audio_controller.initialize_player()
+            self.audio_controller.load_catalog()
+        elif key == "character":
+            self.character_page.raise_()
+            self.character_page.show()
+            if not self.character_controller.data_loaded:
+                self.character_controller.restore_local()
 
     def _set_toolbars_visible(self, visible):
         """切换视图时只隐藏侧边栏，顶部导航栏（view_toolbar/debug_toolbar）始终保留"""
@@ -788,31 +730,13 @@ class MainWindow(QMainWindow):
 
     def _toggle_preview_mode(self, show_preview):
         """切换预览视图/版本列表"""
-        self._set_active_view_btn(self.btn_image_preview if show_preview else self.btn_home)
-        self._set_toolbars_visible(not show_preview)
-        self._set_version_content_visible(not show_preview)
-        self.preview_page.setVisible(show_preview)
-        self.character_page.setVisible(False)
-        self._show_character = False
-        if show_preview:
-            self.audio_page.setVisible(False)
-            self.preview_controller.load()
+        self._activate_feature("preview" if show_preview else "versions")
 
     # ==================== 音频管理器 ====================
 
     def _toggle_audio_mode(self, show_audio):
         """切换音频管理器视图"""
-        self._set_active_view_btn(self.btn_audio if show_audio else self.btn_home)
-        self._set_toolbars_visible(not show_audio)
-        self._set_version_content_visible(not show_audio)
-        self.preview_page.setVisible(False)
-        self.character_page.setVisible(False)
-        self._show_character = False
-        self.audio_page.setVisible(show_audio)
-        if show_audio:
-            self.audio_controller.initialize_player()
-            # 页面切换只读取最终产物；已加载过的树保留，用户可用“刷新列表”主动重建。
-            self.audio_controller.load_catalog()
+        self._activate_feature("audio" if show_audio else "versions")
 
     # ========== 角色视图 ==========
 
@@ -822,26 +746,15 @@ class MainWindow(QMainWindow):
 
     def _toggle_character_mode(self, show_character):
         """切换角色视图显示/隐藏"""
-        self._set_active_view_btn(self.btn_lua if show_character else self.btn_home)
-        self._set_toolbars_visible(not show_character)
-        self._set_version_content_visible(not show_character)
-        self.preview_page.setVisible(False)
-        self.audio_page.setVisible(False)
-        self.character_page.setVisible(show_character)
-        self._show_character = show_character
-        if show_character:
-            self.character_page.raise_()
-            self.character_page.show()
+        self._activate_feature("character" if show_character else "versions")
 
     def _start_lua_decrypt(self):
         """点击【角色】按钮：只切换视图并读取本地数据，不现场解析 Lua。"""
         if self._show_character:
             # 当前已显示角色视图，切换到版本列表
-            self._toggle_character_mode(False)
+            self._activate_feature("versions")
             return
-        self._toggle_character_mode(True)
-        if not self.character_controller.data_loaded:
-            self.character_controller.restore_local()
+        self._activate_feature("character")
 
     def _on_preview_controller_progress(self, current, total, stage):
         """接入 PreviewController 的统一进度语义。"""
@@ -872,5 +785,5 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(500, lambda: self.status_bar.showMessage("就绪"))
 
     def closeEvent(self, event):
-        self.audio_controller.close()
+        self.runtime.registry.close()
         super().closeEvent(event)

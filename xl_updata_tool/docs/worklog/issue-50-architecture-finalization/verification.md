@@ -45,3 +45,11 @@
 - [x] shared/bootstrap 保持 Qt-free；signal 作为 opaque port 传递。
 - [x] P2 全量 pytest 156 passed、Ruff、AST 156、import smoke、Qt offscreen 和 diff check 通过。
 - [x] 生产启动仍走旧装配路径，未把 P2 装配变化误认为用户行为变化；正式切换留到 P3。
+
+## P3 退出门
+
+- [x] 生产 `main.py` 显式创建 AppContext、ApplicationRuntime 并传入 MainWindow，日志配置顺序保持不变。
+- [x] MainWindow 无具体 Feature import/constructor；导航从 descriptor 生成。
+- [x] ImportResult → Audio/Characters 后处理由 Composition Root workflow 显式路由，覆盖成功、取消和音频失败路径。
+- [x] 159 项全量 pytest、Ruff、AST 159、import smoke、runtime Qt offscreen smoke 和 diff check 通过。
+- [x] 既有 MainWindow 作为迁移期公共入口仍可无 runtime 参数启动，兼容旧测试/脚本调用。

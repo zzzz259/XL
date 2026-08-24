@@ -58,6 +58,15 @@
 - Qt offscreen：`QT_SMOKE_OK True False False False False`；最后一项确认 `MainWindow.preview_controls` 不存在。
 - `git diff --check`：通过。
 
+## P3 退出复核（2026-08-24）
+
+- 生产入口已切换为：日志配置 → QApplication → `build_app_context()` → `create_application_runtime()` → `MainWindow(runtime=...)`；日志初始化仍早于业务窗口导入。
+- MainWindow 不再导入或构造具体 Feature Page/Controller/Service；只从 Runtime descriptor 取得 page/controller，并保留现有 Shell 状态栏、导入进度和窗口生命周期。
+- 顶部导航由 Runtime descriptor 生成，Importer 作为无页面 Feature 不进入导航；既有四个用户可见入口顺序和文案由工厂 descriptor 固化。
+- 版本、预览、音频、角色页面切换统一经过 `FeatureRuntimeRegistry.activate()`；首次加载动作仍由 Shell 的通用激活入口桥接，未改变现有数据加载时机。
+- `ImportPostprocessWorkflow` 由 Composition Root 创建并显式接收 Importer/Audio/Characters；ImportResult 的音频后处理、取消/失败和 Lua 后处理路由不再由 MainWindow 判断。
+- P3 全量 `pytest -q`：159 项收集，全部通过；`ruff check --no-cache app tests`、不落盘 AST `AST_OK 159`、import smoke、runtime Qt smoke `RUNTIME_QT_SMOKE_OK True False False False 4`、diff check 均通过。
+
 ## P2 退出复核（2026-08-24）
 
 - 新增 `features/{versions,preview,audio,characters,importer}/factory.py`，集中描述页面、Controller、Service 和路径装配；五个 Feature 的 descriptor 顺序固定为版本、预览、音频、角色、导入。

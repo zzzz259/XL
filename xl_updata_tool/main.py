@@ -26,6 +26,7 @@ def main(argv=None):
         # 运行模式和日志在导入主窗口前就绪，避免业务模块导入时错过 Debug 配置。
         from PySide6.QtWidgets import QApplication
         from PySide6.QtGui import QFont, QFontDatabase
+        from app.bootstrap import build_app_context, create_application_runtime
         from app.ui.main_window import MainWindow
 
         app = QApplication(sys.argv)
@@ -33,6 +34,8 @@ def main(argv=None):
         app.setApplicationVersion("1.0.0")
         font = QFont("Microsoft YaHei UI", 10)
         app.setFont(font)
+        app_context = build_app_context(runtime)
+        app_runtime = create_application_runtime(app_context)
         try:
             base = get_base_dir()
             font_path = os.path.join(base, "app", "resources", "font.ttf")
@@ -40,7 +43,7 @@ def main(argv=None):
                 QFontDatabase.addApplicationFont(font_path)
         except Exception as e:
             logger.warning("font.load_failed error=%s", e, exc_info=True)
-        window = MainWindow(debug_mode=debug_mode)
+        window = MainWindow(debug_mode=debug_mode, runtime=app_runtime)
         window.show()
         sys.exit(app.exec())
     except Exception as e:

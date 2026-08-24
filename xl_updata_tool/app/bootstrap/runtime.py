@@ -3,8 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
 from app.shared.contracts import FeatureRuntime
+
+
+@dataclass(frozen=True)
+class ApplicationRuntime:
+    """应用级组合结果，Shell 只接收这个 opaque runtime。"""
+
+    context: object
+    registry: "FeatureRuntimeRegistry"
+    postprocessor_registry: object
+    import_workflow: object
+
+    @property
+    def features(self) -> tuple[FeatureRuntime, ...]:
+        return self.registry.features
+
+    def feature(self, key: str) -> FeatureRuntime:
+        return self.registry.get(key)
 
 
 class FeatureRuntimeRegistry:

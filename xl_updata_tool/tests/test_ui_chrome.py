@@ -103,6 +103,18 @@ def test_version_workspace_has_summary_and_stable_table_contract(qapp):
 
 def test_main_view_toolbar_builds_qicons_for_navigation(qapp):
     window = MainWindow.__new__(MainWindow)
+    window.runtime = SimpleNamespace(
+        features=[
+            SimpleNamespace(descriptor=SimpleNamespace(key=key, title=title, icon=icon))
+            for key, title, icon in (
+                ("versions", "版本列表", "list"),
+                ("preview", "图片预览", "image"),
+                ("audio", "音频", "music"),
+                ("character", "角色", "users"),
+                ("importer", "导入AS", "file-import"),
+            )
+        ]
+    )
 
     toolbar = window._view_toolbar()
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from app.shared.contracts import FeatureDescriptor, FeatureRuntime
 
 from .context import AppContext
+from .runtime import ApplicationRuntime, FeatureRuntimeRegistry
 
 FeatureFactory = Callable[[AppContext], FeatureRuntime]
 
@@ -76,4 +77,26 @@ def default_feature_definitions(parent=None) -> tuple[FeatureDefinition, ...]:
             lambda context, creator=creator: creator(context, parent=parent),
         )
         for descriptor, creator in creators
+    )
+
+
+def create_application_runtime(context: AppContext, parent=None) -> ApplicationRuntime:
+    """创建完整应用 Runtime；P3 由生产入口显式调用。"""
+
+    from app.features.importer.postprocessing import PostProcessorRegistry
+    from .workflows import ImportPostprocessWorkflow
+
+    features = create_features(context, default_feature_definitions(parent=parent))
+    registry = FeatureRuntimeRegistry(features)
+    postprocessor_registry = PostProcessorRegistry(("lua", "audio"))
+    return ApplicationRuntime(
+        context=context,
+        registry=registry,
+        postprocessor_registry=postprocessor_registry,
+        import_workflow=ImportPostprocessWorkflow(
+            registry.get("importer").controller,
+            registry.get("audio").controller,
+            registry.get("character").controller,
+            postprocessor_registry,
+        ),
     )
