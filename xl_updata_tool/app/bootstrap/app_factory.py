@@ -1,7 +1,7 @@
 """应用组合根与 Feature 注册工厂。
 
-生产 Shell 仍处于迁移期，但具体 Feature 已可由这里集中注册和隔离装配。
-P3 再切换生产启动路径，避免在同一阶段同时改变装配和 Shell 行为。
+生产入口通过这里集中创建 AppContext、Feature Runtime 和 Shell contribution；
+MainWindow 只消费稳定的 Runtime/页面/通用 Shell 契约。
 """
 
 from __future__ import annotations

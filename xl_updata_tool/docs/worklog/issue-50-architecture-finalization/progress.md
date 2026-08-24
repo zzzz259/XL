@@ -39,3 +39,10 @@
 等待 Sol 对本次终态门禁修正独立复核，以及用户实机验收；在此之前不推送分支、不创建 PR。
 
 本轮本地 checkpoint：`9828d80 refactor: 收口终态架构边界`。
+
+## 纯文档净化（2026-08-24）
+
+- [completed] 重排 `references.md`：P8 当前引用结论置于前部，P0 旧关系明确降为历史快照；当前兼容入口逐项登记真实 tracked 调用方。
+- [completed] 修正正式架构文档中的 Importer、Preview、Shell 和兼容入口路径，移除已完成 P8 后仍存在的迁移态路线描述。
+- [completed] 更新 `app/bootstrap/app_factory.py` 顶部文档字符串，使其描述当前 Composition Root 和 Shell contribution 事实；未改生产逻辑。
+- [completed] 未覆盖交接包 `Sol 复核` 区域；本轮只在 Luna 执行结果和项目 worklog 留痕。

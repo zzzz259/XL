@@ -141,3 +141,11 @@
 - [x] 不落盘 AST、Feature/Platform import smoke、临时运行目录 MainWindow Qt offscreen smoke 和终态架构复现器均通过：`AST_OK 182`、`MAIN_WINDOW_RUNTIME_SMOKE_OK`、`ARCHITECTURE_TERMINAL_OK`。
 - [x] `app`、`tests`、`tools` 的旧 `app.core` 生产引用归零，删除的三个旧 View 无有效引用；`git diff --check` 通过。
 - [ ] Sol 独立复核和用户实机验收：待进行；本分支仍未推送、未创建 PR。
+
+## 纯文档净化验证（2026-08-24）
+
+- [x] 正式文档关键词审查：未发现“下一阶段”“后续拆分”“迁移期”“当前迁移顺序”等已完成 P8 后的旧状态描述；保留内容均为当前兼容入口或真实未完成事项。
+- [x] `references.md` 当前结论由新鲜 `rg`/AST 证据生成，P0 旧关系已明确归入历史快照；未覆盖交接包中的 `Sol 复核` 区域。
+- [x] `python -m ruff check --no-cache app tests`：通过。
+- [x] `git diff --check`：通过。
+- [x] 本轮只改文档与 `app/bootstrap/app_factory.py` 顶部文档字符串，未改生产逻辑或测试；待建立本地 docs checkpoint。
