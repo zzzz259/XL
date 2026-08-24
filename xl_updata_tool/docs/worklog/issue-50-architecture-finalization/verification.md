@@ -96,3 +96,10 @@
 - [x] Character Service/Controller/详情组件不再从 `app.core.character_*` 获取这些领域实现。
 - [x] `character_loader.py` 未在本批移动，P7 解析器拆分边界保持清晰；旧 core 兼容入口未删除。
 - [x] 全量 pytest 138 passed、Ruff、AST 180、Characters import smoke、runtime Qt smoke 和 diff check 通过。
+
+## P6d 退出门
+
+- [x] 数据库、文件、路径、进程、下载和诊断真实实现已进入 `app/platform/`。
+- [x] 平台实现不依赖对应 `app.core` 兼容模块；旧 core 路径保留兼容转发。
+- [x] 临时 compat 文件误入暂存的问题已用修正检查点恢复并验证。
+- [x] 全量 pytest 139 passed、Ruff、AST 187、兼容 import smoke、runtime Qt smoke 和 diff check 通过。

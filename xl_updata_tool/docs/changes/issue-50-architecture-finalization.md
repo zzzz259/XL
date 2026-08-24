@@ -17,3 +17,5 @@ P6b-版本将版本仓库、差异、下载计划、更新持久化、本地同�
 P6b-Bundle 将 Bundle Parser、Selector、Manager 分别归入 platform、Importer、Versions；旧 `app/core/bundle_*` 路径仅保留兼容转发，未改变 Bundle 修复、精准筛选和版本差异行为。
 
 P6c 将角色缓存、展示/CSV、Wiki Profile 和增量仓库实现归入 Characters Feature；`character_loader.py` 留待 P7，未改变角色解析入口或数据结构。
+
+P6d 将数据库、文件、路径、进程、下载和诊断实现归入 `app/platform/`；`app/core` 对应路径保留兼容转发，未改变日志、数据库、运行模式或外部进程契约。

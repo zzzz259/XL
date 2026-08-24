@@ -123,3 +123,10 @@
 - `character_loader.py` 仍按计划保留在 `app/core`，作为 P7 解析器拆分对象；本批未复制或改写 Lua 解析实现。
 - 对应 `app/core/character_cache.py`、`character_presenter.py`、`character_profile.py`、`character_repository.py` 保留兼容转发；旧入口仍有测试/组件兼容调用，未执行删除。
 - P6c 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（138 项）；Ruff 通过；不落盘 AST `AST_OK 180`；`CHARACTERS_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。
+
+## P6d 退出复核（2026-08-24）
+
+- 数据库、文件、路径、进程、下载、日志上下文、任务上下文、环境摘要、崩溃报告和运行模式配置的真实实现已归入 `app/platform/`；`app/platform/diagnostics.py` 统一提供诊断契约。
+- `app/core` 对应路径保留兼容转发，应用内部新引用已切到 platform；平台实现不再依赖这些 core 兼容模块。
+- 首次提交准备时发现 Git 命令工作目录前缀错误，产生了临时 compat 文件且未带入 core 转发；已立即建立修正检查点 `19f0268`，恢复兼容入口并删除临时文件，修正后验证通过。
+- P6d 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（139 项）；Ruff 通过；不落盘 AST `AST_OK 187`；兼容 import `COMPAT_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。

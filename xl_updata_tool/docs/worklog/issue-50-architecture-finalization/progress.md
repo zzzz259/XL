@@ -18,7 +18,7 @@
 - [completed] P6b-版本：归位版本仓库、差异、下载计划、更新持久化、本地 Bundle 同步和种子实现；对应 core 路径降为兼容转发。
 - [completed] P6b-Bundle：归位 Bundle Parser/Selector/Manager，并收口 Versions/Importer 调用边界；旧 core 路径保留兼容转发。
 - [completed] P6c：归位角色缓存、展示模型、Wiki Profile 和增量仓库实现；`character_loader.py` 留待 P7。
-- [pending] P6d：收口平台与诊断基础设施。
+- [completed] P6d：收口平台与诊断基础设施；`app/core` 对应路径降为兼容转发，平台实现与诊断契约已稳定。
 
 ## 偏差
 
