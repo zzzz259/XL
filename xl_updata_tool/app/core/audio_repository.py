@@ -62,7 +62,9 @@ def sync_audio_snapshot(output_dir: str | os.PathLike[str], audio_files: list[di
         info["unread"] = current[name]["unread"]
 
     data = {"files": current}
-    _save(output_dir, data)
+    # 目录未变化时不重复写入近 MB 的快照，减少启动预热和重复刷新开销。
+    if previous != current:
+        _save(output_dir, data)
     return data
 
 

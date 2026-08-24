@@ -40,6 +40,7 @@ class AudioPage(QWidget):
     item_pressed = Signal(object, int)
     item_clicked = Signal(object, int)
     item_double_clicked = Signal(object, int)
+    item_expanded = Signal(object)
     play_toggled = Signal()
     slider_moved = Signal(int)
     slider_pressed = Signal()
@@ -95,6 +96,7 @@ class AudioPage(QWidget):
         self.audio_table.itemPressed.connect(self.item_pressed.emit)
         self.audio_table.itemClicked.connect(self.item_clicked.emit)
         self.audio_table.itemDoubleClicked.connect(self.item_double_clicked.emit)
+        self.audio_table.itemExpanded.connect(self.item_expanded.emit)
 
         content = QWidget(self)
         content.setObjectName("viewContent")

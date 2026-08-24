@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QObject, Qt
+from PySide6.QtCore import QObject, QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTreeWidget
 
 from app.ui.main_window import MainWindow
@@ -16,6 +17,7 @@ from app.ui.views.audio_view import create_audio_view
 from app.ui.views.character_view import create_character_view
 from app.ui.views.preview_view import create_preview_view
 from app.ui.views.version_view import create_version_header, create_version_table
+from app.features.versions.page import VersionPage
 from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
 from app.core.audio_library import format_size
 from app.ui.theme import DANGER, TEXT_MUTED
@@ -71,6 +73,21 @@ def test_feature_views_use_shared_page_chrome(qapp):
     assert detail_body is not None and detail_body.isHidden()
     assert highlight_button is not None and highlight_button.isHidden()
     assert any(button.text() == "全部标为已读" for button in views[2].findChildren(QPushButton))
+
+
+def test_version_page_visibility_controls_whole_page(qapp):
+    page = VersionPage()
+    page.show()
+    qapp.processEvents()
+
+    page.set_visible(False)
+    assert page.isHidden()
+
+    page.set_visible(True)
+    qapp.processEvents()
+    assert page.isVisible()
+
+    page.close()
 
 
 def test_version_workspace_has_summary_and_stable_table_contract(qapp):
@@ -149,14 +166,42 @@ def test_audio_rows_are_single_choice_when_clicked_anywhere(qapp):
     first, second = controller._audio_file_items
     controller.on_item_pressed(first, 3)
     controller.on_item_clicked(first, 3)
+    qapp.processEvents()
     assert first.checkState(0).name == "Checked"
     assert second.checkState(0).name == "Unchecked"
 
     controller.on_item_pressed(second, 2)
     controller.on_item_clicked(second, 2)
+    qapp.processEvents()
     assert first.checkState(0).name == "Unchecked"
     assert second.checkState(0).name == "Checked"
     assert controller.page.audio_table.selectedItems() == []
+
+
+def test_audio_checkbox_indicator_toggles_reliably(qapp):
+    controller = _build_audio_controller(qapp)
+    controller._audio_files = [
+        {"name": "album\\专辑\\a.wav", "dir": "album\\专辑", "ext": "WAV", "size": 1, "path": "a.wav"},
+    ]
+    controller._audio_file_items = populate_audio_tree(
+        controller.page.audio_table, controller._audio_files, format_size
+    )
+    controller.page.resize(800, 500)
+    controller.page.show()
+    controller.page.audio_table.expandAll()
+    qapp.processEvents()
+
+    item = controller._audio_file_items[0]
+    rect = controller.page.audio_table.visualItemRect(item)
+    checkbox = QPoint(rect.left() + 3, rect.center().y())
+    QTest.mouseClick(controller.page.audio_table.viewport(), Qt.LeftButton, Qt.NoModifier, checkbox)
+    qapp.processEvents()
+    assert item.checkState(0) == Qt.Checked
+
+    QTest.mouseClick(controller.page.audio_table.viewport(), Qt.LeftButton, Qt.NoModifier, checkbox)
+    qapp.processEvents()
+    assert item.checkState(0) == Qt.Unchecked
+    controller.page.close()
 
 
 def test_audio_directory_selection_checks_descendants_and_ctrl_adds(qapp):
@@ -174,6 +219,7 @@ def test_audio_directory_selection_checks_descendants_and_ctrl_adds(qapp):
     first_album = root.child(0)
     controller.on_item_pressed(first_album, 0)
     controller.on_item_clicked(first_album, 0)
+    qapp.processEvents()
     assert [item.checkState(0) for item in controller._audio_file_items] == [
         Qt.Checked, Qt.Checked, Qt.Unchecked
     ]
@@ -182,6 +228,7 @@ def test_audio_directory_selection_checks_descendants_and_ctrl_adds(qapp):
     with patch("app.features.audio.controller.QApplication.keyboardModifiers", return_value=Qt.ControlModifier):
         controller.on_item_pressed(second_album, 0)
         controller.on_item_clicked(second_album, 0)
+        qapp.processEvents()
     assert all(item.checkState(0) == Qt.Checked for item in controller._audio_file_items)
 
 

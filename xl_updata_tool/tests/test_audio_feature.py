@@ -5,8 +5,12 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
 
 from app.features.audio.page import AudioPage
-from app.features.audio.service import AudioService
-from app.features.audio.tree import populate_audio_tree as feature_populate_audio_tree
+from app.features.audio.service import AudioCatalogIndex, AudioService
+from app.features.audio.tree import (
+    populate_audio_directory,
+    populate_audio_tree as feature_populate_audio_tree,
+    populate_audio_tree_roots,
+)
 from app.ui.features.audio_controller import populate_audio_tree as legacy_populate_audio_tree
 
 
@@ -54,3 +58,27 @@ def test_audio_service_caches_and_invalidates_catalog(tmp_path):
 
 def test_audio_tree_legacy_import_is_compatibility_alias():
     assert legacy_populate_audio_tree is feature_populate_audio_tree
+
+
+def test_audio_catalog_index_supports_layered_lazy_tree(qapp):
+    files = [
+        {"name": "album/第五专辑/event.wav", "dir": "album/第五专辑", "ext": "WAV", "size": 1, "unread": True},
+        {"name": "album/第六专辑/event.wav", "dir": "album/第六专辑", "ext": "WAV", "size": 1},
+        {"name": "voice/001/cn/line.wav", "dir": "voice/001/cn", "ext": "WAV", "size": 1},
+    ]
+    index = AudioCatalogIndex(files)
+    page = AudioPage()
+    table = page.audio_table
+    roots = populate_audio_tree_roots(table, index, AudioService.format_size)
+
+    assert [root.text(0) for root in roots] == ["album", "voice"]
+    assert roots[0].text(5) == "新"
+    assert roots[0].childCount() == 1  # 仅保留懒加载占位节点
+
+    populate_audio_directory(roots[0], index, AudioService.format_size)
+    assert [roots[0].child(i).text(0) for i in range(roots[0].childCount())] == [
+        "第五专辑",
+        "第六专辑",
+    ]
+    assert roots[0].child(0).childCount() == 1  # 专辑曲目仍未构造
+    page.close()

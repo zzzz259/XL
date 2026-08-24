@@ -618,3 +618,15 @@ app/features/audio/
 - [completed] P8：执行 Feature ownership 场景验收、公共文件冲突审查和最终全量质量门禁。
 
 详细调查、进度和验证记录见 `docs/worklog/issue-45-platform-shared/`；面向评审的变更摘要见 `docs/changes/issue-45-platform-shared.md`。
+
+## 2026-08-24 Issue #46：多页面切换布局修复
+
+- [completed] 修复版本页外层残留布局占位，保持页面整体互斥显示。
+- [completed] 补充页面显隐回归测试、文档记录和 Qt 布局冒烟。
+
+## 2026-08-24 Issue #47：音频后台预热、树懒加载与稳定勾选
+
+- [completed] 复现并固化复选框事件竞争、7000+ 音频同步加载和树构造性能基线。
+- [completed] 建立 Qt-free 音频目录索引与后台预热入口。
+- [completed] 将音频树改为按目录层级懒加载，并以逻辑选择集驱动目录递归勾选。
+- [completed] 完成全量测试、Qt 交互测试、性能基准、启动冒烟和文档同步；等待用户验收后建立本地检查点。

@@ -534,6 +534,8 @@ class MainWindow(QMainWindow):
         self._set_active_view_btn(self.btn_home)
         self._set_toolbars_visible(True)
         self.version_controller.load()
+        # 版本列表优先可用；音频目录在事件循环空闲后后台预热，避免首次进入音频页卡顿。
+        QTimer.singleShot(0, self.audio_controller.preload_catalog)
 
     def _get_selected_ts(self):
         """迁移期导入适配：返回版本功能域当前选中的版本。"""
@@ -1235,3 +1237,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(1500, self._check_update)
         else:
             QTimer.singleShot(500, lambda: self.status_bar.showMessage("就绪"))
+
+    def closeEvent(self, event):
+        self.audio_controller.close()
+        super().closeEvent(event)

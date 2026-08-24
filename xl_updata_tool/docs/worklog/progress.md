@@ -381,6 +381,18 @@
 - [completed] 采用新增稳定入口、调用方门禁和兼容导出，不删除旧 core/ui，不改变运行时数据与输出契约。
 - [completed] 详细记录已拆至 `docs/worklog/issue-45-platform-shared/`，并新增 `docs/changes/issue-45-platform-shared.md`。
 
+## 2026-08-24 Issue #46：多页面切换布局修复
+
+- [completed] 已定位并修复 `VersionPage` 外层页面未随内部标题/表格一起隐藏的问题。
+- [completed] 已完成页面可见性回归测试、文档同步和 Qt 布局冒烟。
+
+## 2026-08-24 Issue #47：音频后台预热、树懒加载与稳定勾选
+
+- [completed] 已确认复选框事件竞争根因：`itemClicked` 中的手动状态修改会与 Qt 默认复选框切换互相覆盖。
+- [completed] 已确认首次音频页加载在 GUI 线程同步执行目录扫描、状态快照和完整树构造；本轮采用后台预热与按层级懒加载组合方案。
+- [completed] 已实现 Qt-free 目录索引、启动后台预热、按层级懒加载、逻辑选择集、目录递归勾选和稳定 Ctrl 多选。
+- [completed] 已完成全量测试、Ruff、AST、Qt 启动冒烟、性能基准和差异检查；等待用户真实音频页面验收。
+
 ### P5b 调查错误
 
 - [completed] Feature 导出适配器初版漏转发部分旧 Spine 函数，导致兼容导入失败；已根据旧 Worker 实际导入清单补齐入口，并通过导入 smoke 与全量测试。

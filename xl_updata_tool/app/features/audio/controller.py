@@ -10,7 +10,7 @@ import os
 import subprocess
 import sys
 
-from PySide6.QtCore import QMimeData, QObject, QUrl, Qt, Signal
+from PySide6.QtCore import QMimeData, QObject, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QMenu, QProgressDialog
 
@@ -26,12 +26,14 @@ from app.platform.diagnostics import logger
 from app.features.audio.page import AudioPage
 from app.features.audio.service import AudioService
 from app.features.audio.tree import (
+    LOADED_ROLE,
+    directory_path,
     iter_audio_leaves,
-    populate_audio_tree,
-    refresh_audio_tree_checks,
+    populate_audio_directory,
+    populate_audio_tree_roots,
     refresh_audio_tree_unread,
 )
-from app.features.audio.worker import AudioDecryptWorker
+from app.features.audio.worker import AudioCatalogWorker, AudioDecryptWorker
 
 
 class AudioController(QObject):
@@ -73,6 +75,9 @@ class AudioController(QObject):
         self._audio_player = None
         self._audio_output = None
         self._audio_worker = None
+        self._catalog_worker = None
+        self._catalog_index = None
+        self._selected_names: set[str] = set()
         self._progress_dialog = None
         self._processing_shared = False
 
@@ -95,6 +100,7 @@ class AudioController(QObject):
         self.page.item_pressed.connect(self.on_item_pressed)
         self.page.item_clicked.connect(self.on_item_clicked)
         self.page.item_double_clicked.connect(self.on_item_double_clicked)
+        self.page.item_expanded.connect(self.on_item_expanded)
         self.page.play_toggled.connect(self.toggle_play)
         self.page.slider_moved.connect(self.on_slider_moved)
         self.page.slider_pressed.connect(self.on_slider_pressed)
@@ -115,85 +121,189 @@ class AudioController(QObject):
         self._audio_player.durationChanged.connect(self._update_duration)
         self._audio_player.playbackStateChanged.connect(self._on_playback_state_changed)
 
+    def preload_catalog(self, force_reload: bool = False) -> None:
+        """后台预热音频目录，不触碰 Qt 树，避免阻塞版本列表。"""
+        if self.service.catalog_loaded and not force_reload:
+            return
+        self._start_catalog_worker(force_reload)
+
+    def _start_catalog_worker(self, force_reload: bool = False) -> None:
+        if self._catalog_worker is not None and self._catalog_worker.isRunning():
+            return
+        self._catalog_worker = AudioCatalogWorker(self.service, force=force_reload, parent=self)
+        self._catalog_worker.loaded.connect(self._on_catalog_loaded)
+        self._catalog_worker.failed.connect(self._on_catalog_failed)
+        self._catalog_worker.finished.connect(self._on_catalog_worker_finished)
+        self._catalog_worker.start()
+
     def load_catalog(self, force_reload: bool = False) -> None:
-        """加载最终音频目录并更新页面；普通页面切换复用现有树。"""
+        """加载音频目录；优先复用预热结果，未完成时异步等待。"""
         if self._list_loaded and not force_reload:
             return
-        self._audio_files = self.service.load_catalog(force=force_reload)
-        self._audio_file_items = populate_audio_tree(
+        if self.service.catalog_loaded and not force_reload:
+            self._on_catalog_loaded(self.service.load_catalog())
+            return
+        self.page.audio_table.setEnabled(False)
+        self.page.audio_title.setText("音频管理器 · 正在加载音频列表…")
+        self.page.audio_status.setText("正在加载音频列表…")
+        self.status_changed.emit("正在后台加载音频列表…")
+        self._start_catalog_worker(force_reload)
+
+    def _on_catalog_loaded(self, audio_files: list[dict]) -> None:
+        self._audio_files = audio_files
+        self._catalog_index = self.service.catalog_index
+        if self._catalog_index is None:
+            self._on_catalog_failed("音频目录索引未生成")
+            return
+        self._selected_names.clear()
+        self._audio_file_items = populate_audio_tree_roots(
             self.page.audio_table,
-            self._audio_files,
+            self._catalog_index,
             self.service.format_size,
         )
         total = len(self._audio_files)
         self.page.audio_title.setText(f"音频管理器 · 共 {total} 个音频文件")
         self.page.audio_status.setText(f"已选: 0 个 | 共 {total} 个音频文件")
         self.page.audio_empty.setVisible(total == 0)
+        self.page.audio_table.setEnabled(True)
         self._list_loaded = True
         self.unread_changed.emit()
         logger.info(f"音频列表加载完成: 共 {total} 个文件")
         self.status_changed.emit(f"音频列表加载完成: {total} 个文件")
 
+    def _on_catalog_failed(self, message: str) -> None:
+        logger.error(f"音频列表加载失败: {message}")
+        self.page.audio_table.setEnabled(True)
+        self.page.audio_title.setText("音频管理器 · 加载失败")
+        self.page.audio_status.setText(f"音频列表加载失败：{message}")
+        self.status_changed.emit("音频列表加载失败，可点击刷新列表重试")
+
+    def _on_catalog_worker_finished(self) -> None:
+        worker = self._catalog_worker
+        if worker is not None:
+            worker.deleteLater()
+        self._catalog_worker = None
+
+    def on_item_expanded(self, item) -> None:
+        if self._catalog_index is None or directory_path(item) is None:
+            return
+        if item.data(0, LOADED_ROLE):
+            return
+        populate_audio_directory(item, self._catalog_index, self.service.format_size)
+        self._apply_visible_selection()
+        refresh_audio_tree_unread(self.page.audio_table, self._catalog_index)
+
     def invalidate_catalog(self) -> None:
         self.service.invalidate()
+        self._catalog_index = None
         self._list_loaded = False
 
     def on_item_pressed(self, item, _column: int) -> None:
-        self._pressed_check_state = item.checkState(0)
+        # 保留语义信号兼容；实际点击前状态由逻辑选择集提供，避免 Qt
+        # 复选框默认切换与 itemClicked 的事件顺序竞争。
+        self._pressed_check_state = None
 
     def on_item_clicked(self, item, _column: int) -> None:
-        before = self._pressed_check_state
         self._pressed_check_state = None
-        if before is None:
-            before = item.checkState(0)
-        leaves = iter_audio_leaves(item)
-        if not leaves:
+        target_names = self._target_names(item)
+        if not target_names:
             return
 
         ctrl = bool(QApplication.keyboardModifiers() & Qt.ControlModifier)
-        should_check = before != Qt.Checked
+        before_checked = target_names.issubset(self._selected_names)
+        # 延迟到 Qt 完成复选框默认切换后再提交逻辑状态，兼容点击行文本
+        # 和点击复选框指示器两条事件路径。
+        QTimer.singleShot(
+            0,
+            lambda: self._apply_item_selection(target_names, not before_checked, ctrl),
+        )
+
+    def _target_names(self, item) -> set[str]:
+        if self._catalog_index is not None:
+            directory = directory_path(item)
+            if directory is not None:
+                return {
+                    str(info.get("name", "")).replace("\\", "/")
+                    for info in self._catalog_index.files_under(directory)
+                }
+        return {
+            str(leaf.data(0, Qt.UserRole).get("name", "")).replace("\\", "/")
+            for leaf in iter_audio_leaves(item)
+            if leaf.data(0, Qt.UserRole)
+        }
+
+    def _apply_item_selection(self, target_names: set[str], checked: bool, ctrl: bool) -> None:
+        if not ctrl:
+            self._selected_names.clear()
+        if checked:
+            self._selected_names.update(target_names)
+        else:
+            self._selected_names.difference_update(target_names)
+        self._apply_visible_selection()
+        self.page.audio_table.clearSelection()
+        self._update_selection_status()
+
+    def _apply_visible_selection(self) -> None:
         table = self.page.audio_table
         table.blockSignals(True)
         try:
-            if not ctrl:
-                for other in self._audio_file_items:
-                    other.setCheckState(0, Qt.Unchecked)
-                for index in range(table.topLevelItemCount()):
-                    self._set_directory_state(table.topLevelItem(index), Qt.Unchecked)
-            state = Qt.Checked if should_check else Qt.Unchecked
-            for leaf in leaves:
-                leaf.setCheckState(0, state)
-            refresh_audio_tree_checks(table)
+            def update(item) -> None:
+                directory = directory_path(item)
+                if directory is not None and self._catalog_index is not None:
+                    names = {
+                        str(info.get("name", "")).replace("\\", "/")
+                        for info in self._catalog_index.files_under(directory)
+                    }
+                    if not names or not self._selected_names.intersection(names):
+                        state = Qt.Unchecked
+                    elif names.issubset(self._selected_names):
+                        state = Qt.Checked
+                    else:
+                        state = Qt.PartiallyChecked
+                    item.setCheckState(0, state)
+                else:
+                    info = item.data(0, Qt.UserRole) or {}
+                    name = str(info.get("name", "")).replace("\\", "/")
+                    item.setCheckState(0, Qt.Checked if name in self._selected_names else Qt.Unchecked)
+                for index in range(item.childCount()):
+                    child = item.child(index)
+                    if child.data(0, Qt.UserRole + 2):
+                        continue
+                    update(child)
+
+            for index in range(table.topLevelItemCount()):
+                update(table.topLevelItem(index))
         finally:
             table.blockSignals(False)
-        table.clearSelection()
-        checked = sum(item.checkState(0) == Qt.Checked for item in self._audio_file_items)
+
+    def _update_selection_status(self) -> None:
+        checked = len(self._selected_names)
         self.page.audio_status.setText(f"已选: {checked} 个 | 共 {len(self._audio_files)} 个音频文件")
 
-    @staticmethod
-    def _set_directory_state(item, state) -> None:
-        if item.data(0, Qt.UserRole) is not None:
-            item.setCheckState(0, state)
-            return
-        item.setCheckState(0, state)
-        for index in range(item.childCount()):
-            AudioController._set_directory_state(item.child(index), state)
-
     def _selected_infos(self) -> list[dict]:
-        selected = []
-        for item in self._audio_file_items:
-            if item.checkState(0) == Qt.Checked:
-                info = item.data(0, Qt.UserRole)
-                if info:
-                    selected.append(info)
-        return selected
+        selected = {
+            str(name).replace("\\", "/")
+            for name in self._selected_names
+        }
+        if selected:
+            return [
+                info for info in self._audio_files
+                if str(info.get("name", "")).replace("\\", "/") in selected
+            ]
+        # 兼容迁移期外部直接构造叶节点的调用方。
+        return [
+            info for item in self._audio_file_items
+            if item.checkState(0) == Qt.Checked
+            for info in [item.data(0, Qt.UserRole)]
+            if info
+        ]
 
     def mark_all_read(self) -> None:
         changed = self.service.mark_all_read()
         for item in self._audio_file_items:
             info = item.data(0, Qt.UserRole) or {}
             item.setData(0, Qt.UserRole, {**info, "unread": False})
-        refresh_audio_tree_unread(self.page.audio_table)
+        refresh_audio_tree_unread(self.page.audio_table, self._catalog_index)
         self.unread_changed.emit()
         self.status_changed.emit("已将全部音频标记为已读" if changed else "当前没有未读音频")
 
@@ -250,7 +360,7 @@ class AudioController(QObject):
             if info.get("path") == filepath:
                 item.setData(0, Qt.UserRole, {**info, "unread": False})
                 break
-        refresh_audio_tree_unread(self.page.audio_table)
+        refresh_audio_tree_unread(self.page.audio_table, self._catalog_index)
         self.unread_changed.emit()
         self.page.audio_now_playing.setText(f"正在播放：{filename}")
         self.page.audio_play_btn.setText("暂停")
@@ -455,5 +565,10 @@ class AudioController(QObject):
 
     def close(self) -> None:
         self.cancel_audio_worker()
+        if self._catalog_worker is not None and self._catalog_worker.isRunning():
+            self._catalog_worker.requestInterruption()
+            if not self._catalog_worker.wait(30000):
+                logger.error("音频目录预热线程未能在关闭超时内退出")
+        self._catalog_worker = None
         if self._audio_player:
             self._audio_player.stop()

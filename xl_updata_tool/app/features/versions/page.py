@@ -59,6 +59,7 @@ class VersionPage(QWidget):
         layout.addWidget(self.table, 1)
 
     def set_visible(self, visible: bool) -> None:
+        self.setVisible(visible)
         self.version_header.setVisible(visible)
         self.table.setVisible(visible)
 

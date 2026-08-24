@@ -9,4 +9,10 @@
 - `issue-<id>-<slug>/verification.md`：验证门禁和兼容性记录。
 - `../changes/issue-<id>-<slug>.md`：面向评审的变更摘要。
 
+当前 Issue：
+
+- `issue-45-platform-shared/`：Platform/Shared 与 ownership 收口。
+- `issue-46-view-switch-layout/`：多页面切换时的版本页布局占位修复。
+- `issue-47-audio-performance/`：音频后台预热、分层懒加载与稳定勾选。
+
 用户使用说明只进入项目 README；当前有效的架构和开发约束只进入开发指南；废弃方案、调试过程和一次性验证不写入人类面向的产品文档。

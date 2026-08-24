@@ -9,6 +9,11 @@ from PySide6.QtWidgets import QTreeWidgetItem
 from app.shared.qt.tokens import DANGER, TEXT_MUTED
 
 
+DIRECTORY_ROLE = Qt.UserRole + 1
+PLACEHOLDER_ROLE = Qt.UserRole + 2
+LOADED_ROLE = Qt.UserRole + 3
+
+
 def _set_unread_marker(item, unread):
     item.setText(5, "新" if unread else "")
     item.setForeground(5, QColor(DANGER if unread else TEXT_MUTED))
@@ -18,22 +23,27 @@ def _set_unread_marker(item, unread):
         item.setToolTip(5, "")
 
 
-def refresh_audio_tree_unread(table):
+def refresh_audio_tree_unread(table, catalog_index=None):
     """根据叶节点状态刷新整棵音频树的“新”标记。"""
 
     def update_item(item):
         info = item.data(0, Qt.UserRole)
         if info is not None:
             unread = bool(info.get("unread"))
+        elif catalog_index is not None and directory_path(item) is not None:
+            unread = any(
+                bool(info.get("unread"))
+                for info in catalog_index.files_under(directory_path(item))
+            )
         else:
             unread = False
-            for index in range(item.childCount()):
-                unread = update_item(item.child(index)) or unread
+            for child_index in range(item.childCount()):
+                unread = update_item(item.child(child_index)) or unread
         _set_unread_marker(item, unread)
         return unread
 
-    for index in range(table.topLevelItemCount()):
-        update_item(table.topLevelItem(index))
+    for root_index in range(table.topLevelItemCount()):
+        update_item(table.topLevelItem(root_index))
 
 
 def iter_audio_leaves(item):
@@ -44,6 +54,75 @@ def iter_audio_leaves(item):
     for index in range(item.childCount()):
         leaves.extend(iter_audio_leaves(item.child(index)))
     return leaves
+
+
+def directory_path(item) -> str | None:
+    """返回目录节点路径；音频叶节点返回 ``None``。"""
+    value = item.data(0, DIRECTORY_ROLE)
+    return str(value) if value else None
+
+
+def is_placeholder(item) -> bool:
+    return bool(item.data(0, PLACEHOLDER_ROLE))
+
+
+def _configure_directory_item(item, directory: str, index) -> None:
+    item.setData(0, DIRECTORY_ROLE, directory)
+    item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+    item.setCheckState(0, Qt.Unchecked)
+    if index.has_children(directory):
+        placeholder = QTreeWidgetItem([""])
+        placeholder.setData(0, PLACEHOLDER_ROLE, True)
+        item.addChild(placeholder)
+
+
+def _make_audio_leaf(info: dict, format_size) -> QTreeWidgetItem:
+    unread = bool(info.get("unread"))
+    leaf = QTreeWidgetItem([
+        os.path.basename(info["name"]),
+        info["dir"],
+        "-",
+        info["ext"],
+        format_size(info["size"]),
+        "新" if unread else "",
+    ])
+    leaf.setData(0, Qt.UserRole, info)
+    leaf.setFlags(leaf.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+    leaf.setCheckState(0, Qt.Unchecked)
+    return leaf
+
+
+def populate_audio_tree_roots(table, index, format_size) -> list[QTreeWidgetItem]:
+    """只构造首层目录，后续节点由 ``populate_audio_directory`` 懒加载。"""
+    table.clear()
+    roots = []
+    for directory in index.root_directories():
+        item = QTreeWidgetItem([os.path.basename(directory)])
+        _configure_directory_item(item, directory, index)
+        table.addTopLevelItem(item)
+        roots.append(item)
+    refresh_audio_tree_unread(table, index)
+    return roots
+
+
+def populate_audio_directory(item, index, format_size) -> list[QTreeWidgetItem]:
+    """构造一个已展开目录的直接子目录和直接音频文件。"""
+    directory = directory_path(item)
+    if directory is None:
+        return []
+    item.takeChildren()
+    item.setData(0, LOADED_ROLE, True)
+    children = []
+    for child_directory in index.child_directories(directory):
+        child = QTreeWidgetItem([os.path.basename(child_directory)])
+        _configure_directory_item(child, child_directory, index)
+        item.addChild(child)
+        children.append(child)
+    for info in index.files_in_directory(directory):
+        leaf = _make_audio_leaf(info, format_size)
+        item.addChild(leaf)
+        children.append(leaf)
+    return children
 
 
 def refresh_audio_tree_checks(table):
@@ -78,18 +157,7 @@ def populate_audio_tree(table, audio_files: list[dict], format_size) -> list[QTr
     leaf_nodes = {}
 
     for info in audio_files:
-        unread = bool(info.get("unread"))
-        leaf = QTreeWidgetItem([
-            os.path.basename(info["name"]),
-            info["dir"],
-            "-",
-            info["ext"],
-            format_size(info["size"]),
-            "新" if unread else "",
-        ])
-        leaf.setData(0, Qt.UserRole, info)
-        leaf.setFlags(leaf.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-        leaf.setCheckState(0, Qt.Unchecked)
+        leaf = _make_audio_leaf(info, format_size)
         file_items.append(leaf)
 
         parts = info["dir"].replace("\\", "/").split("/")
