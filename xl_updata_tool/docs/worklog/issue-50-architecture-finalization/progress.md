@@ -25,3 +25,15 @@
 ## 偏差
 
 暂无。
+
+## 终态复核退回后的修正（2026-08-24）
+
+- [completed] 根据 Sol 复核意见补充终态架构测试，覆盖 Shell 具体 Feature 下转、跨 Feature 内部导入和旧 View 完整实现三类门禁。
+- [completed] `MainWindow` 改为通过 Runtime 与通用 Shell contribution 接入功能；跨 Feature 的 Lua 文本解析归入 `app/shared/lua.py`。
+- [completed] 基于 tracked 生产代码、测试、工具和正式文档真实引用重新核对，删除 `audio_view.py`、`preview_view.py`、`version_view.py`；未恢复兼容门面。
+- [completed] 修正文档中的迁移态描述和旧 View 引用，补充当前终态引用结论。
+- [completed] 新鲜全量测试为 146 collected / 146 passed；这是在 Sol 的 143 项复核基础上新增 3 项终态架构测试后的当前计数。Ruff、AST、import smoke、Qt offscreen smoke、终态复现器和 diff check 均通过。
+
+## 当前状态
+
+等待 Sol 对本次终态门禁修正独立复核，以及用户实机验收；在此之前不推送分支、不创建 PR。

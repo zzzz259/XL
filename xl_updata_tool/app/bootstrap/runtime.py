@@ -16,6 +16,7 @@ class ApplicationRuntime:
     registry: "FeatureRuntimeRegistry"
     postprocessor_registry: object
     import_workflow: object
+    shell_contribution: object
 
     @property
     def features(self) -> tuple[FeatureRuntime, ...]:
@@ -23,6 +24,14 @@ class ApplicationRuntime:
 
     def feature(self, key: str) -> FeatureRuntime:
         return self.registry.get(key)
+
+    def install_shell(self, shell):
+        """安装 Composition Root 提供的通用 Shell contribution。"""
+        return self.shell_contribution.install(shell)
+
+    def activate_feature(self, key: str) -> None:
+        """通过通用 contribution 激活 Feature，不向 Shell 暴露具体实现。"""
+        self.shell_contribution.activate(key)
 
 
 class FeatureRuntimeRegistry:
@@ -67,6 +76,14 @@ class FeatureRuntimeRegistry:
 
     def bind_badge(self, handler: Callable[..., None]) -> None:
         self._bind("badge_signal", handler)
+
+    def badge_states(self) -> tuple[tuple[str, bool], ...]:
+        """返回各 Feature 的通用角标状态。"""
+        return tuple(
+            (feature.descriptor.key, bool(feature.badge_state()))
+            for feature in self._features
+            if feature.badge_state is not None
+        )
 
     def _bind(self, attribute: str, handler: Callable[..., None]) -> None:
         for feature in self._features:

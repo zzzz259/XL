@@ -54,24 +54,10 @@ class MainWindow(QMainWindow):
         self.runtime = runtime or create_application_runtime(
             build_app_context(), parent=self
         )
-        self._features = {
-            feature.descriptor.key: feature for feature in self.runtime.features
+        self._pages = {
+            feature.descriptor.key: feature.page for feature in self.runtime.features
         }
-        self.version_controller = self._features["versions"].controller
-        self.version_page = self._features["versions"].page
-        self.version_service = self.version_controller.service
-        self.preview_controller = self._features["preview"].controller
-        self.preview_page = self._features["preview"].page
-        self.audio_controller = self._features["audio"].controller
-        self.audio_page = self._features["audio"].page
-        self.character_controller = self._features["character"].controller
-        self.character_page = self._features["character"].page
-        self.import_controller = self._features["importer"].controller
-        self.importer_service = self.import_controller.service
-        self.import_controller.progress_stage.connect(self._on_import_progress)
-        self.import_controller.stage_finished.connect(self._on_import_stage_finished)
-        self.import_controller.category_finished.connect(self._on_import_category_finished)
-        self.import_controller.all_finished.connect(self._on_import_all_finished)
+        self._shell_actions = self.runtime.install_shell(self)
         logger.info(f"当前 DATA_DIR: {DATA_DIR}")
         self._seed_bundled_version()
         self._setup_ui()
@@ -106,22 +92,12 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        self.version_header = self.version_page.version_header
-        self.version_summary = self.version_page.version_summary
-        self.table = self.version_page.table
-        content_layout.addWidget(self.version_page, 1)
-
-        # 预览视图容器（默认隐藏）
-        self.preview_page.setVisible(False)
-        content_layout.addWidget(self.preview_page, 1)
-
-        # 音频管理器视图容器（默认隐藏）。页面自身拥有控件，主窗口只接收语义信号。
-        self.audio_page.setVisible(False)
-        content_layout.addWidget(self.audio_page, 1)
-
-        # 角色功能域（页面拥有控件，控制器拥有数据和行为）
-        self.character_page.setVisible(False)
-        content_layout.addWidget(self.character_page, 1)
+        for feature in self.runtime.features:
+            if feature.descriptor.key == "importer":
+                continue
+            page = feature.page
+            page.setVisible(feature.descriptor.key == "versions")
+            content_layout.addWidget(page, 1)
 
         body.addWidget(content, 1)
         root.addLayout(body, 1)
@@ -132,25 +108,11 @@ class MainWindow(QMainWindow):
                          padding:4px 12px; color:{get_color('TEXT_SECONDARY')}; font-size:14px; }}
         """)
         self.setStatusBar(self.status_bar)
-        self._connect_audio_controller()
-        self._connect_version_controller()
-        self.preview_page.close_requested.connect(lambda: self._toggle_preview_mode(False))
-        self.preview_controller.progress_changed.connect(self._on_preview_controller_progress)
         self.runtime.registry.bind_status(self.status_bar.showMessage)
         self.runtime.registry.bind_badge(self._refresh_unread_badges)
-        # 只恢复本地角色仓库/缓存，确保启动时顶层“角色”角标准确；绝不解析 Lua。
-        self.character_controller.restore_local()
         self._refresh_unread_badges()
         self._anim_timer = QTimer()
         self._anim_dots = 0
-
-    def _connect_audio_controller(self):
-        """连接音频功能域的任务结果与全局 Shell 状态。"""
-        self.audio_page.close_requested.connect(lambda: self._toggle_audio_mode(False))
-
-    def _connect_version_controller(self):
-        """连接版本功能域状态到全局状态栏和下载进度条。"""
-        self.version_controller.progress_changed.connect(self._on_version_progress)
 
     def _on_version_progress(self, current, total, message):
         if total <= 0:
@@ -224,17 +186,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_unread_badges(self):
         """把各功能模块的未读状态同步到对应顶层工作区标签。"""
-        character_has_unread = bool(
-            getattr(getattr(self, "character_controller", None), "has_unread", False)
-        )
-        audio_has_unread = bool(
-            getattr(getattr(self, "audio_controller", None), "has_unread", False)
-        )
+        unread = dict(self.runtime.registry.badge_states())
         for key, badge in getattr(self, "_unread_badges", {}).items():
-            badge.setVisible(
-                (key == "character" and character_has_unread)
-                or (key == "audio" and audio_has_unread)
-            )
+            badge.setVisible(bool(unread.get(key, False)))
 
     def _action_toolbar(self):
         """侧边功能工具栏：检查更新/导入AS + 导出配置 + 主题（设置区）+ 刷新/作者（底部），竖排"""
@@ -259,14 +213,16 @@ class MainWindow(QMainWindow):
             b.setProperty("fluentAppearance", "secondary")
             return b
 
-        self.btn_check = _side_btn("检查更新", "arrows-rotate")
-        self.btn_check.setProperty("fluentAppearance", "primary")
-        self.btn_check.clicked.connect(lambda: self.version_controller.check_update())
-        layout.addWidget(self.btn_check)
-        self.btn_browse = _side_btn("导入AS", "file-import")
-        self.btn_browse.setProperty("fluentAppearance", "primary")
-        self.btn_browse.clicked.connect(self._import_selected)
-        layout.addWidget(self.btn_browse)
+        self._shell_action_buttons = {}
+        for action in self._shell_actions:
+            button = _side_btn(action.text, action.icon)
+            if action.primary:
+                button.setProperty("fluentAppearance", "primary")
+            button.clicked.connect(action.callback)
+            layout.addWidget(button)
+            self._shell_action_buttons[action.text] = button
+        self.btn_check = self._shell_action_buttons.get("检查更新")
+        self.btn_browse = self._shell_action_buttons.get("导入AS")
         layout.addSpacing(8)
         layout.addWidget(self._lbl("导出内容", 11, get_color("TEXT_SECONDARY"), True))
         self.cb_export_lua = QCheckBox("lua")
@@ -331,6 +287,31 @@ class MainWindow(QMainWindow):
             return qta.icon(f"fa6s.{name}", color=color)
         return None
 
+    # ShellPort：bootstrap 编排只通过这些无领域 UI 能力访问 Qt。
+    def schedule(self, delay_ms, callback):
+        QTimer.singleShot(delay_ms, callback)
+
+    def show_warning(self, title, message):
+        QMessageBox.warning(self, title, message)
+
+    def show_information(self, title, message):
+        QMessageBox.information(self, title, message)
+
+    def confirm(self, title, message):
+        return QMessageBox.question(
+            self, title, message, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        ) == QMessageBox.Yes
+
+    def create_progress_dialog(self, label, cancel_text):
+        dialog = QProgressDialog(label, cancel_text, 0, 100, self)
+        dialog.setWindowModality(Qt.NonModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setMinimumWidth(520)
+        dialog.setMinimumHeight(160)
+        return dialog
+
     def _tbtn(self, t, accent=False, icon=None):
         b = QToolButton(); b.setText(t)
         b.setMinimumWidth(110)
@@ -371,7 +352,7 @@ class MainWindow(QMainWindow):
 
     def _set_version_content_visible(self, visible):
         """整体切换版本工作区，避免页面切换留下单独的工作区标题。"""
-        self.version_page.set_visible(visible)
+        self._pages["versions"].set_visible(visible)
 
     def _clear_dir(self, target_dir):
         """确认后清空目录（rmtree + 重建）"""
@@ -401,7 +382,7 @@ class MainWindow(QMainWindow):
 
     def _compute_delta_hashes(self, ts):
         """返回本版本相对上一版本的增量 hash 集合（新增/修改的 bundle）；无上一版本时返回全量"""
-        return self.version_service.delta_hashes(ts)
+        return self.runtime.shell_contribution.delta_hashes(ts)
 
     def _row_btn(self, text, color, tooltip=""):
         b = QPushButton(text)
@@ -426,127 +407,20 @@ class MainWindow(QMainWindow):
         磁盘是事实来源：磁盘有但 DB 未记录 → 标记已下载；DB 有记录但磁盘无 → 清除。
         ts 非空时只同步该版本，否则同步全部版本。
         """
-        return self.version_service.sync_local(ts)
+        return self.runtime.shell_contribution.sync_local(ts)
 
     def _load_data(self):
         self._activate_feature("versions")
 
     def _get_selected_ts(self):
         """迁移期导入适配：返回版本功能域当前选中的版本。"""
-        return self.version_controller.selected_version
+        return self.runtime.shell_contribution.selected_version()
 
     # ========== BROWSE ==========
 
     def _import_selected(self):
-        # 确保版本列表可见（隐藏图片预览和音频视图）
-        self.runtime.registry.activate("versions")
-        self._set_active_view_btn(self._nav_buttons["versions"])
-        self._set_toolbars_visible(True)
-        self._set_version_content_visible(True)
-        self._show_character = False
-        ts = self._get_selected_ts()
-        if not ts: QMessageBox.warning(self, "未选择", "请先选中一个版本."); return
-        export_categories = self._get_export_categories()
-        if not export_categories:
-            QMessageBox.warning(self, "提示", "请至少勾选一类要导出的资源")
-            return
-
-        # 同步该版本磁盘实际状态（磁盘为准），再取已下载的本地路径
-        self._sync_local_bundles(ts)
-        sub = db.get_sub_bundles(ts)
-        # debug 模式：可选「全量导入 / 增量导入」
-        delta_only = (self.debug_mode and getattr(self, "debug_import_scope", None)
-                      and self.debug_import_scope.currentData())
-        if delta_only:
-            delta_hashes = self._compute_delta_hashes(ts)
-            fs = [r[2] for r in sub if r[2] and os.path.exists(r[2]) and r[0] in delta_hashes]
-            logger.info(f"[导入AS] 增量导入：{len(fs)} 个增量 bundle（增量 hash {len(delta_hashes)} 个）")
-        else:
-            fs = [r[2] for r in sub if r[2] and os.path.exists(r[2])]
-        if not fs:
-            QMessageBox.information(self, "无文件", "此版本没有已下载的 bundle，请先下载.")
-            return
-
-        # 计算路径
-        bundle_dir = os.path.dirname(fs[0])
-        isolate_bundle_dir = False
-        if export_categories in ({"lua"}, {"audio"}):
-            category = "lua" if export_categories == {"lua"} else "audio"
-            selected_fs, mapped, asset_count, map_path = self.import_controller.select_bundles(
-                category, fs, bundle_dir
-            )
-            if mapped:
-                fs = selected_fs
-                isolate_bundle_dir = True
-                logger.info(
-                    "[导入AS] %s 资源映射命中 %s 个资源，筛选 %s/%s 个 bundle",
-                    "Lua" if export_categories == {"lua"} else "音频",
-                    asset_count, len(fs), len(sub),
-                )
-                if not fs:
-                    QMessageBox.information(
-                        self,
-                        "没有对应资源",
-                        "该版本的资源映射中没有找到所选分类的资源。",
-                    )
-                    return
-            else:
-                logger.warning(
-                    "[导入AS] %s 资源映射不可用，无法提前精准筛选 bundle，将兼容扫描已下载包：%s",
-                    "Lua" if export_categories == {"lua"} else "音频",
-                    map_path,
-                )
-                self.status_bar.showMessage("未找到资源映射，将扫描已下载 bundle")
-        as_cli = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
-        if not os.path.exists(as_cli):
-            logger.error(f"AssetStudio.CLI.exe 不存在: {as_cli}")
-            QMessageBox.warning(self, "错误", f"AssetStudio CLI 不存在:\n{as_cli}")
-            return
-        logger.debug(f"AssetStudio.CLI 路径确认: {as_cli}")
-
-        # 取消已有导入线程
-        if self._import_worker is not None:
-            self._import_worker.cancel()
-            self._import_worker.wait(2000)
-
-        # 禁用导入按钮，显示进度条
-        self.btn_browse.setEnabled(False)
-        self.dl_progress.setVisible(True)
-        self.dl_progress.setValue(0)
-        self.dl_progress.setFormat("修复文件头: 0/0")
-        self.status_bar.showMessage("正在导入AS: 修复文件头...")
-
-        # 启动后台工作线程
-        # 大规模操作告知耗时（全量导出 bundle 数大时）
-        if len(fs) > 1000:
-            ret = QMessageBox.question(
-                self, "耗时提示",
-                f"本次将导入 {len(fs)} 个 bundle，预计耗时较长（可能数分钟）。\n\n是否继续？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-            if ret != QMessageBox.Yes:
-                self.btn_browse.setEnabled(True)
-                self.dl_progress.setVisible(False)
-                return
-        logger.info(f"开始导入AS: 版本 {ts}, 共 {len(fs)} 个 bundle 文件，勾选导出分类 {sorted(export_categories)}")
-        self._import_worker = self.import_controller.start(
-            fs, bundle_dir, as_cli,
-            export_categories=export_categories,
-            version_timestamp=ts,
-            lua_output_dir=LUA_OUTPUT_DIR,
-            isolate_bundle_dir=isolate_bundle_dir,
-        )
-
-        # 进度弹窗（非模态，可取消）
-        self._import_progress_dialog = QProgressDialog("正在导入 AS...", "取消", 0, 100, self)
-        self._import_progress_dialog.setWindowTitle("导入 AS")
-        self._import_progress_dialog.setWindowModality(Qt.NonModal)
-        self._import_progress_dialog.setMinimumDuration(0)
-        self._import_progress_dialog.setAutoClose(False)
-        self._import_progress_dialog.setAutoReset(False)
-        self._import_progress_dialog.setMinimumWidth(520)
-        self._import_progress_dialog.setMinimumHeight(160)
-        self._import_progress_dialog.canceled.connect(self._import_worker.cancel)
-        self._import_progress_dialog.show()
+        self.runtime.shell_contribution.import_selected()
+        return
 
     def _on_import_progress(self, stage_name, current, total):
         """导入AS进度更新（两行：阶段名 + 进度/处理中，避免来回跳）"""
@@ -630,12 +504,7 @@ class MainWindow(QMainWindow):
 
     def _append_changelog(self, message):
         """追加导入更新日志到 output/CHANGELOG.md（像 git 提交记录）"""
-        try:
-            out_log = os.path.join(get_base_dir(), "output", "CHANGELOG.md")
-            self.version_service.append_changelog(out_log, message)
-            logger.info(f"已写更新日志: {out_log}")
-        except Exception as e:
-            logger.warning(f"写更新日志失败: {e}")
+        self.runtime.shell_contribution.append_changelog(message)
 
     def _browse_version(self, ts):
         """备用方法：打开资源浏览器窗口（当前未使用，保留以备后用）"""
@@ -690,28 +559,7 @@ class MainWindow(QMainWindow):
 
     def _activate_feature(self, key):
         """按 Runtime descriptor 激活页面，并执行该页面的首次加载动作。"""
-        if key not in self._nav_buttons:
-            return
-        self.runtime.registry.activate(key)
-        self._set_active_view_btn(self._nav_buttons[key])
-        self._set_toolbars_visible(key == "versions")
-        self._show_character = key == "character"
-        if key == "versions":
-            self._set_version_content_visible(True)
-            self.version_controller.load()
-            QTimer.singleShot(0, self.audio_controller.preload_catalog)
-        else:
-            self._set_version_content_visible(False)
-        if key == "preview":
-            self.preview_controller.load()
-        elif key == "audio":
-            self.audio_controller.initialize_player()
-            self.audio_controller.load_catalog()
-        elif key == "character":
-            self.character_page.raise_()
-            self.character_page.show()
-            if not self.character_controller.data_loaded:
-                self.character_controller.restore_local()
+        self.runtime.activate_feature(key)
 
     def _set_toolbars_visible(self, visible):
         """切换视图时只隐藏侧边栏，顶部导航栏（view_toolbar/debug_toolbar）始终保留"""
@@ -746,12 +594,14 @@ class MainWindow(QMainWindow):
             return
         self._activate_feature("character")
 
-    def _on_preview_controller_progress(self, current, total, stage):
-        """接入 PreviewController 的统一进度语义。"""
+    def _on_feature_progress(self, page, current, total, stage):
+        """接入任意 Feature 的统一进度语义。"""
         if total > 0:
-            self.preview_page.preview_progress.setMaximum(total)
-            self.preview_page.preview_progress.setValue(current)
-            self.preview_page.preview_progress.setFormat(f"{stage}... {current}/{total}")
+            progress = getattr(page, "preview_progress", None)
+            if progress is not None:
+                progress.setMaximum(total)
+                progress.setValue(current)
+                progress.setFormat(f"{stage}... {current}/{total}")
         self.status_bar.showMessage(
             f"{stage}: {current}/{total}" if total > 0 else f"{stage}: 处理中..."
         )
@@ -759,20 +609,15 @@ class MainWindow(QMainWindow):
     # ========== DELETE ==========
 
     def _delete_version(self, ts):
-        self.version_controller.delete_version(ts)
+        self.runtime.shell_contribution.delete_version(ts)
 
     # ========== SEED ==========
 
     def _seed_bundled_version(self):
-        self.version_service.seed()
+        self.runtime.shell_contribution.seed()
 
     def _check_auto(self):
-        cur = self.version_service.current()
-        if not cur:
-            self.status_bar.showMessage("首次启动, 自动检查更新...")
-            QTimer.singleShot(1500, self.version_controller.check_update)
-        else:
-            QTimer.singleShot(500, lambda: self.status_bar.showMessage("就绪"))
+        self.runtime.shell_contribution.schedule_update_check()
 
     def closeEvent(self, event):
         self.runtime.registry.close()

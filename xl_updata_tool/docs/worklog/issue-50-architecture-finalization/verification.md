@@ -121,7 +121,7 @@
 - [x] 全量 pytest 180 项、Ruff、AST `AST_OK 179`、`P8_IMPORT_SMOKE_OK`、runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')` 和 core import zero 检查通过。
 - [x] 针对性测试曾发现旧测试 patch 迁移前内部变量，已按稳定 Controller API 修正并重新通过；未改变产品行为。
 
-## P8 终态复核（2026-08-24）
+## P8 首次终态复核快照（已被后续修正证据取代）
 
 - [x] 独立复跑 `pytest -q`：180 项通过；仅出现仓库既有 `.pytest_cache` ACL 警告，未修改权限。
 - [x] 独立复跑 `ruff check --no-cache app tests`：通过。
@@ -129,3 +129,15 @@
 - [x] `app`、`tests`、`tools` 中实际 `from/import app.core` 引用归零，`app/core` 无 Python 模块：`P8_CORE_IMPORT_ZERO_OK`。
 - [x] 使用临时运行时目录执行 Qt offscreen Feature Runtime 装配：`RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`。
 - [x] `git diff --check`：通过。
+
+## P8 终态门禁修正（2026-08-24）
+
+- [x] 新增终态架构测试，稳定复现并阻止 Shell 按业务 key 下转具体 Feature Controller/Page/Service、Feature 间导入内部实现，以及旧 View 保留 `controls_dict`/`parent._xxx` 完整实现。
+- [x] `MainWindow` 改为只通过 `ApplicationRuntime`、`FeatureRuntime` 和通用 `ApplicationShellContribution` 接入功能；Shell contribution 保持 Qt-free，Qt 提示/进度能力通过 `ShellPort` 提供。
+- [x] `features/audio/album_map.py` 改用 `app/shared/lua.py` 的通用解析入口，消除 Audio → Characters Parser 的跨 Feature 内部依赖。
+- [x] `audio_view.py`、`preview_view.py`、`version_view.py` 经生产代码、测试、工具和正式文档引用归零核对后保持删除；测试已切换到对应 Feature Page。`character_view.py` 仍作为明确登记的兼容入口保留。
+- [x] 精确外部 basetemp 全量测试：原有 Sol 复核的 143 项基线加上 3 项终态架构测试后为 146 collected / 146 passed；此前 180 项记录标记为不可复现的旧快照，不再作为当前证据。
+- [x] Ruff：`ruff check --no-cache app tests` 通过。
+- [x] 不落盘 AST、Feature/Platform import smoke、临时运行目录 MainWindow Qt offscreen smoke 和终态架构复现器均通过：`AST_OK 182`、`MAIN_WINDOW_RUNTIME_SMOKE_OK`、`ARCHITECTURE_TERMINAL_OK`。
+- [x] `app`、`tests`、`tools` 的旧 `app.core` 生产引用归零，删除的三个旧 View 无有效引用；`git diff --check` 通过。
+- [ ] Sol 独立复核和用户实机验收：待进行；本分支仍未推送、未创建 PR。

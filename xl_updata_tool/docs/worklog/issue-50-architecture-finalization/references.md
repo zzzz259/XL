@@ -19,7 +19,7 @@
 
 ### `app/ui/views`
 
-`audio_view.py`、`character_view.py`、`preview_view.py`、`version_view.py`。
+`character_view.py`。`audio_view.py`、`preview_view.py`、`version_view.py` 已在生产代码、测试、工具和正式文档引用归零后删除；不得为了兼容旧路径重新恢复。
 
 ### `app/ui/workers`
 
@@ -39,13 +39,11 @@
   - `features/preview/worker.py` → `app.ui.workers.image_loader`、`preview_export`、`batch_export`、`composite_export`
   - `features/versions/worker.py` → `app.ui.workers.download`
 - Feature Page/Adapter → 旧 View/UI：
-  - `features/preview/page.py` → `app.ui.views.preview_view`
   - `features/preview/adapter.py` → `app.ui.adapters.spine_adapter`
   - `features/preview/fgui.py` → `app.ui.features.fgui_atlas`
-  - `features/versions/page.py` → `app.ui.views.version_view`
   - `features/characters/page.py` → `app.ui.widgets.character_profile`
   - `shared/qt/chrome.py` → `app.ui.widgets.view_chrome`
-- Shell → 具体 Feature Page/Controller/Service 以及多个 `app.core` 领域入口；这正是 P2 的 Composition Root/ShellPort 迁移目标，当前不能伪装成已完成。
+- Shell → `FeatureRuntime`、`ApplicationShellContribution` 和通用 `ShellPort`；Shell 不按业务 key 获取具体 Feature Controller/Page/Service。
 - Platform → 旧 `app.core` 基础设施门面；这些是 P6 的收口对象，不属于本阶段删除范围。
 - 工具/测试仍直接使用多个 `app.core.*` 与 `app.ui.workers.*` 入口；音频旧入口目前是薄兼容门面，其他领域必须在迁移和兼容策略明确后再处理。
 
@@ -65,12 +63,12 @@
 
 ## 当前 `controls_dict` / `parent._` 事实
 
-- `app/ui/views/audio_view.py`、`preview_view.py`、`character_view.py` 仍是迁移期控件字典/父窗口回调入口。
-- `features/preview/page.py` 仍通过旧 View 的控件字典建页内引用。
+- `app/ui/views/character_view.py` 是仍登记的兼容工厂；Audio、Preview、Versions 已使用各自 Feature Page。
+- Feature Page 自持控件，不通过旧 View 的控件字典建页内引用。
 - `features/preview/export_controller.py` 仍读取 `parent._...` worker、状态和骨架映射；P1 必须先建立行为等价的 Feature-owned 状态接口，再删除兼容桥。
 - 当前 P0 不修改上述生产实现，只把这些事实作为后续阶段的删除前置条件。
 
-## P0 基线命令与结果
+## P0 基线命令与结果（历史快照）
 
 - `pytest`：127 collected，127 passed。
 - `ruff check --no-cache app tests`：`All checks passed!`。
@@ -91,3 +89,10 @@ ruff check --no-cache xl_updata_tool/app xl_updata_tool/tests
 ```
 
 若仍有正式调用方、测试入口、工具入口或登记的兼容入口，保留薄门面并把调用方写入本清单；不得为目录整洁强删。
+
+## P8 终态修正后的当前引用结论（2026-08-24）
+
+- `app/ui/views/audio_view.py`、`preview_view.py`、`version_view.py` 的 tracked 源码、生产代码、测试、工具和正式文档引用均已归零，因此保持删除。
+- `app/ui/views/character_view.py` 仍是明确登记的兼容入口；其调用方继续保留在本清单，不将其与已归零的三个旧 View 混同。
+- `features/audio/album_map.py` 通过 `app.shared.lua` 使用通用 Lua 文本解析，不再跨 Feature 导入 Characters Parser 内部实现。
+- `app/ui/main_window.py` 只通过 Runtime 和通用 Shell contribution 接入功能，不按业务 key 下转具体 Controller/Page/Service。

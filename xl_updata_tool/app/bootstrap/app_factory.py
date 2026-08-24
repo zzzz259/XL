@@ -85,18 +85,24 @@ def create_application_runtime(context: AppContext, parent=None) -> ApplicationR
 
     from app.features.importer.postprocessing import PostProcessorRegistry
     from .workflows import ImportPostprocessWorkflow
+    from .shell_contribution import ApplicationShellContribution
 
     features = create_features(context, default_feature_definitions(parent=parent))
     registry = FeatureRuntimeRegistry(features)
     postprocessor_registry = PostProcessorRegistry(("lua", "audio"))
+    import_workflow = ImportPostprocessWorkflow(
+        registry.get("importer").controller,
+        registry.get("audio").controller,
+        registry.get("character").controller,
+        postprocessor_registry,
+    )
+    shell_contribution = ApplicationShellContribution(
+        registry, import_workflow, context
+    )
     return ApplicationRuntime(
         context=context,
         registry=registry,
         postprocessor_registry=postprocessor_registry,
-        import_workflow=ImportPostprocessWorkflow(
-            registry.get("importer").controller,
-            registry.get("audio").controller,
-            registry.get("character").controller,
-            postprocessor_registry,
-        ),
+        import_workflow=import_workflow,
+        shell_contribution=shell_contribution,
     )

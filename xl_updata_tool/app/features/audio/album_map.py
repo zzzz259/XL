@@ -14,8 +14,8 @@ import json
 import os
 import re
 
-from app.features.characters.parser import parse_word_file
 from app.platform.diagnostics import logger
+from app.shared.lua import parse_word_file
 
 
 def _normalise_bank_key(value):

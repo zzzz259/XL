@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from app.bootstrap.app_factory import FeatureDefinition, create_features
@@ -28,6 +29,50 @@ def test_production_entrypoint_builds_runtime_before_shell():
     assert "from app.features." not in shell_text
 
 
+def test_terminal_shell_does_not_downcast_feature_runtime():
+    """终态 Shell 只能消费 Runtime 与通用端口，不能按业务 key 取具体对象。"""
+    shell_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+    forbidden = (
+        'self._features["versions"].controller',
+        'self._features["preview"].controller',
+        'self._features["audio"].controller',
+        'self._features["character"].controller',
+        'self._features["importer"].controller',
+    )
+    assert all(token not in shell_text for token in forbidden)
+
+
+def test_features_do_not_import_other_feature_internals():
+    """Feature 之间只能通过 shared/bootstrap 契约连接，不能跨域导入内部实现。"""
+    violations = []
+    for path in (APP_DIR / "features").rglob("*.py"):
+        own_feature = path.relative_to(APP_DIR / "features").parts[0]
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            module = node.module if isinstance(node, ast.ImportFrom) else None
+            if module and module.startswith("app.features."):
+                target = module.split(".")[2]
+                if target != own_feature:
+                    violations.append((path, module))
+    assert violations == []
+
+
+def test_legacy_workspace_views_are_not_full_implementations():
+    """旧 UI 路径不能继续保留第二份 controls_dict/parent 回调实现。"""
+    for relative in (
+        Path("ui/views/audio_view.py"),
+        Path("ui/views/preview_view.py"),
+        Path("ui/views/version_view.py"),
+    ):
+        path = APP_DIR / relative
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "controls_dict" not in text
+        assert "parent._" not in text
+
+
 def test_core_layer_does_not_import_qt():
     """Keep the core layer usable in CLI/tests without a Qt runtime."""
     offenders = []
@@ -48,11 +93,11 @@ def test_legacy_asset_browser_has_explicit_compatibility_entrypoint():
 def test_ui_feature_boundaries_have_explicit_entrypoints():
     from app.ui.features.audio_controller import populate_audio_tree
     from app.ui.features.preview_controller import build_preview_item
-    from app.ui.views.version_view import create_version_table
+    from app.features.versions.page import VersionPage
 
     assert callable(populate_audio_tree)
     assert callable(build_preview_item)
-    assert callable(create_version_table)
+    assert hasattr(VersionPage, "set_visible")
 
 
 def test_p0_contract_layers_are_framework_free():
@@ -232,8 +277,8 @@ def test_importer_processing_is_qt_free_and_feature_worker_does_not_use_legacy_w
 def test_main_window_delegates_import_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert 'self._features["importer"]' in main_window_text
     assert "create_application_runtime" in main_window_text
+    assert "shell_contribution" in main_window_text
     assert "ImportASWorker" not in main_window_text
 
 
@@ -242,8 +287,8 @@ def test_preview_service_and_main_window_respect_feature_boundary():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
     assert "PySide6" not in service_text
-    assert 'self._features["preview"]' in main_window_text
     assert "create_application_runtime" in main_window_text
+    assert "runtime.install_shell" in main_window_text
     assert "PreviewExportWorker" not in main_window_text
     assert "ImageLoadWorker" not in main_window_text
 
@@ -255,8 +300,7 @@ def test_preview_export_and_compatibility_entrypoints_are_feature_owned():
     legacy_text = (APP_DIR / "ui" / "features" / "export_controller.py").read_text(encoding="utf-8")
     feature_export_text = (PREVIEW_FEATURE_DIR / "export_controller.py").read_text(encoding="utf-8")
 
-    assert 'self._features["preview"]' in main_window_text
-    assert "preview_controller" in main_window_text
+    assert "shell_contribution" in main_window_text
     assert "create_preview_view" not in page_text
     assert "self.controls" not in page_text
     assert "show_context_menu" in controller_text
@@ -295,7 +339,7 @@ def test_preview_workers_dialogs_and_adapters_are_feature_owned():
 def test_main_window_delegates_audio_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert 'self._features["audio"]' in main_window_text
+    assert "shell_contribution" in main_window_text
     assert "from app.features.audio" not in main_window_text
     assert "AudioService" not in main_window_text
     assert "AudioDecryptWorker" not in main_window_text
@@ -307,7 +351,7 @@ def test_main_window_delegates_audio_runtime_to_feature_controller():
 def test_main_window_delegates_character_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert 'self._features["character"]' in main_window_text
+    assert "shell_contribution" in main_window_text
     assert "CharacterController" not in main_window_text
     assert "CharacterService" not in main_window_text
     assert "create_character_view" not in main_window_text
@@ -320,7 +364,7 @@ def test_main_window_delegates_character_runtime_to_feature_controller():
 def test_main_window_delegates_version_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert 'self._features["versions"]' in main_window_text
+    assert "shell_contribution" in main_window_text
     assert "VersionController" not in main_window_text
     assert "VersionService" not in main_window_text
     assert "create_version_table" not in main_window_text

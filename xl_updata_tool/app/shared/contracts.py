@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Protocol
 
 
@@ -41,6 +42,31 @@ class WorkerPort(Protocol):
         """请求任务取消。"""
 
 
+class ShellPort(Protocol):
+    """Feature/Composition Root 面向桌面 Shell 的最小宿主端口。"""
+
+    def set_status(self, message: str) -> None:
+        """展示通用状态消息。"""
+
+    def set_progress(self, current: int, total: int, message: str) -> None:
+        """展示通用进度。"""
+
+    def schedule(self, delay_ms: int, callback: Callable[[], None]) -> None:
+        """在 Shell 所属 UI 线程调度回调。"""
+
+    def show_warning(self, title: str, message: str) -> None:
+        """展示警告。"""
+
+    def show_information(self, title: str, message: str) -> None:
+        """展示提示。"""
+
+    def confirm(self, title: str, message: str) -> bool:
+        """请求用户确认。"""
+
+    def create_progress_dialog(self, label: str, cancel_text: str) -> object:
+        """创建 Shell 托管的通用进度对话框。"""
+
+
 @dataclass(frozen=True)
 class FeatureDescriptor:
     """Shell 注册 Feature 所需的稳定元数据。"""
@@ -70,6 +96,7 @@ class FeatureRuntime:
     status_signal: object | None = None
     progress_signal: object | None = None
     badge_signal: object | None = None
+    badge_state: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)

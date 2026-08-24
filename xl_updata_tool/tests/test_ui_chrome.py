@@ -13,10 +13,8 @@ from app.ui.main_window import MainWindow
 from app.features.audio.controller import AudioController
 from app.features.audio.page import AudioPage
 from app.features.audio.service import AudioService
-from app.ui.views.audio_view import create_audio_view
-from app.ui.views.character_view import create_character_view
-from app.ui.views.preview_view import create_preview_view
-from app.ui.views.version_view import create_version_header, create_version_table
+from app.features.characters.page import CharacterPage
+from app.features.preview.page import PreviewPage
 from app.features.versions.page import VersionPage
 from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
 from app.features.audio.audio_library import format_size
@@ -31,10 +29,10 @@ def qapp():
 
 
 def test_feature_views_use_shared_page_chrome(qapp):
-    views = [create_preview_view()[0], create_audio_view()[0], create_character_view()[0]]
+    views = [PreviewPage(), AudioPage(), CharacterPage()]
 
     for view in views:
-        assert view.objectName() == "viewContainer"
+        assert view.objectName() in {"viewContainer", "previewPage"}
         assert view.findChild(QObject, "pageHeader") is not None
         assert view.findChild(QObject, "pageCommandBar") is not None
 
@@ -77,20 +75,17 @@ def test_feature_views_use_shared_page_chrome(qapp):
 
 def test_auto_update_routes_through_version_controller(monkeypatch):
     window = MainWindow.__new__(MainWindow)
-    window.version_service = SimpleNamespace(current=lambda: None)
-    window.version_controller = SimpleNamespace(check_update=MagicMock())
-    window.status_bar = SimpleNamespace(showMessage=MagicMock())
-    callbacks = []
-    monkeypatch.setattr(
-        "app.ui.main_window.QTimer.singleShot",
-        lambda _delay, callback: callbacks.append(callback),
+    check_update = MagicMock()
+    window.runtime = SimpleNamespace(
+        shell_contribution=SimpleNamespace(
+            schedule_update_check=MagicMock(side_effect=lambda: check_update())
+        )
     )
-
+    window.status_bar = SimpleNamespace(showMessage=MagicMock())
     window._check_auto()
 
-    assert len(callbacks) == 1
-    callbacks[0]()
-    window.version_controller.check_update.assert_called_once_with()
+    window.runtime.shell_contribution.schedule_update_check.assert_called_once_with()
+    check_update.assert_called_once_with()
 
 
 def test_version_page_visibility_controls_whole_page(qapp):
@@ -109,8 +104,8 @@ def test_version_page_visibility_controls_whole_page(qapp):
 
 
 def test_version_workspace_has_summary_and_stable_table_contract(qapp):
-    header, summary = create_version_header()
-    table = create_version_table()
+    page = VersionPage()
+    header, summary, table = page.version_header, page.version_summary, page.table
 
     assert header.objectName() == "workspaceHeader"
     assert summary.objectName() == "workspaceSummary"
@@ -145,7 +140,9 @@ def test_main_view_toolbar_builds_qicons_for_navigation(qapp):
 
 def test_character_unread_only_marks_character_tab(qapp):
     window = MainWindow.__new__(MainWindow)
-    window.character_controller = SimpleNamespace(has_unread=True)
+    window.runtime = SimpleNamespace(
+        registry=SimpleNamespace(badge_states=lambda: (("character", True),))
+    )
     window._unread_badges = {
         "home": QLabel(),
         "preview": QLabel(),
@@ -163,8 +160,11 @@ def test_character_unread_only_marks_character_tab(qapp):
 
 def test_audio_unread_only_marks_audio_tab(qapp):
     window = MainWindow.__new__(MainWindow)
-    window.character_controller = SimpleNamespace(has_unread=False)
-    window.audio_controller = SimpleNamespace(has_unread=True)
+    window.runtime = SimpleNamespace(
+        registry=SimpleNamespace(
+            badge_states=lambda: (("character", False), ("audio", True))
+        )
+    )
     window._unread_badges = {
         "home": QLabel(),
         "preview": QLabel(),

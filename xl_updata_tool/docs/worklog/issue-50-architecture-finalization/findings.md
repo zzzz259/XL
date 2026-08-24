@@ -145,3 +145,9 @@
 - Lua 成品仓库归入 `app/platform/lua_repository.py`；Importer、Characters、Audio 均已切换到 platform 入口。
 - 对 `app`、`tests`、`tools` 的生产导入引用归零核对通过后，删除了 `app/core` 下全部纯转发 Python 文件；无用户数据、数据库或 output 目录变更。
 - P8 期间一次针对性测试发现旧 UI chrome 测试仍 patch 已移除的 `audio_unread_files` 模块变量；根因是测试绑定了迁移前内部实现，已改为通过 `AudioController.has_unread` 验证同一用户行为，未修改产品行为。
+
+## P8 终态复核修正结论（2026-08-24）
+
+- 初始 P8 快照中关于 `preview_view.py` 保留的判断已失效。重新核对 tracked 生产代码、测试、工具和正式文档后，Audio、Preview、Versions 三个旧 View 均无有效调用方，因此保持删除；只有 `character_view.py` 仍是明确登记的兼容入口。
+- Shell 的终态边界由 `ApplicationRuntime`、`FeatureRuntime`、`ApplicationShellContribution` 和 `ShellPort` 固化；`MainWindow` 不再按业务 key 取得具体 Controller/Page/Service。
+- Audio 专辑映射所需的通用 Lua 文本解析已抽到 `app/shared/lua.py`，Feature 之间不再互相导入内部 Parser。

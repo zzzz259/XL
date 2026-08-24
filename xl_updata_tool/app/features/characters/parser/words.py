@@ -3,19 +3,7 @@
 
 import re
 
-
-def parse_word_file(file_path):
-    """解析 BaseWord_cn.lua，返回 word_dict (id -> 文本)。"""
-    result = {}
-    content = file_path.read_text(encoding="utf-8") if hasattr(file_path, "read_text") else open(file_path, encoding="utf-8").read()
-    pattern = r'\[(\d+)\] = \{(.*?)\}(?=,|\n\s*\]|\n\s*\})'
-    for key_id, item_content in re.findall(pattern, content, re.DOTALL):
-        name_match = re.search(r'(?:name|sub_name) = "([^"]+)"', item_content)
-        if name_match:
-            result[int(key_id)] = name_match.group(1)
-    for match in re.finditer(r'\[\s*(\d+)\s*\]\s*=\s*"([^"]*)"', content):
-        result[int(match.group(1))] = match.group(2)
-    return result
+from app.shared.lua import parse_word_file as parse_word_file
 
 
 def parse_cv_file(file_path):
