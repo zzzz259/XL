@@ -597,3 +597,16 @@ app/features/audio/
 - [completed] MainWindow 已改为装配 Preview Feature；图片目录扫描、角色筛选、缩略图加载、立绘导出任务生命周期由 Feature 控制器管理。
 - [completed] 保留 `preview_view.py`、`preview_controller.py`、四类旧 Worker 作为兼容入口；未改变 `output/character` 和 Spine 导出行为。
 - [completed] 完成 Preview 目录/架构测试、全量 pytest、Ruff、Qt 启动冒烟和 diff 检查；用户验证通过后继续 P5b 的 FGUI/Spine/视频导出边界收口。
+
+### P5b 当前执行：FGUI / Spine / 视频导出入口
+
+- [in_progress] 将 `export_controller.py` 的导出编排切换到 Preview Feature，旧 UI 路径保留兼容转发。
+- [pending] 将 FGUI 图集切割、Spine/FFmpeg 适配和批量 Worker 入口纳入 Preview ownership。
+- [pending] 补充导出计划、输出路径、取消和兼容入口测试；不改变 `output/fgui`、`output/video` 和角色图片输出契约。
+
+### P5b 检查点结果
+
+- [completed] 导出编排已切换到 `app/features/preview/export_controller.py`；`app/ui/features/export_controller.py` 保留为兼容转发。
+- [completed] FGUI 图集和 Spine/FFmpeg 适配新增 Preview Feature 入口，批量/合成 Worker 通过 Feature Worker 入口装配；不改变外部工具参数与 output 契约。
+- [completed] 完成兼容导入、架构边界、全量 pytest、Ruff、AST 解析 139 个 Python 文件、实际 Qt 启动冒烟和 diff 检查。
+- [completed] P5 主要 UI/导出 ownership 迁移完成；外部工具 Platform 适配的最终下沉列入下一阶段 Platform/Shared 收缩。

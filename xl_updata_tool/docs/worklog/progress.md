@@ -368,3 +368,13 @@
 - [completed] 新增 `PreviewPage`、`PreviewService`、`PreviewController`、预览项构造和功能域 Worker 入口。
 - [completed] MainWindow 已切换图片预览页面、目录扫描、角色筛选、缩略图加载和立绘导出任务到 Preview Feature；旧页面/Worker 保留兼容。
 - [completed] 定向测试、全量 pytest、Ruff、实际 Qt 启动冒烟和 diff 检查通过；等待用户验证 P5a 后继续 FGUI/Spine/视频导出边界。
+
+- [in_progress] 开始 P5b：收口 FGUI 图集、Spine 合成和视频导出入口；先移动编排 ownership，不改外部工具算法。
+
+- [completed] 导出编排已切换到 `app/features/preview/export_controller.py`，旧 UI 入口改为兼容转发。
+- [completed] FGUI、Spine/FFmpeg 适配和批量/合成 Worker 已增加 Preview Feature 入口；全量 pytest、Ruff、AST、Qt smoke 和 diff 检查通过。
+- [completed] Preview P5 迁移完成，下一阶段进入 Platform/Shared 收缩；外部工具适配器暂保留旧实现作为兼容底层。
+
+### P5b 调查错误
+
+- [completed] Feature 导出适配器初版漏转发部分旧 Spine 函数，导致兼容导入失败；已根据旧 Worker 实际导入清单补齐入口，并通过导入 smoke 与全量测试。

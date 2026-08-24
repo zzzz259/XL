@@ -110,6 +110,17 @@ def test_preview_service_and_main_window_respect_feature_boundary():
     assert "ImageLoadWorker" not in main_window_text
 
 
+def test_preview_export_and_compatibility_entrypoints_are_feature_owned():
+    main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+    legacy_text = (APP_DIR / "ui" / "features" / "export_controller.py").read_text(encoding="utf-8")
+    feature_export_text = (PREVIEW_FEATURE_DIR / "export_controller.py").read_text(encoding="utf-8")
+
+    assert "app.features.preview.export_controller" in main_window_text
+    assert "app.features.preview.export_controller" in legacy_text
+    assert "CompositeExportWorker" in feature_export_text
+    assert "BatchExportWorker" in feature_export_text
+
+
 def test_main_window_delegates_audio_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 

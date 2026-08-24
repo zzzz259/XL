@@ -1,6 +1,13 @@
 from app.features.preview.service import PreviewService
 
 
+def test_preview_export_compatibility_entrypoints_resolve_to_same_callable():
+    from app.features.preview.export_controller import batch_export_with_dialog
+    from app.ui.features.export_controller import batch_export_with_dialog as legacy_batch_export
+
+    assert batch_export_with_dialog is legacy_batch_export
+
+
 def test_preview_service_scans_final_images_recursively_and_roles(tmp_path):
     material = tmp_path / "material"
     cardspine = material / "assets" / "art" / "models" / "cardspine"

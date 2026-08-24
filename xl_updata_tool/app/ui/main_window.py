@@ -38,7 +38,7 @@ from app.core.path_utils import get_data_dir, get_base_dir, get_tools_dir
 
 # 拆分后的模块导入
 from .dialogs.image_viewer import ImageViewerDialog
-from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
+from app.features.preview.adapter import extract_skin_name_from_png, is_composite_png
 from app.features.audio.page import AudioPage
 from app.features.audio.controller import AudioController
 from app.features.versions.page import VersionPage
@@ -53,7 +53,7 @@ from app.features.importer.service import ImporterService
 from app.features.preview.page import PreviewPage
 from app.features.preview.controller import PreviewController
 from app.features.preview.service import PreviewService
-from .features.export_controller import (
+from app.features.preview.export_controller import (
     export_composite_video,
     export_with_dialog,
     batch_export_with_dialog,

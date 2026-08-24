@@ -8,8 +8,8 @@ from PySide6.QtCore import QThread, Signal
 from app.core.logger import logger, timed
 from app.core.path_utils import DATA_DIR, get_base_dir
 
-from app.ui.features.fgui_atlas import UIPackageTool
-from app.ui.adapters.spine_adapter import (
+from app.features.preview.fgui import UIPackageTool
+from app.features.preview.adapter import (
     find_paired_files,
     composite_images,
     composite_with_offset,
