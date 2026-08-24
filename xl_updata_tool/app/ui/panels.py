@@ -13,7 +13,7 @@ from .theme import (
     TEXT_SECONDARY, TEXT_MUTED, SUCCESS
 )
 from app.core import database as db
-from app.core.audio_library import format_size
+from app.features.audio.audio_library import format_size
 
 
 def ticks_to_date(ticks):

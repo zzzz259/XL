@@ -1,4 +1,4 @@
-from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
+from app.features.audio.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
 
 
 def test_scan_audio_files_filters_and_sorts_relative_names(tmp_path):

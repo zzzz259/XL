@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QListWidgetItem
 
-from app.core.preview_catalog import find_skel_paths
+from app.features.preview.catalog import find_skel_paths
 
 
 def build_preview_item(image_path: str, thumbnail, skel_map: dict) -> QListWidgetItem:

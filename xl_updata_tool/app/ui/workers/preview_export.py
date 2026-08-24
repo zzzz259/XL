@@ -19,7 +19,7 @@ from app.features.preview.adapter import (
     export_skel_skins,
     extract_character_id,
 )
-from app.core.prefab_parser import parse_prefab, compute_pixel_offset, build_cardspine_bundle_map
+from app.features.preview.prefab_parser import parse_prefab, compute_pixel_offset, build_cardspine_bundle_map
 
 
 class PreviewExportWorker(QThread):

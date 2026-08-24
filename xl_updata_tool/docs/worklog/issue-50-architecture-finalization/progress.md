@@ -14,7 +14,10 @@
 - [completed] P4：迁移 Audio 处理 Worker；Qt-free 音频处理进入 Feature，生产 Feature Worker 不再依赖旧 `app/ui/workers/audio_decrypt.py`，旧路径保留薄兼容门面。
 - [pending] P5：迁移 Importer / AssetStudio Worker，去除 Feature 对旧导入 Worker 的生产依赖。
 - [completed] P5：迁移 Importer / AssetStudio Worker；Qt-free 导入处理进入 Feature，生产 Feature Worker 不再依赖旧 `app/ui/workers/import_as.py`，旧路径保留薄兼容门面。
-- [pending] P6：按 Feature 归位领域代码并清场基础设施旧门面。
+- [completed] P6a：归位音频与预览领域实现；`app/core` 对应路径降为兼容转发，Feature 内部不再从 core 获取这些领域实现。
+- [pending] P6b：归位版本与导入领域实现及其基础设施边界。
+- [pending] P6c：归位角色领域仓库/展示实现。
+- [pending] P6d：收口平台与诊断基础设施。
 
 ## 偏差
 

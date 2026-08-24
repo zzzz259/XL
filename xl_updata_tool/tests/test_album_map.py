@@ -1,6 +1,6 @@
 import json
 
-from app.core.album_map import audit_bgm_exports, build_album_bank_map, build_album_map
+from app.features.audio.album_map import audit_bgm_exports, build_album_bank_map, build_album_map
 
 
 def test_album_map_keeps_full_bank_path_and_filename_aliases(tmp_path, monkeypatch):
@@ -21,7 +21,7 @@ def test_album_map_keeps_full_bank_path_and_filename_aliases(tmp_path, monkeypat
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "app.core.album_map.parse_word_file",
+        "app.features.audio.album_map.parse_word_file",
         lambda _path: {80880005: "第五专辑"},
     )
 
@@ -48,7 +48,7 @@ def test_audit_bgm_exports_reports_missing_lua_bank(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "app.core.album_map.parse_word_file",
+        "app.features.audio.album_map.parse_word_file",
         lambda _path: {80880005: "第五专辑"},
     )
     audio_dir = tmp_path / "audio"

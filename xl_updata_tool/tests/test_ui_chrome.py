@@ -19,7 +19,7 @@ from app.ui.views.preview_view import create_preview_view
 from app.ui.views.version_view import create_version_header, create_version_table
 from app.features.versions.page import VersionPage
 from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
-from app.core.audio_library import format_size
+from app.features.audio.audio_library import format_size
 from app.ui.theme import DANGER, TEXT_MUTED
 
 

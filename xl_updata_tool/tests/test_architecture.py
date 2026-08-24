@@ -87,6 +87,22 @@ def test_audio_processing_is_qt_free_and_feature_worker_does_not_use_legacy_work
     assert "app.features.audio.worker" in legacy_text
 
 
+def test_audio_and_preview_domain_implementations_live_in_feature_directories():
+    audio_files = ["audio_library.py", "audio_repository.py", "album_map.py"]
+    preview_files = ["catalog.py", "prefab_parser.py"]
+    for filename in audio_files:
+        text = (AUDIO_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+    for filename in preview_files:
+        text = (PREVIEW_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+
+    assert "app.features.audio.audio_library" in (CORE_DIR / "audio_library.py").read_text(encoding="utf-8")
+    assert "app.features.preview.catalog" in (CORE_DIR / "preview_catalog.py").read_text(encoding="utf-8")
+
+
 def test_characters_page_and_service_respect_feature_boundaries():
     page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
     service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")

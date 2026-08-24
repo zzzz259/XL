@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from app.core.preview_catalog import (
+from .catalog import (
     build_skel_map,
     scan_cardspine_roles,
     scan_preview_roles,

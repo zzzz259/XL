@@ -6,13 +6,13 @@ import os
 from collections import defaultdict
 from pathlib import Path
 
-from app.core.audio_library import (
+from .audio_library import (
     export_audio_files,
     format_duration,
     format_size,
     scan_audio_files,
 )
-from app.core.audio_repository import mark_all_read, mark_read, sync_audio_snapshot
+from .audio_repository import mark_all_read, mark_read, sync_audio_snapshot
 
 
 def _normalise_directory(value: str | os.PathLike[str] | None) -> str:

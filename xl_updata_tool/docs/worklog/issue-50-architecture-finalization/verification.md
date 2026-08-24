@@ -68,3 +68,10 @@
 - [x] Bundle 修复、AssetStudio 映射、分类导出、staging 提交/回滚、Lua 发布、精准 Bundle 输入和取消语义由单一处理器承载。
 - [x] 旧导入入口保留为薄兼容门面，没有第二份实现；删除前的引用归零条件仍未满足。
 - [x] 全量 pytest 134 passed、Ruff、AST 161、Importer import smoke、runtime Qt smoke 和 diff check 通过。
+
+## P6a 退出门
+
+- [x] 音频目录、快照、专辑映射和预览目录/Prefab 解析的真实实现已进入对应 Feature。
+- [x] `app/core` 旧路径仅保留兼容转发；Feature 内部 import 已切换到新路径。
+- [x] 兼容调用方仍有登记，未执行无证据删除。
+- [x] 全量 pytest 135 passed、Ruff、AST 166、P6 import smoke、runtime Qt smoke 和 diff check 通过。

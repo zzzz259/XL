@@ -1,4 +1,4 @@
-from app.core.preview_catalog import build_skel_map, find_skel_paths, scan_cardspine_roles, scan_preview_roles
+from app.features.preview.catalog import build_skel_map, find_skel_paths, scan_cardspine_roles, scan_preview_roles
 
 
 def test_find_skel_paths_handles_animation_and_composite_names(tmp_path):

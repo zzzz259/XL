@@ -96,3 +96,10 @@
 - `app/features/importer/worker.py` 已收回 Importer Worker ownership，只把 Qt 线程生命周期、取消、进度、阶段、分类和完成回调映射为既有信号。
 - 旧 `app/ui/workers/import_as.py` 保留为 `ImportASWorker` 薄兼容门面；生产 Feature 不再反向引用旧路径。
 - P5 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（134 项）；Ruff 通过；不落盘 AST `AST_OK 161`；Importer import smoke `IMPORTER_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。
+
+## P6a 退出复核（2026-08-24）
+
+- 音频领域真实实现已归入 `app/features/audio/{audio_library,audio_repository,album_map}.py`；预览目录和 Prefab 解析已归入 `app/features/preview/{catalog,prefab_parser}.py`。
+- `app/core/` 对应五个旧路径改为显式迁移期转发；Audio/Preview Feature 内部 import 已切到 Feature 路径，测试和预览导出调用方同步切换。
+- P6a 未删除兼容门面：`git grep` 仍能发现旧入口被测试、Shell、旧 UI 或兼容模块使用；引用归零留到 P8 的清理门。
+- P6a 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（135 项）；Ruff 通过；不落盘 AST `AST_OK 166`；`P6_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。
