@@ -12,13 +12,13 @@
 - [completed] P2：五个 Feature 工厂、opaque 状态/进度/角标端口和 Qt-free Runtime registry 已建立；生产装配暂未切换。
 - [completed] P3：生产入口、descriptor 导航和 ImportResult 后处理 workflow 已切换；全量门禁和 runtime Qt smoke 通过。
 - [completed] P4：迁移 Audio 处理 Worker；Qt-free 音频处理进入 Feature，生产 Feature Worker 不再依赖旧 `app/ui/workers/audio_decrypt.py`，旧路径保留薄兼容门面。
-- [pending] P5：迁移 Importer / AssetStudio Worker，去除 Feature 对旧导入 Worker 的生产依赖。
 - [completed] P5：迁移 Importer / AssetStudio Worker；Qt-free 导入处理进入 Feature，生产 Feature Worker 不再依赖旧 `app/ui/workers/import_as.py`，旧路径保留薄兼容门面。
 - [completed] P6a：归位音频与预览领域实现；`app/core` 对应路径降为兼容转发，Feature 内部不再从 core 获取这些领域实现。
 - [completed] P6b-版本：归位版本仓库、差异、下载计划、更新持久化、本地 Bundle 同步和种子实现；对应 core 路径降为兼容转发。
 - [completed] P6b-Bundle：归位 Bundle Parser/Selector/Manager，并收口 Versions/Importer 调用边界；旧 core 路径保留兼容转发。
 - [completed] P6c：归位角色缓存、展示模型、Wiki Profile 和增量仓库实现；`character_loader.py` 留待 P7。
 - [completed] P6d：收口平台与诊断基础设施；`app/core` 对应路径降为兼容转发，平台实现与诊断契约已稳定。
+- [completed] P7：拆分角色 Lua 解析器；按通用参数、基础表、养成消耗、技能、BaseCard 聚合和整体装配归位，保留旧 core re-export 入口并加入脱敏 fixture/golden 保护。
 
 ## 偏差
 

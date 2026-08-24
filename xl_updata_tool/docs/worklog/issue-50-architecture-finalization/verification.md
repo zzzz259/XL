@@ -103,3 +103,12 @@
 - [x] 平台实现不依赖对应 `app.core` 兼容模块；旧 core 路径保留兼容转发。
 - [x] 临时 compat 文件误入暂存的问题已用修正检查点恢复并验证。
 - [x] 全量 pytest 139 passed、Ruff、AST 187、兼容 import smoke、runtime Qt smoke 和 diff check 通过。
+
+## P7 退出门
+
+- [x] `app/features/characters/parser/` 已按职责包含 common、words、progression、skills、cards、assembler；各模块无 Qt 依赖。
+- [x] Character Service、音频专辑映射和角色解析测试已切到 Feature Parser；`app/core/character_loader.py` 仅为兼容 re-export。
+- [x] 脱敏 fixture 完整形状测试通过；旧实现与同一临时 fixture 深度等价核对通过：`P7_GOLDEN_EQUIVALENCE_OK`。
+- [x] 针对性测试、全量 pytest 141 项、Ruff、AST `AST_OK 193` 通过；删除/引用检查确认生产代码不再依赖旧 core 实现。
+- [x] `P7_IMPORT_SMOKE_OK`、`RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')` 和 `git diff --check` 通过。
+- [x] 本阶段源码引用检查确认 `app`、`tests`、`tools`、`scripts` 不再直接依赖 `app.core.character_loader`；兼容入口仍可导入。

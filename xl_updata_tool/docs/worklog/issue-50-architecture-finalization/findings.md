@@ -130,3 +130,10 @@
 - `app/core` 对应路径保留兼容转发，应用内部新引用已切到 platform；平台实现不再依赖这些 core 兼容模块。
 - 首次提交准备时发现 Git 命令工作目录前缀错误，产生了临时 compat 文件且未带入 core 转发；已立即建立修正检查点 `19f0268`，恢复兼容入口并删除临时文件，修正后验证通过。
 - P6d 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（139 项）；Ruff 通过；不落盘 AST `AST_OK 187`；兼容 import `COMPAT_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。
+
+## P7 角色 Lua 解析器拆分（2026-08-24）
+
+- 原 `app/core/character_loader.py` 的实现已迁移到 `app/features/characters/parser/`，按职责拆为 `common.py`、`words.py`、`progression.py`、`skills.py`、`cards.py` 和 `assembler.py`；`assembler.py` 保持 `load_character_data()`、返回结构和进度回调语义。
+- `CharacterService`、音频专辑映射和角色解析测试已切到 Feature Parser 公共入口；`app/core/character_loader.py` 仅保留 re-export 兼容入口，不维护第二份实现。
+- 新增脱敏的最小 Lua fixture 和完整结果形状测试，覆盖文本、CV、等级/品质属性、技能、角色卡、语音、故事、徽章和消耗装配；另用 `19f0268` 中的旧实现对同一临时 fixture 做深度等价核对，结果为 `P7_GOLDEN_EQUIVALENCE_OK`。
+- 解析器模块不依赖 PySide6/PyQt；无真实游戏数据进入版本库。

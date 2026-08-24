@@ -15,7 +15,7 @@ from .cache import (
     save_cache,
     source_mtime,
 )
-from app.core.character_loader import load_character_data
+from .parser import load_character_data
 from .presenter import export_characters_csv
 from .repository import (
     clear_all_unread,

@@ -14,7 +14,7 @@ import json
 import os
 import re
 
-from app.core.character_loader import parse_word_file
+from app.features.characters.parser import parse_word_file
 from app.platform.diagnostics import logger
 
 

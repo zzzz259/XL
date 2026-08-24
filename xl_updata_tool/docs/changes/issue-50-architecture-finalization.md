@@ -1,6 +1,6 @@
 # Issue #50：架构迁移收口
 
-状态：执行中，P0-P5 已完成，P6a 已完成，P6b-P6d 待进入。
+状态：执行中，P0-P7 已完成，P8 引用归零复核与终态验收待进入。
 
 本变更将沿现有 Feature Ownership 方向完成 Composition Root、兼容桥、Worker、领域代码归属、Character Parser 和终态架构测试收口。实施保持用户行为、输出目录、数据库、日志、信号、取消和失败语义不变。
 
@@ -19,3 +19,5 @@ P6b-Bundle 将 Bundle Parser、Selector、Manager 分别归入 platform、Import
 P6c 将角色缓存、展示/CSV、Wiki Profile 和增量仓库实现归入 Characters Feature；`character_loader.py` 留待 P7，未改变角色解析入口或数据结构。
 
 P6d 将数据库、文件、路径、进程、下载和诊断实现归入 `app/platform/`；`app/core` 对应路径保留兼容转发，未改变日志、数据库、运行模式或外部进程契约。
+
+P7 将角色 Lua 解析器按通用参数、基础表、养成消耗、技能、BaseCard 聚合和整体装配归入 `app/features/characters/parser/`；`CharacterService` 保持原稳定入口，旧 `app/core/character_loader.py` 仅保留兼容转发。新增脱敏 fixture 和旧实现深度等价保护，未改变角色数据结构、排序、进度回调或输出契约。

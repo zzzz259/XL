@@ -155,6 +155,19 @@ def test_character_domain_implementations_live_in_feature_directory():
     assert "app.features.characters.repository" in (CORE_DIR / "character_repository.py").read_text(encoding="utf-8")
 
 
+def test_character_parser_is_split_and_qt_free():
+    parser_dir = CHARACTERS_FEATURE_DIR / "parser"
+    expected = {"common.py", "words.py", "progression.py", "skills.py", "cards.py", "assembler.py"}
+    assert expected <= {path.name for path in parser_dir.glob("*.py")}
+    for path in parser_dir.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert "PyQt" not in text
+    service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    assert "app.core.character_loader" not in service_text
+    assert "from .parser import load_character_data" in service_text
+
+
 def test_platform_implementations_do_not_depend_on_core_compatibility_modules():
     platform_dir = APP_DIR / "platform"
     implementation_names = (
