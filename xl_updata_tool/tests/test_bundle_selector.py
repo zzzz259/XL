@@ -1,6 +1,6 @@
 import json
 
-from app.core.bundle_selector import select_audio_bundles, select_lua_bundles
+from app.features.importer.bundle_selector import select_audio_bundles, select_lua_bundles
 
 
 def test_select_lua_bundles_uses_container_and_source_mapping(tmp_path):

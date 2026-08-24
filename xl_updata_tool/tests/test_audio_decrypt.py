@@ -2,7 +2,7 @@ import os
 import sys
 import types
 
-from app.ui.workers.audio_decrypt import AudioDecryptWorker
+from app.features.audio.processing import AudioDecryptProcessor
 
 
 def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
@@ -24,9 +24,9 @@ def test_existing_audio_does_not_skip_new_bank(tmp_path, monkeypatch):
         calls.append((input_dir, output_dir, progress_callback, subdir_fn, workers, temp_dir, cancel_check, use_cache))
 
     monkeypatch.setitem(sys.modules, "epic7_debank", types.SimpleNamespace(run=fake_run))
-    monkeypatch.setattr("app.ui.workers.audio_decrypt.build_album_map", lambda _: {})
+    monkeypatch.setattr("app.features.audio.processing.build_album_map", lambda _: {})
 
-    worker = AudioDecryptWorker(
+    worker = AudioDecryptProcessor(
         str(tmp_path / "material"),
         str(audio_output_dir),
         str(debank_dir),
@@ -47,7 +47,7 @@ def test_audio_worker_normalizes_duplicate_battle_hit_names(tmp_path):
         path.write_bytes(bytes([suffix]))
         paths.append(str(path))
 
-    worker = AudioDecryptWorker(
+    worker = AudioDecryptProcessor(
         str(tmp_path / "material"),
         str(tmp_path / "output" / "audio"),
         str(tmp_path / "debank"),
@@ -79,7 +79,7 @@ def test_audio_worker_normalizes_uniform_foreign_voice_prefix(tmp_path):
         path.write_bytes(b"audio")
         paths.append(str(path))
 
-    worker = AudioDecryptWorker(
+    worker = AudioDecryptProcessor(
         str(tmp_path / "material"),
         str(tmp_path / "output" / "audio"),
         str(tmp_path / "debank"),
@@ -102,7 +102,7 @@ def test_audio_worker_removes_cross_character_voice_files(tmp_path):
     voice_dir.mkdir(parents=True)
     stale = voice_dir / "095_battle_atk_01.wav"
     stale.write_bytes(b"stale")
-    worker = AudioDecryptWorker(
+    worker = AudioDecryptProcessor(
         str(tmp_path / "material"),
         str(tmp_path / "output" / "audio"),
         str(tmp_path / "debank"),
@@ -122,7 +122,7 @@ def test_audio_worker_corrects_same_named_file_in_old_album(tmp_path):
     old = tmp_path / "output" / "audio" / "album" / "未分类" / "event.wav"
     old.parent.mkdir(parents=True)
     old.write_bytes(b"old")
-    worker = AudioDecryptWorker(
+    worker = AudioDecryptProcessor(
         str(tmp_path / "material"),
         str(tmp_path / "output" / "audio"),
         str(tmp_path / "debank"),
@@ -145,7 +145,7 @@ def test_audio_worker_does_not_delete_current_bgm_staging_file(tmp_path):
     current = staging / "event.wav"
     current.write_bytes(b"current")
 
-    worker = AudioDecryptWorker(
+    worker = AudioDecryptProcessor(
         str(tmp_path / "material"),
         str(audio_root),
         str(tmp_path / "debank"),
@@ -169,7 +169,7 @@ def test_audio_worker_keeps_cn_file_when_processing_same_named_jp_file(tmp_path)
     cn_file.write_bytes(b"cn")
     jp_file.write_bytes(b"jp")
 
-    worker = AudioDecryptWorker(
+    worker = AudioDecryptProcessor(
         str(tmp_path / "material"),
         str(tmp_path / "output" / "audio"),
         str(tmp_path / "debank"),

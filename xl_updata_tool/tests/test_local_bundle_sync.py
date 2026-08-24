@@ -1,5 +1,5 @@
-from app.core import database as db
-from app.core.local_bundle_sync import sync_local_bundles
+from app.platform import database as db
+from app.features.versions.local_bundle_sync import sync_local_bundles
 
 
 def test_sync_local_bundles_uses_disk_as_source_of_truth(tmp_path):

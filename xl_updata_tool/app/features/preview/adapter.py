@@ -1,6 +1,6 @@
 """Spine/FFmpeg 外部工具适配的 Preview Feature 入口。"""
 
-from app.ui.adapters.spine_adapter import (
+from .spine_adapter import (
     composite_images,
     composite_with_offset,
     cleanup_temp,

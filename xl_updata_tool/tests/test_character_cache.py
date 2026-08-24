@@ -1,4 +1,4 @@
-from app.core.character_cache import derive_character_index, load_cache, save_cache, source_mtime
+from app.features.characters.cache import derive_character_index, load_cache, save_cache, source_mtime
 
 
 def test_derive_character_index_filters_and_sorts_roles():

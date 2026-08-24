@@ -53,6 +53,12 @@ class ImportController(QObject):
         if self.worker is not None:
             self.worker.cancel()
 
+    def select_bundles(self, category: str, bundle_paths, bundle_dir):
+        """按导出分类选择精准 Bundle，隐藏 Selector 具体实现。"""
+        map_path = self.service.asset_map_path(category, bundle_dir)
+        selected, mapped, asset_count = self.service.select_bundles(category, bundle_paths, map_path)
+        return selected, mapped, asset_count, map_path
+
     def wait(self, timeout=2000):
         return self.worker.wait(timeout) if self.worker is not None else True
 
@@ -86,4 +92,3 @@ class ImportController(QObject):
         )
         self.result_ready.emit(self.last_result)
         self.all_finished.emit(success, message)
-

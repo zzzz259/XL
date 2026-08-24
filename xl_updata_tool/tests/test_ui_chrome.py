@@ -13,13 +13,11 @@ from app.ui.main_window import MainWindow
 from app.features.audio.controller import AudioController
 from app.features.audio.page import AudioPage
 from app.features.audio.service import AudioService
-from app.ui.views.audio_view import create_audio_view
-from app.ui.views.character_view import create_character_view
-from app.ui.views.preview_view import create_preview_view
-from app.ui.views.version_view import create_version_header, create_version_table
+from app.features.characters.page import CharacterPage
+from app.features.preview.page import PreviewPage
 from app.features.versions.page import VersionPage
 from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
-from app.core.audio_library import format_size
+from app.features.audio.audio_library import format_size
 from app.ui.theme import DANGER, TEXT_MUTED
 
 
@@ -31,10 +29,10 @@ def qapp():
 
 
 def test_feature_views_use_shared_page_chrome(qapp):
-    views = [create_preview_view()[0], create_audio_view()[0], create_character_view()[0]]
+    views = [PreviewPage(), AudioPage(), CharacterPage()]
 
     for view in views:
-        assert view.objectName() == "viewContainer"
+        assert view.objectName() in {"viewContainer", "previewPage"}
         assert view.findChild(QObject, "pageHeader") is not None
         assert view.findChild(QObject, "pageCommandBar") is not None
 
@@ -75,6 +73,21 @@ def test_feature_views_use_shared_page_chrome(qapp):
     assert any(button.text() == "全部标为已读" for button in views[2].findChildren(QPushButton))
 
 
+def test_auto_update_routes_through_version_controller(monkeypatch):
+    window = MainWindow.__new__(MainWindow)
+    check_update = MagicMock()
+    window.runtime = SimpleNamespace(
+        shell_contribution=SimpleNamespace(
+            schedule_update_check=MagicMock(side_effect=lambda: check_update())
+        )
+    )
+    window.status_bar = SimpleNamespace(showMessage=MagicMock())
+    window._check_auto()
+
+    window.runtime.shell_contribution.schedule_update_check.assert_called_once_with()
+    check_update.assert_called_once_with()
+
+
 def test_version_page_visibility_controls_whole_page(qapp):
     page = VersionPage()
     page.show()
@@ -91,8 +104,8 @@ def test_version_page_visibility_controls_whole_page(qapp):
 
 
 def test_version_workspace_has_summary_and_stable_table_contract(qapp):
-    header, summary = create_version_header()
-    table = create_version_table()
+    page = VersionPage()
+    header, summary, table = page.version_header, page.version_summary, page.table
 
     assert header.objectName() == "workspaceHeader"
     assert summary.objectName() == "workspaceSummary"
@@ -103,6 +116,18 @@ def test_version_workspace_has_summary_and_stable_table_contract(qapp):
 
 def test_main_view_toolbar_builds_qicons_for_navigation(qapp):
     window = MainWindow.__new__(MainWindow)
+    window.runtime = SimpleNamespace(
+        features=[
+            SimpleNamespace(descriptor=SimpleNamespace(key=key, title=title, icon=icon))
+            for key, title, icon in (
+                ("versions", "版本列表", "list"),
+                ("preview", "图片预览", "image"),
+                ("audio", "音频", "music"),
+                ("character", "角色", "users"),
+                ("importer", "导入AS", "file-import"),
+            )
+        ]
+    )
 
     toolbar = window._view_toolbar()
 
@@ -115,7 +140,9 @@ def test_main_view_toolbar_builds_qicons_for_navigation(qapp):
 
 def test_character_unread_only_marks_character_tab(qapp):
     window = MainWindow.__new__(MainWindow)
-    window.character_controller = SimpleNamespace(has_unread=True)
+    window.runtime = SimpleNamespace(
+        registry=SimpleNamespace(badge_states=lambda: (("character", True),))
+    )
     window._unread_badges = {
         "home": QLabel(),
         "preview": QLabel(),
@@ -133,7 +160,11 @@ def test_character_unread_only_marks_character_tab(qapp):
 
 def test_audio_unread_only_marks_audio_tab(qapp):
     window = MainWindow.__new__(MainWindow)
-    window.character_controller = SimpleNamespace(has_unread=False)
+    window.runtime = SimpleNamespace(
+        registry=SimpleNamespace(
+            badge_states=lambda: (("character", False), ("audio", True))
+        )
+    )
     window._unread_badges = {
         "home": QLabel(),
         "preview": QLabel(),
@@ -141,11 +172,7 @@ def test_audio_unread_only_marks_audio_tab(qapp):
         "character": QLabel(),
     }
 
-    with patch(
-        "app.ui.main_window.audio_unread_files",
-        return_value={"album/第五专辑/event.wav"},
-    ):
-        window._refresh_unread_badges()
+    window._refresh_unread_badges()
 
     assert window._unread_badges["audio"].isVisible()
     assert not window._unread_badges["character"].isVisible()

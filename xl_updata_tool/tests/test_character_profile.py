@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QLabel
 
-from app.core.character_profile import build_character_profile
+from app.features.characters.profile import build_character_profile
 from app.ui.widgets.character_profile import CharacterProfileView
 
 

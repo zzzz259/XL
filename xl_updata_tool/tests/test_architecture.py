@@ -1,8 +1,10 @@
+import ast
 from pathlib import Path
 
 from app.bootstrap.app_factory import FeatureDefinition, create_features
 from app.bootstrap.context import build_app_context
-from app.core.file_utils import atomic_write_bytes, replace_directory
+from app.bootstrap.runtime import FeatureRuntimeRegistry
+from app.platform.files import atomic_write_bytes, replace_directory
 from app.shared.contracts import FeatureDescriptor, FeatureRuntime, ImportResult
 
 CORE_DIR = Path(__file__).parents[1] / "app" / "core"
@@ -14,6 +16,61 @@ CHARACTERS_FEATURE_DIR = APP_DIR / "features" / "characters"
 VERSIONS_FEATURE_DIR = APP_DIR / "features" / "versions"
 IMPORTER_FEATURE_DIR = APP_DIR / "features" / "importer"
 PREVIEW_FEATURE_DIR = APP_DIR / "features" / "preview"
+
+
+def test_production_entrypoint_builds_runtime_before_shell():
+    main_text = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+    shell_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+    assert "build_app_context" in main_text
+    assert "create_application_runtime" in main_text
+    assert main_text.index("configure_logging") < main_text.index("QApplication")
+    assert main_text.index("create_application_runtime") < main_text.index("MainWindow(")
+    assert "from app.features." not in shell_text
+
+
+def test_terminal_shell_does_not_downcast_feature_runtime():
+    """终态 Shell 只能消费 Runtime 与通用端口，不能按业务 key 取具体对象。"""
+    shell_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+    forbidden = (
+        'self._features["versions"].controller',
+        'self._features["preview"].controller',
+        'self._features["audio"].controller',
+        'self._features["character"].controller',
+        'self._features["importer"].controller',
+    )
+    assert all(token not in shell_text for token in forbidden)
+
+
+def test_features_do_not_import_other_feature_internals():
+    """Feature 之间只能通过 shared/bootstrap 契约连接，不能跨域导入内部实现。"""
+    violations = []
+    for path in (APP_DIR / "features").rglob("*.py"):
+        own_feature = path.relative_to(APP_DIR / "features").parts[0]
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            module = node.module if isinstance(node, ast.ImportFrom) else None
+            if module and module.startswith("app.features."):
+                target = module.split(".")[2]
+                if target != own_feature:
+                    violations.append((path, module))
+    assert violations == []
+
+
+def test_legacy_workspace_views_are_not_full_implementations():
+    """旧 UI 路径不能继续保留第二份 controls_dict/parent 回调实现。"""
+    for relative in (
+        Path("ui/views/audio_view.py"),
+        Path("ui/views/preview_view.py"),
+        Path("ui/views/version_view.py"),
+    ):
+        path = APP_DIR / relative
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "controls_dict" not in text
+        assert "parent._" not in text
 
 
 def test_core_layer_does_not_import_qt():
@@ -36,11 +93,11 @@ def test_legacy_asset_browser_has_explicit_compatibility_entrypoint():
 def test_ui_feature_boundaries_have_explicit_entrypoints():
     from app.ui.features.audio_controller import populate_audio_tree
     from app.ui.features.preview_controller import build_preview_item
-    from app.ui.views.version_view import create_version_table
+    from app.features.versions.page import VersionPage
 
     assert callable(populate_audio_tree)
     assert callable(build_preview_item)
-    assert callable(create_version_table)
+    assert hasattr(VersionPage, "set_visible")
 
 
 def test_p0_contract_layers_are_framework_free():
@@ -55,6 +112,10 @@ def test_p0_contract_layers_are_framework_free():
     assert offenders == []
 
 
+def test_migrated_core_compatibility_layer_has_no_python_modules():
+    assert list(CORE_DIR.glob("*.py")) == []
+
+
 def test_audio_page_and_service_respect_feature_boundaries():
     page_text = (AUDIO_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
     service_text = (AUDIO_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
@@ -62,6 +123,117 @@ def test_audio_page_and_service_respect_feature_boundaries():
     assert "parent._" not in page_text
     assert "controls =" not in page_text
     assert "PySide6" not in service_text
+
+
+def test_audio_processing_is_qt_free_and_feature_worker_does_not_use_legacy_worker():
+    processing_text = (AUDIO_FEATURE_DIR / "processing.py").read_text(encoding="utf-8")
+    worker_text = (AUDIO_FEATURE_DIR / "worker.py").read_text(encoding="utf-8")
+    legacy_text = (APP_DIR / "ui" / "workers" / "audio_decrypt.py").read_text(encoding="utf-8")
+
+    assert "PySide6" not in processing_text
+    assert "app.ui.workers.audio_decrypt" not in worker_text
+    assert "AudioDecryptProcessor" in worker_text
+    assert "app.features.audio.worker" in legacy_text
+
+
+def test_audio_and_preview_domain_implementations_live_in_feature_directories():
+    audio_files = ["audio_library.py", "audio_repository.py", "album_map.py"]
+    preview_files = ["catalog.py", "prefab_parser.py"]
+    for filename in audio_files:
+        text = (AUDIO_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+    for filename in preview_files:
+        text = (PREVIEW_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+
+    assert not (CORE_DIR / "audio_library.py").exists()
+    assert not (CORE_DIR / "preview_catalog.py").exists()
+    assert not (CORE_DIR / "prefab_parser.py").exists()
+
+
+def test_versions_domain_implementations_live_in_feature_directory():
+    service_text = (VERSIONS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    implementation_names = (
+        "version_cleanup.py",
+        "version_data.py",
+        "version_download.py",
+        "version_manager.py",
+        "version_update.py",
+        "local_bundle_sync.py",
+        "seed_versions.py",
+    )
+    assert "app.core.version_" not in service_text
+    assert "app.core.local_bundle_sync" not in service_text
+    assert "app.core.seed_versions" not in service_text
+    for filename in implementation_names:
+        text = (VERSIONS_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+    assert not (CORE_DIR / "version_manager.py").exists()
+
+
+def test_bundle_boundaries_match_consuming_domains():
+    importer_service = (IMPORTER_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    importer_processing = (IMPORTER_FEATURE_DIR / "processing.py").read_text(encoding="utf-8")
+    versions_data = (VERSIONS_FEATURE_DIR / "version_data.py").read_text(encoding="utf-8")
+    versions_seed = (VERSIONS_FEATURE_DIR / "seed_versions.py").read_text(encoding="utf-8")
+    platform_parser = (APP_DIR / "platform" / "bundle_parser.py").read_text(encoding="utf-8")
+
+    assert "app.core.bundle_selector" not in importer_service
+    assert "app.core.bundle_parser" not in importer_processing
+    assert "app.core.bundle_parser" not in versions_data
+    assert "app.core.bundle_parser" not in versions_seed
+    assert "PySide6" not in platform_parser
+    assert not (CORE_DIR / "bundle_parser.py").exists()
+    assert not (CORE_DIR / "bundle_selector.py").exists()
+    assert not (CORE_DIR / "bundle_manager.py").exists()
+
+
+def test_character_domain_implementations_live_in_feature_directory():
+    service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    implementation_names = ("cache.py", "presenter.py", "profile.py", "repository.py")
+    assert "app.core.character_cache" not in service_text
+    assert "app.core.character_presenter" not in service_text
+    assert "app.core.character_profile" not in service_text
+    assert "app.core.character_repository" not in service_text
+    for filename in implementation_names:
+        text = (CHARACTERS_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+    assert not (CORE_DIR / "character_repository.py").exists()
+
+
+def test_character_parser_is_split_and_qt_free():
+    parser_dir = CHARACTERS_FEATURE_DIR / "parser"
+    expected = {"common.py", "words.py", "progression.py", "skills.py", "cards.py", "assembler.py"}
+    assert expected <= {path.name for path in parser_dir.glob("*.py")}
+    for path in parser_dir.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert "PyQt" not in text
+    service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    assert "app.core.character_loader" not in service_text
+    assert "from .parser import load_character_data" in service_text
+
+
+def test_platform_implementations_do_not_depend_on_core_compatibility_modules():
+    platform_dir = APP_DIR / "platform"
+    implementation_names = (
+        "database.py", "files.py", "paths.py", "processes.py", "downloader.py",
+        "logger.py", "logging_context.py", "task_context.py", "environment.py",
+        "crash_reporter.py", "runtime_config.py",
+    )
+    forbidden = (
+        "app.core.database", "app.core.file_utils", "app.core.path_utils",
+        "app.core.process_runner", "app.core.downloader", "app.core.logger",
+        "app.core.logging_context", "app.core.task_context", "app.core.environment",
+        "app.core.crash_reporter", "app.core.runtime_config",
+    )
+    for filename in implementation_names:
+        text = (platform_dir / filename).read_text(encoding="utf-8")
+        assert not any(module in text for module in forbidden), filename
 
 
 def test_characters_page_and_service_respect_feature_boundaries():
@@ -91,11 +263,22 @@ def test_importer_service_and_specs_respect_feature_boundaries():
     assert "ImportResult" in service_text
 
 
+def test_importer_processing_is_qt_free_and_feature_worker_does_not_use_legacy_worker():
+    processing_text = (IMPORTER_FEATURE_DIR / "processing.py").read_text(encoding="utf-8")
+    worker_text = (IMPORTER_FEATURE_DIR / "worker.py").read_text(encoding="utf-8")
+    legacy_text = (APP_DIR / "ui" / "workers" / "import_as.py").read_text(encoding="utf-8")
+
+    assert "PySide6" not in processing_text
+    assert "app.ui.workers.import_as" not in worker_text
+    assert "ImportProcessor" in worker_text
+    assert "app.features.importer.worker" in legacy_text
+
+
 def test_main_window_delegates_import_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "ImportController" in main_window_text
-    assert "ImporterService" in main_window_text
+    assert "create_application_runtime" in main_window_text
+    assert "shell_contribution" in main_window_text
     assert "ImportASWorker" not in main_window_text
 
 
@@ -104,27 +287,60 @@ def test_preview_service_and_main_window_respect_feature_boundary():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
     assert "PySide6" not in service_text
-    assert "PreviewPage" in main_window_text
-    assert "PreviewController" in main_window_text
+    assert "create_application_runtime" in main_window_text
+    assert "runtime.install_shell" in main_window_text
     assert "PreviewExportWorker" not in main_window_text
     assert "ImageLoadWorker" not in main_window_text
 
 
 def test_preview_export_and_compatibility_entrypoints_are_feature_owned():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+    page_text = (PREVIEW_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
+    controller_text = (PREVIEW_FEATURE_DIR / "controller.py").read_text(encoding="utf-8")
     legacy_text = (APP_DIR / "ui" / "features" / "export_controller.py").read_text(encoding="utf-8")
     feature_export_text = (PREVIEW_FEATURE_DIR / "export_controller.py").read_text(encoding="utf-8")
 
-    assert "app.features.preview.export_controller" in main_window_text
+    assert "shell_contribution" in main_window_text
+    assert "create_preview_view" not in page_text
+    assert "self.controls" not in page_text
+    assert "show_context_menu" in controller_text
+    assert "open_item" in controller_text
+    assert "preview_controls" not in main_window_text
     assert "app.features.preview.export_controller" in legacy_text
+    assert "parent._" not in feature_export_text
     assert "CompositeExportWorker" in feature_export_text
     assert "BatchExportWorker" in feature_export_text
+
+
+def test_preview_workers_dialogs_and_adapters_are_feature_owned():
+    preview_worker_text = (PREVIEW_FEATURE_DIR / "worker.py").read_text(encoding="utf-8")
+    preview_adapter_text = (PREVIEW_FEATURE_DIR / "adapter.py").read_text(encoding="utf-8")
+    preview_fgui_text = (PREVIEW_FEATURE_DIR / "fgui.py").read_text(encoding="utf-8")
+    preview_controller_text = (PREVIEW_FEATURE_DIR / "controller.py").read_text(encoding="utf-8")
+    preview_export_text = (PREVIEW_FEATURE_DIR / "export_controller.py").read_text(encoding="utf-8")
+    characters_page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
+
+    for text in (
+        preview_worker_text,
+        preview_adapter_text,
+        preview_fgui_text,
+        preview_controller_text,
+        preview_export_text,
+        characters_page_text,
+    ):
+        assert "app.ui.workers" not in text
+        assert "app.ui.adapters" not in text
+        assert "app.ui.dialogs" not in text
+        assert "app.ui.widgets" not in text
+    assert "app.platform.lua_repository" in (APP_DIR / "features" / "importer" / "processing.py").read_text(encoding="utf-8")
+    assert "app.platform.lua_repository" in (APP_DIR / "features" / "characters" / "service.py").read_text(encoding="utf-8")
 
 
 def test_main_window_delegates_audio_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "AudioController" in main_window_text
+    assert "shell_contribution" in main_window_text
+    assert "from app.features.audio" not in main_window_text
     assert "AudioService" not in main_window_text
     assert "AudioDecryptWorker" not in main_window_text
     assert "QMediaPlayer" not in main_window_text
@@ -135,8 +351,9 @@ def test_main_window_delegates_audio_runtime_to_feature_controller():
 def test_main_window_delegates_character_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "CharacterController" in main_window_text
-    assert "CharacterService" in main_window_text
+    assert "shell_contribution" in main_window_text
+    assert "CharacterController" not in main_window_text
+    assert "CharacterService" not in main_window_text
     assert "create_character_view" not in main_window_text
     assert "load_character_data" not in main_window_text
     assert "merge_character_snapshot" not in main_window_text
@@ -147,8 +364,9 @@ def test_main_window_delegates_character_runtime_to_feature_controller():
 def test_main_window_delegates_version_runtime_to_feature_controller():
     main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
 
-    assert "VersionController" in main_window_text
-    assert "VersionService" in main_window_text
+    assert "shell_contribution" in main_window_text
+    assert "VersionController" not in main_window_text
+    assert "VersionService" not in main_window_text
     assert "create_version_table" not in main_window_text
     assert "CheckUpdateThread" not in main_window_text
     assert "DownloadWorker" not in main_window_text
@@ -244,3 +462,59 @@ def test_replace_directory_swaps_staged_output(tmp_path):
 
     assert (destination / "new.txt").read_text(encoding="utf-8") == "new"
     assert not (destination / "old.txt").exists()
+
+
+def test_feature_runtime_registry_binds_generic_ports_and_lifecycle():
+    class Signal:
+        def __init__(self):
+            self.handlers = []
+
+        def connect(self, handler):
+            self.handlers.append(handler)
+
+        def emit(self, *args):
+            for handler in self.handlers:
+                handler(*args)
+
+    class Page:
+        def __init__(self):
+            self.visible = None
+
+        def set_visible(self, visible):
+            self.visible = visible
+
+    class Controller:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    first_page, second_page = Page(), Page()
+    first_controller, second_controller = Controller(), Controller()
+    status, progress, badges = Signal(), Signal(), Signal()
+    features = (
+        FeatureRuntime(
+            FeatureDescriptor("first", "第一项"), first_page, first_controller,
+            status_signal=status, progress_signal=progress, badge_signal=badges,
+        ),
+        FeatureRuntime(
+            FeatureDescriptor("second", "第二项"), second_page, second_controller,
+        ),
+    )
+    registry = FeatureRuntimeRegistry(features)
+
+    received = []
+    registry.bind_status(lambda value: received.append(("status", value)))
+    registry.bind_progress(lambda *value: received.append(("progress", value)))
+    registry.bind_badge(lambda: received.append(("badge",)))
+    registry.activate("second")
+    status.emit("ready")
+    progress.emit(1, 2, "loading")
+    badges.emit()
+    registry.close()
+
+    assert registry.keys() == ("first", "second")
+    assert first_page.visible is False and second_page.visible is True
+    assert received == [("status", "ready"), ("progress", (1, 2, "loading")), ("badge",)]
+    assert first_controller.closed and second_controller.closed

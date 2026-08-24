@@ -1,4 +1,4 @@
-from app.core.version_data import compute_download_hashes, compute_version_delta_map
+from app.features.versions.version_data import compute_download_hashes, compute_version_delta_map
 
 
 def test_compute_download_hashes_uses_nearest_previous_version():

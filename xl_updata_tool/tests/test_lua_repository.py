@@ -1,4 +1,4 @@
-from app.core.lua_repository import (
+from app.platform.lua_repository import (
     cleanup_lua_staging,
     has_character_sources,
     latest_lua_version,

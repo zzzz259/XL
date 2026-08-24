@@ -1,10 +1,10 @@
 import subprocess
 
-from app.core.crash_reporter import CrashReporter
-from app.core.logger import configure_logging, logger
-from app.core.process_runner import run_external_process
-from app.core.runtime_config import RuntimeConfig, parse_runtime_config
-from app.core.task_context import stage_context, task_context
+from app.platform.crash_reporter import CrashReporter
+from app.platform.logger import configure_logging, logger
+from app.platform.processes import run_external_process
+from app.platform.runtime_config import RuntimeConfig, parse_runtime_config
+from app.platform.task_context import stage_context, task_context
 
 
 def _flush_logger():

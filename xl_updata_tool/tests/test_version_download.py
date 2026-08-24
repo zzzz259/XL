@@ -1,4 +1,4 @@
-from app.core.version_download import calculate_missing_downloads
+from app.features.versions.version_download import calculate_missing_downloads
 
 
 def test_calculate_missing_downloads_ignores_local_files_and_sorts():

@@ -1,4 +1,4 @@
-from app.core.path_utils import get_base_dir, get_data_dir, get_output_dir
+from app.platform.paths import get_base_dir, get_data_dir, get_output_dir
 
 
 def test_runtime_directories_are_under_project_root():

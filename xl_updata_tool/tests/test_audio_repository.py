@@ -1,4 +1,4 @@
-from app.core.audio_repository import mark_all_read, mark_read, sync_audio_snapshot, unread_files
+from app.features.audio.audio_repository import mark_all_read, mark_read, sync_audio_snapshot, unread_files
 
 
 def test_audio_snapshot_marks_new_and_preserves_read_state(tmp_path):

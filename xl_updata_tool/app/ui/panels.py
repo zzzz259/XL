@@ -12,8 +12,8 @@ from .theme import (
     ACCENT, BG_SURFACE, BG_ELEVATED, BG_HOVER, BORDER, TEXT_PRIMARY,
     TEXT_SECONDARY, TEXT_MUTED, SUCCESS
 )
-from app.core import database as db
-from app.core.audio_library import format_size
+from app.platform import database as db
+from app.features.audio.audio_library import format_size
 
 
 def ticks_to_date(ticks):

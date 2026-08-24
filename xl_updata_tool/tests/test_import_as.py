@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from app.ui.workers.import_as import ImportASWorker
+from app.features.importer.processing import ImportProcessor
 
 
 def test_import_as_counts_unrepairable_bundle_as_failure(tmp_path):
@@ -10,7 +10,7 @@ def test_import_as_counts_unrepairable_bundle_as_failure(tmp_path):
     valid_bundle.write_bytes(b"UnityFS" + b"\x00" * 16)
     invalid_bundle.write_bytes(b"not a bundle")
 
-    worker = ImportASWorker(
+    worker = ImportProcessor(
         [str(valid_bundle), str(invalid_bundle)],
         str(tmp_path),
         str(tmp_path / "material"),
@@ -30,7 +30,7 @@ def test_import_as_publishes_versioned_lua_and_cleans_material_staging(tmp_path)
     (lua_dir / "BaseWord_cn.lua").write_text("word", encoding="utf-8")
     output_dir = tmp_path / "output" / "lua"
 
-    worker = ImportASWorker(
+    worker = ImportProcessor(
         [], str(tmp_path / "bundles"), str(material_dir), str(tmp_path / "AssetStudio.CLI.exe"),
         export_categories={"lua"}, version_timestamp=20260811, lua_output_dir=str(output_dir),
     )
@@ -58,10 +58,10 @@ def test_import_as_keeps_old_output_when_assetstudio_fails(tmp_path, monkeypatch
             return self.returncode
 
     monkeypatch.setattr(
-        "app.ui.workers.import_as.subprocess.Popen",
+        "app.features.importer.processing.subprocess.Popen",
         lambda *args, **kwargs: FailedProcess(),
     )
-    worker = ImportASWorker(
+    worker = ImportProcessor(
         [], str(tmp_path / "bundles"), str(material_dir), str(as_cli), export_categories={"lua"}
     )
 
@@ -93,10 +93,10 @@ def test_import_as_commits_partial_assetstudio_output(tmp_path, monkeypatch):
             return self.returncode
 
     monkeypatch.setattr(
-        "app.ui.workers.import_as.subprocess.Popen",
+        "app.features.importer.processing.subprocess.Popen",
         lambda command, **kwargs: PartialProcess(Path(command[2])),
     )
-    worker = ImportASWorker(
+    worker = ImportProcessor(
         [], str(tmp_path / "bundles"), str(material_dir), str(as_cli), export_categories={"lua"}
     )
 
@@ -121,7 +121,7 @@ def test_import_as_replaces_only_selected_category(tmp_path):
     new_lua.parent.mkdir(parents=True)
     new_lua.write_text("new", encoding="utf-8")
 
-    worker = ImportASWorker(
+    worker = ImportProcessor(
         [], str(tmp_path / "bundles"), str(material_dir), str(tmp_path / "AssetStudio.CLI.exe"),
         export_categories={"lua"},
     )
@@ -141,7 +141,7 @@ def test_import_as_isolates_selected_bundles_for_assetstudio(tmp_path):
     first.write_bytes(b"first")
     second.write_bytes(b"second")
 
-    worker = ImportASWorker(
+    worker = ImportProcessor(
         [str(first)], str(bundle_dir), str(tmp_path / "material"),
         str(tmp_path / "AssetStudio.CLI.exe"), export_categories={"lua"},
         isolate_bundle_dir=True,
@@ -174,7 +174,7 @@ def test_import_as_rolls_back_all_categories_when_commit_fails(tmp_path, monkeyp
     new_lua.write_text("new lua", encoding="utf-8")
     new_fgui.write_text("new fgui", encoding="utf-8")
 
-    worker = ImportASWorker(
+    worker = ImportProcessor(
         [], str(tmp_path / "bundles"), str(material_dir), str(tmp_path / "AssetStudio.CLI.exe"),
         export_categories={"lua", "fgui"},
     )
@@ -188,7 +188,7 @@ def test_import_as_rolls_back_all_categories_when_commit_fails(tmp_path, monkeyp
             raise OSError("simulated commit failure")
         original_replace(source, destination)
 
-    monkeypatch.setattr("app.ui.workers.import_as.os.replace", fail_on_second_new_move)
+    monkeypatch.setattr("app.features.importer.processing.os.replace", fail_on_second_new_move)
 
     try:
         worker._commit_staged_material()

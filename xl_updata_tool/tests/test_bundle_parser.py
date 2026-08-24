@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.core.bundle_parser import compute_delta, fix_bundle_inplace, needs_fix
+from app.platform.bundle_parser import compute_delta, fix_bundle_inplace, needs_fix
 
 
 def test_compute_delta_returns_added_removed_and_common_count():

@@ -13,7 +13,7 @@ import time
 import psutil
 
 try:
-    from app.core.logger import logger
+    from app.platform.diagnostics import logger
 except ImportError:
     logger = None
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from app.core import database as db
-from app.core.version_update import append_changelog, record_downloaded_bundle
+from app.platform import database as db
+from app.features.versions.version_update import append_changelog, record_downloaded_bundle
 
 
 def test_append_changelog_normalizes_multiline_message(tmp_path):

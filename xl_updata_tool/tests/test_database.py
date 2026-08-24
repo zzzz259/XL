@@ -1,4 +1,4 @@
-from app.core import database as db
+from app.platform import database as db
 
 
 def test_record_changes_stores_size_delta(tmp_path):

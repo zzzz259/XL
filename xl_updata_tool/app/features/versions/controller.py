@@ -287,7 +287,7 @@ class VersionController(QObject):
         self._download_worker.start()
 
     def _record_download(self, timestamp, name, path):
-        from app.core.version_update import record_downloaded_bundle
+        from .version_update import record_downloaded_bundle
 
         record_downloaded_bundle(timestamp, name, path)
 

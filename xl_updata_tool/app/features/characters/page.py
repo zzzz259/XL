@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.shared.qt.tokens import get_color
-from app.ui.widgets.character_profile import CharacterProfileView
+from .profile_widget import CharacterProfileView
 from app.shared.qt.chrome import (
     create_action_button,
     create_command_bar,

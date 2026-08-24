@@ -1,4 +1,4 @@
-from app.core.character_loader import extract_all_card_blocks, parse_t_args
+from app.features.characters.parser import extract_all_card_blocks, parse_t_args
 
 
 def test_extract_all_card_blocks_handles_nested_tables():
