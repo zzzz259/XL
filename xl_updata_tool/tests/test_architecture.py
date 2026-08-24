@@ -103,6 +103,27 @@ def test_audio_and_preview_domain_implementations_live_in_feature_directories():
     assert "app.features.preview.catalog" in (CORE_DIR / "preview_catalog.py").read_text(encoding="utf-8")
 
 
+def test_versions_domain_implementations_live_in_feature_directory():
+    service_text = (VERSIONS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    implementation_names = (
+        "version_cleanup.py",
+        "version_data.py",
+        "version_download.py",
+        "version_manager.py",
+        "version_update.py",
+        "local_bundle_sync.py",
+        "seed_versions.py",
+    )
+    assert "app.core.version_" not in service_text
+    assert "app.core.local_bundle_sync" not in service_text
+    assert "app.core.seed_versions" not in service_text
+    for filename in implementation_names:
+        text = (VERSIONS_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+    assert "app.features.versions.version_manager" in (CORE_DIR / "version_manager.py").read_text(encoding="utf-8")
+
+
 def test_characters_page_and_service_respect_feature_boundaries():
     page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
     service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")

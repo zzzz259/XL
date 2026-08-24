@@ -75,3 +75,10 @@
 - [x] `app/core` 旧路径仅保留兼容转发；Feature 内部 import 已切换到新路径。
 - [x] 兼容调用方仍有登记，未执行无证据删除。
 - [x] 全量 pytest 135 passed、Ruff、AST 166、P6 import smoke、runtime Qt smoke 和 diff check 通过。
+
+## P6b-版本退出门
+
+- [x] Versions Feature 已拥有版本仓库、差异、下载计划、更新持久化、本地同步和种子实现。
+- [x] Version Service/Controller 不再从 `app.core.version_*`、`local_bundle_sync`、`seed_versions` 获取领域实现。
+- [x] 旧 core 路径保留兼容转发；Bundle Parser 依赖尚未在本批删除或伪装为已归位。
+- [x] 全量 pytest 136 passed、Ruff、AST 173、Versions import smoke、runtime Qt smoke 和 diff check 通过。

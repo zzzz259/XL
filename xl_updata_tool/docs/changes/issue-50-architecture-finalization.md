@@ -11,3 +11,5 @@
 本阶段新增 Importer Feature 的 Qt-free AssetStudio 导入处理器和 Worker 适配器；旧 `ImportASWorker` 路径仅保留兼容转发，未改变导入结果、分类提交/回滚、Lua 发布、精准 Bundle 筛选、取消和失败信号契约。
 
 P6a 将音频目录/仓库/专辑映射和预览目录/Prefab 解析的真实实现归入对应 Feature；旧 `app/core` 路径仅保留兼容转发，未改变产物、分类、未读状态或预览匹配行为。
+
+P6b-版本将版本仓库、差异、下载计划、更新持久化、本地同步和种子实现归入 Versions Feature；旧 `app/core/version_*` 等路径仅保留兼容转发，Bundle Parser 仍留待下一批处理。
