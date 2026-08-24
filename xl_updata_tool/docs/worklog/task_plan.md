@@ -400,8 +400,8 @@ Phase 6 - Lua 与角色数据链路重构
 ### 阶段 1 当前执行边界
 
 - Issue #40 已创建，开始 P1 Audio Feature ownership 模板迁移。
-- P1a 已完成音频 Page、Qt-free AudioService、树逻辑 Feature 入口和旧模块兼容转发；MainWindow 仅保留迁移期信号适配与控件别名。
-- P1b 待迁移播放器/选择状态、AudioController、AudioDecryptWorker 和任务结果；完成后再移除 MainWindow 音频状态。
+- P1a 已完成音频 Page、Qt-free AudioService、树逻辑 Feature 入口和旧模块兼容转发。
+- P1b 已完成播放器/选择状态、AudioController、AudioDecryptWorker 功能域入口和任务结果回调迁移；MainWindow 不再持有音频 Worker、播放器或音频控件状态。
 - 每个子步骤保持旧入口可回退；未经用户验证，不删除旧音频实现。
 
 ### P1a 完成记录：Audio Page 与目录服务
@@ -411,6 +411,15 @@ Phase 6 - Lua 与角色数据链路重构
 - `app/features/audio/tree.py` 接管音频树构造、目录递归勾选和未读标记聚合；`app/ui/features/audio_controller.py` 保留兼容转发。
 - `MainWindow` 已切换到 `AudioPage` 和 `AudioService`；导出、播放、取消、分类、未读和输出目录契约保持不变。
 - 新增 `tests/test_audio_feature.py` 及架构边界断言；P1a 不删除旧 `audio_view.py`，为 P1b 回退保留入口。
+
+### P1b 完成记录：AudioController 与任务适配
+
+- `app/features/audio/controller.py` 接管音频列表缓存、目录/文件勾选、播放进度、音量、右键菜单、导出和未读状态。
+- `app/features/audio/worker.py` 提供功能域侧 `AudioDecryptWorker` 入口，当前包装迁移期 Worker，保持 bank/debank、取消和进度信号契约不变。
+- MainWindow 只保留音频页面显隐、导入流程总协调和结果提示；音频页面信号由 AudioController 自己消费。
+- 导入共享进度弹窗通过 `processing_finished/processing_cancelled/processing_error` 结果信号回到 Shell；独立进度弹窗和 Worker 生命周期由 Controller 管理。
+- 旧 `audio_view.py`、`ui/features/audio_controller.py` 和 `ui/workers/audio_decrypt.py` 暂保留兼容入口，后续确认调用方全部切换后再删除。
+- P1 代码门禁：全量 pytest 100 项通过，Ruff、AST 解析 111 个 Python 文件和 `git diff --check` 通过。
 
 ### Errors Encountered
 

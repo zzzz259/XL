@@ -14,12 +14,6 @@ from PySide6.QtCore import Qt, QTimer, QMimeData, QUrl, QSettings, QEvent
 from PySide6.QtGui import QColor, QBrush
 
 try:
-    from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-    QT_MULTIMEDIA_AVAILABLE = True
-except ImportError:
-    QT_MULTIMEDIA_AVAILABLE = False
-
-try:
     import qtawesome as qta
     QT_AWESOME_AVAILABLE = True
 except ImportError:
@@ -58,7 +52,6 @@ from app.core.bundle_selector import (
 )
 from app.core.character_presenter import export_characters_csv
 from app.core.character_profile import build_character_profile
-from app.core.audio_library import format_duration, format_size
 from app.core.audio_repository import unread_files as audio_unread_files
 from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
 from app.core.seed_versions import seed_bundled_versions
@@ -79,24 +72,17 @@ from app.core.lua_repository import (
 from .dialogs.image_viewer import ImageViewerDialog
 from .workers.image_loader import ImageLoadWorker
 from .workers.preview_export import PreviewExportWorker
-from .workers.audio_decrypt import AudioDecryptWorker
 from .workers.import_as import ImportASWorker
 from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
 from .views.preview_view import create_preview_view
 from app.features.audio.page import AudioPage
-from app.features.audio.service import AudioService
+from app.features.audio.controller import AudioController
 from .views.character_view import create_character_view
 from .views.version_view import create_version_header, create_version_table
 from .features.export_controller import (
     export_composite_video,
     export_with_dialog,
     batch_export_with_dialog,
-)
-from app.features.audio.tree import (
-    iter_audio_leaves,
-    populate_audio_tree,
-    refresh_audio_tree_checks,
-    refresh_audio_tree_unread,
 )
 from .features.preview_controller import build_preview_item
 from app.core.character_loader import load_character_data
@@ -130,23 +116,11 @@ class MainWindow(QMainWindow):
         self.version_mgr = VersionManager()
         # 后台工作线程实例（避免 AttributeError）
         self._preview_worker = None
-        self._audio_worker = None
-        self._audio_player = None
-        self._audio_output = None
         self._batch_worker = None
         self._composite_worker = None
         self._image_worker = None
         self._import_worker = None
         self._pending_import_message = None
-        self._audio_uses_import_dialog = False
-        self.audio_service = AudioService(os.path.join(get_base_dir(), "output"))
-        # 音频播放器相关属性（避免首次访问 AttributeError）
-        self._audio_player = None
-        self._audio_output = None
-        self._audio_files = []
-        self._audio_list_loaded = False
-        self._audio_slider_dragging = False
-        self._audio_current_path = None
         self._show_character = False
         self._character_data_loaded = False
         self._character_loading = False
@@ -207,9 +181,16 @@ class MainWindow(QMainWindow):
 
         # 音频管理器视图容器（默认隐藏）。页面自身拥有控件，主窗口只接收语义信号。
         self.audio_page = AudioPage(self)
+        self.audio_controller = AudioController(
+            page=self.audio_page,
+            material_dir=os.path.join(DATA_DIR, "material"),
+            debank_dir=os.path.join(get_tools_dir(), "epic7_debank_v1_0"),
+            lua_output_dir=LUA_OUTPUT_DIR,
+            output_dir=os.path.join(get_base_dir(), "output"),
+            parent=self,
+        )
         self.audio_page.setVisible(False)
         content_layout.addWidget(self.audio_page, 1)
-        self._connect_audio_page()
 
         # 角色视图容器（默认隐藏）
         self.character_container, self.character_controls = create_character_view(self)
@@ -243,37 +224,41 @@ class MainWindow(QMainWindow):
                          padding:4px 12px; color:{get_color('TEXT_SECONDARY')}; font-size:14px; }}
         """)
         self.setStatusBar(self.status_bar)
+        self._connect_audio_controller()
         self._anim_timer = QTimer()
         self._anim_dots = 0
 
-    def _connect_audio_page(self):
-        """连接音频页面的语义信号，暂保留旧业务方法作为过渡适配层。"""
-        page = self.audio_page
-        # 兼容尚未迁移到 AudioController 的旧业务方法；控件实际所有权仍在 AudioPage。
-        self.audio_container = page
-        self.audio_title = page.audio_title
-        self.audio_table = page.audio_table
-        self.audio_play_btn = page.audio_play_btn
-        self.audio_now_playing = page.audio_now_playing
-        self.audio_position_label = page.audio_position_label
-        self.audio_slider = page.audio_slider
-        self.audio_volume = page.audio_volume
-        self.audio_status = page.audio_status
-        self.audio_empty = page.audio_empty
-        page.close_requested.connect(lambda: self._toggle_audio_mode(False))
-        page.refresh_requested.connect(lambda: self._load_audio_list(force_reload=True))
-        page.export_requested.connect(self._export_selected_audio)
-        page.play_selected_requested.connect(self._play_selected_audio)
-        page.mark_all_read_requested.connect(self._mark_all_audio_read)
-        page.context_menu_requested.connect(self._show_audio_context_menu)
-        page.item_pressed.connect(self._on_audio_item_pressed)
-        page.item_clicked.connect(self._on_audio_item_clicked)
-        page.item_double_clicked.connect(self._on_audio_double_click)
-        page.play_toggled.connect(self._toggle_play)
-        page.slider_moved.connect(self._on_audio_slider_moved)
-        page.slider_pressed.connect(self._on_audio_slider_pressed)
-        page.slider_released.connect(self._on_audio_slider_released)
-        page.volume_changed.connect(self._set_audio_volume)
+    def _connect_audio_controller(self):
+        """连接音频功能域的任务结果与全局 Shell 状态。"""
+        self.audio_page.close_requested.connect(lambda: self._toggle_audio_mode(False))
+        self.audio_controller.status_changed.connect(self.status_bar.showMessage)
+        self.audio_controller.unread_changed.connect(self._refresh_unread_badges)
+        self.audio_controller.processing_finished.connect(self._on_audio_processing_finished)
+        self.audio_controller.processing_cancelled.connect(self._on_audio_processing_cancelled)
+        self.audio_controller.processing_error.connect(self._on_audio_processing_error)
+
+    def _on_audio_processing_finished(self, shared):
+        """导入流程使用共享弹窗时，接收 AudioController 的完成结果。"""
+        if shared and self._pending_import_message:
+            self._finish_import(True, self._pending_import_message)
+
+    def _on_audio_processing_cancelled(self, shared):
+        """导入流程中的音频任务取消后结束导入流程。"""
+        if shared and self._pending_import_message:
+            self._finish_import(
+                False,
+                "音频后处理已取消，已完成的文件已保留，可稍后重新处理音频。",
+                cancelled=True,
+            )
+
+    def _on_audio_processing_error(self, error_message, shared):
+        """导入流程中的音频任务失败后保留导入结果并提示用户。"""
+        if shared and self._pending_import_message:
+            self._finish_import(
+                True,
+                self._pending_import_message,
+                audio_error=error_message,
+            )
 
     def _view_toolbar(self):
         """顶部视图切换工具栏（版本列表 / 图片预览 / 音频 / 角色）"""
@@ -546,7 +531,7 @@ class MainWindow(QMainWindow):
         # 确保版本列表可见（隐藏图片预览、音频和角色视图）
         self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
+        self.audio_page.setVisible(False)
         self.character_container.setVisible(False)
         self._show_character = False
         self._set_active_view_btn(self.btn_home)
@@ -733,7 +718,7 @@ class MainWindow(QMainWindow):
         # 确保版本列表可见（隐藏图片预览和音频视图）
         self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
+        self.audio_page.setVisible(False)
         self.btn_check.setEnabled(False)
         self.table.insertRow(0)
         self.table.setItem(0, 0, QTableWidgetItem("正在检查更新"))
@@ -862,7 +847,7 @@ class MainWindow(QMainWindow):
         # 确保版本列表可见（隐藏图片预览和音频视图）
         self._set_version_content_visible(True)
         self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
+        self.audio_page.setVisible(False)
         ts = self._get_selected_ts()
         if not ts: QMessageBox.warning(self, "未选择", "请先选中一个版本."); return
         export_categories = self._get_export_categories()
@@ -1017,7 +1002,7 @@ class MainWindow(QMainWindow):
         self._pending_import_message = message
         if "audio" in categories:
             # 音频解密是导出后的必经步骤，复用导入弹窗，避免用户误以为已经完成。
-            self._start_audio_decrypt(
+            self.audio_controller.start_decrypt(
                 force=False,
                 shared_dialog=getattr(self, "_import_progress_dialog", None),
             )
@@ -1033,7 +1018,6 @@ class MainWindow(QMainWindow):
             self._import_progress_dialog.close()
             self._import_progress_dialog = None
         self._pending_import_message = None
-        self._audio_uses_import_dialog = False
 
         if cancelled:
             self.status_bar.showMessage("导入已取消，已完成的文件已保留")
@@ -1248,7 +1232,7 @@ class MainWindow(QMainWindow):
         self.character_container.setVisible(False)
         self._show_character = False
         if show_preview:
-            self.audio_container.setVisible(False)
+            self.audio_page.setVisible(False)
             self._load_preview_images()
 
     # ==================== 音频管理器 ====================
@@ -1261,11 +1245,11 @@ class MainWindow(QMainWindow):
         self.preview_container.setVisible(False)
         self.character_container.setVisible(False)
         self._show_character = False
-        self.audio_container.setVisible(show_audio)
+        self.audio_page.setVisible(show_audio)
         if show_audio:
-            self._init_audio_player()
+            self.audio_controller.initialize_player()
             # 页面切换只读取最终产物；已加载过的树保留，用户可用“刷新列表”主动重建。
-            self._load_audio_list()
+            self.audio_controller.load_catalog()
 
     def _cancel_preview_worker(self):
         """取消预览导出线程"""
@@ -1273,228 +1257,6 @@ class MainWindow(QMainWindow):
             self._preview_worker.cancel()
             self._preview_worker.wait(2000)
             self._preview_worker = None
-
-    def _cancel_audio_worker(self):
-        """取消音频解密线程"""
-        worker = self._audio_worker
-        if worker is None:
-            return True
-        worker.cancel()
-        if not worker.wait(30000):
-            logger.error("音频解密线程未能在取消超时内退出，不启动新的音频任务")
-            return False
-        try:
-            worker.cancelled_decrypt.disconnect(self._on_audio_decrypt_cancelled)
-            worker.finished_decrypt.disconnect(self._on_audio_decrypt_finished)
-            worker.error.disconnect(self._on_audio_decrypt_error)
-        except (TypeError, RuntimeError):
-            pass
-        self._audio_worker = None
-        return True
-
-    def _start_audio_decrypt(self, force=False, shared_dialog=None):
-        """启动后台线程执行音频后处理（仅由导出完成流程调用）。"""
-        material_dir = os.path.join(DATA_DIR, "material")
-        debank_dir = os.path.join(get_tools_dir(), "epic7_debank_v1_0")
-        audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
-
-        # 取消已有的解密线程
-        if not self._cancel_audio_worker():
-            self.status_bar.showMessage("上一轮音频处理尚未退出，已取消启动新的任务")
-            return
-
-        self.status_bar.showMessage("正在处理音频文件...")
-
-        self._audio_worker = AudioDecryptWorker(
-            material_dir, audio_output_dir, debank_dir,
-            force=force, lua_output_dir=LUA_OUTPUT_DIR, parent=self
-        )
-        self._audio_worker.progress.connect(self._on_audio_decrypt_progress)
-        self._audio_worker.progress_value.connect(self._on_audio_decrypt_progress_value)
-        self._audio_worker.finished_decrypt.connect(self._on_audio_decrypt_finished)
-        self._audio_worker.cancelled_decrypt.connect(self._on_audio_decrypt_cancelled)
-        self._audio_worker.error.connect(self._on_audio_decrypt_error)
-        self._audio_worker.start()
-
-        # 导入后的自动处理复用导入弹窗；兼容性调用才创建独立弹窗。
-        self._audio_uses_import_dialog = shared_dialog is not None
-        if shared_dialog is not None:
-            self._audio_progress_dialog = shared_dialog
-            shared_dialog.setLabelText("正在处理音频...\n准备转换音频中间文件")
-            shared_dialog.setRange(0, 0)
-        else:
-            self._audio_progress_dialog = QProgressDialog("正在处理音频...", "取消", 0, 100, self)
-            self._audio_progress_dialog.setWindowTitle("音频处理")
-            self._audio_progress_dialog.setWindowModality(Qt.NonModal)
-            self._audio_progress_dialog.setMinimumDuration(0)
-            self._audio_progress_dialog.setAutoClose(False)
-            self._audio_progress_dialog.setAutoReset(False)
-            self._audio_progress_dialog.setMinimumWidth(520)
-            self._audio_progress_dialog.setMinimumHeight(160)
-        self._audio_progress_dialog.canceled.connect(self._audio_worker.cancel)
-        self._audio_progress_dialog.show()
-
-    def _on_audio_decrypt_progress(self, msg):
-        """音频解密进度更新"""
-        self.status_bar.showMessage(msg)
-
-    def _on_audio_decrypt_progress_value(self, current, total, msg):
-        """音频解密数值进度（两行：消息 + 进度/处理中，避免来回跳）"""
-        if getattr(self, "_audio_progress_dialog", None):
-            if total > 0:
-                self._audio_progress_dialog.setLabelText(f"{msg}\n已处理 {current}/{total}")
-                self._audio_progress_dialog.setRange(0, total)
-                self._audio_progress_dialog.setValue(current)
-            else:
-                self._audio_progress_dialog.setLabelText(f"{msg}\n处理中...")
-                self._audio_progress_dialog.setRange(0, 0)
-        self.status_bar.showMessage(msg)
-
-    def _on_audio_decrypt_finished(self):
-        """音频解密完成回调，自动加载音频列表"""
-        shared = self._audio_uses_import_dialog
-        if getattr(self, "_audio_progress_dialog", None) and not shared:
-            self._audio_progress_dialog.close()
-        self._audio_progress_dialog = None
-        self.status_bar.showMessage("音频处理完成")
-        self._load_audio_list(force_reload=True)
-        if shared and self._pending_import_message:
-            self._finish_import(True, self._pending_import_message)
-
-    def _on_audio_decrypt_cancelled(self):
-        """音频解密取消回调：保留已发布产物，不自动续跑。"""
-        shared = self._audio_uses_import_dialog
-        if getattr(self, "_audio_progress_dialog", None) and not shared:
-            self._audio_progress_dialog.close()
-        self._audio_progress_dialog = None
-        self.status_bar.showMessage("音频处理已取消，已完成的文件已保留")
-        self._load_audio_list(force_reload=True)
-        if shared and self._pending_import_message:
-            self._finish_import(
-                False,
-                "音频后处理已取消，已完成的文件已保留，可稍后重新处理音频。",
-                cancelled=True,
-            )
-
-    def _on_audio_decrypt_error(self, err_msg):
-        """音频解密错误回调"""
-        self.status_bar.showMessage("音频处理失败")
-        logger.error(f"音频解密失败: {err_msg}")
-        # 即使解密失败也尝试加载已有文件
-        self._load_audio_list(force_reload=True)
-        shared = self._audio_uses_import_dialog
-        if shared and self._pending_import_message:
-            self._audio_progress_dialog = None
-            self._finish_import(True, self._pending_import_message, audio_error=err_msg)
-        elif getattr(self, "_audio_progress_dialog", None):
-            self._audio_progress_dialog.close()
-            self._audio_progress_dialog = None
-
-    def _init_audio_player(self):
-        """初始化音频播放器"""
-        if self._audio_player is not None:
-            return
-        if not QT_MULTIMEDIA_AVAILABLE:
-            logger.warning("QtMultimedia 不可用，音频播放功能受限")
-            return
-        self._audio_player = QMediaPlayer()
-        self._audio_output = QAudioOutput()
-        self._audio_player.setAudioOutput(self._audio_output)
-        self._audio_output.setVolume(0.8)
-        self._audio_player.positionChanged.connect(self._update_audio_position)
-        self._audio_player.durationChanged.connect(self._update_audio_duration)
-        self._audio_player.playbackStateChanged.connect(self._on_audio_state_changed)
-
-    @timed("音频列表加载")
-    def _load_audio_list(self, force_reload=False):
-        """扫描 output/audio/ 目录，加载已解密的音频文件列表"""
-        if getattr(self, "_audio_list_loaded", False) and not force_reload:
-            return
-        audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
-        self._audio_files = self.audio_service.load_catalog(force=force_reload)
-        self._audio_file_items = []
-
-        if not os.path.isdir(audio_output_dir):
-            self.audio_title.setText("音频管理器 · 共 0 个音频文件")
-            self.audio_status.setText("已选: 0 个 | 共 0 个音频文件")
-            self.audio_table.clear()
-            self.audio_empty.setVisible(True)
-            self._audio_list_loaded = True
-            self._refresh_unread_badges()
-            logger.info(f"音频输出目录不存在: {audio_output_dir}")
-            return
-
-        self._audio_file_items = populate_audio_tree(
-            self.audio_table, self._audio_files, self._format_size
-        )
-
-        total = len(self._audio_files)
-        self.audio_title.setText(f"音频管理器 · 共 {total} 个音频文件")
-        self.audio_status.setText(f"已选: 0 个 | 共 {total} 个音频文件")
-        self.audio_empty.setVisible(total == 0)
-        self._audio_list_loaded = True
-        self._refresh_unread_badges()
-        logger.info(f"音频列表加载完成: 共 {total} 个文件")
-        self.status_bar.showMessage(f"音频列表加载完成: {total} 个文件")
-
-    def _on_audio_item_pressed(self, item, _column):
-        """记录点击前状态，目录和叶节点都支持任意列点击。"""
-        self._audio_pressed_check_state = item.checkState(0)
-
-    def _on_audio_item_clicked(self, item, _column):
-        """按文件管理器语义处理勾选：普通点击单选，Ctrl 点击追加/取消，目录递归作用。"""
-        before = getattr(self, "_audio_pressed_check_state", None)
-        self._audio_pressed_check_state = None
-        if before is None:
-            before = item.checkState(0)
-        leaves = iter_audio_leaves(item)
-        if not leaves:
-            return
-        modifiers = QApplication.keyboardModifiers()
-        ctrl = bool(modifiers & Qt.ControlModifier)
-        should_check = before != Qt.Checked
-        self.audio_table.blockSignals(True)
-        try:
-            if not ctrl:
-                for other in getattr(self, "_audio_file_items", []):
-                    other.setCheckState(0, Qt.Unchecked)
-                for root_index in range(self.audio_table.topLevelItemCount()):
-                    self._set_audio_directory_state(
-                        self.audio_table.topLevelItem(root_index), Qt.Unchecked
-                    )
-            state = Qt.Checked if should_check else Qt.Unchecked
-            for leaf in leaves:
-                leaf.setCheckState(0, state)
-            refresh_audio_tree_checks(self.audio_table)
-        finally:
-            self.audio_table.blockSignals(False)
-        self.audio_table.clearSelection()
-        checked = sum(
-            item.checkState(0) == Qt.Checked
-            for item in getattr(self, "_audio_file_items", [])
-        )
-        self.audio_status.setText(f"已选: {checked} 个 | 共 {len(self._audio_files)} 个音频文件")
-
-    @staticmethod
-    def _set_audio_directory_state(item, state):
-        """设置目录节点及其后代的状态，叶节点由调用方计数。"""
-        if item.data(0, Qt.UserRole) is not None:
-            item.setCheckState(0, state)
-            return
-        item.setCheckState(0, state)
-        for index in range(item.childCount()):
-            MainWindow._set_audio_directory_state(item.child(index), state)
-
-    def _mark_all_audio_read(self):
-        """清除全部音频未读状态，并同步当前树和顶部角标。"""
-        service = getattr(self, "audio_service", AudioService(os.path.join(get_base_dir(), "output")))
-        changed = service.mark_all_read()
-        for item in getattr(self, "_audio_file_items", []):
-            info = item.data(0, Qt.UserRole) or {}
-            item.setData(0, Qt.UserRole, {**info, "unread": False})
-        refresh_audio_tree_unread(self.audio_table)
-        self._refresh_unread_badges()
-        self.status_bar.showMessage("已将全部音频标记为已读" if changed else "当前没有未读音频")
 
     # ========== 角色视图 ==========
 
@@ -1508,7 +1270,7 @@ class MainWindow(QMainWindow):
         self._set_toolbars_visible(not show_character)
         self._set_version_content_visible(not show_character)
         self.preview_container.setVisible(False)
-        self.audio_container.setVisible(False)
+        self.audio_page.setVisible(False)
         self.character_container.setVisible(show_character)
         self._show_character = show_character
         if show_character:
@@ -1837,210 +1599,6 @@ class MainWindow(QMainWindow):
                 badge.setText("")
         self._refresh_unread_badges()
         self.status_bar.showMessage("已将全部角色数据标记为已读" if cleared else "当前没有未读角色数据")
-
-    def _export_selected_audio(self):
-        """导出选中的音频文件"""
-        selected = []
-        for item in getattr(self, "_audio_file_items", []):
-            if item.checkState(0) == Qt.Checked:
-                info = item.data(0, Qt.UserRole)
-                if info:
-                    selected.append(info)
-
-        if not selected:
-            QMessageBox.information(self, "提示", "请先勾选要导出的音频文件")
-            return
-
-        dst_dir = QFileDialog.getExistingDirectory(self, "选择导出目录")
-        if not dst_dir:
-            return
-
-        logger.info(f"导出音频：选中 {len(selected)} 个文件 → {dst_dir}")
-        success, failures = self.audio_service.export_selected(selected, dst_dir)
-        for filename in failures:
-            logger.error(f"导出失败 {filename}")
-
-        QMessageBox.information(self, "导出完成", f"成功导出 {success} 个音频文件到:\n{dst_dir}")
-        logger.info(f"导出 {success} 个音频文件到 {dst_dir}")
-
-    def _play_selected_audio(self):
-        """播放选中的音频文件（取第一个勾选，否则当前选中项）"""
-        for item in getattr(self, "_audio_file_items", []):
-            if item.checkState(0) == Qt.Checked:
-                info = item.data(0, Qt.UserRole)
-                if info:
-                    self._play_audio_file(info["path"], info["name"])
-                    return
-
-        cur = self.audio_table.currentItem()
-        if cur:
-            info = cur.data(0, Qt.UserRole)
-            if info:
-                self._play_audio_file(info["path"], info["name"])
-
-    def _on_audio_double_click(self, item, column):
-        """双击播放音频"""
-        if item:
-            info = item.data(0, Qt.UserRole)
-            if info:
-                self._play_audio_file(info["path"], info["name"])
-
-    def _play_audio_file(self, filepath, filename):
-        """播放指定音频文件"""
-        if not QT_MULTIMEDIA_AVAILABLE or self._audio_player is None:
-            QMessageBox.warning(self, "错误", "音频播放器不可用（QtMultimedia 未安装）")
-            return
-
-        if not os.path.exists(filepath):
-            QMessageBox.warning(self, "错误", f"文件不存在: {filepath}")
-            return
-
-        self._audio_current_path = filepath
-        self._audio_player.setSource(QUrl.fromLocalFile(filepath))
-        self._audio_player.play()
-        audio_dir = os.path.join(get_base_dir(), "output", "audio")
-        relative_name = os.path.relpath(filepath, audio_dir)
-        self.audio_service.mark_read(relative_name)
-        for item in getattr(self, "_audio_file_items", []):
-            info = item.data(0, Qt.UserRole) or {}
-            if info.get("path") == filepath:
-                info["unread"] = False
-                break
-        refresh_audio_tree_unread(self.audio_table)
-        self._refresh_unread_badges()
-        self.audio_now_playing.setText(f"正在播放：{filename}")
-        self.audio_play_btn.setText("暂停")
-        self.audio_play_btn.setEnabled(True)
-        self.audio_slider.setEnabled(True)
-        logger.info(f"播放音频: {filename}")
-
-    def _toggle_play(self):
-        """播放/暂停切换"""
-        if not self._audio_player:
-            return
-        if self._audio_player.playbackState() == QMediaPlayer.PlayingState:
-            self._audio_player.pause()
-        else:
-            self._audio_player.play()
-
-    def _on_audio_state_changed(self, state):
-        """播放状态变化"""
-        if state == QMediaPlayer.PlayingState:
-            self.audio_play_btn.setText("暂停")
-        elif state in (QMediaPlayer.PausedState, QMediaPlayer.StoppedState):
-            self.audio_play_btn.setText("播放")
-
-    def _update_audio_position(self, position):
-        """更新播放进度"""
-        duration = self._audio_player.duration() if self._audio_player else 0
-        if duration > 0 and not getattr(self, "_audio_slider_dragging", False):
-            self.audio_slider.setRange(0, duration)
-            self.audio_slider.setValue(position)
-        pos_str = self._format_duration(position)
-        dur_str = self._format_duration(duration)
-        self.audio_position_label.setText(f"{pos_str} / {dur_str}")
-
-    def _update_audio_duration(self, duration):
-        """总时长变化"""
-        if duration > 0:
-            self.audio_slider.setRange(0, duration)
-
-    def _on_audio_slider_moved(self, position):
-        """拖动过程中只更新预览位置，释放时再提交给播放器。"""
-        duration = self._audio_player.duration() if self._audio_player else 0
-        self.audio_position_label.setText(
-            f"{self._format_duration(position)} / {self._format_duration(duration)}"
-        )
-
-    def _on_audio_slider_pressed(self):
-        """锁定播放器回调，避免 positionChanged 把用户拖动位置抢回去。"""
-        self._audio_slider_dragging = True
-
-    def _on_audio_slider_released(self):
-        """提交用户拖动后的位置。"""
-        self._audio_slider_dragging = False
-        if self._audio_player:
-            self._audio_player.setPosition(self.audio_slider.value())
-
-    def _set_audio_volume(self, volume):
-        """设置音量"""
-        if self._audio_output:
-            self._audio_output.setVolume(volume / 100.0)
-
-    def _show_audio_context_menu(self, position):
-        """音频列表右键菜单"""
-        item = self.audio_table.itemAt(position)
-        if not item:
-            return
-        info = item.data(0, Qt.UserRole)
-        if not info:
-            return  # 目录节点，无音频信息
-        filepath = info["path"]
-
-        menu = QMenu(self)
-        menu.setObjectName("contextMenu")
-
-        act_open = menu.addAction("打开文件所在目录")
-        act_copy = menu.addAction("复制文件")
-        act_play = menu.addAction("播放")
-
-        action = menu.exec(self.audio_table.mapToGlobal(position))
-        if action == act_open:
-            self._open_audio_file_location(filepath)
-        elif action == act_copy:
-            self._copy_audio_file(filepath)
-        elif action == act_play:
-            self._play_audio_file(filepath, info["name"])
-
-    def _open_audio_file_location(self, file_path):
-        """打开文件所在目录"""
-        logger.info(f"打开文件所在目录: {file_path}")
-        try:
-            if sys.platform == "win32":
-                subprocess.Popen(['explorer', '/select,', file_path],
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                folder = os.path.dirname(file_path)
-                subprocess.Popen(['xdg-open', folder] if sys.platform.startswith('linux') else ['open', folder])
-        except Exception as e:
-            logger.error(f"打开目录失败: {e}")
-
-    def _copy_audio_file(self, file_path):
-        """复制文件到剪贴板"""
-        if not os.path.exists(file_path):
-            return
-        try:
-            from PySide6.QtGui import QGuiApplication
-            clipboard = QGuiApplication.clipboard()
-            url = QUrl.fromLocalFile(file_path)
-            data = QMimeData()
-            data.setUrls([url])
-            clipboard.setMimeData(data)
-            logger.info(f"已复制文件到剪贴板: {file_path}")
-        except Exception as e:
-            logger.error(f"复制文件失败: {e}")
-
-    def _get_audio_duration(self, filepath):
-        """获取音频时长（毫秒），失败返回 None"""
-        try:
-            if not QT_MULTIMEDIA_AVAILABLE:
-                return None
-            # 使用 QMediaPlayer 临时探测（非阻塞方式不可行，这里用文件大小估算）
-            # 对于 WAV: duration ≈ filesize / (sample_rate * channels * bits_per_sample/8) * 1000
-            # 简化：返回 None，让用户播放时显示实际时长
-            return None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _format_duration(ms):
-        """毫秒转 mm:ss"""
-        return format_duration(ms)
-
-    @staticmethod
-    def _format_size(size):
-        """字节转可读大小"""
-        return format_size(size)
 
     def _populate_character_filter(self):
         """扫描 output/character 的角色目录，填充图片预览的角色过滤下拉框"""

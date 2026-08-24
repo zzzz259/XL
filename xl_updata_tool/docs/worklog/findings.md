@@ -337,3 +337,11 @@ app/
 - 音频目录扫描、快照同步和选中导出本身不需要 Qt，集中到 `AudioService` 后可以缓存普通页面切换，且可在无 GUI 测试中验证。
 - 本轮保持 MainWindow 的播放器、选择状态、进度弹窗和 AudioDecryptWorker 不变，只把 Page 信号和目录服务先接上；这是 P1a 与 P1b 的安全边界，避免一次迁移同时改变取消/输出行为。
 - 验证结果：全量 pytest 98 项通过，Ruff `--no-cache` 通过，app/tests 共 109 个 Python 文件 AST 解析通过，`git diff --check` 通过；项目目录既有 `.pytest_cache`/`__pycache__` ACL 警告属于环境问题，未修改生产逻辑绕过。
+
+## 2026-08-24 Issue #40：Audio Feature P1b 实施发现
+
+- 播放器、目录选择、未读同步、导出和右键菜单都依赖音频树节点与页面控件，适合由同一个 `AudioController` 持有；拆成多个互相调用的 UI helper 会再次形成隐式共享状态。
+- 解密任务的生命周期和导入共享弹窗必须由 Controller 管理，Shell 只接收“完成/取消/失败 + 是否共享导入任务”的结果；这样普通音频任务不会把进度弹窗状态泄漏回 MainWindow。
+- 当前 Worker 的 bank/debank 业务仍较重，P1 只先固定 `app/features/audio/worker.py` 的功能域入口并复用现有实现；真正拆分 Service/Organizer/Audit/Adapter 应作为后续独立子阶段，避免改变输出和取消语义。
+- 旧测试原先直接调用 MainWindow 私有音频方法，已改为验证 AudioController；新增架构断言确保 MainWindow 不再导入/持有 AudioDecryptWorker、QMediaPlayer 或音频控件状态。
+- P1 验证结果：全量 pytest 100 项通过，Ruff `--no-cache` 通过，app/tests 共 111 个 Python 文件 AST 解析通过，`git diff --check` 通过。

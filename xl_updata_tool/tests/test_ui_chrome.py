@@ -5,16 +5,18 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QObject, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QSlider, QTableWidget, QTreeWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTreeWidget
 
 from app.ui.main_window import MainWindow
+from app.features.audio.controller import AudioController
+from app.features.audio.page import AudioPage
+from app.features.audio.service import AudioService
 from app.ui.views.audio_view import create_audio_view
 from app.ui.views.character_view import create_character_view
 from app.ui.views.preview_view import create_preview_view
 from app.ui.views.version_view import create_version_header, create_version_table
 from app.ui.features.audio_controller import populate_audio_tree, refresh_audio_tree_unread
 from app.core.audio_library import format_size
-from app.core.audio_repository import sync_audio_snapshot
 from app.ui.theme import DANGER, TEXT_MUTED
 
 
@@ -141,56 +143,52 @@ def test_audio_unread_only_marks_audio_tab(qapp):
 
 
 def test_audio_rows_are_single_choice_when_clicked_anywhere(qapp):
-    window = MainWindow.__new__(MainWindow)
-    window.audio_table = QTreeWidget()
-    window.audio_status = QLabel()
-    window._audio_files = [
+    controller = _build_audio_controller(qapp)
+    controller._audio_files = [
         {"name": "album\\第五专辑\\a.wav", "dir": "album\\第五专辑", "ext": "WAV", "size": 1, "path": "a.wav"},
         {"name": "album\\第五专辑\\b.wav", "dir": "album\\第五专辑", "ext": "WAV", "size": 1, "path": "b.wav"},
     ]
-    window._audio_file_items = populate_audio_tree(
-        window.audio_table, window._audio_files, format_size
+    controller._audio_file_items = populate_audio_tree(
+        controller.page.audio_table, controller._audio_files, format_size
     )
 
-    first, second = window._audio_file_items
-    window._on_audio_item_pressed(first, 3)
-    window._on_audio_item_clicked(first, 3)
+    first, second = controller._audio_file_items
+    controller.on_item_pressed(first, 3)
+    controller.on_item_clicked(first, 3)
     assert first.checkState(0).name == "Checked"
     assert second.checkState(0).name == "Unchecked"
 
-    window._on_audio_item_pressed(second, 2)
-    window._on_audio_item_clicked(second, 2)
+    controller.on_item_pressed(second, 2)
+    controller.on_item_clicked(second, 2)
     assert first.checkState(0).name == "Unchecked"
     assert second.checkState(0).name == "Checked"
-    assert window.audio_table.selectedItems() == []
+    assert controller.page.audio_table.selectedItems() == []
 
 
 def test_audio_directory_selection_checks_descendants_and_ctrl_adds(qapp):
-    window = MainWindow.__new__(MainWindow)
-    window.audio_table = QTreeWidget()
-    window.audio_status = QLabel()
-    window._audio_files = [
+    controller = _build_audio_controller(qapp)
+    controller._audio_files = [
         {"name": "album\\a\\one.wav", "dir": "album\\a", "ext": "WAV", "size": 1, "path": "one.wav"},
         {"name": "album\\a\\two.wav", "dir": "album\\a", "ext": "WAV", "size": 1, "path": "two.wav"},
         {"name": "album\\b\\three.wav", "dir": "album\\b", "ext": "WAV", "size": 1, "path": "three.wav"},
     ]
-    window._audio_file_items = populate_audio_tree(
-        window.audio_table, window._audio_files, format_size
+    controller._audio_file_items = populate_audio_tree(
+        controller.page.audio_table, controller._audio_files, format_size
     )
 
-    root = window.audio_table.topLevelItem(0)
+    root = controller.page.audio_table.topLevelItem(0)
     first_album = root.child(0)
-    window._on_audio_item_pressed(first_album, 0)
-    window._on_audio_item_clicked(first_album, 0)
-    assert [item.checkState(0) for item in window._audio_file_items] == [
+    controller.on_item_pressed(first_album, 0)
+    controller.on_item_clicked(first_album, 0)
+    assert [item.checkState(0) for item in controller._audio_file_items] == [
         Qt.Checked, Qt.Checked, Qt.Unchecked
     ]
 
     second_album = root.child(1)
-    with patch("app.ui.main_window.QApplication.keyboardModifiers", return_value=Qt.ControlModifier):
-        window._on_audio_item_pressed(second_album, 0)
-        window._on_audio_item_clicked(second_album, 0)
-    assert all(item.checkState(0) == Qt.Checked for item in window._audio_file_items)
+    with patch("app.features.audio.controller.QApplication.keyboardModifiers", return_value=Qt.ControlModifier):
+        controller.on_item_pressed(second_album, 0)
+        controller.on_item_clicked(second_album, 0)
+    assert all(item.checkState(0) == Qt.Checked for item in controller._audio_file_items)
 
 
 def test_audio_slider_commits_seek_on_release(qapp):
@@ -204,21 +202,18 @@ def test_audio_slider_commits_seek_on_release(qapp):
         def setPosition(self, position):
             self.positions.append(position)
 
-    window = MainWindow.__new__(MainWindow)
-    window._audio_player = FakePlayer()
-    window.audio_slider = QSlider(Qt.Horizontal)
-    window.audio_slider.setRange(0, 10000)
-    window.audio_position_label = QLabel()
-    window._audio_slider_dragging = False
+    controller = _build_audio_controller(qapp)
+    controller._audio_player = FakePlayer()
+    controller.page.audio_slider.setRange(0, 10000)
 
-    window._on_audio_slider_pressed()
-    window.audio_slider.setValue(4200)
-    window._on_audio_slider_moved(4200)
-    assert window._audio_player.positions == []
-    window._on_audio_slider_released()
+    controller.on_slider_pressed()
+    controller.page.audio_slider.setValue(4200)
+    controller.on_slider_moved(4200)
+    assert controller._audio_player.positions == []
+    controller.on_slider_released()
 
-    assert window._audio_player.positions == [4200]
-    assert "00:04" in window.audio_position_label.text()
+    assert controller._audio_player.positions == [4200]
+    assert "00:04" in controller.page.audio_position_label.text()
 
 
 def test_audio_unread_marker_propagates_to_outer_folders(qapp):
@@ -282,52 +277,37 @@ def test_mark_all_audio_read_updates_leaf_data_and_all_parent_markers(qapp, tmp_
     second_path.parent.mkdir(parents=True)
     first_path.write_bytes(b"cn")
     second_path.write_bytes(b"bgm")
-    audio_files = [
-        {
-            "name": "voice\\064\\cn\\064_in_01.wav",
-            "dir": "voice\\064\\cn",
-            "ext": "WAV",
-            "size": first_path.stat().st_size,
-            "path": str(first_path),
-        },
-        {
-            "name": "album\\第五专辑\\event.wav",
-            "dir": "album\\第五专辑",
-            "ext": "WAV",
-            "size": second_path.stat().st_size,
-            "path": str(second_path),
-        },
-    ]
-    sync_audio_snapshot(str(audio_dir), audio_files)
+    controller = _build_audio_controller(qapp, tmp_path)
+    controller.load_catalog()
+    controller.mark_all_read()
 
-    window = MainWindow.__new__(MainWindow)
-    window.audio_table = QTreeWidget()
-    window.audio_status = QLabel()
-    window.status_bar = MagicMock()
-    window._refresh_unread_badges = MagicMock()
-    window._audio_files = audio_files
-    window._audio_file_items = populate_audio_tree(
-        window.audio_table, audio_files, format_size
-    )
-
-    with patch("app.ui.main_window.get_base_dir", return_value=str(tmp_path)):
-        window._mark_all_audio_read()
-
-    assert all(not item.data(0, Qt.UserRole)["unread"] for item in window._audio_file_items)
-    assert all(item.text(5) == "" for item in _walk_tree(window.audio_table))
-    assert all(item.foreground(5).color().name() == TEXT_MUTED for item in _walk_tree(window.audio_table))
+    assert all(not item.data(0, Qt.UserRole)["unread"] for item in controller._audio_file_items)
+    assert all(item.text(5) == "" for item in _walk_tree(controller.page.audio_table))
+    assert all(item.foreground(5).color().name() == TEXT_MUTED for item in _walk_tree(controller.page.audio_table))
 
 
 def test_cancel_audio_worker_waits_for_thread_before_replacement(qapp):
     worker = MagicMock()
     worker.wait.return_value = True
-    window = MainWindow.__new__(MainWindow)
-    window._audio_worker = worker
+    controller = _build_audio_controller(qapp)
+    controller._audio_worker = worker
 
-    assert window._cancel_audio_worker() is True
+    assert controller.cancel_audio_worker() is True
     worker.cancel.assert_called_once_with()
     worker.wait.assert_called_once_with(30000)
-    assert window._audio_worker is None
+    assert controller._audio_worker is None
+
+
+def _build_audio_controller(qapp, output_root=None):
+    page = AudioPage()
+    return AudioController(
+        page=page,
+        service=AudioService(output_root or "E:/AI-Agent/Codex-GPT/tmp/audio-controller"),
+        material_dir="",
+        debank_dir="",
+        lua_output_dir="",
+        parent=page,
+    )
 
 
 def _walk_tree(table):

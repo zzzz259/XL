@@ -60,6 +60,17 @@ def test_audio_page_and_service_respect_feature_boundaries():
     assert "PySide6" not in service_text
 
 
+def test_main_window_delegates_audio_runtime_to_feature_controller():
+    main_window_text = (APP_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+
+    assert "AudioController" in main_window_text
+    assert "AudioService" not in main_window_text
+    assert "AudioDecryptWorker" not in main_window_text
+    assert "QMediaPlayer" not in main_window_text
+    assert "self._audio_worker" not in main_window_text
+    assert "self.audio_table" not in main_window_text
+
+
 def test_feature_factory_preserves_registration_order_and_rejects_duplicates(tmp_path):
     context = build_app_context(
         base_dir=tmp_path,

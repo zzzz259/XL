@@ -329,7 +329,7 @@
 - [completed] 盘点音频页面、控制器、播放器、缓存、AudioDecryptWorker 和现有 MainWindow 音频状态，设计兼容迁移切片。
 - [completed] 建立 `AudioPage`、`AudioService` 和 Audio tree Feature 入口；页面自持控件并通过语义信号连接迁移期 Shell。
 - [completed] 将音频树逻辑和目录扫描/快照/导出服务迁入 `app/features/audio/`，旧 `ui/features/audio_controller.py` 保留兼容转发。
-- [completed] 接入 MainWindow，保留音频输出、导出、播放、取消、分类和未读状态契约；旧 `audio_view.py` 暂不删除。
-- [completed] 定向及全量 pytest 98 项通过，Ruff `--no-cache`、AST 解析 109 个 Python 文件和 `git diff --check` 通过。
-- [in_progress] P1b：迁移播放器/选择状态、AudioController、AudioDecryptWorker 和任务结果，进一步移除 MainWindow 音频私有状态。
-- [pending] 用户正常启动验证 P1a 后，创建本地检查点；再继续 P1b。
+- [completed] 迁移播放器、选择状态、右键菜单、选中导出、解密任务生命周期和进度弹窗到 `AudioController`；新增功能域 Worker 入口。
+- [completed] 接入 MainWindow，保留音频输出、导出、播放、取消、分类和未读状态契约；旧模块暂不删除。
+- [completed] 全量 pytest 100 项通过，Ruff、AST 解析 111 个 Python 文件和 `git diff --check` 通过。
+- [pending] 用户正常启动验证 P1；确认后创建本地检查点并进入 Characters Feature。
