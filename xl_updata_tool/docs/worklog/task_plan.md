@@ -377,7 +377,7 @@ Phase 6 - Lua 与角色数据链路重构
 
 ### 阶段 0：架构契约与协作门禁
 
-当前状态：local implementation complete，等待用户启动验证（Issue #39）
+当前状态：completed（Issue #39；用户已完成正常启动验证）
 
 目标：只建边界，不改变业务行为。
 
@@ -396,6 +396,21 @@ Phase 6 - Lua 与角色数据链路重构
 - 本次只新增无 Qt 的契约、组合根草图、架构测试和 ownership 文档。
 - 不修改 `app/ui/main_window.py`、`app/core/`、任何 Worker、导出逻辑或数据格式。
 - P0 完成并经用户启动验证后，再进入 Audio Feature 迁移。
+
+### 阶段 1 当前执行边界
+
+- Issue #40 已创建，开始 P1 Audio Feature ownership 模板迁移。
+- P1a 已完成音频 Page、Qt-free AudioService、树逻辑 Feature 入口和旧模块兼容转发；MainWindow 仅保留迁移期信号适配与控件别名。
+- P1b 待迁移播放器/选择状态、AudioController、AudioDecryptWorker 和任务结果；完成后再移除 MainWindow 音频状态。
+- 每个子步骤保持旧入口可回退；未经用户验证，不删除旧音频实现。
+
+### P1a 完成记录：Audio Page 与目录服务
+
+- `app/features/audio/page.py` 新增 `AudioPage`，页面自持控件，只发出关闭、刷新、导出、播放、选择、进度和音量等语义信号。
+- `app/features/audio/service.py` 新增 `AudioService`，集中处理 `output/audio/` 扫描缓存、快照未读状态和选中导出；不依赖 Qt。
+- `app/features/audio/tree.py` 接管音频树构造、目录递归勾选和未读标记聚合；`app/ui/features/audio_controller.py` 保留兼容转发。
+- `MainWindow` 已切换到 `AudioPage` 和 `AudioService`；导出、播放、取消、分类、未读和输出目录契约保持不变。
+- 新增 `tests/test_audio_feature.py` 及架构边界断言；P1a 不删除旧 `audio_view.py`，为 P1b 回退保留入口。
 
 ### Errors Encountered
 

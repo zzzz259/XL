@@ -58,8 +58,8 @@ from app.core.bundle_selector import (
 )
 from app.core.character_presenter import export_characters_csv
 from app.core.character_profile import build_character_profile
-from app.core.audio_library import export_audio_files, format_duration, format_size, scan_audio_files
-from app.core.audio_repository import mark_all_read as mark_all_audio_read, mark_read as mark_audio_read, sync_audio_snapshot, unread_files as audio_unread_files
+from app.core.audio_library import format_duration, format_size
+from app.core.audio_repository import unread_files as audio_unread_files
 from app.core.preview_catalog import build_skel_map, scan_cardspine_roles, scan_preview_roles
 from app.core.seed_versions import seed_bundled_versions
 from app.core.version_cleanup import count_downloaded_bundles, delete_downloaded_bundles
@@ -83,7 +83,8 @@ from .workers.audio_decrypt import AudioDecryptWorker
 from .workers.import_as import ImportASWorker
 from .adapters.spine_adapter import extract_skin_name_from_png, is_composite_png
 from .views.preview_view import create_preview_view
-from .views.audio_view import create_audio_view
+from app.features.audio.page import AudioPage
+from app.features.audio.service import AudioService
 from .views.character_view import create_character_view
 from .views.version_view import create_version_header, create_version_table
 from .features.export_controller import (
@@ -91,7 +92,7 @@ from .features.export_controller import (
     export_with_dialog,
     batch_export_with_dialog,
 )
-from .features.audio_controller import (
+from app.features.audio.tree import (
     iter_audio_leaves,
     populate_audio_tree,
     refresh_audio_tree_checks,
@@ -138,6 +139,7 @@ class MainWindow(QMainWindow):
         self._import_worker = None
         self._pending_import_message = None
         self._audio_uses_import_dialog = False
+        self.audio_service = AudioService(os.path.join(get_base_dir(), "output"))
         # 音频播放器相关属性（避免首次访问 AttributeError）
         self._audio_player = None
         self._audio_output = None
@@ -203,10 +205,11 @@ class MainWindow(QMainWindow):
         self.preview_container.setVisible(False)
         content_layout.addWidget(self.preview_container, 1)
 
-        # 音频管理器视图容器（默认隐藏）
-        self.audio_container, self.audio_controls = create_audio_view(self)
-        self.audio_container.setVisible(False)
-        content_layout.addWidget(self.audio_container, 1)
+        # 音频管理器视图容器（默认隐藏）。页面自身拥有控件，主窗口只接收语义信号。
+        self.audio_page = AudioPage(self)
+        self.audio_page.setVisible(False)
+        content_layout.addWidget(self.audio_page, 1)
+        self._connect_audio_page()
 
         # 角色视图容器（默认隐藏）
         self.character_container, self.character_controls = create_character_view(self)
@@ -223,17 +226,6 @@ class MainWindow(QMainWindow):
         self.empty_label = self.preview_controls["empty_label"]
         self.preview_status = self.preview_controls["preview_status"]
         self.btn_reload = self.preview_controls["btn_reload"]
-
-        # 暴露音频控件引用
-        self.audio_title = self.audio_controls["audio_title"]
-        self.audio_table = self.audio_controls["audio_table"]
-        self.audio_play_btn = self.audio_controls["audio_play_btn"]
-        self.audio_now_playing = self.audio_controls["audio_now_playing"]
-        self.audio_position_label = self.audio_controls["audio_position_label"]
-        self.audio_slider = self.audio_controls["audio_slider"]
-        self.audio_volume = self.audio_controls["audio_volume"]
-        self.audio_status = self.audio_controls["audio_status"]
-        self.audio_empty = self.audio_controls["audio_empty"]
 
         # 暴露角色控件引用
         self.character_title = self.character_controls["character_title"]
@@ -253,6 +245,35 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self._anim_timer = QTimer()
         self._anim_dots = 0
+
+    def _connect_audio_page(self):
+        """连接音频页面的语义信号，暂保留旧业务方法作为过渡适配层。"""
+        page = self.audio_page
+        # 兼容尚未迁移到 AudioController 的旧业务方法；控件实际所有权仍在 AudioPage。
+        self.audio_container = page
+        self.audio_title = page.audio_title
+        self.audio_table = page.audio_table
+        self.audio_play_btn = page.audio_play_btn
+        self.audio_now_playing = page.audio_now_playing
+        self.audio_position_label = page.audio_position_label
+        self.audio_slider = page.audio_slider
+        self.audio_volume = page.audio_volume
+        self.audio_status = page.audio_status
+        self.audio_empty = page.audio_empty
+        page.close_requested.connect(lambda: self._toggle_audio_mode(False))
+        page.refresh_requested.connect(lambda: self._load_audio_list(force_reload=True))
+        page.export_requested.connect(self._export_selected_audio)
+        page.play_selected_requested.connect(self._play_selected_audio)
+        page.mark_all_read_requested.connect(self._mark_all_audio_read)
+        page.context_menu_requested.connect(self._show_audio_context_menu)
+        page.item_pressed.connect(self._on_audio_item_pressed)
+        page.item_clicked.connect(self._on_audio_item_clicked)
+        page.item_double_clicked.connect(self._on_audio_double_click)
+        page.play_toggled.connect(self._toggle_play)
+        page.slider_moved.connect(self._on_audio_slider_moved)
+        page.slider_pressed.connect(self._on_audio_slider_pressed)
+        page.slider_released.connect(self._on_audio_slider_released)
+        page.volume_changed.connect(self._set_audio_volume)
 
     def _view_toolbar(self):
         """顶部视图切换工具栏（版本列表 / 图片预览 / 音频 / 角色）"""
@@ -1390,8 +1411,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_audio_list_loaded", False) and not force_reload:
             return
         audio_output_dir = os.path.join(get_base_dir(), "output", "audio")
-        self._audio_files = scan_audio_files(audio_output_dir)
-        sync_audio_snapshot(audio_output_dir, self._audio_files)
+        self._audio_files = self.audio_service.load_catalog(force=force_reload)
         self._audio_file_items = []
 
         if not os.path.isdir(audio_output_dir):
@@ -1467,8 +1487,8 @@ class MainWindow(QMainWindow):
 
     def _mark_all_audio_read(self):
         """清除全部音频未读状态，并同步当前树和顶部角标。"""
-        audio_dir = os.path.join(get_base_dir(), "output", "audio")
-        changed = mark_all_audio_read(audio_dir)
+        service = getattr(self, "audio_service", AudioService(os.path.join(get_base_dir(), "output")))
+        changed = service.mark_all_read()
         for item in getattr(self, "_audio_file_items", []):
             info = item.data(0, Qt.UserRole) or {}
             item.setData(0, Qt.UserRole, {**info, "unread": False})
@@ -1836,7 +1856,7 @@ class MainWindow(QMainWindow):
             return
 
         logger.info(f"导出音频：选中 {len(selected)} 个文件 → {dst_dir}")
-        success, failures = export_audio_files(selected, dst_dir)
+        success, failures = self.audio_service.export_selected(selected, dst_dir)
         for filename in failures:
             logger.error(f"导出失败 {filename}")
 
@@ -1880,7 +1900,7 @@ class MainWindow(QMainWindow):
         self._audio_player.play()
         audio_dir = os.path.join(get_base_dir(), "output", "audio")
         relative_name = os.path.relpath(filepath, audio_dir)
-        mark_audio_read(audio_dir, relative_name)
+        self.audio_service.mark_read(relative_name)
         for item in getattr(self, "_audio_file_items", []):
             info = item.data(0, Qt.UserRole) or {}
             if info.get("path") == filepath:

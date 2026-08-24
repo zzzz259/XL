@@ -127,6 +127,7 @@ xl_updata_tool/
 ├── app/                源代码
     │   ├── bootstrap/      迁移期应用上下文与 Feature 装配入口
     │   ├── shared/         与 Qt 无关的跨 Feature 契约
+    │   ├── features/audio/ 音频 Feature 页面、目录服务和树逻辑（P1a）
     │   ├── core/           迁移期核心逻辑兼容层
     │   └── ui/             迁移期 UI 界面（workers/dialogs/features/views/adapters）
 ├── tests/              项目测试（与 app/ 平级）

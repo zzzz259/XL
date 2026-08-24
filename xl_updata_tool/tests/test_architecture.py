@@ -9,6 +9,7 @@ CORE_DIR = Path(__file__).parents[1] / "app" / "core"
 APP_DIR = Path(__file__).parents[1] / "app"
 BOOTSTRAP_DIR = APP_DIR / "bootstrap"
 SHARED_DIR = APP_DIR / "shared"
+AUDIO_FEATURE_DIR = APP_DIR / "features" / "audio"
 
 
 def test_core_layer_does_not_import_qt():
@@ -48,6 +49,15 @@ def test_p0_contract_layers_are_framework_free():
                 offenders.append(path.relative_to(APP_DIR).as_posix())
 
     assert offenders == []
+
+
+def test_audio_page_and_service_respect_feature_boundaries():
+    page_text = (AUDIO_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
+    service_text = (AUDIO_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+
+    assert "parent._" not in page_text
+    assert "controls =" not in page_text
+    assert "PySide6" not in service_text
 
 
 def test_feature_factory_preserves_registration_order_and_rejects_duplicates(tmp_path):

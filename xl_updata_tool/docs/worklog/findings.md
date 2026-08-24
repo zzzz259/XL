@@ -329,3 +329,11 @@ app/
 - 报告关于 `main.py` 的判断得到复核：当前入口本身职责集中，后续应保持轻量；Composition Root 更适合新增到 `app/bootstrap/app_factory.py`，而不是继续扩展 `main.py`。
 - 报告提出的 feature-first 结构、Page 自有控件、显式 PostProcessorRegistry、Worker 薄化、parser 子域拆分、依赖 AST 门禁、Change Fragment 和按 Issue 分隔 worklog 均纳入后续计划。
 - 本地修正：不直接执行“全仓搬家”，不以 `MainWindow` 行数作为唯一指标；先建立过渡层和兼容导出，再按 Audio → Characters → Versions → Importer → Preview 的顺序迁移。
+
+## 2026-08-24 Issue #40：Audio Feature P1a 实施发现
+
+- 原 `audio_view.py` 不是独立页面：它接收 `parent` 并把按钮、树和播放控件全部连接到 `MainWindow` 私有方法，同时返回 `controls_dict`；这会让 UI 改动持续回到公共热点文件。
+- 原 `audio_controller.py` 只承载树构造和状态传播，适合先迁入 `app/features/audio/tree.py`；旧路径改为兼容转发可以降低多人协作期间的切换风险。
+- 音频目录扫描、快照同步和选中导出本身不需要 Qt，集中到 `AudioService` 后可以缓存普通页面切换，且可在无 GUI 测试中验证。
+- 本轮保持 MainWindow 的播放器、选择状态、进度弹窗和 AudioDecryptWorker 不变，只把 Page 信号和目录服务先接上；这是 P1a 与 P1b 的安全边界，避免一次迁移同时改变取消/输出行为。
+- 验证结果：全量 pytest 98 项通过，Ruff `--no-cache` 通过，app/tests 共 109 个 Python 文件 AST 解析通过，`git diff --check` 通过；项目目录既有 `.pytest_cache`/`__pycache__` ACL 警告属于环境问题，未修改生产逻辑绕过。
