@@ -1,4 +1,4 @@
-from app.core.character_repository import (
+from app.features.characters.repository import (
     clear_all_unread,
     clear_unread,
     current_characters,

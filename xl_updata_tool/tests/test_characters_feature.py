@@ -4,7 +4,7 @@ import pytest
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
 
-from app.core.character_repository import merge_snapshot
+from app.features.characters.repository import merge_snapshot
 from app.features.characters.controller import CharacterController
 from app.features.characters.page import CharacterPage
 from app.features.characters.service import CharacterService

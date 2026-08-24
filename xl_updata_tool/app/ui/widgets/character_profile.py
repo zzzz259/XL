@@ -3,7 +3,7 @@
 
 这个组件只负责把 :class:`CharacterProfile` 展示为 Qt 原生区块，
 不读取缓存、不解析 Lua，也不改变角色数据契约。这样详情页的布局可以
-独立演进，解析和导出逻辑仍由 app.core 负责。
+独立演进，解析和导出逻辑仍由 Characters Feature 负责。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.character_profile import CharacterProfile, ProfileField, ProfileSkill, ProfileStat
+from app.features.characters.profile import CharacterProfile, ProfileField, ProfileSkill, ProfileStat
 
 
 NUMBER_PATTERN = re.compile(r"(?<![\w.])[+-]?\d+(?:,\d{3})*(?:\.\d+)?%?")

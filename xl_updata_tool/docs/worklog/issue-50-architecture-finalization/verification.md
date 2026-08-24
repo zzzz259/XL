@@ -89,3 +89,10 @@
 - [x] Versions/Importer 内部不再从 `app.core.bundle_*` 获取实现；旧 core 路径保留兼容转发。
 - [x] 移动后的相对 logger 导入问题已修复并通过 import smoke。
 - [x] 全量 pytest 137 passed、Ruff、AST 176、Bundle import smoke、runtime Qt smoke 和 diff check 通过。
+
+## P6c 退出门
+
+- [x] 角色缓存、展示/CSV、Profile 和增量仓库真实实现已进入 Characters Feature。
+- [x] Character Service/Controller/详情组件不再从 `app.core.character_*` 获取这些领域实现。
+- [x] `character_loader.py` 未在本批移动，P7 解析器拆分边界保持清晰；旧 core 兼容入口未删除。
+- [x] 全量 pytest 138 passed、Ruff、AST 180、Characters import smoke、runtime Qt smoke 和 diff check 通过。

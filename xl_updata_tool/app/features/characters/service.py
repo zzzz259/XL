@@ -9,15 +9,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from app.core.character_cache import (
+from .cache import (
     derive_character_index,
     load_cache,
     save_cache,
     source_mtime,
 )
 from app.core.character_loader import load_character_data
-from app.core.character_presenter import export_characters_csv
-from app.core.character_repository import (
+from .presenter import export_characters_csv
+from .repository import (
     clear_all_unread,
     clear_unread,
     current_characters,

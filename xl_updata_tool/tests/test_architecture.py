@@ -141,6 +141,20 @@ def test_bundle_boundaries_match_consuming_domains():
     assert "app.features.versions.bundle_manager" in (CORE_DIR / "bundle_manager.py").read_text(encoding="utf-8")
 
 
+def test_character_domain_implementations_live_in_feature_directory():
+    service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    implementation_names = ("cache.py", "presenter.py", "profile.py", "repository.py")
+    assert "app.core.character_cache" not in service_text
+    assert "app.core.character_presenter" not in service_text
+    assert "app.core.character_profile" not in service_text
+    assert "app.core.character_repository" not in service_text
+    for filename in implementation_names:
+        text = (CHARACTERS_FEATURE_DIR / filename).read_text(encoding="utf-8")
+        assert "PySide6" not in text
+        assert len(text) > 100
+    assert "app.features.characters.repository" in (CORE_DIR / "character_repository.py").read_text(encoding="utf-8")
+
+
 def test_characters_page_and_service_respect_feature_boundaries():
     page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
     service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")

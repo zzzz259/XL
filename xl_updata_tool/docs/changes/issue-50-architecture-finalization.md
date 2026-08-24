@@ -15,3 +15,5 @@ P6a 将音频目录/仓库/专辑映射和预览目录/Prefab 解析的真实实
 P6b-版本将版本仓库、差异、下载计划、更新持久化、本地同步和种子实现归入 Versions Feature；旧 `app/core/version_*` 等路径仅保留兼容转发，Bundle Parser 仍留待下一批处理。
 
 P6b-Bundle 将 Bundle Parser、Selector、Manager 分别归入 platform、Importer、Versions；旧 `app/core/bundle_*` 路径仅保留兼容转发，未改变 Bundle 修复、精准筛选和版本差异行为。
+
+P6c 将角色缓存、展示/CSV、Wiki Profile 和增量仓库实现归入 Characters Feature；`character_loader.py` 留待 P7，未改变角色解析入口或数据结构。

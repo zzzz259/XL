@@ -1,6 +1,6 @@
 import csv
 
-from app.core.character_presenter import build_character_detail_html, export_characters_csv
+from app.features.characters.presenter import build_character_detail_html, export_characters_csv
 
 
 def test_build_character_detail_html_keeps_display_fields_and_line_breaks():

@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QTableWidgetItem
 
-from app.core.character_profile import build_character_profile
+from .profile import build_character_profile
 from app.platform.diagnostics import logger
 from app.features.characters.page import CharacterPage
 from app.features.characters.service import CharacterService

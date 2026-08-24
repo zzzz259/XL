@@ -116,3 +116,10 @@
 - Versions 的差异/种子和 Importer 的导入处理已切到新边界；旧 `app/core/bundle_*.py` 只保留兼容转发，Shell/旧 Worker 仍可通过原入口工作。
 - 首次 import smoke 发现移动后的 `bundle_manager.py` 遗留 `.logger` 相对导入；已定位并切到 `app.platform.diagnostics`，之后 import、pytest、Ruff、AST、Qt smoke 和 diff 全部重跑通过。
 - P6b-Bundle 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（137 项）；Ruff 通过；不落盘 AST `AST_OK 176`；`BUNDLE_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。
+
+## P6c 退出复核（2026-08-24）
+
+- `app/features/characters/` 已接管角色缓存索引、Wiki 展示/CSV、Profile 模型和增量仓库；Character Service/Controller/详情组件与测试已切到 Feature 路径。
+- `character_loader.py` 仍按计划保留在 `app/core`，作为 P7 解析器拆分对象；本批未复制或改写 Lua 解析实现。
+- 对应 `app/core/character_cache.py`、`character_presenter.py`、`character_profile.py`、`character_repository.py` 保留兼容转发；旧入口仍有测试/组件兼容调用，未执行删除。
+- P6c 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（138 项）；Ruff 通过；不落盘 AST `AST_OK 180`；`CHARACTERS_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。
