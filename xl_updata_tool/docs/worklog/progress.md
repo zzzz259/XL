@@ -319,5 +319,6 @@
 - [completed] 新增架构 AST 测试、ownership 文档，并保留现有实现作为迁移期兼容层。
 - [completed] 全量 pytest 84 项通过，Python 编译 103 个文件通过；Ruff 初次发现并记录 1 个未使用导入，已修正。
 - [completed] 重新运行 P0 定向 pytest 8 项、Ruff 和 Python 编译 103 个文件；全部通过。
-- [in_progress] 运行全量 pytest、最终 diff 审查并创建本地 P0 检查点。
+- [completed] 全量 pytest 84 项、Ruff、Python 编译 103 个文件和 `git diff --check` 通过。
+- [completed] 创建本地 P0 检查点：`a0e8301 refactor: 建立功能域所有权架构基线`。
 - [pending] 用户用正常模式启动 XL 验证启动、页面和现有功能不变；确认后再进入 Audio Feature 迁移。
