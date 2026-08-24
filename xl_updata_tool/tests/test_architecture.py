@@ -124,6 +124,23 @@ def test_versions_domain_implementations_live_in_feature_directory():
     assert "app.features.versions.version_manager" in (CORE_DIR / "version_manager.py").read_text(encoding="utf-8")
 
 
+def test_bundle_boundaries_match_consuming_domains():
+    importer_service = (IMPORTER_FEATURE_DIR / "service.py").read_text(encoding="utf-8")
+    importer_processing = (IMPORTER_FEATURE_DIR / "processing.py").read_text(encoding="utf-8")
+    versions_data = (VERSIONS_FEATURE_DIR / "version_data.py").read_text(encoding="utf-8")
+    versions_seed = (VERSIONS_FEATURE_DIR / "seed_versions.py").read_text(encoding="utf-8")
+    platform_parser = (APP_DIR / "platform" / "bundle_parser.py").read_text(encoding="utf-8")
+
+    assert "app.core.bundle_selector" not in importer_service
+    assert "app.core.bundle_parser" not in importer_processing
+    assert "app.core.bundle_parser" not in versions_data
+    assert "app.core.bundle_parser" not in versions_seed
+    assert "PySide6" not in platform_parser
+    assert "app.platform.bundle_parser" in (CORE_DIR / "bundle_parser.py").read_text(encoding="utf-8")
+    assert "app.features.importer.bundle_selector" in (CORE_DIR / "bundle_selector.py").read_text(encoding="utf-8")
+    assert "app.features.versions.bundle_manager" in (CORE_DIR / "bundle_manager.py").read_text(encoding="utf-8")
+
+
 def test_characters_page_and_service_respect_feature_boundaries():
     page_text = (CHARACTERS_FEATURE_DIR / "page.py").read_text(encoding="utf-8")
     service_text = (CHARACTERS_FEATURE_DIR / "service.py").read_text(encoding="utf-8")

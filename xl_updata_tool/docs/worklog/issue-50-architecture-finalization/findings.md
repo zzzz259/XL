@@ -109,3 +109,10 @@
 - `app/features/versions/` 已接管 `version_cleanup`、`version_data`、`version_download`、`version_manager`、`version_update`、`local_bundle_sync` 和 `seed_versions` 的真实实现；Version Service/Controller 已切到 Feature 内部路径。
 - 对应 `app/core/version_*`、`app/core/local_bundle_sync.py`、`app/core/seed_versions.py` 均保留为迁移期兼容转发；Bundle Parser 仍暂由旧 core 兼容入口提供，留待下一批处理。
 - P6b-版本 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（136 项）；Ruff 通过；不落盘 AST `AST_OK 173`；`VERSIONS_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。
+
+## P6b-Bundle 退出复核（2026-08-24）
+
+- Bundle Parser 真实实现已归入 `app/platform/bundle_parser.py`，Bundle Selector 归入 `app/features/importer/bundle_selector.py`，Bundle Manager 归入 `app/features/versions/bundle_manager.py`。
+- Versions 的差异/种子和 Importer 的导入处理已切到新边界；旧 `app/core/bundle_*.py` 只保留兼容转发，Shell/旧 Worker 仍可通过原入口工作。
+- 首次 import smoke 发现移动后的 `bundle_manager.py` 遗留 `.logger` 相对导入；已定位并切到 `app.platform.diagnostics`，之后 import、pytest、Ruff、AST、Qt smoke 和 diff 全部重跑通过。
+- P6b-Bundle 新鲜验证：全量 `pytest -q -p no:cacheprovider` 通过（137 项）；Ruff 通过；不落盘 AST `AST_OK 176`；`BUNDLE_IMPORT_SMOKE_OK`；runtime Qt smoke `RUNTIME_QT_SMOKE_OK ('versions', 'preview', 'audio', 'character', 'importer')`；`git diff --check` 通过。

@@ -5,7 +5,7 @@ import ssl
 import urllib.request
 
 from app.platform import database as db
-from app.core.bundle_parser import extract_manifest_hashes
+from app.platform.bundle_parser import extract_manifest_hashes
 from app.platform.diagnostics import logger
 
 

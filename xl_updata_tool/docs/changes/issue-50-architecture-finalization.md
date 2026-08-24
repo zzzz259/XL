@@ -13,3 +13,5 @@
 P6a 将音频目录/仓库/专辑映射和预览目录/Prefab 解析的真实实现归入对应 Feature；旧 `app/core` 路径仅保留兼容转发，未改变产物、分类、未读状态或预览匹配行为。
 
 P6b-版本将版本仓库、差异、下载计划、更新持久化、本地同步和种子实现归入 Versions Feature；旧 `app/core/version_*` 等路径仅保留兼容转发，Bundle Parser 仍留待下一批处理。
+
+P6b-Bundle 将 Bundle Parser、Selector、Manager 分别归入 platform、Importer、Versions；旧 `app/core/bundle_*` 路径仅保留兼容转发，未改变 Bundle 修复、精准筛选和版本差异行为。

@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 
-from app.core.bundle_parser import compute_delta
+from app.platform.bundle_parser import compute_delta
 
 
 def compute_download_hashes(

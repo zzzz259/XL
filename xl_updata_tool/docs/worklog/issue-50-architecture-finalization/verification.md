@@ -82,3 +82,10 @@
 - [x] Version Service/Controller 不再从 `app.core.version_*`、`local_bundle_sync`、`seed_versions` 获取领域实现。
 - [x] 旧 core 路径保留兼容转发；Bundle Parser 依赖尚未在本批删除或伪装为已归位。
 - [x] 全量 pytest 136 passed、Ruff、AST 173、Versions import smoke、runtime Qt smoke 和 diff check 通过。
+
+## P6b-Bundle 退出门
+
+- [x] Bundle Parser、Selector、Manager 已按消费边界进入 platform、Importer、Versions。
+- [x] Versions/Importer 内部不再从 `app.core.bundle_*` 获取实现；旧 core 路径保留兼容转发。
+- [x] 移动后的相对 logger 导入问题已修复并通过 import smoke。
+- [x] 全量 pytest 137 passed、Ruff、AST 176、Bundle import smoke、runtime Qt smoke 和 diff check 通过。

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from app.core.bundle_selector import select_audio_bundles, select_lua_bundles
+from .bundle_selector import select_audio_bundles, select_lua_bundles
 from app.shared.contracts import ImportResult
 
 from .spec import CATEGORY_DIRS, normalise_categories
