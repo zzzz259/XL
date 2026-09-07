@@ -71,13 +71,13 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# onedir 模式：EXE 不得内嵌 binaries/datas（否则退化成每次启动解压到临时目录的
+# onefile 行为，体积翻倍且启动缓慢）；二进制与数据只交给 COLLECT 落到 _internal/。
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='XL',
     debug=False,
     bootloader_ignore_signals=False,

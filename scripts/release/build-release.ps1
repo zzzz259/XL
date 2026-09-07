@@ -174,13 +174,15 @@ Invoke-Step '组件体积报告' {
     }
     $rows = [System.Collections.Generic.List[psobject]]::new()
     $totalMB = Get-DirMB $distDir
-    $javaMB   = Get-DirMB (Join-Path $distDir 'runtimes\java')
-    $dotnetMB = Get-DirMB (Join-Path $distDir 'runtimes\dotnet')
-    $toolsMB  = Get-DirMB (Join-Path $distDir 'tools')
+    # PyInstaller 6 onedir：datas/binaries 落在 exe 旁的 _internal/ 子目录
+    $internalDir = Join-Path $distDir '_internal'
+    $javaMB   = Get-DirMB (Join-Path $internalDir 'runtimes\java')
+    $dotnetMB = Get-DirMB (Join-Path $internalDir 'runtimes\dotnet')
+    $toolsMB  = Get-DirMB (Join-Path $internalDir 'tools')
     $rows.Add([pscustomobject]@{ Component = 'Python+Qt+app'; SizeMB = [math]::Round($totalMB - $javaMB - $dotnetMB - $toolsMB, 1) })
     $rows.Add([pscustomobject]@{ Component = 'runtimes/java (jlink JRE)'; SizeMB = $javaMB })
     $rows.Add([pscustomobject]@{ Component = 'runtimes/dotnet (.NET 8)'; SizeMB = $dotnetMB })
-    foreach ($sub in Get-ChildItem (Join-Path $distDir 'tools') -Directory) {
+    foreach ($sub in Get-ChildItem (Join-Path $internalDir 'tools') -Directory) {
         $rows.Add([pscustomobject]@{ Component = "tools/$($sub.Name)"; SizeMB = (Get-DirMB $sub.FullName) })
     }
     $rows.Add([pscustomobject]@{ Component = 'TOTAL (dist/XL)'; SizeMB = $totalMB })
