@@ -19,7 +19,7 @@ class ImportWorker(QThread):
 
     def __init__(self, bundle_paths, bundle_dir, material_dir, as_cli, parent=None,
                  export_types=None, export_categories=None, version_timestamp=None,
-                 lua_output_dir=None, isolate_bundle_dir=False):
+                 lua_output_dir=None, isolate_bundle_dir=False, as_env=None):
         super().__init__(parent)
         self.processor = ImportProcessor(
             bundle_paths,
@@ -36,6 +36,7 @@ class ImportWorker(QThread):
             category_finished_callback=self.category_finished.emit,
             all_finished_callback=self.all_finished.emit,
             cancel_check=lambda: self.isInterruptionRequested(),
+            as_env=as_env,
         )
 
     @property

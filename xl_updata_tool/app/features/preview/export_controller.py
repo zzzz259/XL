@@ -19,7 +19,8 @@ from app.features.preview.adapter import (
 )
 from app.features.preview.worker import BatchExportWorker, CompositeExportWorker
 from app.platform.diagnostics import logger
-from app.platform.paths import get_base_dir, get_tools_dir
+from app.platform.paths import get_base_dir
+from app.platform.tool_locator import ToolLocator
 from .dialogs.export_settings import ExportSettingsDialog
 
 
@@ -47,7 +48,7 @@ def export_composite_video(controller, png_path, default_format="MP4", skin_name
         QMessageBox.warning(_page(controller), "错误", f"背景 .skel 不存在: {bg_skel}")
         return
 
-    spine_cli = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewerCLI.exe")
+    spine_cli = ToolLocator.create().spineviewer_cli()
     if not os.path.exists(spine_cli):
         QMessageBox.warning(_page(controller), "错误",
                             "SpineViewerCLI.exe 未找到，请确认 tools/SpineViewer/ 目录完整")
@@ -88,7 +89,7 @@ def export_with_dialog(controller, skel_path, atlas_path, default_format="MP4", 
         QMessageBox.warning(_page(controller), "错误", "无法导出，缺少对应的 .atlas 文件")
         return
 
-    spine_cli = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewerCLI.exe")
+    spine_cli = ToolLocator.create().spineviewer_cli()
     if not os.path.exists(spine_cli):
         logger.error("SpineViewerCLI 不存在: %s", spine_cli)
         QMessageBox.warning(_page(controller), "错误",
@@ -146,7 +147,7 @@ def batch_export_with_dialog(controller, entries_with_png, default_format="MP4")
         QMessageBox.warning(_page(controller), "错误", "没有可导出的有效文件")
         return
 
-    spine_cli = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewerCLI.exe")
+    spine_cli = ToolLocator.create().spineviewer_cli()
     if not os.path.exists(spine_cli):
         logger.error("SpineViewerCLI 不存在: %s", spine_cli)
         QMessageBox.warning(_page(controller), "错误",

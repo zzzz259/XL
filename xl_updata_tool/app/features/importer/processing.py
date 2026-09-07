@@ -15,10 +15,11 @@ import tempfile
 import time
 
 from app.platform.diagnostics import logger, timed, stage_operation, task_operation
-from app.platform.paths import get_base_dir, get_tools_dir
+from app.platform.paths import get_base_dir
 from app.platform.bundle_parser import fix_bundle_inplace
 from app.platform.files import replace_directory
 from app.platform.lua_repository import cleanup_lua_staging, publish_lua_version
+from app.platform.tool_locator import ToolLocator
 from .lua_decrypt import decompile_lua_dir
 from app.features.importer.spec import CATEGORY_DIRS, EXPORT_SPECS, build_category_commands
 
@@ -46,11 +47,20 @@ class ImportProcessor:
                  lua_output_dir=None, isolate_bundle_dir=False,
                  progress_stage_callback=None, stage_finished_callback=None,
                  category_finished_callback=None, all_finished_callback=None,
-                 cancel_check=None):
+                 cancel_check=None, as_env=None):
         self.bundle_paths = bundle_paths
         self.bundle_dir = bundle_dir
         self.material_dir = material_dir
-        self.as_cli = as_cli
+        # as_cli 兼容两种形态：单个 exe 路径（旧调用方/测试）或完整命令前缀
+        # 列表（冻结环境为 [dotnet, AssetStudio.CLI.dll]）。统一归一成命令前缀，
+        # 末位始终是 exe/dll 目标文件，供存在性检查、错误信息和 cwd 使用。
+        if isinstance(as_cli, (list, tuple)):
+            self.as_command = [str(part) for part in as_cli]
+        else:
+            self.as_command = [str(as_cli)]
+        self.as_cli = self.as_command[-1]
+        # bundled dotnet 的环境变量覆盖（DOTNET_ROOT 等）；None 表示直接继承父进程环境。
+        self.as_env = dict(as_env) if as_env else None
         self.export_types = export_types
         self.export_categories = export_categories
         self.version_timestamp = version_timestamp
@@ -200,7 +210,7 @@ class ImportProcessor:
     def _stage_map(self):
         """阶段 2: 调用 AssetStudio CLI 生成资源映射"""
         if not os.path.exists(self.as_cli):
-            logger.error(f"[导入AS] AssetStudio.CLI.exe 不存在: {self.as_cli}")
+            logger.error(f"[导入AS] AssetStudio CLI 不存在: {self.as_cli}")
             return None, f"AssetStudio CLI 不存在: {self.as_cli}"
         map_dir = os.path.join(self.bundle_dir, "_map")
         os.makedirs(map_dir, exist_ok=True)
@@ -209,9 +219,10 @@ class ImportProcessor:
         self._emit_progress("解析资源", 0, total_bundles)
         try:
             proc = subprocess.Popen(
-                [self.as_cli, self._cli_bundle_dir, map_dir, "--game", "UnityCN", "--key_index", "23",
+                self.as_command + [self._cli_bundle_dir, map_dir, "--game", "UnityCN", "--key_index", "23",
                  "--map_op", "Both", "--map_type", "JSON"],
-                cwd=os.path.dirname(self.as_cli), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                cwd=os.path.dirname(self.as_cli), env=self.as_env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, bufsize=1,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             loaded = 0
@@ -246,7 +257,7 @@ class ImportProcessor:
     def _stage_export(self, assets):
         """阶段 3: 先导出到 staging，成功后再替换 data/material/。"""
         if not os.path.exists(self.as_cli):
-            logger.error(f"[导入AS] AssetStudio.CLI.exe 不存在: {self.as_cli}")
+            logger.error(f"[导入AS] AssetStudio CLI 不存在: {self.as_cli}")
             return 0, f"AssetStudio CLI 不存在: {self.as_cli}"
 
         material_parent = os.path.dirname(os.path.abspath(self.material_dir))
@@ -279,14 +290,14 @@ class ImportProcessor:
                 if self.is_cancelled():
                     return 0, "已取消"
                 self._emit_progress_stage("导出分类", i + 1, total)
-                cmd = [self.as_cli, self._cli_bundle_dir, self._working_material_dir,
+                cmd = self.as_command + [self._cli_bundle_dir, self._working_material_dir,
                        "--game", "UnityCN", "--key_index", "23"] + extra_args + \
                       ["--group_assets", "ByContainer", "--export_type", "Convert"]
                 logger.info(f"[导入AS] {label} 开始（{i + 1}/{total}）: {' '.join(cmd)}")
                 t0 = time.time()
                 try:
                     proc = subprocess.Popen(
-                        cmd, cwd=os.path.dirname(self.as_cli),
+                        cmd, cwd=os.path.dirname(self.as_cli), env=self.as_env,
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                         text=True, bufsize=1,
                         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
@@ -466,9 +477,9 @@ class ImportProcessor:
         lua_dir = os.path.join(self._working_material_dir, "assets", "lua")
         if not os.path.isdir(lua_dir):
             return
-        tools_dir = get_tools_dir()
-        unluac_path = os.path.join(tools_dir, "lua", "unluac.jar")
-        opmap_path = os.path.join(tools_dir, "lua", "opmap")
+        locator = ToolLocator.create()
+        unluac_path = locator.unluac_jar()
+        opmap_path = locator.unluac_opmap()
         if not os.path.isfile(unluac_path):
             logger.warning("[导入AS] unluac.jar 不存在，跳过 Lua 反编译")
             return

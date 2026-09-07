@@ -132,9 +132,9 @@ class PreviewController(QObject):
 
     def start_export_from_tools(self, force=False, selected_roles=None) -> bool:
         """使用项目内 Spine CLI 启动预览导出。"""
-        from app.platform.paths import get_tools_dir
+        from app.platform.tool_locator import ToolLocator
 
-        spine_cli = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewerCLI.exe")
+        spine_cli = ToolLocator.create().spineviewer_cli()
         self.page.preview_progress.setVisible(True)
         self.page.preview_progress.setValue(0)
         return self.start_export(spine_cli, force=force, selected_roles=selected_roles)

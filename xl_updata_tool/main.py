@@ -13,6 +13,11 @@ from app.platform.runtime_config import parse_runtime_config
 def main(argv=None):
     runtime = parse_runtime_config(sys.argv[1:] if argv is None else argv)
     session = configure_logging(runtime)
+    if runtime.self_check:
+        # 自检只验证环境并输出报告，不创建 QApplication，退出码即结论。
+        from app.platform.self_check import run_self_check
+
+        sys.exit(run_self_check(session))
     crash_reporter = install_crash_reporter(session.directory)
     debug_mode = runtime.debug
     logger.info("application.start mode=%s session=%s", runtime.name, session.session_id)
@@ -31,7 +36,7 @@ def main(argv=None):
 
         app = QApplication(sys.argv)
         app.setApplicationName("XL Update Tool")
-        app.setApplicationVersion("1.0.0")
+        app.setApplicationVersion("1.60.2")
         font = QFont("Microsoft YaHei UI", 10)
         app.setFont(font)
         app_context = build_app_context(runtime)

@@ -20,7 +20,7 @@ except ImportError:
     PILLOW_AVAILABLE = False
 
 from app.platform.diagnostics import logger
-from app.platform.paths import get_tools_dir
+from app.platform.tool_locator import ToolLocator
 
 
 def extract_character_id(base_name):
@@ -498,14 +498,10 @@ def export_spine_media_file(spine_cli, skel_path, atlas_path,
 def get_ffmpeg_path():
     """获取 FFmpeg 可执行文件路径
 
-    优先使用 tools/SpineViewer/ffmpeg.exe，若不存在则回退到系统 PATH。
+    路径解析统一收口到 ToolLocator：优先 tools/SpineViewer/ffmpeg.exe，
+    开发模式缺失时回退系统 PATH，冻结模式不回退。
     """
-    local_ffmpeg = os.path.join(get_tools_dir(), "SpineViewer", "ffmpeg.exe")
-    if os.path.exists(local_ffmpeg):
-        logger.debug(f"使用本地 FFmpeg: {local_ffmpeg}")
-        return local_ffmpeg
-    logger.debug("使用系统 PATH 中的 FFmpeg")
-    return "ffmpeg"
+    return ToolLocator.create().ffmpeg()
 
 
 def ffmpeg_composite_videos(bg_path, role_path, output_path, fps, fmt="mp4"):

@@ -19,6 +19,12 @@ import tempfile
 from PySide6.QtCore import QThread, Signal
 
 from app.platform.diagnostics import logger, task_operation
+from app.platform.tool_locator import ToolLocator
+
+
+def _java_exe():
+    """经 ToolLocator 解析 Java；冻结环境只允许 bundled 运行时。"""
+    return ToolLocator.create().java()
 
 
 FIXED_HEAD = (b'\x1B\x4C\x75\x61\x54\x00\x19\x93\x0D\x0A\x1A\x0A\x04\x08\x08\x78'
@@ -209,7 +215,7 @@ def _decompile_batch(lua_dir, bytecode, unluac_path, opmap_path,
                 fh.write(fixed)
 
         # 批量反编译（单 JVM，多线程）
-        cmd = ['java', '-jar', unluac_path, fixed_dir,
+        cmd = [_java_exe(), '-jar', unluac_path, fixed_dir,
                '--output', out_dir, '--opmap', opmap_path]
         _run_batch(cmd, emit)
 
@@ -267,7 +273,7 @@ def _decompile_single(fixed_data, out_path, unluac_path, opmap_path):
         fh.write(fixed_data)
         tmp_in = fh.name
     try:
-        cmd = ['java', '-jar', unluac_path, tmp_in,
+        cmd = [_java_exe(), '-jar', unluac_path, tmp_in,
                '--output', out_path, '--opmap', opmap_path]
         subprocess.run(cmd, capture_output=True, timeout=120)
         return os.path.isfile(out_path) and os.path.getsize(out_path) > 0

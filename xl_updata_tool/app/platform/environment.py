@@ -12,10 +12,12 @@ from pathlib import Path
 
 from .logger import logger
 from .paths import get_base_dir, get_data_dir, get_output_dir, get_tools_dir
+from .tool_locator import ToolLocator, ToolNotFoundError
 
 
 def collect_environment() -> dict[str, object]:
     base_dir = get_base_dir()
+    locator = ToolLocator.create()
     return {
         "python": sys.version.split()[0],
         "platform": platform.platform(),
@@ -32,13 +34,28 @@ def collect_environment() -> dict[str, object]:
             for name in ("Py" + "Side6", "UnityPy", "psutil")
         },
         "tools": {
-            "java": shutil.which("java") is not None,
-            "dotnet": shutil.which("dotnet") is not None,
-            "assetstudio": os.path.isfile(os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")),
-            "vgmstream": os.path.isfile(os.path.join(get_tools_dir(), "vgmstream", "vgmstream-cli.exe")),
-            "quickbms": os.path.isfile(os.path.join(get_tools_dir(), "quickbms", "quickbms.exe")),
+            "java": _runtime_available(locator.java),
+            "dotnet": _runtime_available(locator.dotnet),
+            "assetstudio": os.path.isfile(locator.assetstudio_dll()),
+            "vgmstream": os.path.isfile(locator.vgmstream()),
+            # quickbms 实际位于 epic7_debank 的 _subcontractors/，不是独立目录
+            "quickbms": os.path.isfile(locator.quickbms()),
+            "fsb_aud_extr": os.path.isfile(locator.fsb_extractor()),
+            "unluac": os.path.isfile(locator.unluac_jar()),
+            "spineviewer_cli": os.path.isfile(locator.spineviewer_cli()),
+            "ffmpeg": os.path.isfile(str(locator.tools / "SpineViewer" / "ffmpeg.exe"))
+            or shutil.which("ffmpeg") is not None,
         },
     }
+
+
+def _runtime_available(resolve) -> bool:
+    """bundled 或系统 PATH（仅开发模式）任一可用即视为可用。"""
+    try:
+        resolve()
+    except ToolNotFoundError:
+        return False
+    return True
 
 
 def write_environment_report(directory: str | os.PathLike[str]) -> Path:

@@ -7,24 +7,35 @@ import subprocess
 import tempfile
 import time
 from app.platform.diagnostics import logger
-from app.platform.paths import get_base_dir, get_tools_dir
+from app.platform.paths import get_base_dir
 from app.platform.processes import run_external_process
+from app.platform.tool_locator import ToolLocator, ToolNotFoundError
 
 PROJECT_ROOT = get_base_dir()
-AS_CLI = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
+
+
+def _assetstudio():
+    """每次调用现场解析：避免模块导入时固化路径，冻结/开发模式由 locator 分流。"""
+    return ToolLocator.create()
 
 
 def _check_as_cli():
-    """检查 AssetStudio.CLI.exe 是否存在，不存在则重试一次"""
-    logger.debug(f"检查 AssetStudio.CLI 路径: {AS_CLI}")
-    if os.path.exists(AS_CLI):
+    """检查 AssetStudio CLI 启动目标（exe 或 dll）是否存在，不存在则重试一次"""
+    locator = _assetstudio()
+    try:
+        target = locator.assetstudio_command()[-1]
+    except ToolNotFoundError as error:
+        logger.error(f"AssetStudio CLI 不可用: {error}")
+        return False
+    logger.debug(f"检查 AssetStudio.CLI 路径: {target}")
+    if os.path.exists(target):
         return True
-    logger.warning(f"AssetStudio.CLI.exe 不存在，1秒后重试: {AS_CLI}")
+    logger.warning(f"AssetStudio CLI 不存在，1秒后重试: {target}")
     time.sleep(1)
-    if os.path.exists(AS_CLI):
-        logger.info(f"AssetStudio.CLI.exe 重试后可用: {AS_CLI}")
+    if os.path.exists(target):
+        logger.info(f"AssetStudio CLI 重试后可用: {target}")
         return True
-    logger.error(f"AssetStudio.CLI.exe 不存在: {AS_CLI}")
+    logger.error(f"AssetStudio CLI 不存在: {target}")
     return False
 
 MAGIC_UNITYFS = b"UnityFS"
@@ -86,15 +97,19 @@ def extract_manifest_hashes(category_path):
 
     logger.debug(f"提取 manifest hash: {os.path.basename(category_path)}")
     out_dir = tempfile.mkdtemp()
+    locator = _assetstudio()
     try:
-        proc = run_external_process([
-            AS_CLI, category_path, out_dir,
-            "--game", "UnityCN", "--key_index", "23",
-            "--group_assets", "ByType",
-            "--export_type", "Convert",
-            "--silent",
-        ], tool="AssetStudio-manifest",
-            cwd=os.path.dirname(AS_CLI),
+        proc = run_external_process(
+            locator.assetstudio_command() + [
+                category_path, out_dir,
+                "--game", "UnityCN", "--key_index", "23",
+                "--group_assets", "ByType",
+                "--export_type", "Convert",
+                "--silent",
+            ], tool="AssetStudio-manifest",
+            # deps/native 解析依赖 AssetStudio 目录作为工作目录
+            cwd=os.path.dirname(locator.assetstudio_dll()),
+            env=locator.subprocess_env(),
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             timeout=300,
@@ -144,15 +159,18 @@ def extract_manifest_from_dir(category_dir, log_cb=None):
     logger.debug(f"提取 manifest（目录）: {category_dir}")
     out_dir = tempfile.mkdtemp()
     result = {}
+    locator = _assetstudio()
     try:
-        proc = run_external_process([
-            AS_CLI, category_dir, out_dir,
-            "--game", "UnityCN", "--key_index", "23",
-            "--group_assets", "ByType",
-            "--export_type", "Convert",
-            "--silent",
-        ], tool="AssetStudio-manifest-dir",
-            cwd=os.path.dirname(AS_CLI),
+        proc = run_external_process(
+            locator.assetstudio_command() + [
+                category_dir, out_dir,
+                "--game", "UnityCN", "--key_index", "23",
+                "--group_assets", "ByType",
+                "--export_type", "Convert",
+                "--silent",
+            ], tool="AssetStudio-manifest-dir",
+            cwd=os.path.dirname(locator.assetstudio_dll()),
+            env=locator.subprocess_env(),
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             timeout=300,

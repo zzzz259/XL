@@ -12,7 +12,8 @@ from typing import Callable
 
 from app.platform import database as db
 from app.platform.diagnostics import logger
-from app.platform.paths import get_base_dir, get_tools_dir
+from app.platform.paths import get_base_dir
+from app.platform.tool_locator import ToolLocator, ToolNotFoundError
 
 
 @dataclass(frozen=True)
@@ -172,9 +173,16 @@ class ApplicationShellContribution:
                 )
                 shell.status_bar.showMessage("未找到资源映射，将扫描已下载 bundle")
 
-        as_cli = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
+        locator = ToolLocator.create()
+        try:
+            as_command = locator.assetstudio_command()
+        except ToolNotFoundError as error:
+            logger.error("AssetStudio CLI 不可用: %s", error)
+            shell.show_warning("错误", f"AssetStudio CLI 不可用:\n{error}")
+            return
+        as_cli = as_command[-1]
         if not os.path.exists(as_cli):
-            logger.error("AssetStudio.CLI.exe 不存在: %s", as_cli)
+            logger.error("AssetStudio CLI 不存在: %s", as_cli)
             shell.show_warning("错误", f"AssetStudio CLI 不存在:\n{as_cli}")
             return
         if shell._import_worker is not None:
@@ -205,11 +213,12 @@ class ApplicationShellContribution:
         shell._import_worker = importer.controller.start(
             fs,
             bundle_dir,
-            as_cli,
+            as_command,
             export_categories=export_categories,
             version_timestamp=ts,
             lua_output_dir=os.path.join(str(self.context.output_dir), "lua"),
             isolate_bundle_dir=isolate_bundle_dir,
+            as_env=locator.dotnet_env(),
         )
         shell._import_progress_dialog = shell.create_progress_dialog("正在导入 AS...", "取消")
         shell._import_progress_dialog.canceled.connect(shell._import_worker.cancel)

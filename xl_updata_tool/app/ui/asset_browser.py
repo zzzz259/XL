@@ -19,12 +19,17 @@ from .theme import (
 )
 from app.platform.bundle_parser import fix_bundle_inplace
 from app.platform.diagnostics import logger
-from app.platform.paths import get_base_dir, get_tools_dir
+from app.platform.paths import get_base_dir
+from app.platform.tool_locator import ToolLocator, ToolNotFoundError
 
 _PROJ = get_base_dir()
-AS_CLI = os.path.join(get_tools_dir(), "AssetStudio", "AssetStudio.CLI.exe")
 
 COLUMNS = ["Name", "Type", "Path", "Size", "Hash"]
+
+
+def _assetstudio_command():
+    """AssetStudio CLI 命令前缀（冻结环境经 bundled dotnet 调 dll）。"""
+    return ToolLocator.create().assetstudio_command()
 
 
 class _MultiSelectComboBox(QPushButton):
@@ -206,18 +211,27 @@ class _MapWorker(QThread):
 
     def run(self):
         try:
-            if not os.path.exists(AS_CLI):
-                logger.error(f"AssetStudio.CLI.exe 不存在: {AS_CLI}")
-                self.error.emit(f"AssetStudio CLI 不存在: {AS_CLI}")
+            locator = ToolLocator.create()
+            try:
+                as_command = locator.assetstudio_command()
+            except ToolNotFoundError as error:
+                logger.error(f"AssetStudio CLI 不可用: {error}")
+                self.error.emit(f"AssetStudio CLI 不可用: {error}")
+                return
+            as_target = as_command[-1]
+            if not os.path.exists(as_target):
+                logger.error(f"AssetStudio CLI 不存在: {as_target}")
+                self.error.emit(f"AssetStudio CLI 不存在: {as_target}")
                 return
             md = os.path.join(self._bd, "_map")
             os.makedirs(md, exist_ok=True)
             total_bundles = sum(1 for f in os.listdir(self._bd) if f.lower().endswith(".bundle")) if os.path.isdir(self._bd) else 0
             logger.info(f"[资源浏览器] 解析资源，{total_bundles} 个 bundle")
             proc = subprocess.Popen(
-                [AS_CLI, self._bd, md, "--game", "UnityCN", "--key_index", "23",
+                as_command + [self._bd, md, "--game", "UnityCN", "--key_index", "23",
                  "--map_op", "Both", "--map_type", "JSON"],
-                cwd=os.path.dirname(AS_CLI), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                cwd=os.path.dirname(as_target), env=locator.subprocess_env(),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, bufsize=1,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             loaded = 0
@@ -260,18 +274,26 @@ class _ExtractWorker(QThread):
 
     def run(self):
         try:
-            if not os.path.exists(AS_CLI):
-                logger.error(f"AssetStudio.CLI.exe 不存在: {AS_CLI}")
-                self.result.emit(False, f"AssetStudio CLI 不存在: {AS_CLI}", 0)
+            locator = ToolLocator.create()
+            try:
+                as_command = locator.assetstudio_command()
+            except ToolNotFoundError as error:
+                logger.error(f"AssetStudio CLI 不可用: {error}")
+                self.result.emit(False, f"AssetStudio CLI 不可用: {error}", 0)
+                return
+            as_target = as_command[-1]
+            if not os.path.exists(as_target):
+                logger.error(f"AssetStudio CLI 不存在: {as_target}")
+                self.result.emit(False, f"AssetStudio CLI 不存在: {as_target}", 0)
                 return
             os.makedirs(self._od, exist_ok=True)
-            cmd = [AS_CLI, self._bd, self._od, "--game", "UnityCN", "--key_index", "23",
+            cmd = as_command + [self._bd, self._od, "--game", "UnityCN", "--key_index", "23",
                    "--types", ",".join(self._tp), "--group_assets", "ByContainer",
                    "--export_type", "Convert"]
             logger.debug(f"CLI 命令: {' '.join(cmd)}")
             logger.info(f"开始导出资源，类型: {self._tp}")
             proc = subprocess.run(
-                cmd, cwd=os.path.dirname(AS_CLI),
+                cmd, cwd=os.path.dirname(as_target), env=locator.subprocess_env(),
                 capture_output=True, text=True, timeout=300,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             logger.info(f"CLI 退出码: {proc.returncode}")

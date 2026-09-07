@@ -16,6 +16,7 @@ class RuntimeConfig:
     """一次应用启动的不可变运行配置。"""
 
     debug: bool = False
+    self_check: bool = False
     extra_args: tuple[str, ...] = ()
 
     @property
@@ -44,5 +45,6 @@ def parse_runtime_config(argv: Sequence[str] | None = None) -> RuntimeConfig:
     """解析 XL 自己的参数，保留 Qt 或启动器可能传入的未知参数。"""
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--debug", action="store_true", help="启用诊断运行模式")
+    parser.add_argument("--self-check", action="store_true", help="运行 Release 环境自检后退出（不启动界面）")
     args, unknown = parser.parse_known_args(list(argv) if argv is not None else None)
-    return RuntimeConfig(debug=bool(args.debug), extra_args=tuple(unknown))
+    return RuntimeConfig(debug=bool(args.debug), self_check=bool(args.self_check), extra_args=tuple(unknown))

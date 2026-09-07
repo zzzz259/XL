@@ -26,7 +26,8 @@ from .theme import (
 from app.bootstrap import build_app_context, create_application_runtime
 from app.platform import database as db
 from app.platform.diagnostics import logger
-from app.platform.paths import get_data_dir, get_base_dir, get_tools_dir
+from app.platform.paths import get_data_dir, get_base_dir
+from app.platform.tool_locator import ToolLocator
 
 DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
@@ -529,7 +530,7 @@ class MainWindow(QMainWindow):
 
     def _open_spineviewer(self):
         """启动 SpineViewer 独立程序"""
-        sv_exe = os.path.join(get_tools_dir(), "SpineViewer", "SpineViewer.exe")
+        sv_exe = ToolLocator.create().spineviewer_gui()
 
         if not os.path.exists(sv_exe):
             logger.error(f"SpineViewer.exe 未找到: {sv_exe}")
