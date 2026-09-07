@@ -20,6 +20,22 @@ def test_parse_runtime_config_keeps_unknown_qt_arguments():
     assert config.extra_args == ("--platform", "offscreen")
 
 
+def test_parse_runtime_config_supports_self_check():
+    config = parse_runtime_config(["--self-check"])
+
+    assert config.self_check is True
+    assert config.debug is False
+
+    default = parse_runtime_config([])
+    assert default.self_check is False
+
+    # --self-check 可与 --debug 组合，未知参数仍原样保留。
+    combined = parse_runtime_config(["--self-check", "--debug", "--platform", "offscreen"])
+    assert combined.self_check is True
+    assert combined.debug is True
+    assert combined.extra_args == ("--platform", "offscreen")
+
+
 def test_logging_profiles_and_task_context(tmp_path):
     normal = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "normal")
     logger.debug("normal.debug.should_be_hidden")

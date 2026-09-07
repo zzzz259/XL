@@ -1,4 +1,5 @@
 import ast
+import re
 from pathlib import Path
 
 from app.bootstrap.app_factory import FeatureDefinition, create_features
@@ -234,6 +235,24 @@ def test_platform_implementations_do_not_depend_on_core_compatibility_modules():
     for filename in implementation_names:
         text = (platform_dir / filename).read_text(encoding="utf-8")
         assert not any(module in text for module in forbidden), filename
+
+
+def test_external_tool_launchers_are_resolved_by_tool_locator():
+    """Release 自包含门禁：app/ 生产代码不得裸调 java 或硬编码 AssetStudio.CLI.exe。
+
+    工具路径统一由 app.platform.tool_locator 解析（tools/ 目录、tests 和
+    tool_locator.py 自身不在扫描范围）。
+    """
+    violations = []
+    for path in APP_DIR.rglob("*.py"):
+        if path.name == "tool_locator.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"""[\[(]\s*['"]java['"]""", text):
+            violations.append(f"{path.relative_to(APP_DIR)}: 裸 java subprocess 调用")
+        if "AssetStudio.CLI.exe" in text:
+            violations.append(f"{path.relative_to(APP_DIR)}: 硬编码 AssetStudio.CLI.exe")
+    assert violations == []
 
 
 def test_characters_page_and_service_respect_feature_boundaries():
