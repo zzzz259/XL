@@ -415,20 +415,26 @@ def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_t
                 "method": "vgmstream",
                 "elapsed": time.perf_counter() - started,
             }
-        execute_kwargs = {
-            "result_dir": job["result_dir"],
-            "timeout": bank_timeout,
-        }
-        if cancel_check is not None:
-            execute_kwargs["cancel_check"] = cancel_check
-        success, returncode = execute_quickbms_single(
-            job["bank_path"],
-            folder4subcontractors,
-            job["extract_dir"],
-            folder_cur,
-            python_exe,
-            **execute_kwargs,
-        )
+        if python_exe is None:
+            # 冻结模式且系统无 Python：QuickBMS -S 回调无法执行，直接判失败，
+            # 把 bank 交给结果统计，避免 quickbms 静默空跑。
+            _log(f"[音频bank] 跳过 QuickBMS 回退（无可用 Python）: {job['bank_name']}")
+            success, returncode = False, "quickbms_skipped_no_python"
+        else:
+            execute_kwargs = {
+                "result_dir": job["result_dir"],
+                "timeout": bank_timeout,
+            }
+            if cancel_check is not None:
+                execute_kwargs["cancel_check"] = cancel_check
+            success, returncode = execute_quickbms_single(
+                job["bank_path"],
+                folder4subcontractors,
+                job["extract_dir"],
+                folder_cur,
+                python_exe,
+                **execute_kwargs,
+            )
     audio_files = collect_audio_files(job["result_dir"])
     if returncode == "cancelled" or (cancel_check and cancel_check()):
         status = "cancelled"
@@ -503,7 +509,14 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
         folder_cur = os.path.dirname(os.path.abspath(__file__))
 
     if getattr(sys, 'frozen', False):
-        python_exe = "python"
+        # 冻结包内没有可执行 Python；quickbms -S 回调 _epic7_defsb.py 只能靠
+        # 系统 PATH 里的 python。干净机器上必然缺失，此处显式探测，缺失时
+        # 记 warning 并跳过 QuickBMS 回退（vgmstream 直解与 fsb_aud_extr 兜底
+        # 不受影响），而不是让每个 bank 静默失败一遍。
+        python_exe = shutil.which("python")
+        if python_exe is None:
+            _log("[音频bank] 警告: 冻结模式下未找到系统 Python，QuickBMS 回退阶段将被跳过，"
+                 "vgmstream 直解失败的 bank 会标记为失败")
     else:
         python_exe = psutil.Process(os.getpid()).name()
 
