@@ -25,11 +25,17 @@ MainWindow 作为 Shell 负责导航、页面宿主和通用任务状态；`app/
 
 ## 环境要求
 
+### 运行 Release 版（普通用户）
+
 - Windows 10/11 64 位
-- Python 3.10 或更高版本（推荐 3.12）
-- 已安装 pip
-- Java 21+（Lua 反编译用，需在 PATH 中）
-- .NET 8 运行时（AssetStudio 用）
+- **无需安装任何其他环境**（Python / Java / .NET 均已内置在发布包中）
+
+### 源码开发（开发者）
+
+- Windows 10/11 64 位
+- Python 3.10 或更高版本（推荐 3.12），已安装 pip
+- Java 21+（可选；仅当开发模式需要跑 Lua 反编译且尚未生成 `runtimes/java` 时，需在 PATH 中；unluac.jar 按 Java 21 编译）
+- .NET 8 运行时（可选；AssetStudio 开发模式需要系统安装的 .NET 8，或已由 `scripts/release/prepare-dotnet.ps1` 生成的 `runtimes/dotnet`）
 
 ## 安装步骤
 
@@ -60,6 +66,30 @@ MainWindow 作为 Shell 负责导航、页面宿主和通用任务状态；`app/
    # 方式二：命令行执行
    python main.py
    ```
+
+## 构建 Release（Windows x64 便携包）
+
+在**仓库根目录**（`XL/`）的 PowerShell 中执行一条命令：
+
+```powershell
+.\scripts\release\build-release.ps1
+```
+
+构建脚本会自动完成：jlink 生成精简 Java 运行时、下载私有 .NET 8 运行时、裁剪 `tools/`（去掉非 win 平台运行时、GUI 程序、调试符号）、质量门禁（pytest + ruff）、PyInstaller 打包、自检、体积报告和 ZIP 压缩。
+
+前置条件：本机装有 Python 3.10+ 与 JDK 21+（`JAVA_HOME` 或 PATH 中有 `jlink`），构建过程需要联网（下载 .NET 运行时与 Python 依赖）。
+
+产物：
+
+- `xl_updata_tool/dist/XL/`：解压即用的绿色目录，双击 `XL.exe` 即可运行
+- `release/XL-v<版本>-win-x64-portable.zip` + `release/SHA256SUMS.txt`：发布压缩包与校验文件
+- `build/size-report.txt`：各组件体积报告
+
+发布包完全自包含：内置 Python/Qt、Java 运行时（Lua 反编译）、.NET 8 运行时（AssetStudio）以及 AssetStudio / SpineViewer / vgmstream / QuickBMS 等全部外部工具，目标机器无需安装 Python / Java / .NET。
+
+常用参数：`-Version 1.60.2` 指定版本号；`-SkipTests` 跳过 pytest/ruff；`-SkipRuntimes` 复用已生成的 `runtimes/`（快速迭代）；`-NoVenv` 直接用当前 Python 而不建 `build/.venv`。
+
+打 `v*` 标签推送后，GitHub Actions（`.github/workflows/release.yml`）会自动执行同样的构建并把 ZIP 与校验文件发布到 Release。
 
 ## 使用说明
 
