@@ -1,0 +1,4 @@
+# Release 构建依赖：在 requirements.txt 基础上锁定 PyInstaller 工具链
+-r requirements.txt
+pyinstaller==6.16.0
+pyinstaller-hooks-contrib==2025.8

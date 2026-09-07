@@ -1,0 +1,68 @@
+name: XL Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号（不带 v 前缀，如 1.60.2）'
+        required: false
+        default: '1.60.2'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up JDK (Temurin 21, for jlink/jdeps)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event.inputs.version }}") {
+            $v = "${{ github.event.inputs.version }}"
+          } else {
+            $v = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "Release version: $v"
+
+      - name: Build release (prepare runtimes, stage tools, tests, pyinstaller, self-check, zip)
+        shell: pwsh
+        run: |
+          .\scripts\release\build-release.ps1 -Version "${{ steps.ver.outputs.version }}" -NoVenv
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XL-${{ steps.ver.outputs.version }}-win-x64-portable
+          path: |
+            release/*.zip
+            release/SHA256SUMS.txt
+            build/size-report.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.zip
+            release/SHA256SUMS.txt
+          generate_release_notes: true

@@ -33,6 +33,11 @@ xl_updata_tool/tools/AssetStudio/Maps/
 dist/
 build/
 
+# Release 发布产物与私有运行时（前导 / 锚定仓库根，避免误伤 scripts/release/）
+/release/
+/xl_updata_tool/runtimes/
+/xl_updata_tool/dist/
+
 # IDE
 .idea/
 .vscode/
