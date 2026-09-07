@@ -117,3 +117,4 @@ Write-Host '    unluac.jar 加载冒烟通过'
 
 $sizeMB = [math]::Round(((Get-ChildItem $outDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
 Write-Host "==> [prepare-java] 完成，私有 JRE 体积 ${sizeMB} MB" -ForegroundColor Green
+

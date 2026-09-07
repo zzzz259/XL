@@ -67,9 +67,13 @@ Invoke-Step '清理 build/stage、dist、PyInstaller work 目录' {
 if (-not $SkipRuntimes) {
     Invoke-Step '准备私有 Java 运行时（jlink）' {
         & (Join-Path $PSScriptRoot 'prepare-java.ps1')
+        # 子脚本内部已用 EAP=Stop 保证真实失败会抛错；这里清掉其子进程残留的
+        # LASTEXITCODE（如 jdeps 的告警退出码），避免 pwsh 下误判步骤失败
+        $global:LASTEXITCODE = 0
     }
     Invoke-Step '准备私有 .NET 8 运行时' {
         & (Join-Path $PSScriptRoot 'prepare-dotnet.ps1')
+        $global:LASTEXITCODE = 0
     }
 } else {
     Write-Host '==> -SkipRuntimes：跳过 prepare-java / prepare-dotnet，使用已有 runtimes/' -ForegroundColor Yellow
@@ -79,6 +83,7 @@ if (-not $SkipRuntimes) {
 }
 Invoke-Step '裁剪 tools 到 build/stage/tools' {
     & (Join-Path $PSScriptRoot 'stage-tools.ps1')
+    $global:LASTEXITCODE = 0
 }
 
 # ---------- 3. Python 环境 + 构建依赖 ----------

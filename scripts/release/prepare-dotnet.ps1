@@ -82,3 +82,4 @@ if ($r.Output -notmatch 'Microsoft\.NETCore\.App 8\.0\.\d+') {
 
 $sizeMB = [math]::Round(((Get-ChildItem $installDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
 Write-Host "==> [prepare-dotnet] 完成，私有 .NET 运行时体积 ${sizeMB} MB" -ForegroundColor Green
+
