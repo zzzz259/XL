@@ -95,8 +95,10 @@ if (-not $NoVenv) {
     $python = Join-Path $buildDir '.venv\Scripts\python.exe'
 }
 Write-Host "==> 使用 Python: $python"
-Invoke-Step '安装构建依赖（requirements-build.txt）' {
+Invoke-Step '安装构建依赖（requirements-build.txt + requirements-dev.txt）' {
     Invoke-Native $python @('-m', 'pip', 'install', '-r', (Join-Path $appDir 'requirements-build.txt'))
+    # 质量门禁的 pytest/ruff 在 dev 依赖里，venv 是全新环境必须显式安装
+    Invoke-Native $python @('-m', 'pip', 'install', '-r', (Join-Path $appDir 'requirements-dev.txt'))
 }
 
 # ---------- 4. 质量门禁 ----------
