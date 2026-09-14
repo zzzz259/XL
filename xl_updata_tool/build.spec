@@ -2,7 +2,7 @@
 """XL Update Tool PyInstaller spec（Release 构建，--onedir 模式）
 
 前置条件（缺失会给出清晰报错）：
-  1. scripts/release/stage-tools.ps1     -> <repo>/build/stage/tools
+  1. scripts/release/stage-tools.ps1     -> xl_updata_tool/build/stage/tools
   2. scripts/release/prepare-java.ps1    -> xl_updata_tool/runtimes/java
   3. scripts/release/prepare-dotnet.ps1  -> xl_updata_tool/runtimes/dotnet
 建议直接使用 scripts/release/build-release.ps1 一键编排。
@@ -14,9 +14,7 @@ block_cipher = None
 
 # SPECPATH 由 PyInstaller 注入，为本 spec 文件所在目录（xl_updata_tool/）
 APP_DIR = os.path.abspath(SPECPATH)  # noqa: F821
-REPO_ROOT = os.path.dirname(APP_DIR)
-
-STAGE_TOOLS = os.path.join(REPO_ROOT, 'build', 'stage', 'tools')
+STAGE_TOOLS = os.path.join(APP_DIR, 'build', 'stage', 'tools')
 RUNTIMES = os.path.join(APP_DIR, 'runtimes')
 
 _missing = []

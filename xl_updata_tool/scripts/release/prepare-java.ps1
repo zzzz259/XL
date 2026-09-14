@@ -15,9 +15,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$jarPath  = Join-Path $repoRoot 'xl_updata_tool\tools\lua\unluac.jar'
-$outDir   = Join-Path $repoRoot 'xl_updata_tool\runtimes\java'
+$appDir   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$jarPath  = Join-Path $appDir 'tools\lua\unluac.jar'
+$outDir   = Join-Path $appDir 'runtimes\java'
 
 # PS 5.1 下 EAP=Stop 会把外部程序的 stderr 输出变成 NativeCommandError，
 # 统一在本函数内以 Continue 调用原生命令，返回输出文本与退出码。

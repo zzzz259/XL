@@ -72,7 +72,7 @@ MainWindow 作为 Shell 负责导航、页面宿主和通用任务状态；`app/
 在**仓库根目录**（`XL/`）的 PowerShell 中执行一条命令：
 
 ```powershell
-.\scripts\release\build-release.ps1
+.\xl_updata_tool\scripts\release\build-release.ps1
 ```
 
 构建脚本会自动完成：jlink 生成精简 Java 运行时、下载私有 .NET 8 运行时、裁剪 `tools/`（去掉非 win 平台运行时、GUI 程序、调试符号）、质量门禁（pytest + ruff）、PyInstaller 打包、自检、体积报告和 ZIP 压缩。
@@ -82,8 +82,8 @@ MainWindow 作为 Shell 负责导航、页面宿主和通用任务状态；`app/
 产物：
 
 - `xl_updata_tool/dist/XL/`：解压即用的绿色目录，双击 `XL.exe` 即可运行
-- `release/XL-v<版本>-win-x64-portable.zip` + `release/SHA256SUMS.txt`：发布压缩包与校验文件
-- `build/size-report.txt`：各组件体积报告
+- `xl_updata_tool/release/XL-v<版本>-win-x64-portable.zip` + `xl_updata_tool/release/SHA256SUMS.txt`：发布压缩包与校验文件
+- `xl_updata_tool/build/size-report.txt`：各组件体积报告
 
 发布包完全自包含：内置 Python/Qt、Java 运行时（Lua 反编译）、.NET 8 运行时（AssetStudio）以及 AssetStudio / SpineViewer / vgmstream / QuickBMS 等全部外部工具，目标机器无需安装 Python / Java / .NET。
 

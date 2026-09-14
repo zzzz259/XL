@@ -21,11 +21,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$appDir    = Join-Path $repoRoot 'xl_updata_tool'
-$buildDir  = Join-Path $repoRoot 'build'
+$appDir    = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$repoRoot  = (Resolve-Path (Join-Path $appDir '..')).Path
+$buildDir  = Join-Path $appDir 'build'
 $stageDir  = Join-Path $buildDir 'stage'
-$releaseDir = Join-Path $repoRoot 'release'
+$releaseDir = Join-Path $appDir 'release'
 $distDir   = Join-Path $appDir 'dist\XL'
 $workDir   = Join-Path $appDir 'build'
 

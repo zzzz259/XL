@@ -46,16 +46,16 @@ jobs:
       - name: Build release (prepare runtimes, stage tools, tests, pyinstaller, self-check, zip)
         shell: pwsh
         run: |
-          .\scripts\release\build-release.ps1 -Version "${{ steps.ver.outputs.version }}" -NoVenv
+          .\xl_updata_tool\scripts\release\build-release.ps1 -Version "${{ steps.ver.outputs.version }}" -NoVenv
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: XL-${{ steps.ver.outputs.version }}-win-x64-portable
           path: |
-            release/*.zip
-            release/SHA256SUMS.txt
-            build/size-report.txt
+            xl_updata_tool/release/*.zip
+            xl_updata_tool/release/SHA256SUMS.txt
+            xl_updata_tool/build/size-report.txt
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -63,6 +63,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/*.zip
-            release/SHA256SUMS.txt
+            xl_updata_tool/release/*.zip
+            xl_updata_tool/release/SHA256SUMS.txt
           generate_release_notes: true

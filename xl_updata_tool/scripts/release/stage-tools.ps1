@@ -15,9 +15,9 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$srcRoot  = Join-Path $repoRoot 'xl_updata_tool\tools'
-$dstRoot  = Join-Path $repoRoot 'build\stage\tools'
+$appDir   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$srcRoot  = Join-Path $appDir 'tools'
+$dstRoot  = Join-Path $appDir 'build\stage\tools'
 
 if (-not (Test-Path $srcRoot)) { throw "找不到 tools 目录: $srcRoot" }
 

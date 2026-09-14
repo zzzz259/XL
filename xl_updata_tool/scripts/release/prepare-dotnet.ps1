@@ -13,9 +13,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$buildDir   = Join-Path $repoRoot 'build'
-$installDir = Join-Path $repoRoot 'xl_updata_tool\runtimes\dotnet'
+$appDir     = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$buildDir   = Join-Path $appDir 'build'
+$installDir = Join-Path $appDir 'runtimes\dotnet'
 $scriptPath = Join-Path $buildDir 'dotnet-install.ps1'
 
 # PS 5.1 下 EAP=Stop 会把外部程序的 stderr 输出变成 NativeCommandError，

@@ -29,12 +29,9 @@ xl_updata_tool/tools/AssetStudio/Maps/
 # 日志
 *.log
 
-# PyInstaller 构建产物
-dist/
-build/
-
-# Release 发布产物与私有运行时（前导 / 锚定仓库根，避免误伤 scripts/release/）
-/release/
+# XL 项目构建产物、发布产物与私有运行时
+/xl_updata_tool/build/
+/xl_updata_tool/release/
 /xl_updata_tool/runtimes/
 /xl_updata_tool/dist/
 
