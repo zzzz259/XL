@@ -26,6 +26,7 @@ class VersionController(QObject):
     """协调版本工作区、更新检查、下载和删除任务。"""
 
     status_changed = Signal(str)
+    check_state_changed = Signal(bool)
     progress_changed = Signal(int, int, str)
     versions_changed = Signal()
     selection_changed = Signal(object)
@@ -62,6 +63,7 @@ class VersionController(QObject):
         self.page.cell_clicked.connect(self._on_cell_clicked)
         self.page.row_selected.connect(self._on_row_select)
         self.page.hover_row_changed.connect(self._highlight_row)
+        self.page.checking_message_changed.connect(self._set_status)
 
     def _set_status(self, message: str):
         self.status_changed.emit(message)
@@ -238,18 +240,25 @@ class VersionController(QObject):
         if self._hover_row in self._checkbox_containers:
             self._checkbox_containers[self._hover_row].setStyleSheet("")
 
-    def check_update(self):
+    def check_update(self, notify_errors=True):
+        if self._check_thread is not None and self._check_thread.isRunning():
+            self._set_status("已有更新检查正在进行，请等待当前检查完成。")
+            return
         current = self.service.current()
         old_hashes = []
         if current:
             old_hashes = [item[0] for item in (self.service.bundles(current[0]) or [])]
-        self._set_status("正在检查更新...")
+        self.page.set_checking(True)
+        self.check_state_changed.emit(True)
         self._check_thread = CheckUpdateThread(str(self.service.bundles_dir / "current"), old_hashes)
         self._check_thread.finished.connect(self._on_update_checked)
-        self._check_thread.error.connect(self._on_check_error)
+        self._check_thread.error.connect(
+            lambda error: self._on_check_error(error, notify_errors)
+        )
         self._check_thread.start()
 
     def _on_update_checked(self, info, versions, new_hashes, delta):
+        self._finish_check()
         result = self.service.register_checked(info, versions, new_hashes, delta)
         if result:
             self._set_status(f"发现新版本! 新增 {result['added']} 个 bundle.")
@@ -259,12 +268,21 @@ class VersionController(QObject):
             QMessageBox.information(self.page, "已是最新", "当前已是最新版本，无需更新。")
         self.load()
 
-    def _on_check_error(self, error):
-        self._set_status(f"错误: {error}")
-        QMessageBox.warning(self.page, "错误", f"检查更新失败:\n{error}")
+    def _on_check_error(self, error, notify_errors=True):
+        self._finish_check()
+        self._set_status(f"更新检查失败，可点击‘检查更新’重试：{error}")
+        if notify_errors:
+            QMessageBox.warning(self.page, "错误", f"检查更新失败:\n{error}")
+
+    def _finish_check(self):
+        self.page.set_checking(False)
+        self.check_state_changed.emit(False)
 
     def download_version(self, timestamp, delta_only=True):
         if not timestamp:
+            return
+        if self._download_worker is not None and self._download_worker.isRunning():
+            self._set_status("已有下载任务正在进行，请等待当前任务完成。")
             return
         sub_bundles, missing = self.service.missing_downloads(timestamp, delta_only)
         if not sub_bundles:
@@ -373,6 +391,23 @@ class VersionController(QObject):
             return
         self._set_status("下载完成!")
         QMessageBox.information(self.page, "完成", "下载完毕!")
+
+    def close(self):
+        """停止版本域线程，避免窗口销毁时 QThread 仍在运行。"""
+        for attribute in ("_download_worker", "_check_thread"):
+            worker = getattr(self, attribute, None)
+            if worker is None or not worker.isRunning():
+                setattr(self, attribute, None)
+                continue
+            stopper = getattr(worker, "stop", None)
+            if stopper is not None:
+                stopper()
+            else:
+                worker.requestInterruption()
+            if worker.wait(30000):
+                setattr(self, attribute, None)
+            else:
+                logger.error("版本线程未能在关闭超时内退出: %s", attribute)
 
     def delete_version(self, timestamp):
         count = self.service.downloaded_count(timestamp)

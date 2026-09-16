@@ -50,6 +50,7 @@ class MainWindow(QMainWindow):
         apply_theme(self, _theme)
         # 仅保留 Shell 自己拥有的导入任务；各 Feature 的任务由各自 Runtime 管理。
         self._import_worker = None
+        self._check_icon_spin = None
         self._show_character = False
         self._init_db()
         self.runtime = runtime or create_application_runtime(
@@ -255,6 +256,30 @@ class MainWindow(QMainWindow):
         self.btn_author.clicked.connect(self._show_author_info)
         layout.addWidget(self.btn_author)
         return bar
+
+    def _on_check_state_changed(self, checking: bool) -> None:
+        """Reflect the version controller's check state in the action button."""
+        if self.btn_check is None:
+            return
+        if checking:
+            self.btn_check.setEnabled(False)
+            self.btn_check.setText("检查更新中...")
+            if QT_AWESOME_AVAILABLE:
+                self._check_icon_spin = qta.Spin(self.btn_check, interval=80, step=30)
+                self.btn_check.setIcon(
+                    qta.icon("fa6s.arrows-rotate", animation=self._check_icon_spin)
+                )
+                self._check_icon_spin.start()
+            return
+
+        if self._check_icon_spin is not None:
+            self._check_icon_spin.stop()
+            self._check_icon_spin = None
+        self.btn_check.setText("检查更新")
+        icon = self._icon("arrows-rotate")
+        if icon is not None:
+            self.btn_check.setIcon(icon)
+        self.btn_check.setEnabled(True)
 
     def _on_theme_changed(self):
         """兼容未来主题入口；当前正式版只保留蓝灰深色主题。"""

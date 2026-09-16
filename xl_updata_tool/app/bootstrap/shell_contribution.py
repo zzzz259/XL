@@ -49,6 +49,7 @@ class ApplicationShellContribution:
         importer.controller.category_finished.connect(shell._on_import_category_finished)
         importer.controller.all_finished.connect(shell._on_import_all_finished)
         versions.controller.progress_changed.connect(shell._on_version_progress)
+        versions.controller.check_state_changed.connect(shell._on_check_state_changed)
         preview.controller.progress_changed.connect(
             lambda current, total, stage: shell._on_feature_progress(
                 preview.page, current, total, stage
@@ -251,6 +252,10 @@ class ApplicationShellContribution:
         current = self.registry.get("versions").controller.service.current()
         if not current and self.shell is not None:
             self.shell.status_bar.showMessage("首次启动, 自动检查更新...")
-            self.shell.schedule(1500, self.registry.get("versions").controller.check_update)
+            controller = self.registry.get("versions").controller
+            self.shell.schedule(
+                1500,
+                lambda: controller.check_update(notify_errors=False),
+            )
         elif self.shell is not None:
             self.shell.schedule(500, lambda: self.shell.status_bar.showMessage("就绪"))

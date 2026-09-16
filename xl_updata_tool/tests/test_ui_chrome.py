@@ -88,6 +88,21 @@ def test_auto_update_routes_through_version_controller(monkeypatch):
     check_update.assert_called_once_with()
 
 
+def test_check_update_button_feedback_locks_and_restores(qapp):
+    window = MainWindow.__new__(MainWindow)
+    window.btn_check = QPushButton("检查更新")
+    window._check_icon_spin = None
+    window._icon = lambda _name: None
+
+    window._on_check_state_changed(True)
+    assert not window.btn_check.isEnabled()
+    assert window.btn_check.text() == "检查更新中..."
+
+    window._on_check_state_changed(False)
+    assert window.btn_check.isEnabled()
+    assert window.btn_check.text() == "检查更新"
+
+
 def test_version_page_visibility_controls_whole_page(qapp):
     page = VersionPage()
     page.show()
