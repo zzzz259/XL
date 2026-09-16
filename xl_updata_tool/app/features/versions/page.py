@@ -1,6 +1,6 @@
 """版本功能域页面。"""
 
-from PySide6.QtCore import QEvent, QTimer, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -34,11 +34,13 @@ class DownloadProgressButton(QProgressBar):
 
     def set_progress(self, done: int, total: int) -> None:
         percent = int(done * 100 / total) if total else 0
-        self.setValue(done)
+        percent = max(0, min(100, percent))
+        displayed_done = max(0, min(100, int(done)))
+        self.setValue(displayed_done)
         self.setFormat(f"取消下载 {percent}%")
 
     def mouseReleaseEvent(self, event):
-        if event.button().value == 1:
+        if event.button() == Qt.LeftButton:
             self.clicked.emit()
             event.accept()
             return
