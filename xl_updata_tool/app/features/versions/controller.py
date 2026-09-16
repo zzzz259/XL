@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from app.platform.diagnostics import logger
 from app.ui.panels import ticks_to_date
-from app.features.versions.page import VersionPage
+from app.features.versions.page import DownloadProgressButton, VersionPage
 from app.features.versions.service import VersionService
 from app.features.versions.worker import CheckUpdateThread, DownloadWorker
 from app.shared.qt.tokens import DANGER, INFO, SUCCESS, TEXT_MUTED, WARNING, get_color
@@ -39,6 +39,13 @@ class VersionController(QObject):
         self._checkbox_containers = {}
         self._hover_row = -1
         self._download_worker = None
+        self._download_controls = {}
+        self._delete_buttons = {}
+        self._status_items = {}
+        self._active_download_timestamp = None
+        self._active_download_delta_only = None
+        self._download_cancel_requested = False
+        self._download_progress = (0, 0)
         self._check_thread = None
         self._connect_page()
 
@@ -75,6 +82,9 @@ class VersionController(QObject):
         table.setRowCount(len(versions))
         self._version_checkboxes = {}
         self._checkbox_containers = {}
+        self._download_controls = {}
+        self._delete_buttons = {}
+        self._status_items = {}
         self._hover_row = -1
         downloaded_versions = 0
         for row, version in enumerate(versions):
@@ -121,6 +131,7 @@ class VersionController(QObject):
             color = SUCCESS if status == "已下载" else WARNING if "部分" in status else TEXT_MUTED
             status_item.setForeground(QColor(color))
             table.setItem(row, 2, status_item)
+            self._status_items[ts] = status_item
             table.setItem(row, 3, QTableWidgetItem(f"{total:,}" if total else "-"))
             if delta_map and ts in delta_map:
                 added, removed, common = delta_map[ts]
@@ -137,11 +148,13 @@ class VersionController(QObject):
                     self.download_version(current_ts, is_delta)
                 )
                 table.setCellWidget(row, column, button)
+                self._download_controls.setdefault(ts, {})[delta_only] = button
             delete_button = self._row_button("删除已下载", DANGER, width=100)
             delete_button.clicked.connect(
                 lambda _checked=False, current_ts=ts: self.delete_version(current_ts)
             )
             table.setCellWidget(row, 7, delete_button)
+            self._delete_buttons[ts] = delete_button
         table.setSortingEnabled(True)
         self._version_count = len(versions)
         self._downloaded_version_count = downloaded_versions
@@ -271,9 +284,19 @@ class VersionController(QObject):
         if not missing:
             QMessageBox.information(self.page, "已下载", "全部已下载。")
             return
+        self._active_download_timestamp = timestamp
+        self._active_download_delta_only = delta_only
+        self._download_cancel_requested = False
+        self._download_progress = (0, len(missing))
+        self._replace_with_progress_button(timestamp, delta_only)
+        self._set_download_controls_enabled(False)
+        progress_button = self._download_controls[timestamp][delta_only]
+        progress_button.setEnabled(True)
         self._download_worker = DownloadWorker(missing, str(self.service.bundles_dir / str(timestamp)))
         self._download_worker.progress.connect(
-            lambda name, done, total: self.progress_changed.emit(done, total, f"{label}: {done}/{total}")
+            lambda name, done, total: self._on_download_progress(
+                timestamp, label, name, done, total
+            )
         )
         self._download_worker.item_done.connect(
             lambda name, _filename, path: self._record_download(timestamp, name, path)
@@ -286,14 +309,68 @@ class VersionController(QObject):
         self._set_status(f"{label}: 准备下载 {len(missing)} 个文件...")
         self._download_worker.start()
 
+    def _replace_with_progress_button(self, timestamp, delta_only):
+        button = DownloadProgressButton()
+        button.clicked.connect(self.cancel_download)
+        row = self._row_for_timestamp(timestamp)
+        if row < 0:
+            return
+        self.page.table.setCellWidget(row, 5 if delta_only else 6, button)
+        self._download_controls[timestamp][delta_only] = button
+
+    def _row_for_timestamp(self, timestamp):
+        for row, (ts, _checkbox) in self._version_checkboxes.items():
+            if ts == timestamp:
+                return row
+        return -1
+
+    def _set_download_controls_enabled(self, enabled):
+        for controls in self._download_controls.values():
+            for button in controls.values():
+                button.setEnabled(enabled)
+        for button in self._delete_buttons.values():
+            button.setEnabled(enabled)
+
+    def _on_download_progress(self, timestamp, label, name, done, total):
+        if timestamp != self._active_download_timestamp:
+            return
+        self._download_progress = (done, total)
+        progress_button = self._download_controls.get(timestamp, {}).get(
+            bool(self._active_download_delta_only)
+        )
+        if isinstance(progress_button, DownloadProgressButton):
+            progress_button.set_progress(done, total)
+        status_item = self._status_items.get(timestamp)
+        if status_item:
+            status_item.setText(f"下载中 ({done}/{total})")
+        label_text = "增量下载" if self._active_download_delta_only else "全量下载"
+        self.progress_changed.emit(done, total, f"{label_text}: {done}/{total}")
+        self._set_status(f"{label_text} {done}/{total} · {name}.bundle")
+
+    def cancel_download(self):
+        if self._download_worker is None or not self._download_worker.isRunning():
+            return
+        self._download_cancel_requested = True
+        self._download_worker.stop()
+        self._set_status("正在取消下载…")
+
     def _record_download(self, timestamp, name, path):
         from .version_update import record_downloaded_bundle
 
         record_downloaded_bundle(timestamp, name, path)
 
     def _download_complete(self):
+        cancelled = self._download_cancel_requested
+        done, total = self._download_progress
         self.progress_changed.emit(0, 0, "")
         self.load()
+        self._active_download_timestamp = None
+        self._active_download_delta_only = None
+        self._download_cancel_requested = False
+        self._download_progress = (0, 0)
+        if cancelled:
+            self._set_status(f"下载已取消 ({done}/{total})")
+            return
         self._set_status("下载完成!")
         QMessageBox.information(self.page, "完成", "下载完毕!")
 

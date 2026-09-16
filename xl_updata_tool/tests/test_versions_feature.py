@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from app.platform import database as db
 from app.features.versions.controller import VersionController
@@ -239,6 +239,15 @@ def test_download_ui_tracks_progress_filename_and_cancel(monkeypatch, qapp, tmp_
     QTest.mouseClick(progress_button, Qt.LeftButton)
 
     assert worker.stopped is True
+    assert statuses[-1] == "正在取消下载…"
+
+    worker.all_done.emit()
+
+    assert statuses[-1] == "下载已取消 (3/10)"
+    assert isinstance(controller._download_controls[200][True], QPushButton)
+    assert controller._download_controls[200][True].isEnabled() is True
+    assert controller._download_controls[200][False].isEnabled() is True
+    assert controller._delete_buttons[200].isEnabled() is True
 
 
 def test_check_update_locks_action_and_animates_page_title(monkeypatch, qapp, tmp_path):
