@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from app.platform import database as db
 from app.features.versions.controller import VersionController
@@ -195,6 +195,7 @@ def test_download_ui_tracks_progress_filename_and_cancel(monkeypatch, qapp, tmp_
         item_done = Signal(str, str, str)
         item_fail = Signal(str, str)
         all_done = Signal()
+        finished = Signal()
         error = Signal(str)
 
         def __init__(self, hashes, output_dir):
@@ -222,7 +223,15 @@ def test_download_ui_tracks_progress_filename_and_cancel(monkeypatch, qapp, tmp_
     controller = VersionController(page, service)
     controller.populate_table(service.refresh(), service.delta_map(service.refresh()))
     statuses = []
+    progress_updates = []
     controller.status_changed.connect(statuses.append)
+    controller.progress_changed.connect(lambda *args: progress_updates.append(args))
+    information_calls = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *args: information_calls.append(args),
+    )
 
     controller.download_version(200, delta_only=True)
     worker = controller._download_worker
@@ -233,17 +242,26 @@ def test_download_ui_tracks_progress_filename_and_cancel(monkeypatch, qapp, tmp_
     assert progress_button.format() == "取消下载 30%"
     assert controller._download_controls[200][False].isEnabled() is False
     assert controller._delete_buttons[200].isEnabled() is False
+    assert all(
+        button.isEnabled() is False
+        for controls in controller._download_controls.values()
+        for button in controls.values()
+        if controls is not controller._download_controls[200]
+    )
+    assert controller._delete_buttons[100].isEnabled() is False
     assert controller._status_items[200].text() == "下载中 (3/10)"
     assert statuses[-1] == "增量下载 3/10 · new.bundle"
+    assert progress_updates[-1] == (3, 10, "增量下载: 3/10")
 
     QTest.mouseClick(progress_button, Qt.LeftButton)
 
     assert worker.stopped is True
     assert statuses[-1] == "正在取消下载…"
 
-    worker.all_done.emit()
+    worker.finished.emit()
 
     assert statuses[-1] == "下载已取消 (3/10)"
+    assert information_calls == []
     assert isinstance(controller._download_controls[200][True], QPushButton)
     assert controller._download_controls[200][True].isEnabled() is True
     assert controller._download_controls[200][False].isEnabled() is True

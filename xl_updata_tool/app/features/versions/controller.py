@@ -304,7 +304,7 @@ class VersionController(QObject):
         self._download_worker.item_fail.connect(
             lambda bundle_hash, message: logger.error("文件下载失败: %s - %s", bundle_hash[:16], message)
         )
-        self._download_worker.all_done.connect(self._download_complete)
+        self._download_worker.finished.connect(self._download_complete)
         self._download_worker.error.connect(lambda message: self._set_status(f"下载出错: {message}"))
         self._set_status(f"{label}: 准备下载 {len(missing)} 个文件...")
         self._download_worker.start()
