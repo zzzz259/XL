@@ -158,13 +158,17 @@ def test_download_progress_button_shows_percent_and_emits_cancel(qapp):
 
     QTest.mouseClick(button, Qt.LeftButton)
 
-    assert button.value() == 5
+    assert button.value() == 50
     assert button.format() == "取消下载 50%"
     assert clicked == [True]
 
-    button.set_progress(150, 100)
-    assert button.value() == 100
-    assert button.format() == "取消下载 100%"
+    button.set_progress(150, 200)
+    assert button.value() == 75
+    assert button.format() == "取消下载 75%"
+
+    button.set_progress(5, 0)
+    assert button.value() == 0
+    assert button.format() == "取消下载 0%"
 
 
 def test_version_page_checking_animation_resets_header(qapp):

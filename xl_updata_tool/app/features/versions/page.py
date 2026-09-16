@@ -35,8 +35,7 @@ class DownloadProgressButton(QProgressBar):
     def set_progress(self, done: int, total: int) -> None:
         percent = int(done * 100 / total) if total else 0
         percent = max(0, min(100, percent))
-        displayed_done = max(0, min(100, int(done)))
-        self.setValue(displayed_done)
+        self.setValue(percent)
         self.setFormat(f"取消下载 {percent}%")
 
     def mouseReleaseEvent(self, event):
