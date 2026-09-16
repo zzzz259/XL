@@ -177,14 +177,14 @@ def test_version_page_checking_animation_resets_header(qapp):
     page.checking_message_changed.connect(messages.append)
 
     page.set_checking(True)
-    assert page.workspace_title.text() == "检查更新中"
-    page._advance_check_animation()
-    assert page.workspace_title.text() == "检查更新中。"
+    for expected in page._CHECKING_MESSAGES:
+        assert page.workspace_title.text() == expected
+        page._advance_check_animation()
 
     page.set_checking(False)
     assert page.workspace_title.text() == "版本工作区"
     assert page.workspace_description.text() == "管理版本、下载状态与增量关系"
-    assert messages == ["检查更新中", "检查更新中。"]
+    assert messages == list(page._CHECKING_MESSAGES) + [page._CHECKING_MESSAGES[0]]
 
 
 def test_download_ui_tracks_progress_filename_and_cancel(monkeypatch, qapp, tmp_path):
@@ -316,3 +316,70 @@ def test_check_update_locks_action_and_animates_page_title(monkeypatch, qapp, tm
 
     assert checking_states == [True, False]
     assert page.workspace_title.text() == "版本工作区"
+
+
+def test_check_update_rejects_duplicate_running_check(monkeypatch, qapp, tmp_path):
+    _init_version_db(tmp_path)
+
+    class FakeCheckThread(QObject):
+        finished = Signal(object, object, object, object)
+        error = Signal(str)
+
+        def __init__(self, *_args):
+            super().__init__()
+            self.running = False
+
+        def start(self):
+            self.running = True
+
+        def isRunning(self):
+            return self.running
+
+    monkeypatch.setattr("app.features.versions.controller.CheckUpdateThread", FakeCheckThread)
+    controller = VersionController(VersionPage(), VersionService(tmp_path / "bundles"))
+    states = []
+    statuses = []
+    controller.check_state_changed.connect(states.append)
+    controller.status_changed.connect(statuses.append)
+
+    controller.check_update(notify_errors=False)
+    controller.check_update(notify_errors=False)
+
+    assert states == [True]
+    assert statuses[-1] == "已有更新检查正在进行，请等待当前检查完成。"
+
+
+def test_check_update_success_restores_state_and_routes_completion(monkeypatch, qapp, tmp_path):
+    _init_version_db(tmp_path)
+
+    class FakeCheckThread(QObject):
+        finished = Signal(object, object, object, object)
+        error = Signal(str)
+
+        def __init__(self, *_args):
+            super().__init__()
+            self.running = False
+
+        def start(self):
+            self.running = True
+
+        def isRunning(self):
+            return self.running
+
+    monkeypatch.setattr("app.features.versions.controller.CheckUpdateThread", FakeCheckThread)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: None)
+    service = VersionService(tmp_path / "bundles")
+    monkeypatch.setattr(service, "register_checked", lambda *args: None)
+    controller = VersionController(VersionPage(), service)
+    controller.load = lambda: None
+    states = []
+    controller.check_state_changed.connect(states.append)
+    statuses = []
+    controller.status_changed.connect(statuses.append)
+
+    controller.check_update(notify_errors=False)
+    controller._check_thread.finished.emit({}, [], [], {})
+
+    assert states == [True, False]
+    assert controller.page.workspace_title.text() == "版本工作区"
+    assert statuses[-1] == "已是最新版本."

@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QObject, QPoint, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTreeWidget
 
@@ -101,6 +102,51 @@ def test_check_update_button_feedback_locks_and_restores(qapp):
     window._on_check_state_changed(False)
     assert window.btn_check.isEnabled()
     assert window.btn_check.text() == "检查更新"
+
+
+def test_check_update_button_replaces_existing_qtawesome_spin(monkeypatch, qapp):
+    class FakeSpin:
+        instances = []
+
+        def __init__(self, parent, interval, step):
+            self.parent = parent
+            self.interval = interval
+            self.step = step
+            self.started = False
+            self.stopped = False
+            self.__class__.instances.append(self)
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            self.stopped = True
+
+    fake_qta = SimpleNamespace(
+        Spin=FakeSpin,
+        icon=lambda *_args, **_kwargs: QIcon(),
+    )
+    monkeypatch.setattr("app.ui.main_window.QT_AWESOME_AVAILABLE", True)
+    monkeypatch.setattr("app.ui.main_window.qta", fake_qta)
+    window = MainWindow.__new__(MainWindow)
+    window.btn_check = QPushButton("检查更新")
+    window._check_icon_spin = None
+    window._icon = lambda _name: QIcon()
+
+    window._on_check_state_changed(True)
+    first_spin = window._check_icon_spin
+    window._on_check_state_changed(True)
+    second_spin = window._check_icon_spin
+
+    assert first_spin.stopped is True
+    assert second_spin is not first_spin
+    assert second_spin.started is True
+    assert second_spin.interval == 80
+    assert second_spin.step == 30
+
+    window._on_check_state_changed(False)
+    assert second_spin.stopped is True
+    assert window._check_icon_spin is None
 
 
 def test_version_page_visibility_controls_whole_page(qapp):

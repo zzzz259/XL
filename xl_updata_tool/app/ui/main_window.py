@@ -265,6 +265,9 @@ class MainWindow(QMainWindow):
             self.btn_check.setEnabled(False)
             self.btn_check.setText("检查更新中...")
             if QT_AWESOME_AVAILABLE:
+                if self._check_icon_spin is not None:
+                    self._check_icon_spin.stop()
+                    self._check_icon_spin = None
                 self._check_icon_spin = qta.Spin(self.btn_check, interval=80, step=30)
                 self.btn_check.setIcon(
                     qta.icon("fa6s.arrows-rotate", animation=self._check_icon_spin)
