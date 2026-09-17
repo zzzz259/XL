@@ -15,3 +15,16 @@ def test_catalog_can_hold_unmatched_record_without_assigning_character():
 
     assert catalog.unmatched[0].character_id is None
     assert catalog.characters == {}
+
+
+def test_skin_key_uses_identity_fallback_when_attachment_fingerprint_is_unavailable():
+    first = SpineSkinRecord(
+        "10080", "a.skel", "a.atlas", "default", "", "默认", "ready",
+        identity_fingerprint="identity-a", fingerprint_kind="source_skin_identity",
+    )
+    second = SpineSkinRecord(
+        "10080", "a.skel", "a.atlas", "default", "", "默认", "ready",
+        identity_fingerprint="identity-b", fingerprint_kind="source_skin_identity",
+    )
+
+    assert skin_key(first) != skin_key(second)

@@ -13,6 +13,9 @@ import time
 import gc
 import shutil
 from dataclasses import dataclass, field
+from collections import defaultdict
+import hashlib
+import json
 
 try:
     from PIL import Image
@@ -35,6 +38,9 @@ class SkinQueryResult:
     error: str = ""
     timed_out: bool = False
     attachment_fingerprints: dict[str, str] = field(default_factory=dict)
+    identity_fingerprints: dict[str, str] = field(default_factory=dict)
+    attachment_fingerprint_kind: str = "unavailable"
+    diagnostic: str = ""
 
     @property
     def skins(self) -> tuple[str, ...]:
@@ -58,8 +64,12 @@ def parse_skin_query_output(stdout) -> tuple[str, ...]:
             line = line.split(":", 1)[1].strip()
             if not line:
                 continue
+        if line.casefold().startswith("attachment:"):
+            continue
         header = line.rstrip(":").strip().casefold()
-        if header in {"skin", "skins", "skin name", "skin names"}:
+        if header in {
+            "skin", "skins", "skin name", "skin names", "attachments", "attachment",
+        }:
             continue
         if line.endswith(":") and header in {"result", "results", "output"}:
             continue
@@ -67,6 +77,43 @@ def parse_skin_query_output(stdout) -> tuple[str, ...]:
             names.append(line)
             seen.add(line)
     return tuple(names)
+
+
+def _parse_attachment_query_data(stdout):
+    """Parse ``Attachment: skin=...;slot=...;name=...`` identity rows."""
+    attachment_rows = defaultdict(list)
+    for raw_line in str(stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line.casefold().startswith("attachment:"):
+            continue
+        values = {}
+        for component in line.split(":", 1)[1].split(";"):
+            if "=" not in component:
+                continue
+            key, value = component.split("=", 1)
+            key = key.strip().casefold()
+            value = " ".join(value.strip().replace("\\", "/").split())
+            if key and value:
+                values[key] = value
+        skin_name = values.pop("skin", None)
+        if skin_name and values:
+            attachment_rows[skin_name].append(tuple(sorted(values.items())))
+
+    fingerprints = {}
+    for skin_name, rows in attachment_rows.items():
+        payload = json.dumps(sorted(rows), ensure_ascii=False, separators=(",", ":"))
+        fingerprints[skin_name] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return fingerprints
+
+
+def _source_skin_identity(skel_path, atlas_path, skin_name):
+    identity = {
+        "source_skel": os.path.abspath(os.fspath(skel_path)).replace("\\", "/"),
+        "atlas_path": os.path.abspath(os.fspath(atlas_path)).replace("\\", "/"),
+        "skin_name": skin_name,
+    }
+    payload = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class SpineQueryRunner:
@@ -97,12 +144,32 @@ class SpineQueryRunner:
             )
             stdout = proc.stdout or ""
             stderr = proc.stderr or ""
+            skin_names = parse_skin_query_output(stdout) if proc.returncode == 0 else ()
+            attachment_fingerprints = _parse_attachment_query_data(stdout) if proc.returncode == 0 else {}
+            identity_fingerprints = {
+                name: _source_skin_identity(skel_path, atlas_path, name) for name in skin_names
+            }
+            attachment_kind = "attachment_set" if attachment_fingerprints else (
+                "source_skin_identity" if skin_names else "unavailable"
+            )
+            diagnostic = ""
+            if skin_names and not attachment_fingerprints:
+                diagnostic = (
+                    "SpineViewerCLI skin output did not expose attachment sets; "
+                    "attachment fingerprint unavailable; using source/skin identity fallback"
+                )
+            elif attachment_fingerprints.keys() != set(skin_names):
+                diagnostic = "SpineViewerCLI returned attachment data for only some skins"
             return SkinQueryResult(
-                skin_names=parse_skin_query_output(stdout) if proc.returncode == 0 else (),
+                skin_names=skin_names,
                 stdout=stdout,
                 stderr=stderr,
                 returncode=proc.returncode,
                 error=("SpineViewerCLI query failed" if proc.returncode else ""),
+                attachment_fingerprints=attachment_fingerprints,
+                identity_fingerprints=identity_fingerprints,
+                attachment_fingerprint_kind=attachment_kind,
+                diagnostic=diagnostic,
             )
         except subprocess.TimeoutExpired as exc:
             return SkinQueryResult(
@@ -111,6 +178,7 @@ class SpineQueryRunner:
                 returncode=-1,
                 error=f"SpineViewerCLI query timed out after {self.timeout}s",
                 timed_out=True,
+                diagnostic="SpineViewerCLI skin query timed out",
             )
         except Exception as exc:
             return SkinQueryResult(returncode=-1, error=str(exc))

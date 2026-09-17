@@ -91,7 +91,12 @@ def resolve_character_id(path, metadata) -> str | None:
             return candidate
 
     stem = Path(path_text).stem
-    candidates = re.findall(r"(?<!\d)(\d{5})(?!\d)", stem)
+    convention = re.fullmatch(
+        r"(?:cardspine|battlespine)[_-](\d{5})(?:[_-]\d+)?(?:_bg)?",
+        stem,
+        flags=re.IGNORECASE,
+    )
+    candidates = [convention.group(1)] if convention else []
     parent_name = Path(path_text).parent.name
     if re.fullmatch(r"\d{5}", parent_name):
         candidates.append(parent_name)
@@ -118,30 +123,17 @@ def _metadata_for_path(character_data, path):
     return character_data
 
 
-def _file_digest(path):
-    digest = hashlib.sha256()
+def _source_skin_identity(skel_path, atlas_path, skin_name):
     try:
-        with open(path, "rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError:
-        digest.update(b"<missing>")
-    return digest.hexdigest()
-
-
-def _fingerprint(skel_path, atlas_path, skin_name, material_dir):
-    try:
-        source_skel = os.path.relpath(skel_path, material_dir).replace("\\", "/")
-        source_atlas = os.path.relpath(atlas_path, material_dir).replace("\\", "/")
+        source_skel = os.path.abspath(skel_path).replace("\\", "/")
+        source_atlas = os.path.abspath(atlas_path).replace("\\", "/")
     except ValueError:
         source_skel = str(skel_path).replace("\\", "/")
         source_atlas = str(atlas_path).replace("\\", "/")
     identity = {
         "source_skel": source_skel,
-        "atlas": source_atlas,
+        "atlas_path": source_atlas,
         "skin_name": skin_name,
-        "skel_digest": _file_digest(skel_path),
-        "atlas_digest": _file_digest(atlas_path),
     }
     payload = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -178,6 +170,25 @@ def _query_fingerprint(result, skin_name):
     return fingerprints.get(skin_name)
 
 
+def _query_identity_fingerprint(result, skin_name):
+    fingerprints = getattr(result, "identity_fingerprints", {}) or {}
+    return fingerprints.get(skin_name)
+
+
+def _query_diagnostic(result):
+    parts = []
+    for value in (
+        getattr(result, "diagnostic", ""),
+        getattr(result, "error", ""),
+        f"exit code {result.returncode}" if getattr(result, "returncode", 0) not in (0, None) else "",
+        getattr(result, "stderr", ""),
+    ):
+        value = str(value or "").strip()
+        if value and value not in parts:
+            parts.append(value)
+    return "; ".join(parts)
+
+
 def discover_preview_resources(material_dir, character_data=None, query_runner=None) -> PreviewResourceCatalog:
     """Discover same-directory Spine pairs and return identity-based skin records."""
     root = Path(material_dir)
@@ -199,9 +210,12 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
                     source_skel=str(skel_path),
                     atlas_path=str(atlas_path),
                     skin_name="",
-                    attachment_fingerprint=_fingerprint(str(skel_path), str(atlas_path), "", str(root)),
+                    attachment_fingerprint="",
                     display_name=stem,
                     status="invalid",
+                    identity_fingerprint=_source_skin_identity(str(skel_path), str(atlas_path), ""),
+                    fingerprint_kind="source_skin_identity",
+                    diagnostic=f"atlas missing: {atlas_path}",
                 )
             )
             continue
@@ -215,24 +229,40 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
                     source_skel=str(skel_path),
                     atlas_path=str(atlas_path),
                     skin_name="",
-                    attachment_fingerprint=_fingerprint(str(skel_path), str(atlas_path), "", str(root)),
+                    attachment_fingerprint="",
                     display_name=stem,
                     status="invalid",
+                    identity_fingerprint=_query_identity_fingerprint(result, "")
+                    or _source_skin_identity(str(skel_path), str(atlas_path), ""),
+                    fingerprint_kind="source_skin_identity",
+                    diagnostic=_query_diagnostic(result)
+                    or "skin query did not return any skin names",
                 )
             )
             continue
 
         for skin_name in skin_names:
+            attachment_fingerprint = _query_fingerprint(result, skin_name) or ""
+            identity_fingerprint = _query_identity_fingerprint(result, skin_name)
+            diagnostic = _query_diagnostic(result)
+            if not attachment_fingerprint:
+                fallback_diagnostic = (
+                    "attachment set fingerprint unavailable; using source/skin identity fallback"
+                )
+                diagnostic = "; ".join(value for value in (diagnostic, fallback_diagnostic) if value)
             records.append(
                 SpineSkinRecord(
                     character_id=character_id,
                     source_skel=str(skel_path),
                     atlas_path=str(atlas_path),
                     skin_name=skin_name,
-                    attachment_fingerprint=_query_fingerprint(result, skin_name)
-                    or _fingerprint(str(skel_path), str(atlas_path), skin_name, str(root)),
+                    attachment_fingerprint=attachment_fingerprint,
                     display_name=skin_name,
                     status="ready",
+                    identity_fingerprint=identity_fingerprint
+                    or _source_skin_identity(str(skel_path), str(atlas_path), skin_name),
+                    fingerprint_kind=("attachment_set" if attachment_fingerprint else "source_skin_identity"),
+                    diagnostic=diagnostic,
                 )
             )
 

@@ -20,6 +20,9 @@ class SpineSkinRecord:
     attachment_fingerprint: str
     display_name: str
     status: str
+    identity_fingerprint: str = ""
+    fingerprint_kind: str = "attachment_set"
+    diagnostic: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,12 +63,13 @@ def _normalise_path(value: str) -> str:
 
 
 def skin_key(record: SpineSkinRecord) -> str:
-    """Return a stable key based only on resource identity and attachment content."""
+    """Return a stable key using attachment identity or its explicit fallback."""
+    fingerprint = record.attachment_fingerprint or record.identity_fingerprint
     identity = (
         record.character_id or "",
         _normalise_path(record.source_skel),
         record.skin_name,
-        record.attachment_fingerprint,
+        fingerprint,
     )
     payload = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
