@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- 必须使用 `xl_updata_tool/.venv/Scripts/python.exe` 运行测试和 Python 工具。
+- 必须使用 `E:/All-Projects/XL/.venv/Scripts/python.exe` 运行测试和 Python 工具。
 - 不改变 `output/fgui/<包名>/` 既有输出入口。
 - 既有 `output/character/<角色ID>/*.png` 必须可读，并作为 legacy 未归类资源展示。
 - 皮肤主键不得由不规范文件名构成，必须使用 Spine 内部皮肤信息和附件集合指纹。
@@ -39,7 +39,7 @@
 - `PreviewResourceState(path).is_new(fingerprint)`, `.mark_read(fingerprint)`, `.save()`。
 
 - [ ] **Step 1: Write the failing tests**：覆盖相同显示名但附件集合不同会产生不同皮肤键；缺失角色 ID 会进入 `unmatched`；父节点在任意子项未读时为新。
-- [ ] **Step 2: Run the focused tests**：`xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_resource_model.py tests/test_preview_resource_state.py -q`，确认因模块/接口不存在而失败。
+- [ ] **Step 2: Run the focused tests**：`E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_resource_model.py tests/test_preview_resource_state.py -q`，确认因模块/接口不存在而失败。
 - [ ] **Step 3: Implement the minimal immutable records and JSON state store**：指纹和键只使用规范化路径、角色 ID、skin 名和附件指纹；状态文件采用原子替换写入。
 - [ ] **Step 4: Run focused tests again**，确认全部通过。
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/app/features/preview/resource_model.py xl_updata_tool/app/features/preview/resource_state.py xl_updata_tool/app/features/preview/service.py xl_updata_tool/tests/test_preview_resource_model.py xl_updata_tool/tests/test_preview_resource_state.py && git commit -m "feat: add preview resource identity model"`。
@@ -60,7 +60,7 @@
 - `resolve_character_id(path, metadata) -> str | None`。
 
 - [ ] **Step 1: Write failing tests**：模拟 `query --skin` 输出多个 skin；模拟 skin 名重复但附件指纹不同；验证缺少 atlas、CLI 失败和不能确认角色 ID 的结果。
-- [ ] **Step 2: Run focused tests**：`xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_resource_catalog.py tests/test_spine_adapter.py -q`，确认测试先失败。
+- [ ] **Step 2: Run focused tests**：`E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_resource_catalog.py tests/test_spine_adapter.py -q`，确认测试先失败。
 - [ ] **Step 3: Implement injectable CLI query and catalog discovery**：使用现有 ToolLocator 定位 CLI；不再调用 `extract_motion_names()` 作为皮肤来源；保留 stderr 摘要和资源状态。
 - [ ] **Step 4: Run focused tests and existing preview catalog tests**：确认新增测试及 `tests/test_preview_catalog.py` 通过。
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/app/features/preview/resource_catalog.py xl_updata_tool/app/features/preview/catalog.py xl_updata_tool/app/features/preview/spine_adapter.py xl_updata_tool/tests/test_preview_resource_catalog.py xl_updata_tool/tests/test_spine_adapter.py && git commit -m "feat: discover spine skins by metadata"`。
@@ -81,7 +81,7 @@
 - `PreviewExportWorker(jobs, settings, runner)`：发出 `progress(current,total,label)`、`finished(summary)`、`error(message)`。
 
 - [ ] **Step 1: Write failing tests**：验证一个 job 只对应一个角色皮肤目录；命令包含内部 skin 名而不是 PNG 文件名；配置可生成透明 PNG；计划不包含自动 composite job。
-- [ ] **Step 2: Run focused tests**：`xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_export_plan.py tests/test_preview_export_worker.py -q`，确认红灯。
+- [ ] **Step 2: Run focused tests**：`E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_export_plan.py tests/test_preview_export_worker.py -q`，确认红灯。
 - [ ] **Step 3: Implement plan builder and worker**：输出到 `output/character/<character_id>/<skin_key>/`；写入 `metadata.json`；取消时停止后续 job，不删除其他分类输出。
 - [ ] **Step 4: Run focused tests**，确认绿灯并覆盖重复启动保护。
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/app/features/preview/export_plan.py xl_updata_tool/app/features/preview/workers/preview_export.py xl_updata_tool/app/features/preview/spine_adapter.py xl_updata_tool/tests/test_preview_export_plan.py xl_updata_tool/tests/test_preview_export_worker.py && git commit -m "feat: export selected spine skins"`。
@@ -102,7 +102,7 @@
 - `export_game_materials(catalog, output_dir, splitter) -> MaterialExportSummary`。
 
 - [ ] **Step 1: Write failing tests**：覆盖 `burst-head`、`burst_head`、`bursthead` 变体；验证普通 dialoghead 不会仅因名字相似被归类；验证每个图集组有独立输出目录。
-- [ ] **Step 2: Run focused tests**：`xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_material_catalog.py tests/test_fgui_atlas.py -q`，确认红灯。
+- [ ] **Step 2: Run focused tests**：`E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_material_catalog.py tests/test_fgui_atlas.py -q`，确认红灯。
 - [ ] **Step 3: Implement catalog and reuse `UIPackageTool`**：FGUI 仍写 `output/fgui/<包名>/`；Burst Head 写 `output/game_material/burst-head/`；保留来源元数据。
 - [ ] **Step 4: Run focused tests**，确认绿灯。
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/app/features/preview/material_catalog.py xl_updata_tool/app/features/preview/fgui_atlas.py xl_updata_tool/app/features/preview/service.py xl_updata_tool/tests/test_preview_material_catalog.py xl_updata_tool/tests/test_fgui_atlas.py && git commit -m "feat: catalog burst head and atlas materials"`。
@@ -122,7 +122,7 @@
 - `PreviewPage.export_requested = Signal(object)`，参数为选中的 `SpineSkinRecord` 集合。
 
 - [ ] **Step 1: Write failing Qt tests**：验证三个分页存在；Spine 页角色/皮肤节点带复选框和新状态；父节点状态随子节点刷新；角色立绘页继续提供缩略图容器。
-- [ ] **Step 2: Run focused Qt tests**：`$env:QT_QPA_PLATFORM='offscreen'; xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_page.py tests/test_preview_spine_tree.py -q`，确认红灯。
+- [ ] **Step 2: Run focused Qt tests**：`$env:QT_QPA_PLATFORM='offscreen'; E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_page.py tests/test_preview_spine_tree.py -q`，确认红灯。
 - [ ] **Step 3: Implement page and tree widgets**：复用共享 chrome/theme token；Spine 页不加载缩略图；选中或勾选时发语义信号并同步新状态。
 - [ ] **Step 4: Run focused Qt tests**，确认绿灯。
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/app/features/preview/page.py xl_updata_tool/app/features/preview/spine_tree.py xl_updata_tool/app/features/preview/item.py xl_updata_tool/tests/test_preview_page.py xl_updata_tool/tests/test_preview_spine_tree.py && git commit -m "feat: add preview resource tabs"`。
@@ -142,7 +142,7 @@
 - `PreviewController.status_changed` 持续提供“发现中/导出中/已取消/完成/失败”文本。
 
 - [ ] **Step 1: Write failing tests**：验证控件能构造合法 `ExportSettings`；重复点击不会创建第二个 Worker；取消会清理引用并刷新底部状态；导出完成不自动调用 composite。
-- [ ] **Step 2: Run focused tests**：`xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_export_settings.py tests/test_preview_controller.py -q`，确认红灯。
+- [ ] **Step 2: Run focused tests**：`E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_export_settings.py tests/test_preview_controller.py -q`，确认红灯。
 - [ ] **Step 3: Implement dialog/controller wiring**：用 QComboBox、QSpinBox、QCheckBox；导出期间禁用开始按钮并显示当前文件名和 x/N；刷新后重新加载三分页数据。
 - [ ] **Step 4: Run focused tests**，确认绿灯。
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/app/features/preview/dialogs/export_settings.py xl_updata_tool/app/features/preview/controller.py xl_updata_tool/app/features/preview/factory.py xl_updata_tool/tests/test_preview_export_settings.py xl_updata_tool/tests/test_preview_controller.py && git commit -m "feat: configure preview exports from UI"`。
@@ -156,7 +156,7 @@
 - Test: `xl_updata_tool/tests/test_preview_thumbnail_groups.py`
 
 - [ ] **Step 1: Write failing tests**：验证角色/皮肤分页计数、`burst-head` 和图集目录分组、legacy PNG 可显示且标记为未归类、过滤和选择后底部计数即时更新。
-- [ ] **Step 2: Run focused test**：`xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_thumbnail_groups.py -q`，确认红灯。
+- [ ] **Step 2: Run focused test**：`E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_thumbnail_groups.py -q`，确认红灯。
 - [ ] **Step 3: Implement grouped recursive loading**：不阻塞 UI；空状态、加载状态和失败状态使用内容区覆盖层；新状态使用资源键而不是 PNG 文件名。
 - [ ] **Step 4: Run focused test and existing preview tests**，确认绿灯。
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/app/features/preview/workers/image_loader.py xl_updata_tool/app/features/preview/item.py xl_updata_tool/app/features/preview/controller.py xl_updata_tool/tests/test_preview_thumbnail_groups.py && git commit -m "feat: group preview thumbnails by resource"`。
@@ -170,11 +170,11 @@
 - Modify: `xl_updata_tool/tests/test_ownership_acceptance.py`
 
 - [ ] **Step 1: Write failing acceptance tests**：验证旧 `app.ui` Preview 入口仍转发到 Feature；旧 `output/character` 和 `output/fgui` 能被新 Catalog 读取；新导出不自动 composite。
-- [ ] **Step 2: Run acceptance tests**：`xl_updata_tool\.venv\Scripts\python.exe -m pytest tests/test_preview_feature.py tests/test_ownership_acceptance.py -q`，确认红灯。
+- [ ] **Step 2: Run acceptance tests**：`E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest tests/test_preview_feature.py tests/test_ownership_acceptance.py -q`，确认红灯。
 - [ ] **Step 3: Implement compatibility and documentation**：更新目录结构、参数配置、匹配规则、Burst Head 识别限制和拼接操作说明。
 - [ ] **Step 4: Run full verification**：
-  - `xl_updata_tool\.venv\Scripts\python.exe -m pytest -q`
-  - `xl_updata_tool\.venv\Scripts\python.exe -m ruff check app tests`
-  - `xl_updata_tool\.venv\Scripts\python.exe -m compileall -q app`
+  - `E:\All-Projects\XL\.venv\Scripts\python.exe -m pytest -q`
+  - `E:\All-Projects\XL\.venv\Scripts\python.exe -m ruff check app tests`
+  - `E:\All-Projects\XL\.venv\Scripts\python.exe -m compileall -q app`
   - `git diff --check`
 - [ ] **Step 5: Commit**：`git add xl_updata_tool/docs/开发文档指南.md xl_updata_tool/docs/版本历史.md xl_updata_tool/tests/test_preview_feature.py xl_updata_tool/tests/test_ownership_acceptance.py && git commit -m "docs: document preview resource workbench"`。
