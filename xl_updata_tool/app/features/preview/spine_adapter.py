@@ -27,6 +27,44 @@ from app.platform.diagnostics import logger
 from app.platform.tool_locator import ToolLocator
 
 
+def build_spine_export_command(job, spine_cli):
+    """Build a PNG export command from a ``SkinExportJob`` identity."""
+    record = job.record
+    settings = job.settings
+    command = [
+        os.fspath(spine_cli),
+        "export",
+        os.fspath(record.source_skel),
+        "-f",
+        str(settings.format),
+        "-o",
+        os.fspath(job.output_path),
+        "-a",
+        str(settings.animation),
+        "--atlas",
+        os.fspath(record.atlas_path),
+        "--skins",
+        str(record.skin_name),
+        "--scale",
+        str(settings.scale),
+        "--max-resolution",
+        str(settings.max_resolution),
+        "--margin",
+        str(settings.margin),
+        "--time",
+        "0",
+        "--duration",
+        "1",
+        "--fps",
+        str(settings.fps),
+    ]
+    if settings.transparent:
+        command.extend(["--color", "#00000000"])
+    if settings.pma:
+        command.append("--pma")
+    return command
+
+
 @dataclass(frozen=True, slots=True)
 class SkinQueryResult:
     """Result of an authoritative Spine skin metadata query."""

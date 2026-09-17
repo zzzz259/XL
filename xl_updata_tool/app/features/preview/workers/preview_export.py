@@ -2,6 +2,9 @@
 """图片预览导出工作线程（.skel → PNG，含配对合成 + 皮肤导出 + FGUI 图集切割）"""
 
 import os
+import json
+import threading
+from dataclasses import asdict
 
 from PySide6.QtCore import QThread, Signal
 
@@ -20,6 +23,7 @@ from app.features.preview.adapter import (
     extract_character_id,
 )
 from app.features.preview.prefab_parser import parse_prefab, compute_pixel_offset, build_cardspine_bundle_map
+from app.features.preview.export_plan import ExportSettings
 
 
 class PreviewExportWorker(QThread):
@@ -28,28 +32,98 @@ class PreviewExportWorker(QThread):
     在后台线程执行 SpineViewerCLI 导出，避免阻塞 UI。
     支持去重：force=False 时跳过已存在的 PNG。
     """
-    progress = Signal(int, int)            # current, total
+    progress = Signal(int, int, str)       # current, total, label
+    finished = Signal(str)                 # summary for identity-based jobs
     export_finished = Signal(bool, str)    # success, summary
     error = Signal(str)
 
-    def __init__(self, material_dir, output_dir, spine_cli, force=False, selected_roles=None, parent=None):
+    def __init__(self, jobs, settings=None, runner=None, force=False, selected_roles=None, parent=None):
         super().__init__(parent)
-        self.material_dir = material_dir
-        self.output_dir = output_dir
-        self.spine_cli = spine_cli
-        self.force = force
-        self.selected_roles = selected_roles
+        self._job_mode = isinstance(settings, ExportSettings) and runner is not None
+        if self._job_mode:
+            self.jobs = tuple(jobs)
+            self.settings = settings
+            self.runner = runner
+        else:
+            self.material_dir = jobs
+            self.output_dir = settings
+            self.spine_cli = runner
+            self.force = force
+            self.selected_roles = selected_roles
         self._cancelled = False
+        self._active = False
+        self._active_lock = threading.Lock()
+
+    def start(self, priority=None):
+        """Start once while active, returning whether a task was started."""
+        with self._active_lock:
+            if self._active:
+                return False
+            self._active = True
+        try:
+            if priority is None:
+                super().start()
+            else:
+                super().start(priority)
+        except Exception:
+            with self._active_lock:
+                self._active = False
+            raise
+        return True
 
     def cancel(self):
         self._cancelled = True
 
     def run(self):
         try:
-            self._do_export()
+            if self._job_mode:
+                self._run_jobs()
+            else:
+                self._do_export()
         except Exception as e:
             logger.error(f"预览导出线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
+        finally:
+            with self._active_lock:
+                self._active = False
+
+    def _run_jobs(self):
+        total = len(self.jobs)
+        success_count = 0
+        failure_count = 0
+        cancelled = False
+
+        for current, job in enumerate(self.jobs, start=1):
+            if self._cancelled:
+                cancelled = True
+                break
+
+            label = job.record.display_name or job.record.skin_name
+            self.progress.emit(current, total, label)
+            job.output_path.parent.mkdir(parents=True, exist_ok=True)
+            if self.runner(job):
+                success_count += 1
+                self._write_metadata(job)
+            else:
+                failure_count += 1
+
+        if self._cancelled:
+            cancelled = True
+        summary = f"{success_count} succeeded, {failure_count} failed"
+        if cancelled:
+            summary += ", cancelled"
+        self.finished.emit(summary)
+        self.export_finished.emit(success_count > 0 and failure_count == 0 and not cancelled, summary)
+
+    @staticmethod
+    def _write_metadata(job):
+        metadata = {
+            "record": asdict(job.record),
+            "settings": asdict(job.settings),
+            "output_path": str(job.output_path),
+        }
+        metadata_path = job.output_path.parent / "metadata.json"
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _find_assets_map(self):
         """扫描 data/bundles/*/_map/assets_map.json，返回最新一个的路径（用于角色→bundle 映射）"""
@@ -114,7 +188,7 @@ class PreviewExportWorker(QThread):
             char_subdir = os.path.join(self.output_dir, char_id)
 
             processed += 1
-            self.progress.emit(processed, total)
+            self.progress.emit(processed, total, base_name)
 
             if not os.path.exists(atlas_path):
                 logger.warning(f"跳过 {skel_name}: 缺少对应的 .atlas 文件")
