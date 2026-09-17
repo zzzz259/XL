@@ -1,5 +1,7 @@
 import ast
+import os
 import re
+import shutil
 from pathlib import Path
 
 from app.bootstrap.app_factory import FeatureDefinition, create_features
@@ -481,6 +483,37 @@ def test_replace_directory_swaps_staged_output(tmp_path):
 
     assert (destination / "new.txt").read_text(encoding="utf-8") == "new"
     assert not (destination / "old.txt").exists()
+
+
+def test_replace_directory_retries_transient_windows_access_denied(monkeypatch):
+    root = Path.cwd() / f".replace-directory-test-{os.getpid()}"
+    root.mkdir()
+    try:
+        destination = root / "material"
+        source = root / "staging" / "assets"
+        source.mkdir(parents=True)
+        (source / "new.txt").write_text("new", encoding="utf-8")
+
+        original_replace = os.replace
+        attempts = {"source": 0}
+
+        def flaky_replace(source_path, destination_path):
+            if Path(source_path) == source and attempts["source"] < 2:
+                attempts["source"] += 1
+                error = PermissionError(13, "access denied")
+                error.winerror = 5
+                raise error
+            return original_replace(source_path, destination_path)
+
+        monkeypatch.setattr("app.platform.files.os.replace", flaky_replace)
+        monkeypatch.setattr("app.platform.files.time.sleep", lambda _seconds: None)
+
+        replace_directory(source, destination)
+
+        assert attempts["source"] == 2
+        assert (destination / "new.txt").read_text(encoding="utf-8") == "new"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_feature_runtime_registry_binds_generic_ports_and_lifecycle():
