@@ -19,6 +19,7 @@ _BURST_HEAD_TOKEN = re.compile(
 _IMAGE_SUFFIXES = frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tga", ".webp"})
 _ATLAS_SUFFIXES = ("_fui.bank", "_fui.bytes")
 _BURST_MANIFEST_NAME = ".burst-head-manifest.json"
+_BURST_SIDECAR_SUFFIX = ".burst-head.json"
 _METADATA_KIND_KEYS = frozenset(
     {
         "category",
@@ -82,13 +83,7 @@ def _contains_burst_head_token(value) -> bool:
 
 def _metadata_entry(path, metadata):
     if isinstance(metadata, Mapping):
-        for variant in _path_variants(path):
-            if variant in metadata:
-                return metadata[variant]
         path_variants = _path_variants(path)
-        for key, value in metadata.items():
-            if _normalise_path(key) in path_variants:
-                return value
         for key in ("resources", "by_path", "assets", "items"):
             entries = metadata.get(key)
             if isinstance(entries, Mapping):
@@ -229,19 +224,79 @@ def _source_key(path: Path) -> str:
     return os.path.normcase(os.path.abspath(os.fspath(path))).replace("\\", "/")
 
 
+class _BurstManifestError(ValueError):
+    """Raised when the persisted Burst Head manifest cannot be trusted."""
+
+
+def _normalise_manifest_entry(source, entry) -> dict[str, str]:
+    if not isinstance(source, str) or not source:
+        raise _BurstManifestError("source key must be a non-empty string")
+    if not isinstance(entry, Mapping):
+        raise _BurstManifestError(f"entry for {source!r} must be an object")
+    fingerprint = entry.get("fingerprint")
+    output_name = entry.get("output")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        raise _BurstManifestError(f"entry for {source!r} has an invalid fingerprint")
+    if not isinstance(output_name, str) or not output_name or Path(output_name).name != output_name:
+        raise _BurstManifestError(f"entry for {source!r} has an invalid output")
+    return {"fingerprint": fingerprint, "output": output_name}
+
+
 def _load_burst_manifest(output_dir: Path) -> dict[str, Mapping[str, str]]:
+    manifest_path = output_dir / _BURST_MANIFEST_NAME
+    if not manifest_path.exists():
+        return {}
     try:
-        payload = json.loads((output_dir / _BURST_MANIFEST_NAME).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    entries = payload.get("entries") if isinstance(payload, Mapping) else None
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise _BurstManifestError(str(error)) from error
+    if not isinstance(payload, Mapping) or payload.get("version") != 1:
+        raise _BurstManifestError("manifest root must contain version 1")
+    entries = payload.get("entries")
     if not isinstance(entries, Mapping):
-        return {}
+        raise _BurstManifestError("manifest entries must be an object")
     return {
-        str(source): entry
+        source: _normalise_manifest_entry(source, entry)
         for source, entry in entries.items()
-        if isinstance(entry, Mapping)
     }
+
+
+def _save_burst_sidecar(target: Path, source: Path, fingerprint: str) -> None:
+    sidecar_path = target.with_name(f"{target.name}{_BURST_SIDECAR_SUFFIX}")
+    temporary_path = sidecar_path.with_name(f"{sidecar_path.name}.tmp")
+    try:
+        temporary_path.write_text(
+            json.dumps(
+                {"version": 1, "source": _source_key(source), "fingerprint": fingerprint, "output": target.name},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        os.replace(temporary_path, sidecar_path)
+    except Exception:
+        try:
+            temporary_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _load_burst_sidecars(output_dir: Path) -> dict[str, Mapping[str, str]]:
+    sidecars: dict[str, Mapping[str, str]] = {}
+    for sidecar_path in output_dir.glob(f"*{_BURST_SIDECAR_SUFFIX}"):
+        try:
+            payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, Mapping) or payload.get("version") != 1:
+                continue
+            source = payload.get("source")
+            entry = _normalise_manifest_entry(source, payload)
+            if (output_dir / entry["output"]).is_file() and sidecar_path.name == f"{entry['output']}{_BURST_SIDECAR_SUFFIX}":
+                sidecars[source] = entry
+        except (OSError, UnicodeError, json.JSONDecodeError, _BurstManifestError):
+            continue
+    return sidecars
 
 
 def _save_burst_manifest(output_dir: Path, entries: Mapping[str, Mapping[str, str]]) -> None:
@@ -297,6 +352,20 @@ def _burst_output_path(record: GameMaterialRecord, output_dir: Path, manifest) -
         index += 1
 
 
+def _copy_burst_head(record: GameMaterialRecord, source_path: Path, target: Path) -> None:
+    target_existed = target.exists()
+    try:
+        shutil.copy2(source_path, target)
+        _save_burst_sidecar(target, source_path, record.fingerprint)
+    except Exception:
+        if not target_existed:
+            try:
+                target.unlink()
+            except OSError:
+                pass
+        raise
+
+
 def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) -> MaterialExportSummary:
     """Export known game materials while retaining existing output on failures."""
     root = Path(output_dir)
@@ -305,8 +374,17 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
     exported = 0
     failed = 0
     diagnostics: list[str] = []
-    burst_manifest = _load_burst_manifest(burst_output)
+    try:
+        burst_manifest = _load_burst_manifest(burst_output)
+    except _BurstManifestError as error:
+        burst_manifest = {}
+        failed += 1
+        diagnostics.append(f"burst-head manifest load failed: {error}")
     burst_manifest_changed = False
+    for source, entry in _load_burst_sidecars(burst_output).items():
+        if source not in burst_manifest:
+            burst_manifest[source] = entry
+            burst_manifest_changed = True
 
     for record in catalog.burst_heads:
         if record.kind != "burst-head":
@@ -319,15 +397,22 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
         try:
             burst_output.mkdir(parents=True, exist_ok=True)
             target = _burst_output_path(record, burst_output, burst_manifest)
-            if not _manifest_target(record, burst_output, burst_manifest):
-                shutil.copy2(source_path, target)
+            existing_target = _manifest_target(record, burst_output, burst_manifest)
+            if existing_target is None:
+                _copy_burst_head(record, source_path, target)
                 burst_manifest[_source_key(source_path)] = {
                     "fingerprint": record.fingerprint,
                     "output": target.name,
                 }
                 burst_manifest_changed = True
+            elif burst_manifest.get(_source_key(source_path), {}).get("output") != existing_target.name:
+                burst_manifest[_source_key(source_path)] = {
+                    "fingerprint": record.fingerprint,
+                    "output": existing_target.name,
+                }
+                burst_manifest_changed = True
             exported += 1
-        except OSError as error:
+        except Exception as error:
             failed += 1
             diagnostics.append(f"burst-head export failed for {record.source_path}: {error}")
 
@@ -351,7 +436,7 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
     if burst_manifest_changed:
         try:
             _save_burst_manifest(burst_output, burst_manifest)
-        except OSError as error:
+        except Exception as error:
             failed += 1
             diagnostics.append(f"burst-head manifest save failed: {error}")
 

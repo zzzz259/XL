@@ -1,3 +1,8 @@
+import json
+
+import pytest
+
+from app.features.preview import material_catalog
 from app.features.preview.fgui_atlas import UIPackageTool
 from app.features.preview.material_catalog import (
     AtlasResourceGroup,
@@ -33,6 +38,18 @@ def test_metadata_only_classifies_an_explicitly_matching_resource(tmp_path):
 
     catalog = discover_game_materials(tmp_path, metadata)
     assert [record.source_path for record in catalog.burst_heads] == [str(explicit)]
+    assert [record.source_path for record in catalog.unmatched] == [str(ordinary)]
+
+
+@pytest.mark.parametrize("metadata_key", ["category", "container", "kind", "name", "path", "type"])
+def test_top_level_metadata_keys_never_classify_a_file_with_the_same_name(tmp_path, metadata_key):
+    ordinary = tmp_path / metadata_key
+    ordinary.write_bytes(b"ordinary")
+
+    assert not is_burst_head_resource(ordinary, {metadata_key: "burst-head"})
+    catalog = discover_game_materials(tmp_path, {metadata_key: "burst-head"})
+
+    assert catalog.burst_heads == ()
     assert [record.source_path for record in catalog.unmatched] == [str(ordinary)]
 
 
@@ -122,6 +139,75 @@ def test_burst_head_export_is_idempotent_for_the_same_source_and_fingerprint(tmp
     assert first_files == second_files == ["10080.png"]
 
 
+def test_burst_head_manifest_save_failure_retry_does_not_duplicate_or_overwrite_sources(tmp_path, monkeypatch):
+    first = tmp_path / "burst-head" / "10080.png"
+    second = tmp_path / "other" / "10080.png"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_bytes(b"first source")
+    second.write_bytes(b"second source")
+    catalog = GameMaterialCatalog(
+        burst_heads=(
+            GameMaterialRecord("burst-head", str(first), "10080", "first-fingerprint"),
+            GameMaterialRecord("burst-head", str(second), "10080", "second-fingerprint"),
+        ),
+        atlases=(),
+        unmatched=(),
+    )
+    output = tmp_path / "output"
+    real_save = material_catalog._save_burst_manifest
+    save_attempts = 0
+
+    def fail_once(output_dir, entries):
+        nonlocal save_attempts
+        save_attempts += 1
+        if save_attempts == 1:
+            raise OSError("manifest disk full")
+        return real_save(output_dir, entries)
+
+    monkeypatch.setattr(material_catalog, "_save_burst_manifest", fail_once)
+
+    first_summary = export_game_materials(catalog, output, lambda *args: None)
+    output_dir = output / "game_material" / "burst-head"
+    first_files = sorted(path.name for path in output_dir.glob("*.png"))
+    first_contents = sorted(path.read_bytes() for path in output_dir.glob("*.png"))
+
+    second_summary = export_game_materials(catalog, output, lambda *args: None)
+    second_files = sorted(path.name for path in output_dir.glob("*.png"))
+    second_contents = sorted(path.read_bytes() for path in output_dir.glob("*.png"))
+
+    assert first_summary.failed == 1
+    assert any("manifest save failed" in diagnostic for diagnostic in first_summary.diagnostics)
+    assert second_summary.failed == 0
+    assert first_files == second_files
+    assert first_contents == second_contents == [b"first source", b"second source"]
+    assert len(second_files) == 2
+    assert save_attempts == 2
+
+
+@pytest.mark.parametrize(
+    "manifest_bytes",
+    [b"\xff", b"{", json.dumps({"version": 1, "entries": []}).encode("utf-8")],
+    ids=["unicode", "json", "structure"],
+)
+def test_corrupt_burst_manifest_is_reported_without_erasing_existing_output(tmp_path, manifest_bytes):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"new source")
+    output = tmp_path / "output" / "game_material" / "burst-head"
+    output.mkdir(parents=True)
+    existing = output / "10080.png"
+    existing.write_bytes(b"existing output")
+    (output / ".burst-head-manifest.json").write_bytes(manifest_bytes)
+    catalog = discover_game_materials(source.parents[1])
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.failed >= 1
+    assert any("manifest" in diagnostic.lower() for diagnostic in summary.diagnostics)
+    assert existing.read_bytes() == b"existing output"
+
+
 def test_missing_sources_are_reported_without_erasing_existing_output(tmp_path):
     output = tmp_path / "output" / "game_material" / "burst-head"
     output.mkdir(parents=True)
@@ -169,7 +255,7 @@ def test_preview_service_uses_uipackage_tool_splitter_by_default(tmp_path, monke
     def splitter(source_path, destination_dir, is_override_exists=True):
         calls.append((source_path, destination_dir, is_override_exists))
 
-    monkeypatch.setattr(UIPackageTool, "split_atlas", splitter)
+    monkeypatch.setattr(UIPackageTool, "split_atlas_to_package_dir", splitter)
     service.export_game_materials()
 
     assert calls == [(str(source), str(tmp_path / "output" / "fgui" / "Card"), False)]

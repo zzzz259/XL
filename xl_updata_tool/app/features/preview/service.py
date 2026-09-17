@@ -71,5 +71,5 @@ class PreviewService:
         return export_materials(
             catalog or self.discover_game_materials(),
             self.preview_dir.parent,
-            splitter if splitter is not None else UIPackageTool.split_atlas,
+            splitter if splitter is not None else UIPackageTool.split_atlas_to_package_dir,
         )
