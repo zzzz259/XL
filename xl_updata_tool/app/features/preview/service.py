@@ -10,6 +10,7 @@ from .catalog import (
     scan_cardspine_roles,
     scan_preview_roles,
 )
+from .resource_state import PreviewResourceState
 
 
 class PreviewService:
@@ -18,6 +19,13 @@ class PreviewService:
     def __init__(self, material_dir: str | os.PathLike[str], preview_dir: str | os.PathLike[str]):
         self.material_dir = Path(material_dir)
         self.preview_dir = Path(preview_dir)
+        self._resource_state: PreviewResourceState | None = None
+
+    @property
+    def resource_state(self) -> PreviewResourceState:
+        if self._resource_state is None:
+            self._resource_state = PreviewResourceState(self.preview_dir.parent / "preview_state.json")
+        return self._resource_state
 
     def ensure_output_dir(self) -> Path:
         self.preview_dir.mkdir(parents=True, exist_ok=True)
