@@ -11,6 +11,9 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QListWidget,
     QProgressBar,
+    QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +26,21 @@ from app.shared.qt.chrome import (
     create_status_label,
 )
 from .drag_list import DragListWidget
+from .spine_tree import PreviewSpineTree
+
+
+class PreviewTabs(QTabWidget):
+    """Named tab container used by the preview page and controller tests."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("previewTabs")
+        self.setAccessibleName("预览资源分页")
+
+    def add_named_tab(self, widget: QWidget, title: str, accessible_name: str) -> None:
+        widget.setObjectName(accessible_name)
+        widget.setAccessibleName(accessible_name)
+        self.addTab(widget, title)
 
 
 class PreviewPage(QWidget):
@@ -35,10 +53,13 @@ class PreviewPage(QWidget):
     item_clicked = Signal(QListWidgetItem)
     item_double_clicked = Signal(QListWidgetItem)
     selection_changed = Signal()
+    export_requested = Signal(object)
+    spine_selection_changed = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("previewPage")
+        self.setAccessibleName("图片预览工作台")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -73,22 +94,21 @@ class PreviewPage(QWidget):
         content_layout = QGridLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-        self.image_list = DragListWidget()
-        self.image_list.setObjectName("previewImageList")
-        self.image_list.setViewMode(QListWidget.IconMode)
-        self.image_list.setIconSize(QSize(150, 150))
-        self.image_list.setGridSize(QSize(180, 210))
-        self.image_list.setResizeMode(QListWidget.Adjust)
-        self.image_list.setMovement(QListWidget.Static)
-        self.image_list.setSpacing(10)
-        self.image_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.image_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.image_list.setDragEnabled(True)
-        content_layout.addWidget(self.image_list, 0, 0)
+
+        self.tabs = PreviewTabs(content)
+        self._build_spine_tab()
+        self._build_character_tab()
+        self._build_material_tab()
+        content_layout.addWidget(self.tabs, 0, 0)
+
+        # Keep the legacy empty label directly under viewContent. The controller
+        # still owns its visibility, while tab switching keeps it contextual.
         self.empty_label = create_empty_state("暂无图片，请先导出角色立绘", content)
         self.empty_label.setVisible(False)
         self.empty_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         content_layout.addWidget(self.empty_label, 0, 0)
+        self.tabs.currentChanged.connect(self._sync_character_empty_state)
+        self._sync_character_empty_state()
         layout.addWidget(content, 1)
 
         self.preview_status = create_status_label("共 0 张图片", self)
@@ -102,3 +122,125 @@ class PreviewPage(QWidget):
         self.image_list.itemClicked.connect(self.item_clicked)
         self.image_list.itemDoubleClicked.connect(self.item_double_clicked)
         self.image_list.itemSelectionChanged.connect(self.selection_changed)
+        self.spine_tree.selection_changed.connect(self._on_spine_selection_changed)
+        self._material_state = None
+
+    def _build_spine_tab(self) -> None:
+        self.tabs.spine_tab = QWidget(self.tabs)
+        spine_layout = QVBoxLayout(self.tabs.spine_tab)
+        spine_layout.setContentsMargins(12, 12, 12, 12)
+        self.spine_tree = PreviewSpineTree(parent=self.tabs.spine_tab)
+        spine_layout.addWidget(self.spine_tree, 1)
+        self.spine_empty_label = create_empty_state("暂无 Spine 资源", self.tabs.spine_tab)
+        self.spine_empty_label.setVisible(True)
+        spine_layout.addWidget(self.spine_empty_label)
+        self.tabs.add_named_tab(self.tabs.spine_tab, "角色 Spine", "角色 Spine 分页")
+
+    def _build_character_tab(self) -> None:
+        self.tabs.character_tab = QWidget(self.tabs)
+        character_layout = QGridLayout(self.tabs.character_tab)
+        character_layout.setContentsMargins(0, 0, 0, 0)
+        character_layout.setSpacing(0)
+        self.image_list = DragListWidget()
+        self.image_list.setObjectName("previewImageList")
+        self.image_list.setAccessibleName("角色导出立绘列表")
+        self.image_list.setViewMode(QListWidget.IconMode)
+        self.image_list.setIconSize(QSize(150, 150))
+        self.image_list.setGridSize(QSize(180, 210))
+        self.image_list.setResizeMode(QListWidget.Adjust)
+        self.image_list.setMovement(QListWidget.Static)
+        self.image_list.setSpacing(10)
+        self.image_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.image_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.image_list.setDragEnabled(True)
+        character_layout.addWidget(self.image_list, 0, 0)
+        self.tabs.add_named_tab(self.tabs.character_tab, "角色导出立绘", "角色导出立绘分页")
+
+    def _build_material_tab(self) -> None:
+        self.tabs.material_tab = QWidget(self.tabs)
+        material_layout = QGridLayout(self.tabs.material_tab)
+        material_layout.setContentsMargins(12, 12, 12, 12)
+        self.material_tree = QTreeWidget(self.tabs.material_tab)
+        self.material_tree.setObjectName("previewMaterialGroups")
+        self.material_tree.setAccessibleName("游戏素材分组")
+        self.material_tree.setColumnCount(2)
+        self.material_tree.setHeaderLabels(["素材组", "状态"])
+        self.material_tree.setSelectionMode(QTreeWidget.SingleSelection)
+        material_layout.addWidget(self.material_tree, 0, 0)
+        self.material_empty_label = create_empty_state("暂无游戏素材", self.tabs.material_tab)
+        material_layout.addWidget(self.material_empty_label, 1, 0)
+        self.tabs.add_named_tab(self.tabs.material_tab, "游戏素材", "游戏素材分页")
+
+    def set_spine_catalog(self, catalog, state=None) -> None:
+        """Populate the Spine tab without affecting character thumbnails."""
+        if state is not None:
+            self.spine_tree.set_resource_state(state)
+        self.spine_tree.set_catalog(catalog)
+        self.spine_empty_label.setVisible(self.spine_tree.topLevelItemCount() == 0)
+
+    def set_game_material_catalog(self, catalog, state=None) -> None:
+        """Render game-material groups supplied by the Qt-free material catalog."""
+        if state is not None:
+            self._material_state = state
+        self.material_tree.clear()
+        burst_heads = tuple(getattr(catalog, "burst_heads", ()) or ()) if catalog is not None else ()
+        atlases = tuple(getattr(catalog, "atlases", ()) or ()) if catalog is not None else ()
+        if burst_heads:
+            burst = QTreeWidgetItem(["Burst Head / 大头照", ""])
+            burst.setData(0, Qt.UserRole, {"kind": "burst-head"})
+            self.material_tree.addTopLevelItem(burst)
+            for record in burst_heads:
+                child = QTreeWidgetItem(
+                    [str(getattr(record, "display_name", "资源")), self._material_status(record)]
+                )
+                child.setData(0, Qt.UserRole, {"kind": "burst-head", "record": record})
+                burst.addChild(child)
+        for atlas in atlases:
+            package_name = str(getattr(atlas, "package_name", "未命名图集"))
+            group = QTreeWidgetItem([f"图集 · {package_name}", ""])
+            group.setData(0, Qt.UserRole, {"kind": "atlas", "package_name": package_name})
+            self.material_tree.addTopLevelItem(group)
+            for sprite_path in tuple(getattr(atlas, "sprite_paths", ()) or ()):
+                child = QTreeWidgetItem([str(sprite_path), ""])
+                child.setData(0, Qt.UserRole, {"kind": "atlas-sprite", "path": str(sprite_path)})
+                group.addChild(child)
+        self.material_tree.expandAll()
+        self.material_empty_label.setVisible(self.material_tree.topLevelItemCount() == 0)
+
+    set_material_catalog = set_game_material_catalog
+    set_game_materials = set_game_material_catalog
+
+    def selected_spine_records(self):
+        return self.spine_tree.selected_records()
+
+    def set_selected_spine_records(self, records) -> None:
+        self.spine_tree.set_selected_records(records)
+
+    def mark_selected_spine_read(self) -> None:
+        self.spine_tree.mark_selected_read()
+
+    def set_resource_state(self, state) -> None:
+        self.spine_tree.set_resource_state(state)
+
+    def refresh_spine_catalog(self, catalog, state=None) -> None:
+        self.set_spine_catalog(catalog, state)
+
+    def refresh_game_material_catalog(self, catalog, state=None) -> None:
+        self.set_game_material_catalog(catalog, state)
+
+    def _on_spine_selection_changed(self, records) -> None:
+        self.spine_selection_changed.emit(records)
+        self.export_requested.emit(records)
+
+    def _sync_character_empty_state(self) -> None:
+        self.empty_label.setVisible(
+            self.tabs.currentWidget() is self.tabs.character_tab and self.image_list.count() == 0
+        )
+
+    def _material_status(self, record) -> str:
+        fingerprint = str(getattr(record, "fingerprint", "") or "")
+        if getattr(record, "is_new", None) is not None:
+            return "新" if record.is_new else ""
+        if self._material_state is not None and fingerprint:
+            return "新" if self._material_state.is_new(fingerprint) else ""
+        return ""
