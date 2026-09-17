@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Iterable
 
 
 class PreviewResourceState:
@@ -33,6 +34,10 @@ class PreviewResourceState:
 
     def is_new(self, fingerprint: str) -> bool:
         return str(fingerprint) not in self._read_fingerprints
+
+    def is_new_for(self, fingerprints: Iterable[str]) -> bool:
+        """Return whether a parent has at least one unread descendant."""
+        return any(self.is_new(fingerprint) for fingerprint in fingerprints)
 
     def mark_read(self, fingerprint: str) -> bool:
         value = str(fingerprint)
