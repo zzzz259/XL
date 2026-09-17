@@ -18,6 +18,24 @@ def test_burst_head_token_variants_are_recognized_but_dialoghead_is_not(tmp_path
     assert not is_burst_head_resource(tmp_path / "burst-head-extra" / "10080.png", {})
 
 
+def test_metadata_only_classifies_an_explicitly_matching_resource(tmp_path):
+    ordinary = tmp_path / "ordinary.png"
+    explicit = tmp_path / "resource.png"
+    ordinary.write_bytes(b"ordinary")
+    explicit.write_bytes(b"burst head")
+    metadata = {
+        "type": "burst-head",
+        "resources": {str(explicit): {"type": "burst-head"}},
+    }
+
+    assert not is_burst_head_resource(ordinary, metadata)
+    assert is_burst_head_resource(explicit, metadata)
+
+    catalog = discover_game_materials(tmp_path, metadata)
+    assert [record.source_path for record in catalog.burst_heads] == [str(explicit)]
+    assert [record.source_path for record in catalog.unmatched] == [str(ordinary)]
+
+
 def test_material_discovery_groups_each_fui_package(tmp_path):
     ui = tmp_path / "assets" / "fairygui" / "ui"
     ui.mkdir(parents=True)
@@ -84,6 +102,24 @@ def test_burst_head_export_adds_deterministic_suffix_without_overwriting_source(
     assert existing.read_bytes() == b"existing"
     assert (output / "10080_first-fp.png").read_bytes() == b"first"
     assert (output / "10080_second-fp.png").read_bytes() == b"second"
+
+
+def test_burst_head_export_is_idempotent_for_the_same_source_and_fingerprint(tmp_path):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"head")
+    catalog = discover_game_materials(source.parents[1])
+    output = tmp_path / "output"
+
+    first = export_game_materials(catalog, output, lambda *args: None)
+    first_files = sorted(path.name for path in (output / "game_material" / "burst-head").glob("*.png"))
+    second_catalog = discover_game_materials(source.parents[1])
+    second = export_game_materials(second_catalog, output, lambda *args: None)
+    second_files = sorted(path.name for path in (output / "game_material" / "burst-head").glob("*.png"))
+
+    assert first.exported == second.exported == 1
+    assert first.failed == second.failed == 0
+    assert first_files == second_files == ["10080.png"]
 
 
 def test_missing_sources_are_reported_without_erasing_existing_output(tmp_path):

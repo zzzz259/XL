@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -17,6 +18,7 @@ _BURST_HEAD_TOKEN = re.compile(
 )
 _IMAGE_SUFFIXES = frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tga", ".webp"})
 _ATLAS_SUFFIXES = ("_fui.bank", "_fui.bytes")
+_BURST_MANIFEST_NAME = ".burst-head-manifest.json"
 _METADATA_KIND_KEYS = frozenset(
     {
         "category",
@@ -93,6 +95,10 @@ def _metadata_entry(path, metadata):
                 for variant in _path_variants(path):
                     if variant in entries:
                         return entries[variant]
+                path_variants = _path_variants(path)
+                for entry_path, entry in entries.items():
+                    if _normalise_path(entry_path) in path_variants:
+                        return entry
             elif isinstance(entries, (list, tuple)):
                 for entry in entries:
                     if isinstance(entry, Mapping) and any(
@@ -112,10 +118,6 @@ def _metadata_entry(path, metadata):
 
 def _metadata_confirms_burst_head(path, metadata) -> bool:
     entry = _metadata_entry(path, metadata)
-    if entry is None and isinstance(metadata, Mapping):
-        keys = {str(key).strip().lower().replace("-", "_") for key in metadata}
-        if keys & (_METADATA_KIND_KEYS | {"is_burst_head", "burst_head", "bursthead"}):
-            entry = metadata
     if entry is None:
         return False
     if isinstance(entry, Mapping):
@@ -223,7 +225,58 @@ def _safe_filename(value: str) -> str:
     return cleaned
 
 
-def _burst_output_path(record: GameMaterialRecord, output_dir: Path) -> Path:
+def _source_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(os.fspath(path))).replace("\\", "/")
+
+
+def _load_burst_manifest(output_dir: Path) -> dict[str, Mapping[str, str]]:
+    try:
+        payload = json.loads((output_dir / _BURST_MANIFEST_NAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    entries = payload.get("entries") if isinstance(payload, Mapping) else None
+    if not isinstance(entries, Mapping):
+        return {}
+    return {
+        str(source): entry
+        for source, entry in entries.items()
+        if isinstance(entry, Mapping)
+    }
+
+
+def _save_burst_manifest(output_dir: Path, entries: Mapping[str, Mapping[str, str]]) -> None:
+    manifest_path = output_dir / _BURST_MANIFEST_NAME
+    temporary_path = manifest_path.with_name(f"{manifest_path.name}.tmp")
+    try:
+        temporary_path.write_text(
+            json.dumps({"version": 1, "entries": entries}, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(temporary_path, manifest_path)
+    except Exception:
+        try:
+            temporary_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _manifest_target(record: GameMaterialRecord, output_dir: Path, manifest) -> Path | None:
+    entry = manifest.get(_source_key(Path(record.source_path)))
+    if not isinstance(entry, Mapping) or entry.get("fingerprint") != record.fingerprint:
+        return None
+    output_name = entry.get("output")
+    if not isinstance(output_name, str) or Path(output_name).name != output_name:
+        return None
+    target = output_dir / output_name
+    return target if target.is_file() else None
+
+
+def _burst_output_path(record: GameMaterialRecord, output_dir: Path, manifest) -> Path:
+    existing_target = _manifest_target(record, output_dir, manifest)
+    if existing_target is not None:
+        return existing_target
+
     source_path = Path(record.source_path)
     suffix = source_path.suffix or ".png"
     candidate = output_dir / f"{_safe_filename(record.display_name or source_path.stem)}{suffix}"
@@ -252,6 +305,8 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
     exported = 0
     failed = 0
     diagnostics: list[str] = []
+    burst_manifest = _load_burst_manifest(burst_output)
+    burst_manifest_changed = False
 
     for record in catalog.burst_heads:
         if record.kind != "burst-head":
@@ -263,7 +318,14 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
             continue
         try:
             burst_output.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_path, _burst_output_path(record, burst_output))
+            target = _burst_output_path(record, burst_output, burst_manifest)
+            if not _manifest_target(record, burst_output, burst_manifest):
+                shutil.copy2(source_path, target)
+                burst_manifest[_source_key(source_path)] = {
+                    "fingerprint": record.fingerprint,
+                    "output": target.name,
+                }
+                burst_manifest_changed = True
             exported += 1
         except OSError as error:
             failed += 1
@@ -285,5 +347,12 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
         except Exception as error:
             failed += 1
             diagnostics.append(f"atlas export failed for {group.package_name}: {error}")
+
+    if burst_manifest_changed:
+        try:
+            _save_burst_manifest(burst_output, burst_manifest)
+        except OSError as error:
+            failed += 1
+            diagnostics.append(f"burst-head manifest save failed: {error}")
 
     return MaterialExportSummary(exported=exported, failed=failed, diagnostics=tuple(diagnostics))
