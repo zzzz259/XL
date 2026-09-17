@@ -12,6 +12,7 @@ import sys
 import time
 import gc
 import shutil
+from dataclasses import dataclass, field
 
 try:
     from PIL import Image
@@ -21,6 +22,98 @@ except ImportError:
 
 from app.platform.diagnostics import logger
 from app.platform.tool_locator import ToolLocator
+
+
+@dataclass(frozen=True, slots=True)
+class SkinQueryResult:
+    """Result of an authoritative Spine skin metadata query."""
+
+    skin_names: tuple[str, ...] = ()
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int = 0
+    error: str = ""
+    timed_out: bool = False
+    attachment_fingerprints: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def skins(self) -> tuple[str, ...]:
+        """Compatibility alias for callers that refer to queried skins."""
+        return self.skin_names
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0 and not self.error and not self.timed_out
+
+
+def parse_skin_query_output(stdout) -> tuple[str, ...]:
+    """Parse ``SpineViewerCLI query --skin`` output into unique skin names."""
+    names = []
+    seen = set()
+    for raw_line in str(stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.casefold().startswith("skin:"):
+            line = line.split(":", 1)[1].strip()
+            if not line:
+                continue
+        header = line.rstrip(":").strip().casefold()
+        if header in {"skin", "skins", "skin name", "skin names"}:
+            continue
+        if line.endswith(":") and header in {"result", "results", "output"}:
+            continue
+        if line not in seen:
+            names.append(line)
+            seen.add(line)
+    return tuple(names)
+
+
+class SpineQueryRunner:
+    """Run SpineViewerCLI metadata queries without hiding process failures."""
+
+    def __init__(self, spine_cli=None, timeout=15):
+        self.spine_cli = os.fspath(spine_cli or ToolLocator.create().spineviewer_cli())
+        self.timeout = timeout
+
+    def query_skins(self, skel_path, atlas_path) -> SkinQueryResult:
+        command = [
+            self.spine_cli,
+            "query",
+            str(skel_path),
+            "--atlas",
+            str(atlas_path),
+            "--skin",
+        ]
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=os.path.dirname(self.spine_cli) or None,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                env=ToolLocator.create().subprocess_env(),
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            stdout = proc.stdout or ""
+            stderr = proc.stderr or ""
+            return SkinQueryResult(
+                skin_names=parse_skin_query_output(stdout) if proc.returncode == 0 else (),
+                stdout=stdout,
+                stderr=stderr,
+                returncode=proc.returncode,
+                error=("SpineViewerCLI query failed" if proc.returncode else ""),
+            )
+        except subprocess.TimeoutExpired as exc:
+            return SkinQueryResult(
+                stdout=str(getattr(exc, "stdout", "") or ""),
+                stderr=str(getattr(exc, "stderr", "") or ""),
+                returncode=-1,
+                error=f"SpineViewerCLI query timed out after {self.timeout}s",
+                timed_out=True,
+            )
+        except Exception as exc:
+            return SkinQueryResult(returncode=-1, error=str(exc))
 
 
 def extract_character_id(base_name):

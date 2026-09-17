@@ -1,0 +1,239 @@
+"""Discover Spine preview resources and match them to character identities."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+from collections.abc import Mapping
+from pathlib import Path
+
+from .resource_model import PreviewResourceCatalog, SpineSkinRecord
+from .spine_adapter import SkinQueryResult, SpineQueryRunner
+
+
+_CHARACTER_ID_KEYS = ("character_id", "characterId", "char_id", "charId", "role_id", "roleId", "id")
+
+
+def _value_from_metadata(metadata, key):
+    if isinstance(metadata, Mapping):
+        return metadata.get(key)
+    return getattr(metadata, key, None)
+
+
+def _as_character_id(value):
+    if value is None or isinstance(value, bool):
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _known_character_ids(metadata) -> set[str]:
+    if not isinstance(metadata, Mapping):
+        return set()
+    known = set()
+    for key in ("characters", "character_data", "characterData", "ids"):
+        value = metadata.get(key)
+        if isinstance(value, Mapping):
+            known.update(str(item).strip() for item in value if str(item).strip())
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                candidate = item if not isinstance(item, Mapping) else next(
+                    (_value_from_metadata(item, field) for field in _CHARACTER_ID_KEYS), None
+                )
+                candidate = _as_character_id(candidate)
+                if candidate:
+                    known.add(candidate)
+    for key, value in metadata.items():
+        if str(key).isdigit():
+            known.add(str(key))
+        if key in _CHARACTER_ID_KEYS:
+            candidate = _as_character_id(value)
+            if candidate:
+                known.add(candidate)
+    return known
+
+
+def resolve_character_id(path, metadata) -> str | None:
+    """Resolve a character ID from explicit metadata or one reliable path ID."""
+    path_text = os.fspath(path)
+    path_variants = {
+        path_text,
+        os.path.abspath(path_text),
+        path_text.replace("\\", "/"),
+        os.path.basename(path_text),
+    }
+
+    if isinstance(metadata, Mapping):
+        for key in path_variants:
+            if key in metadata:
+                value = metadata[key]
+                if isinstance(value, Mapping):
+                    value = next((_value_from_metadata(value, field) for field in _CHARACTER_ID_KEYS), None)
+                candidate = _as_character_id(value)
+                if candidate:
+                    return candidate
+        for key in ("path_to_character", "pathToCharacter", "resources", "by_path"):
+            entries = metadata.get(key)
+            if isinstance(entries, Mapping):
+                for variant in path_variants:
+                    value = entries.get(variant)
+                    if isinstance(value, Mapping):
+                        value = next((_value_from_metadata(value, field) for field in _CHARACTER_ID_KEYS), None)
+                    candidate = _as_character_id(value)
+                    if candidate:
+                        return candidate
+
+    for key in _CHARACTER_ID_KEYS:
+        candidate = _as_character_id(_value_from_metadata(metadata, key))
+        if candidate:
+            return candidate
+
+    stem = Path(path_text).stem
+    candidates = re.findall(r"(?<!\d)(\d{5})(?!\d)", stem)
+    parent_name = Path(path_text).parent.name
+    if re.fullmatch(r"\d{5}", parent_name):
+        candidates.append(parent_name)
+    unique_candidates = set(candidates)
+    if len(unique_candidates) != 1:
+        return None
+    candidate = next(iter(unique_candidates))
+    known_ids = _known_character_ids(metadata)
+    return candidate if not known_ids or candidate in known_ids else None
+
+
+def _metadata_for_path(character_data, path):
+    if not isinstance(character_data, Mapping):
+        return character_data
+    variants = {
+        str(path),
+        os.path.abspath(str(path)),
+        str(path).replace("\\", "/"),
+        path.name,
+    }
+    for key in variants:
+        if key in character_data:
+            return character_data[key]
+    return character_data
+
+
+def _file_digest(path):
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        digest.update(b"<missing>")
+    return digest.hexdigest()
+
+
+def _fingerprint(skel_path, atlas_path, skin_name, material_dir):
+    try:
+        source_skel = os.path.relpath(skel_path, material_dir).replace("\\", "/")
+        source_atlas = os.path.relpath(atlas_path, material_dir).replace("\\", "/")
+    except ValueError:
+        source_skel = str(skel_path).replace("\\", "/")
+        source_atlas = str(atlas_path).replace("\\", "/")
+    identity = {
+        "source_skel": source_skel,
+        "atlas": source_atlas,
+        "skin_name": skin_name,
+        "skel_digest": _file_digest(skel_path),
+        "atlas_digest": _file_digest(atlas_path),
+    }
+    payload = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _result_skin_names(result):
+    if isinstance(result, SkinQueryResult):
+        return result.skin_names
+    names = getattr(result, "skin_names", None)
+    if names is None:
+        names = getattr(result, "skins", result)
+    if isinstance(names, Mapping):
+        names = names.keys()
+    if isinstance(names, str):
+        names = (names,)
+    normalized = []
+    seen = set()
+    for name in names:
+        value = str(name).strip()
+        if value and value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return tuple(normalized)
+
+
+def _query_ok(result):
+    if isinstance(result, SkinQueryResult):
+        return result.ok
+    return getattr(result, "returncode", 0) == 0 and not getattr(result, "error", "")
+
+
+def _query_fingerprint(result, skin_name):
+    fingerprints = getattr(result, "attachment_fingerprints", {}) or {}
+    return fingerprints.get(skin_name)
+
+
+def discover_preview_resources(material_dir, character_data=None, query_runner=None) -> PreviewResourceCatalog:
+    """Discover same-directory Spine pairs and return identity-based skin records."""
+    root = Path(material_dir)
+    if not root.is_dir():
+        return PreviewResourceCatalog.from_records(())
+    runner = query_runner or SpineQueryRunner()
+    records = []
+
+    for skel_path in sorted(root.rglob("*.skel"), key=lambda item: str(item).casefold()):
+        atlas_path = skel_path.with_suffix(".atlas")
+        metadata = _metadata_for_path(character_data, skel_path)
+        character_id = resolve_character_id(str(skel_path), metadata)
+        stem = skel_path.stem
+
+        if not atlas_path.is_file():
+            records.append(
+                SpineSkinRecord(
+                    character_id=character_id,
+                    source_skel=str(skel_path),
+                    atlas_path=str(atlas_path),
+                    skin_name="",
+                    attachment_fingerprint=_fingerprint(str(skel_path), str(atlas_path), "", str(root)),
+                    display_name=stem,
+                    status="invalid",
+                )
+            )
+            continue
+
+        result = runner.query_skins(str(skel_path), str(atlas_path))
+        skin_names = _result_skin_names(result)
+        if not _query_ok(result) or not skin_names:
+            records.append(
+                SpineSkinRecord(
+                    character_id=character_id,
+                    source_skel=str(skel_path),
+                    atlas_path=str(atlas_path),
+                    skin_name="",
+                    attachment_fingerprint=_fingerprint(str(skel_path), str(atlas_path), "", str(root)),
+                    display_name=stem,
+                    status="invalid",
+                )
+            )
+            continue
+
+        for skin_name in skin_names:
+            records.append(
+                SpineSkinRecord(
+                    character_id=character_id,
+                    source_skel=str(skel_path),
+                    atlas_path=str(atlas_path),
+                    skin_name=skin_name,
+                    attachment_fingerprint=_query_fingerprint(result, skin_name)
+                    or _fingerprint(str(skel_path), str(atlas_path), skin_name, str(root)),
+                    display_name=skin_name,
+                    status="ready",
+                )
+            )
+
+    return PreviewResourceCatalog.from_records(records)

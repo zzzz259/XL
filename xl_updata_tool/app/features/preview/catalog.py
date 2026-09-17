@@ -8,8 +8,9 @@ def build_skel_map(material_dir: str) -> dict[str, tuple[str, str]]:
     result = {}
     if not os.path.isdir(material_dir):
         return result
-    for root, _dirs, files in os.walk(material_dir):
-        for filename in files:
+    for root, dirs, files in os.walk(material_dir):
+        dirs.sort()
+        for filename in sorted(files):
             if not filename.endswith(".skel"):
                 continue
             base = os.path.splitext(filename)[0]
