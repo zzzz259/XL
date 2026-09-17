@@ -1,13 +1,18 @@
 import os
+from pathlib import Path
+from uuid import uuid4
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from app.features.preview.material_catalog import AtlasResourceGroup, GameMaterialCatalog, GameMaterialRecord
 from app.features.preview.page import PreviewPage
 from app.features.preview.resource_model import PreviewResourceCatalog, SpineSkinRecord
+from app.features.preview.controller import PreviewController
+from app.features.preview.service import PreviewService
 
 
 @pytest.fixture(scope="module")
@@ -72,7 +77,15 @@ def test_preview_page_accepts_game_material_catalog_and_has_explicit_empty_state
     )
 
     labels = [page.material_tree.topLevelItem(index).text(0) for index in range(page.material_tree.topLevelItemCount())]
-    assert labels == ["Burst Head / 大头照", "图集 · Battle"]
+    assert labels == ["game_material/burst-head", "fgui/Battle"]
+    burst_data = page.material_tree.topLevelItem(0).data(0, Qt.UserRole)
+    atlas_data = page.material_tree.topLevelItem(1).data(0, Qt.UserRole)
+    assert burst_data["kind"] == "burst-head"
+    assert burst_data["path"] == "game_material/burst-head"
+    assert atlas_data["kind"] == "atlas"
+    assert atlas_data["package"] == "Battle"
+    assert atlas_data["path"] == "fgui/Battle"
+    assert atlas_data["source"] == "Battle_fui.bytes"
     assert page.material_empty_label.isHidden()
     assert not page.spine_empty_label.isHidden()
 
@@ -80,4 +93,46 @@ def test_preview_page_accepts_game_material_catalog_and_has_explicit_empty_state
 
     assert page.material_tree.topLevelItemCount() == 0
     assert not page.material_empty_label.isHidden()
+    page.close()
+
+
+def test_controller_style_empty_updates_are_routed_to_the_current_tab(qapp):
+    page = PreviewPage()
+    root = Path.cwd() / f".task5-preview-controller-{uuid4().hex}"
+    controller = PreviewController(
+        page,
+        PreviewService(root / "material", root / "output" / "character"),
+    )
+
+    page.tabs.setCurrentWidget(page.tabs.spine_tab)
+    controller._on_load_finished([])
+    assert page.empty_label.isHidden()
+    page.tabs.setCurrentWidget(page.tabs.material_tab)
+    assert page.empty_label.isHidden()
+    page.tabs.setCurrentWidget(page.tabs.character_tab)
+    assert not page.empty_label.isHidden()
+
+    page.close()
+
+
+def test_legacy_character_controls_and_state_survive_tab_switches(qapp):
+    page = PreviewPage()
+    page.character_filter.addItem("全部角色", "")
+    page.character_filter.addItem("10080", "10080")
+    page.character_filter.setCurrentIndex(1)
+    page.preview_progress.setVisible(True)
+    page.preview_progress.setValue(3)
+    page.preview_status.setText("legacy status")
+    page.image_list.addItem("legacy image")
+    page.image_list.item(0).setSelected(True)
+
+    for tab in (page.tabs.spine_tab, page.tabs.material_tab, page.tabs.character_tab):
+        page.tabs.setCurrentWidget(tab)
+
+    assert page.image_list.count() == 1
+    assert page.image_list.item(0).isSelected()
+    assert page.character_filter.currentData() == "10080"
+    assert not page.preview_progress.isHidden()
+    assert page.preview_progress.value() == 3
+    assert page.preview_status.text() == "legacy status"
     page.close()

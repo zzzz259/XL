@@ -59,7 +59,11 @@ class PreviewSpineTree(QTreeWidget):
             ):
                 role_item = QTreeWidgetItem([role_id or "未匹配资源", ""])
                 role_item.setData(0, Qt.UserRole, {"kind": self._ROLE, "role_id": role_id})
-                self._make_checkable(role_item, tristate=True)
+                self._make_checkable(
+                    role_item,
+                    tristate=True,
+                    enabled=any(self._is_eligible(item) for item in role_records),
+                )
                 self.addTopLevelItem(role_item)
 
                 skin_groups: OrderedDict[str, list[SpineSkinRecord]] = OrderedDict()
@@ -81,7 +85,7 @@ class PreviewSpineTree(QTreeWidget):
                     self._make_checkable(
                         skin_item,
                         tristate=True,
-                        enabled=all(self._is_eligible(item) for item in grouped_records),
+                        enabled=any(self._is_eligible(item) for item in grouped_records),
                     )
                     role_item.addChild(skin_item)
                     for record in grouped_records:
@@ -152,13 +156,13 @@ class PreviewSpineTree(QTreeWidget):
             return
         changed = False
         for record in self.selected_records():
-            fingerprint = self._record_fingerprint(record)
-            changed = self._state.mark_read(fingerprint) or changed
+            changed = self._state.mark_read(skin_key(record)) or changed
         if changed:
             self._refresh_statuses()
+            self._state.save()
 
     def _record_fingerprint(self, record: SpineSkinRecord) -> str:
-        return record.attachment_fingerprint or record.identity_fingerprint or skin_key(record)
+        return skin_key(record)
 
     def _make_checkable(
         self,
@@ -173,7 +177,9 @@ class PreviewSpineTree(QTreeWidget):
             flags &= ~Qt.ItemIsUserCheckable
             flags &= ~Qt.ItemIsEnabled
         if tristate:
-            flags |= Qt.ItemIsAutoTristate
+            # Parent states are aggregated below so disabled descendants are
+            # never auto-checked by QTreeWidget's built-in propagation.
+            flags &= ~Qt.ItemIsAutoTristate
         item.setFlags(flags)
         item.setCheckState(0, Qt.Unchecked)
 
@@ -192,7 +198,7 @@ class PreviewSpineTree(QTreeWidget):
     def _restore_selection(self, wanted: set[str]) -> None:
         for file_item in self._file_items():
             record = file_item.data(0, Qt.UserRole).get("record")
-            if record is not None and skin_key(record) in wanted:
+            if self._is_eligible(record) and skin_key(record) in wanted:
                 file_item.setCheckState(0, Qt.Checked)
         self._refresh_parent_checks()
 
@@ -204,8 +210,14 @@ class PreviewSpineTree(QTreeWidget):
             self._set_parent_state(role)
 
     def _set_parent_state(self, item: QTreeWidgetItem) -> None:
-        states = [item.child(index).checkState(0) for index in range(item.childCount())]
+        eligible_children = [
+            item.child(index)
+            for index in range(item.childCount())
+            if self._has_eligible_descendant(item.child(index))
+        ]
+        states = [child.checkState(0) for child in eligible_children]
         if not states:
+            item.setCheckState(0, Qt.Unchecked)
             return
         if all(state == Qt.Checked for state in states):
             state = Qt.Checked
@@ -215,6 +227,23 @@ class PreviewSpineTree(QTreeWidget):
             state = Qt.PartiallyChecked
         item.setCheckState(0, state)
 
+    def _has_eligible_descendant(self, item: QTreeWidgetItem) -> bool:
+        if not item.childCount():
+            record = item.data(0, Qt.UserRole).get("record")
+            return self._is_eligible(record)
+        return any(self._has_eligible_descendant(item.child(index)) for index in range(item.childCount()))
+
+    def _set_subtree_check_state(self, item: QTreeWidgetItem, state) -> None:
+        if not self._has_eligible_descendant(item):
+            item.setCheckState(0, Qt.Unchecked)
+            return
+        if not item.childCount():
+            item.setCheckState(0, state)
+            return
+        for index in range(item.childCount()):
+            self._set_subtree_check_state(item.child(index), state)
+        self._set_parent_state(item)
+
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._updating or column != 0:
             return
@@ -223,8 +252,9 @@ class PreviewSpineTree(QTreeWidget):
             if item.childCount():
                 state = item.checkState(0)
                 child_state = Qt.Checked if state == Qt.Checked else Qt.Unchecked
-                for index in range(item.childCount()):
-                    item.child(index).setCheckState(0, child_state)
+                self._set_subtree_check_state(item, child_state)
+            elif not self._has_eligible_descendant(item):
+                item.setCheckState(0, Qt.Unchecked)
             self._refresh_parent_checks()
         finally:
             self._updating = False
@@ -250,7 +280,7 @@ class PreviewSpineTree(QTreeWidget):
             is_new = any(self._refresh_item_status(item.child(index)) for index in range(item.childCount()))
         else:
             record = item.data(0, Qt.UserRole).get("record")
-            is_new = self._is_new(record)
+            is_new = self._is_eligible(record) and self._is_new(record)
         item.setText(1, "新" if is_new else "")
         return is_new
 

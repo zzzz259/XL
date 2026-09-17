@@ -28,3 +28,10 @@ def test_skin_key_uses_identity_fallback_when_attachment_fingerprint_is_unavaila
     )
 
     assert skin_key(first) != skin_key(second)
+
+
+def test_skin_key_distinguishes_skin_identity_when_attachment_fingerprint_is_shared():
+    first = SpineSkinRecord("10080", "a.skel", "a.atlas", "default", "same", "默认", "ready")
+    second = SpineSkinRecord("10080", "a.skel", "a.atlas", "summer", "same", "夏日", "ready")
+
+    assert skin_key(first) != skin_key(second)

@@ -63,13 +63,18 @@ def _normalise_path(value: str) -> str:
 
 
 def skin_key(record: SpineSkinRecord) -> str:
-    """Return a stable key using attachment identity or its explicit fallback."""
-    fingerprint = record.attachment_fingerprint or record.identity_fingerprint
+    """Return a stable key for the source/skin identity, never just attachments."""
+    identity_fingerprint = record.identity_fingerprint or ""
     identity = (
         record.character_id or "",
         _normalise_path(record.source_skel),
+        _normalise_path(record.atlas_path),
         record.skin_name,
-        fingerprint,
+        identity_fingerprint,
+        # Records built without a source identity still need to distinguish
+        # attachment variants; discovered records always have the stronger
+        # source/skin identity above.
+        record.attachment_fingerprint if not identity_fingerprint else "",
     )
     payload = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -95,8 +95,68 @@ def test_spine_tree_semantic_selection_api_and_read_state_refresh(qapp):
 
         tree.mark_selected_read()
 
-        assert state.is_new(second.attachment_fingerprint) is False
+        assert state.is_new(skin_key(second)) is False
         assert tree.topLevelItem(1).text(1) == ""
         assert all(item.text(1) == "" for item in _walk(tree.topLevelItem(1)))
     finally:
         state_path.unlink(missing_ok=True)
+
+
+def test_checking_spine_skin_persists_read_state_for_a_new_state_instance(qapp):
+    record = _record("10080", "default", "cardspine_10080", "attachment-a")
+    state_path = Path.cwd() / f".task5-preview-persist-{uuid4().hex}.json"
+    try:
+        state = PreviewResourceState(state_path)
+        tree = PreviewSpineTree(state=state)
+        tree.set_catalog(PreviewResourceCatalog.from_records([record]))
+
+        tree.topLevelItem(0).child(0).child(0).setCheckState(0, Qt.Checked)
+
+        reloaded = PreviewResourceState(state_path)
+        assert not reloaded.is_new(skin_key(record))
+    finally:
+        state_path.unlink(missing_ok=True)
+
+
+def test_shared_attachment_fingerprint_does_not_cross_contaminate_skin_read_state(qapp):
+    first = _record("10080", "default", "cardspine_10080", "same-attachment")
+    second = _record("10080", "summer", "cardspine_10080", "same-attachment")
+    state_path = Path.cwd() / f".task5-preview-isolation-{uuid4().hex}.json"
+    try:
+        state = PreviewResourceState(state_path)
+        tree = PreviewSpineTree(state=state)
+        tree.set_catalog(PreviewResourceCatalog.from_records([first, second]))
+
+        tree.topLevelItem(0).child(0).child(0).setCheckState(0, Qt.Checked)
+
+        reloaded = PreviewResourceState(state_path)
+        assert not reloaded.is_new(skin_key(first))
+        assert reloaded.is_new(skin_key(second))
+    finally:
+        state_path.unlink(missing_ok=True)
+
+
+def test_spine_recursive_check_ignores_invalid_leaves_and_selected_records(qapp):
+    valid = _record("10080", "valid", "cardspine_10080", "valid-attachment")
+    invalid = SpineSkinRecord(
+        character_id="10080",
+        source_skel="E:/material/cardspine_10080_missing.skel",
+        atlas_path="",
+        skin_name="invalid",
+        attachment_fingerprint="invalid-attachment",
+        display_name="显示 invalid",
+        status="invalid",
+    )
+    tree = PreviewSpineTree()
+    tree.set_catalog(PreviewResourceCatalog.from_records([valid, invalid]))
+
+    role = tree.topLevelItem(0)
+    role.setCheckState(0, Qt.Checked)
+
+    valid_item = next(item for item in (role.child(0), role.child(1)) if item.text(0) == "显示 valid")
+    invalid_item = next(item for item in (role.child(0), role.child(1)) if item.text(0) == "显示 invalid")
+    assert role.checkState(0) == Qt.Checked
+    assert valid_item.checkState(0) == Qt.Checked
+    assert invalid_item.checkState(0) == Qt.Unchecked
+    assert not (invalid_item.flags() & Qt.ItemIsUserCheckable)
+    assert tree.selected_records() == (valid,)

@@ -43,6 +43,60 @@ class PreviewTabs(QTabWidget):
         self.addTab(widget, title)
 
 
+class PreviewEmptyState(QLabel):
+    """Legacy empty-label facade that only renders on the character tab."""
+
+    def __init__(self, text: str, route, parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("emptyState")
+        self.setAlignment(Qt.AlignCenter)
+        self.setAccessibleName(text)
+        self._route = route
+        self._requested_visible = False
+
+    def setVisible(self, visible: bool) -> None:
+        self._requested_visible = bool(visible)
+        super().setVisible(self._requested_visible and self._route())
+
+    def sync_visibility(self) -> None:
+        super().setVisible(self._requested_visible and self._route())
+
+
+class PreviewImageList(DragListWidget):
+    """Legacy image list with a safe content-change signal for empty routing."""
+
+    content_changed = Signal()
+
+    def addItem(self, *args):
+        result = super().addItem(*args)
+        self.content_changed.emit()
+        return result
+
+    def addItems(self, *args):
+        result = super().addItems(*args)
+        self.content_changed.emit()
+        return result
+
+    def insertItem(self, *args):
+        result = super().insertItem(*args)
+        self.content_changed.emit()
+        return result
+
+    def insertItems(self, *args):
+        result = super().insertItems(*args)
+        self.content_changed.emit()
+        return result
+
+    def clear(self) -> None:
+        super().clear()
+        self.content_changed.emit()
+
+    def takeItem(self, *args):
+        result = super().takeItem(*args)
+        self.content_changed.emit()
+        return result
+
+
 class PreviewPage(QWidget):
     """图片预览页面，直接拥有控件并只发布页面级语义信号。"""
 
@@ -103,11 +157,17 @@ class PreviewPage(QWidget):
 
         # Keep the legacy empty label directly under viewContent. The controller
         # still owns its visibility, while tab switching keeps it contextual.
-        self.empty_label = create_empty_state("暂无图片，请先导出角色立绘", content)
+        self.empty_label = PreviewEmptyState(
+            "暂无图片，请先导出角色立绘",
+            lambda: self.tabs.currentWidget() is self.tabs.character_tab,
+            content,
+        )
         self.empty_label.setVisible(False)
         self.empty_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         content_layout.addWidget(self.empty_label, 0, 0)
+        self.image_list.content_changed.connect(self._sync_character_empty_from_items)
         self.tabs.currentChanged.connect(self._sync_character_empty_state)
+        self.empty_label.setVisible(self.image_list.count() == 0)
         self._sync_character_empty_state()
         layout.addWidget(content, 1)
 
@@ -141,7 +201,7 @@ class PreviewPage(QWidget):
         character_layout = QGridLayout(self.tabs.character_tab)
         character_layout.setContentsMargins(0, 0, 0, 0)
         character_layout.setSpacing(0)
-        self.image_list = DragListWidget()
+        self.image_list = PreviewImageList()
         self.image_list.setObjectName("previewImageList")
         self.image_list.setAccessibleName("角色导出立绘列表")
         self.image_list.setViewMode(QListWidget.IconMode)
@@ -186,23 +246,59 @@ class PreviewPage(QWidget):
         burst_heads = tuple(getattr(catalog, "burst_heads", ()) or ()) if catalog is not None else ()
         atlases = tuple(getattr(catalog, "atlases", ()) or ()) if catalog is not None else ()
         if burst_heads:
-            burst = QTreeWidgetItem(["Burst Head / 大头照", ""])
-            burst.setData(0, Qt.UserRole, {"kind": "burst-head"})
+            burst_path = "game_material/burst-head"
+            burst = QTreeWidgetItem([burst_path, ""])
+            burst.setData(
+                0,
+                Qt.UserRole,
+                {"kind": "burst-head", "source": burst_path, "path": burst_path, "package": ""},
+            )
             self.material_tree.addTopLevelItem(burst)
             for record in burst_heads:
                 child = QTreeWidgetItem(
                     [str(getattr(record, "display_name", "资源")), self._material_status(record)]
                 )
-                child.setData(0, Qt.UserRole, {"kind": "burst-head", "record": record})
+                source_path = str(getattr(record, "source_path", ""))
+                child.setData(
+                    0,
+                    Qt.UserRole,
+                    {
+                        "kind": "burst-head",
+                        "source": source_path,
+                        "path": source_path,
+                        "package": "",
+                        "record": record,
+                    },
+                )
                 burst.addChild(child)
         for atlas in atlases:
             package_name = str(getattr(atlas, "package_name", "未命名图集"))
-            group = QTreeWidgetItem([f"图集 · {package_name}", ""])
-            group.setData(0, Qt.UserRole, {"kind": "atlas", "package_name": package_name})
+            group_path = f"fgui/{package_name}"
+            group = QTreeWidgetItem([group_path, ""])
+            group.setData(
+                0,
+                Qt.UserRole,
+                {
+                    "kind": "atlas",
+                    "source": str(getattr(atlas, "source_path", "")),
+                    "path": group_path,
+                    "package": package_name,
+                },
+            )
             self.material_tree.addTopLevelItem(group)
             for sprite_path in tuple(getattr(atlas, "sprite_paths", ()) or ()):
-                child = QTreeWidgetItem([str(sprite_path), ""])
-                child.setData(0, Qt.UserRole, {"kind": "atlas-sprite", "path": str(sprite_path)})
+                sprite_path = str(sprite_path)
+                child = QTreeWidgetItem([sprite_path, ""])
+                child.setData(
+                    0,
+                    Qt.UserRole,
+                    {
+                        "kind": "atlas-sprite",
+                        "source": str(getattr(atlas, "source_path", "")),
+                        "path": sprite_path,
+                        "package": package_name,
+                    },
+                )
                 group.addChild(child)
         self.material_tree.expandAll()
         self.material_empty_label.setVisible(self.material_tree.topLevelItemCount() == 0)
@@ -233,9 +329,10 @@ class PreviewPage(QWidget):
         self.export_requested.emit(records)
 
     def _sync_character_empty_state(self) -> None:
-        self.empty_label.setVisible(
-            self.tabs.currentWidget() is self.tabs.character_tab and self.image_list.count() == 0
-        )
+        self.empty_label.sync_visibility()
+
+    def _sync_character_empty_from_items(self, *_args) -> None:
+        self.empty_label.setVisible(self.image_list.count() == 0)
 
     def _material_status(self, record) -> str:
         fingerprint = str(getattr(record, "fingerprint", "") or "")
