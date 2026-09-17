@@ -29,6 +29,8 @@ from app.platform.tool_locator import ToolLocator
 
 def build_spine_export_command(job, spine_cli):
     """Build a PNG export command from a ``SkinExportJob`` identity."""
+    if str(job.settings.format).casefold() != "png":
+        raise ValueError("Skin export jobs only support PNG format")
     record = job.record
     settings = job.settings
     command = [
@@ -36,7 +38,7 @@ def build_spine_export_command(job, spine_cli):
         "export",
         os.fspath(record.source_skel),
         "-f",
-        str(settings.format),
+        "Png",
         "-o",
         os.fspath(job.output_path),
         "-a",

@@ -1,8 +1,11 @@
 import json
 import threading
 
+import pytest
+
 from app.features.preview.export_plan import ExportSettings, build_export_plan
 from app.features.preview.resource_model import SpineSkinRecord
+from app.features.preview.workers import preview_export
 from app.features.preview.workers.preview_export import PreviewExportWorker
 
 
@@ -43,7 +46,7 @@ def test_worker_reports_progress_and_finished_summary_for_runner_results(tmp_pat
     progress = []
     summaries = []
     errors = []
-    worker.progress.connect(lambda current, total, label: progress.append((current, total, label)))
+    worker.skin_progress.connect(lambda current, total, label: progress.append((current, total, label)))
     worker.finished.connect(summaries.append)
     worker.error.connect(errors.append)
 
@@ -56,6 +59,48 @@ def test_worker_reports_progress_and_finished_summary_for_runner_results(tmp_pat
     assert (tmp_path / "10080" / runner.calls[0].output_path.parent.name / "base.png").is_file()
     metadata = json.loads((runner.calls[0].output_path.parent / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["record"]["skin_name"] == "base"
+
+
+def test_skin_jobs_use_labeled_signal_and_preserve_legacy_progress_signature(tmp_path):
+    worker = PreviewExportWorker(make_jobs(tmp_path, "base"), ExportSettings(), RecordingRunner())
+    assert worker.metaObject().indexOfSignal("progress(int,int)") >= 0
+    assert worker.metaObject().indexOfSignal("progress(int,int,QString)") == -1
+    assert worker.metaObject().indexOfSignal("skin_progress(int,int,QString)") >= 0
+
+
+def test_skin_job_worker_does_not_call_composite_functions(tmp_path, monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("skin-job worker must not call composite functions")
+
+    monkeypatch.setattr(preview_export, "composite_images", fail_if_called)
+    monkeypatch.setattr(preview_export, "composite_with_offset", fail_if_called)
+
+    worker = PreviewExportWorker(make_jobs(tmp_path, "base"), ExportSettings(), RecordingRunner())
+    summaries = []
+    worker.finished.connect(summaries.append)
+
+    worker.run()
+
+    assert summaries == ["1 succeeded, 0 failed"]
+
+
+def test_legacy_export_emits_two_argument_progress(tmp_path, monkeypatch):
+    material_dir = tmp_path / "material"
+    material_dir.mkdir()
+    (material_dir / "hero.skel").write_bytes(b"")
+    (material_dir / "hero.atlas").write_bytes(b"")
+
+    monkeypatch.setattr(preview_export, "get_animation_names", lambda *_args: ["idle"])
+    monkeypatch.setattr(preview_export, "export_animation_frames", lambda *_args: True)
+    monkeypatch.setattr(preview_export, "extract_motion_names", lambda *_args: [])
+
+    worker = PreviewExportWorker(str(material_dir), str(tmp_path / "output"), "SpineViewerCLI.exe")
+    progress = []
+    worker.progress.connect(lambda current, total: progress.append((current, total)))
+
+    worker.run()
+
+    assert progress == [(1, 1)]
 
 
 def test_worker_cancellation_stops_subsequent_jobs_and_preserves_completed_output(tmp_path):

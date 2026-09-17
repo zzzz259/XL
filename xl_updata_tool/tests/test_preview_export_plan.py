@@ -91,6 +91,13 @@ def test_export_plan_never_creates_composite_job(tmp_path):
     assert all("composite" not in str(job.output_path) for job in build_export_plan((record,), ExportSettings(), tmp_path))
 
 
+def test_export_plan_rejects_non_png_format_for_still_image_job(tmp_path):
+    record = ready_record()
+
+    with pytest.raises(ValueError, match="PNG"):
+        build_export_plan((record,), ExportSettings(format="Jpeg"), tmp_path)
+
+
 def test_export_plan_sanitizes_skin_filename_without_changing_internal_identity(tmp_path):
     record = ready_record(skin_name="holiday:night")
 
@@ -98,3 +105,23 @@ def test_export_plan_sanitizes_skin_filename_without_changing_internal_identity(
 
     assert job.record.skin_name == "holiday:night"
     assert job.output_path.name == "holiday_night.png"
+
+
+@pytest.mark.parametrize(
+    "reserved_name",
+    [
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    ],
+)
+def test_export_plan_sanitizes_windows_reserved_output_components(tmp_path, reserved_name):
+    record = ready_record(character_id=reserved_name, skin_name=reserved_name)
+
+    job = build_export_plan((record,), ExportSettings(), tmp_path)[0]
+
+    assert job.output_path.parts[-3] == f"_{reserved_name}"
+    assert job.output_path.name == f"_{reserved_name}.png"

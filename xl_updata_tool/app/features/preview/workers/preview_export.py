@@ -32,7 +32,8 @@ class PreviewExportWorker(QThread):
     在后台线程执行 SpineViewerCLI 导出，避免阻塞 UI。
     支持去重：force=False 时跳过已存在的 PNG。
     """
-    progress = Signal(int, int, str)       # current, total, label
+    progress = Signal(int, int)            # legacy current, total
+    skin_progress = Signal(int, int, str)  # skin-job current, total, label
     finished = Signal(str)                 # summary for identity-based jobs
     export_finished = Signal(bool, str)    # success, summary
     error = Signal(str)
@@ -99,7 +100,7 @@ class PreviewExportWorker(QThread):
                 break
 
             label = job.record.display_name or job.record.skin_name
-            self.progress.emit(current, total, label)
+            self.skin_progress.emit(current, total, label)
             job.output_path.parent.mkdir(parents=True, exist_ok=True)
             if self.runner(job):
                 success_count += 1
@@ -188,7 +189,7 @@ class PreviewExportWorker(QThread):
             char_subdir = os.path.join(self.output_dir, char_id)
 
             processed += 1
-            self.progress.emit(processed, total, base_name)
+            self.progress.emit(processed, total)
 
             if not os.path.exists(atlas_path):
                 logger.warning(f"跳过 {skel_name}: 缺少对应的 .atlas 文件")

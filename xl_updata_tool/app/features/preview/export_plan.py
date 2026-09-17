@@ -10,6 +10,16 @@ from typing import Iterable
 from .resource_model import SpineSkinRecord, skin_key
 
 
+_WINDOWS_RESERVED_DEVICE_NAMES = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{index}" for index in range(1, 10)),
+    *(f"lpt{index}" for index in range(1, 10)),
+}
+
+
 @dataclass(frozen=True, slots=True)
 class ExportSettings:
     """The user-selected settings for one skin export batch."""
@@ -34,14 +44,22 @@ class SkinExportJob:
 
 
 def _safe_component(value: str, fallback: str) -> str:
-    value = re.sub(r"[\\/:*?\"<>|]", "_", str(value)).strip().strip(".")
+    value = re.sub(r"[\\/:*?\"<>|]", "_", str(value)).strip(" .")
+    if value and value.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_DEVICE_NAMES:
+        value = f"_{value}"
     return value or fallback
+
+
+def _validate_png_settings(settings: ExportSettings) -> None:
+    if str(settings.format).casefold() != "png":
+        raise ValueError("Skin export jobs only support PNG format")
 
 
 def build_export_plan(
     records: Iterable[SpineSkinRecord], settings: ExportSettings, output_dir
 ) -> tuple[SkinExportJob, ...]:
     """Build one PNG job per ready, character-matched Spine skin."""
+    _validate_png_settings(settings)
     root = Path(output_dir)
     jobs = []
     for record in records:
