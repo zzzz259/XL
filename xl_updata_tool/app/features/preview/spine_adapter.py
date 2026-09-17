@@ -53,16 +53,48 @@ class SkinQueryResult:
 
 
 def parse_skin_query_output(stdout) -> tuple[str, ...]:
-    """Parse skin entries from the recognized sections of CLI query output."""
+    """Parse skin names from ``SpineViewerCLI query --skin`` output.
+
+    The CLI-compatible forms are explicit ``Skin: <name>`` rows, bare
+    identifier entries in a ``Skin:``/``Skins:`` section, and indented or
+    ``-``/``*`` list entries in that section. Other section headers terminate
+    collection; log, timestamp, path, and status/prose lines are rejected.
+    """
     names = []
     seen = set()
     in_skin_section = False
 
-    def add_name(value):
+    def is_noise(value):
+        lowered_value = value.casefold()
+        return bool(
+            re.match(r"^\[?\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[t ]|\])", lowered_value)
+            or re.match(r"^\[?\d{1,2}:\d{2}:\d{2}(?:\]|\s)", lowered_value)
+            or re.match(
+                r"^(?:\[[^\]]+\]\s*)?(?:trace|debug|info|warn|warning|error)\b",
+                lowered_value,
+            )
+            or lowered_value.startswith("spineviewercli")
+            or lowered_value.startswith(
+                ("query ", "loading ", "loaded ", "resolved ", "found ", "status ", "total ")
+            )
+            or lowered_value in {"done", "complete", "completed", "success", "successful", "failed"}
+            or bool(re.search(r"\b(?:completed?|success(?:fully)?|failed?|failure|status|result)\b", lowered_value))
+            or bool(re.match(r"^(?:[a-z]:[\\/]|[\\/]|\.\.?[\\/])", lowered_value))
+        )
+
+    def add_name(value, raw_line, explicit=False):
         value = value.strip()
-        if value.startswith(("- ", "* ")):
+        list_entry = bool(re.match(r"^\s*(?:[-*])\s+", raw_line))
+        indented_entry = bool(raw_line[:1].isspace())
+        if list_entry:
             value = value[2:].strip()
-        if value and value not in seen:
+        if not value or is_noise(value):
+            return
+        if explicit or list_entry or indented_entry:
+            valid_shape = bool(re.fullmatch(r"[\w][\w.-]*(?:[ \t]+[\w][\w.-]*)*", value))
+        else:
+            valid_shape = bool(re.fullmatch(r"[\w][\w.-]*", value))
+        if valid_shape and value not in seen:
             names.append(value)
             seen.add(value)
 
@@ -81,10 +113,11 @@ def parse_skin_query_output(stdout) -> tuple[str, ...]:
         if not line or line.startswith("#"):
             continue
         lowered = line.casefold()
-        if lowered.startswith("skin:"):
-            value = line.split(":", 1)[1].strip()
+        skin_row = re.match(r"^skin\s*:\s*(.*)$", line, flags=re.IGNORECASE)
+        if skin_row:
+            value = skin_row.group(1).strip()
             if value:
-                add_name(value)
+                add_name(value, raw_line, explicit=True)
                 in_skin_section = False
             else:
                 in_skin_section = True
@@ -103,7 +136,7 @@ def parse_skin_query_output(stdout) -> tuple[str, ...]:
             lowered,
         ):
             continue
-        add_name(line)
+        add_name(line, raw_line)
     return tuple(names)
 
 

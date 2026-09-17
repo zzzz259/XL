@@ -15,6 +15,9 @@ Skins:
 base
 festival
 [DEBUG] resolved 2 skin entries
+2026-09-17 12:00:00 query heartbeat
+Query completed successfully
+not a skin entry
 Attachments:
 Attachment: skin=base;slot=body;name=body_region
 Animations:
@@ -36,6 +39,12 @@ def test_parse_skin_query_output_ignores_headers_and_empty_lines():
 
 def test_parse_skin_query_output_reads_only_skin_section_from_mixed_query_output():
     assert parse_skin_query_output(REALISTIC_MIXED_QUERY_OUTPUT) == ("base", "festival")
+
+
+def test_parse_skin_query_output_accepts_indented_and_list_skin_entries():
+    assert parse_skin_query_output("Skins:\n  base\n- festival\nAnimations:\nidle\n") == (
+        "base", "festival"
+    )
 
 
 def test_query_skins_uses_authoritative_skin_command(monkeypatch, tmp_path):
