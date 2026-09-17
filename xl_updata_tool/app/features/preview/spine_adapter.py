@@ -53,29 +53,57 @@ class SkinQueryResult:
 
 
 def parse_skin_query_output(stdout) -> tuple[str, ...]:
-    """Parse ``SpineViewerCLI query --skin`` output into unique skin names."""
+    """Parse skin entries from the recognized sections of CLI query output."""
     names = []
     seen = set()
+    in_skin_section = False
+
+    def add_name(value):
+        value = value.strip()
+        if value.startswith(("- ", "* ")):
+            value = value[2:].strip()
+        if value and value not in seen:
+            names.append(value)
+            seen.add(value)
+
+    def header_name(value):
+        value = value.strip()
+        if value.startswith("[") and value.endswith("]"):
+            return value[1:-1].strip().casefold()
+        if value.endswith(":"):
+            return value[:-1].strip().casefold()
+        return value.casefold() if value.casefold() in {
+            "skin", "skins", "skin name", "skin names",
+        } else None
+
     for raw_line in str(stdout or "").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        if line.casefold().startswith("skin:"):
-            line = line.split(":", 1)[1].strip()
-            if not line:
-                continue
-        if line.casefold().startswith("attachment:"):
+        lowered = line.casefold()
+        if lowered.startswith("skin:"):
+            value = line.split(":", 1)[1].strip()
+            if value:
+                add_name(value)
+                in_skin_section = False
+            else:
+                in_skin_section = True
             continue
-        header = line.rstrip(":").strip().casefold()
-        if header in {
-            "skin", "skins", "skin name", "skin names", "attachments", "attachment",
-        }:
+        if lowered.startswith("attachment:"):
             continue
-        if line.endswith(":") and header in {"result", "results", "output"}:
+        header = header_name(line)
+        if header in {"skin", "skins", "skin name", "skin names"}:
+            in_skin_section = True
             continue
-        if line not in seen:
-            names.append(line)
-            seen.add(line)
+        if header is not None:
+            in_skin_section = False
+            continue
+        if not in_skin_section or re.match(
+            r"^(?:\[[a-z]+\]|(?:trace|debug|info|warn|warning|error)\b|spineviewercli\b)",
+            lowered,
+        ):
+            continue
+        add_name(line)
     return tuple(names)
 
 
