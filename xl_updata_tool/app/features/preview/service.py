@@ -11,6 +11,13 @@ from .catalog import (
     scan_preview_roles,
 )
 from .resource_state import PreviewResourceState
+from .fgui_atlas import UIPackageTool
+from .material_catalog import (
+    GameMaterialCatalog,
+    MaterialExportSummary,
+    discover_game_materials as discover_materials,
+    export_game_materials as export_materials,
+)
 
 
 class PreviewService:
@@ -52,3 +59,17 @@ class PreviewService:
 
     def preview_roles(self) -> list[str]:
         return scan_preview_roles(str(self.preview_dir))
+
+    def discover_game_materials(self, metadata=None) -> GameMaterialCatalog:
+        return discover_materials(self.material_dir, metadata)
+
+    def export_game_materials(
+        self,
+        catalog: GameMaterialCatalog | None = None,
+        splitter=None,
+    ) -> MaterialExportSummary:
+        return export_materials(
+            catalog or self.discover_game_materials(),
+            self.preview_dir.parent,
+            splitter if splitter is not None else UIPackageTool.split_atlas,
+        )
