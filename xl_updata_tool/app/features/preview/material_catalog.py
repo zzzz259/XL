@@ -228,17 +228,26 @@ class _BurstManifestError(ValueError):
     """Raised when the persisted Burst Head manifest cannot be trusted."""
 
 
+@dataclass(frozen=True, slots=True)
+class _BurstPersistedRecord:
+    source: str
+    fingerprint: str
+    output: str
+    origin: str
+
+
 def _normalise_manifest_entry(source, entry) -> dict[str, str]:
     if not isinstance(source, str) or not source:
         raise _BurstManifestError("source key must be a non-empty string")
+    source_key = _source_key(Path(source))
     if not isinstance(entry, Mapping):
-        raise _BurstManifestError(f"entry for {source!r} must be an object")
+        raise _BurstManifestError(f"entry for {source_key!r} must be an object")
     fingerprint = entry.get("fingerprint")
     output_name = entry.get("output")
     if not isinstance(fingerprint, str) or not fingerprint:
-        raise _BurstManifestError(f"entry for {source!r} has an invalid fingerprint")
+        raise _BurstManifestError(f"entry for {source_key!r} has an invalid fingerprint")
     if not isinstance(output_name, str) or not output_name or Path(output_name).name != output_name:
-        raise _BurstManifestError(f"entry for {source!r} has an invalid output")
+        raise _BurstManifestError(f"entry for {source_key!r} has an invalid output")
     return {"fingerprint": fingerprint, "output": output_name}
 
 
@@ -255,10 +264,15 @@ def _load_burst_manifest(output_dir: Path) -> dict[str, Mapping[str, str]]:
     entries = payload.get("entries")
     if not isinstance(entries, Mapping):
         raise _BurstManifestError("manifest entries must be an object")
-    return {
-        source: _normalise_manifest_entry(source, entry)
-        for source, entry in entries.items()
-    }
+    normalised_entries: dict[str, Mapping[str, str]] = {}
+    for source, entry in entries.items():
+        normalised_entry = _normalise_manifest_entry(source, entry)
+        source_key = _source_key(Path(source))
+        previous = normalised_entries.get(source_key)
+        if previous is not None and previous != normalised_entry:
+            raise _BurstManifestError(f"source {source_key!r} has conflicting manifest records")
+        normalised_entries[source_key] = normalised_entry
+    return normalised_entries
 
 
 def _save_burst_sidecar(target: Path, source: Path, fingerprint: str) -> None:
@@ -283,20 +297,93 @@ def _save_burst_sidecar(target: Path, source: Path, fingerprint: str) -> None:
         raise
 
 
-def _load_burst_sidecars(output_dir: Path) -> dict[str, Mapping[str, str]]:
-    sidecars: dict[str, Mapping[str, str]] = {}
+def _load_burst_sidecars(output_dir: Path) -> tuple[list[_BurstPersistedRecord], list[str]]:
+    sidecars: list[_BurstPersistedRecord] = []
+    diagnostics: list[str] = []
     for sidecar_path in output_dir.glob(f"*{_BURST_SIDECAR_SUFFIX}"):
         try:
             payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
             if not isinstance(payload, Mapping) or payload.get("version") != 1:
-                continue
+                raise _BurstManifestError(f"sidecar {sidecar_path.name} must contain version 1")
             source = payload.get("source")
             entry = _normalise_manifest_entry(source, payload)
-            if (output_dir / entry["output"]).is_file() and sidecar_path.name == f"{entry['output']}{_BURST_SIDECAR_SUFFIX}":
-                sidecars[source] = entry
-        except (OSError, UnicodeError, json.JSONDecodeError, _BurstManifestError):
+            if sidecar_path.name != f"{entry['output']}{_BURST_SIDECAR_SUFFIX}":
+                raise _BurstManifestError(f"sidecar {sidecar_path.name} does not match output {entry['output']}")
+            if not (output_dir / entry["output"]).is_file():
+                raise _BurstManifestError(f"sidecar {sidecar_path.name} points to a missing output")
+            sidecars.append(
+                _BurstPersistedRecord(
+                    source=_source_key(Path(source)),
+                    fingerprint=entry["fingerprint"],
+                    output=entry["output"],
+                    origin=f"sidecar {sidecar_path.name}",
+                )
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, _BurstManifestError) as error:
+            diagnostics.append(f"burst-head sidecar load failed for {sidecar_path.name}: {error}")
+    return sidecars, diagnostics
+
+
+def _load_burst_persistence(output_dir: Path):
+    manifest_entries: dict[str, Mapping[str, str]] = {}
+    manifest_records: list[_BurstPersistedRecord] = []
+    diagnostics: list[str] = []
+    has_conflict = False
+    try:
+        manifest_entries = _load_burst_manifest(output_dir)
+    except _BurstManifestError as error:
+        diagnostics.append(f"burst-head manifest load failed: {error}")
+
+    for source, entry in manifest_entries.items():
+        target = output_dir / entry["output"]
+        if not target.is_file():
+            diagnostics.append(f"burst-head manifest record for {source} points to missing output {entry['output']}")
             continue
-    return sidecars
+        manifest_records.append(
+            _BurstPersistedRecord(
+                source=source,
+                fingerprint=entry["fingerprint"],
+                output=entry["output"],
+                origin="manifest",
+            )
+        )
+
+    sidecars, sidecar_diagnostics = _load_burst_sidecars(output_dir)
+    diagnostics.extend(sidecar_diagnostics)
+    # Sidecars are the durable per-target records. Process them first so a
+    # matching manifest entry cannot hide the fact that its sidecar exists.
+    records = [*sidecars, *manifest_records]
+
+    by_identity: dict[tuple[str, str], _BurstPersistedRecord] = {}
+    by_output: dict[str, _BurstPersistedRecord] = {}
+    valid_records: list[_BurstPersistedRecord] = []
+    for record in records:
+        identity = (record.source, record.fingerprint)
+        previous_identity = by_identity.get(identity)
+        if previous_identity is not None:
+            if previous_identity.output != record.output:
+                diagnostics.append(
+                    "burst-head persistence conflict: "
+                    f"source {record.source!r} fingerprint {record.fingerprint!r} maps to "
+                    f"both {previous_identity.output!r} and {record.output!r}"
+                )
+                has_conflict = True
+            continue
+
+        previous_output = by_output.get(record.output)
+        if previous_output is not None and (previous_output.source, previous_output.fingerprint) != identity:
+            diagnostics.append(
+                "burst-head persistence conflict: "
+                f"output {record.output!r} maps to sources {previous_output.source!r} and {record.source!r}"
+            )
+            has_conflict = True
+            continue
+
+        by_identity[identity] = record
+        by_output[record.output] = record
+        valid_records.append(record)
+
+    return manifest_entries, valid_records, diagnostics, has_conflict
 
 
 def _save_burst_manifest(output_dir: Path, entries: Mapping[str, Mapping[str, str]]) -> None:
@@ -316,19 +403,21 @@ def _save_burst_manifest(output_dir: Path, entries: Mapping[str, Mapping[str, st
         raise
 
 
-def _manifest_target(record: GameMaterialRecord, output_dir: Path, manifest) -> Path | None:
-    entry = manifest.get(_source_key(Path(record.source_path)))
-    if not isinstance(entry, Mapping) or entry.get("fingerprint") != record.fingerprint:
+def _persisted_target(record: GameMaterialRecord, output_dir: Path, persisted_records) -> Path | None:
+    source = _source_key(Path(record.source_path))
+    matches = [
+        persisted
+        for persisted in persisted_records
+        if persisted.source == source and persisted.fingerprint == record.fingerprint
+    ]
+    if not matches:
         return None
-    output_name = entry.get("output")
-    if not isinstance(output_name, str) or Path(output_name).name != output_name:
-        return None
-    target = output_dir / output_name
+    target = output_dir / matches[0].output
     return target if target.is_file() else None
 
 
-def _burst_output_path(record: GameMaterialRecord, output_dir: Path, manifest) -> Path:
-    existing_target = _manifest_target(record, output_dir, manifest)
+def _burst_output_path(record: GameMaterialRecord, output_dir: Path, persisted_records) -> Path:
+    existing_target = _persisted_target(record, output_dir, persisted_records)
     if existing_target is not None:
         return existing_target
 
@@ -374,47 +463,50 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
     exported = 0
     failed = 0
     diagnostics: list[str] = []
-    try:
-        burst_manifest = _load_burst_manifest(burst_output)
-    except _BurstManifestError as error:
-        burst_manifest = {}
-        failed += 1
-        diagnostics.append(f"burst-head manifest load failed: {error}")
+    burst_manifest, persisted_records, persistence_diagnostics, persistence_conflict = _load_burst_persistence(burst_output)
+    failed += len(persistence_diagnostics)
+    diagnostics.extend(persistence_diagnostics)
     burst_manifest_changed = False
-    for source, entry in _load_burst_sidecars(burst_output).items():
-        if source not in burst_manifest:
-            burst_manifest[source] = entry
-            burst_manifest_changed = True
 
-    for record in catalog.burst_heads:
-        if record.kind != "burst-head":
-            continue
-        source_path = Path(record.source_path)
-        if not source_path.is_file():
-            failed += 1
-            diagnostics.append(f"burst-head source missing: {record.source_path}")
-            continue
-        try:
-            burst_output.mkdir(parents=True, exist_ok=True)
-            target = _burst_output_path(record, burst_output, burst_manifest)
-            existing_target = _manifest_target(record, burst_output, burst_manifest)
-            if existing_target is None:
-                _copy_burst_head(record, source_path, target)
-                burst_manifest[_source_key(source_path)] = {
-                    "fingerprint": record.fingerprint,
-                    "output": target.name,
-                }
-                burst_manifest_changed = True
-            elif burst_manifest.get(_source_key(source_path), {}).get("output") != existing_target.name:
-                burst_manifest[_source_key(source_path)] = {
-                    "fingerprint": record.fingerprint,
-                    "output": existing_target.name,
-                }
-                burst_manifest_changed = True
-            exported += 1
-        except Exception as error:
-            failed += 1
-            diagnostics.append(f"burst-head export failed for {record.source_path}: {error}")
+    if not persistence_conflict:
+        for record in catalog.burst_heads:
+            if record.kind != "burst-head":
+                continue
+            source_path = Path(record.source_path)
+            if not source_path.is_file():
+                failed += 1
+                diagnostics.append(f"burst-head source missing: {record.source_path}")
+                continue
+            try:
+                burst_output.mkdir(parents=True, exist_ok=True)
+                target = _burst_output_path(record, burst_output, persisted_records)
+                existing_target = _persisted_target(record, burst_output, persisted_records)
+                if existing_target is None:
+                    _copy_burst_head(record, source_path, target)
+                    persisted_records.append(
+                        _BurstPersistedRecord(
+                            source=_source_key(source_path),
+                            fingerprint=record.fingerprint,
+                            output=target.name,
+                            origin="current export",
+                        )
+                    )
+                elif not any(
+                    persisted.source == _source_key(source_path)
+                    and persisted.fingerprint == record.fingerprint
+                    and persisted.origin.startswith("sidecar")
+                    for persisted in persisted_records
+                ):
+                    _save_burst_sidecar(existing_target, source_path, record.fingerprint)
+                current_entry = {"fingerprint": record.fingerprint, "output": target.name}
+                source_key = _source_key(source_path)
+                if burst_manifest.get(source_key) != current_entry:
+                    burst_manifest[source_key] = current_entry
+                    burst_manifest_changed = True
+                exported += 1
+            except Exception as error:
+                failed += 1
+                diagnostics.append(f"burst-head export failed for {record.source_path}: {error}")
 
     for group in catalog.atlases:
         source_path = Path(group.source_path)

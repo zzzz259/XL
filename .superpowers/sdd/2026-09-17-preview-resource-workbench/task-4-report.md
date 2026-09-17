@@ -46,3 +46,7 @@
 ## Concern
 
 - 受管 sandbox 对既有 pytest 临时目录/cache 目录和 Git index 有 ACL 限制。普通权限下 pytest 会在创建 `tmp_path` 前触发 `PermissionError`，Git staging 会触发 `.git/index.lock: Permission denied`；已使用项目指定解释器和获批的受控 elevated 执行完成 focused suite、stage、diff 检查和 commit。没有安装依赖，也没有修改无关目录或文件。
+
+## 第三修正轮
+
+提交 `5b801006` 的最终复审后，可靠持久化、冲突诊断与重试行为已在同目录的 `task-4-fix3-report.md` 中补充修正和验证记录。

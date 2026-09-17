@@ -185,6 +185,127 @@ def test_burst_head_manifest_save_failure_retry_does_not_duplicate_or_overwrite_
     assert save_attempts == 2
 
 
+def test_burst_head_source_update_manifest_save_failure_retry_reuses_new_target(tmp_path, monkeypatch):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"old source")
+    output = tmp_path / "output"
+
+    old_catalog = discover_game_materials(source.parents[1])
+    assert export_game_materials(old_catalog, output, lambda *args: None).failed == 0
+
+    source.write_bytes(b"new source")
+    new_catalog = discover_game_materials(source.parents[1])
+    real_save = material_catalog._save_burst_manifest
+    save_attempts = 0
+
+    def fail_once(output_dir, entries):
+        nonlocal save_attempts
+        save_attempts += 1
+        if save_attempts == 1:
+            raise OSError("manifest disk full")
+        return real_save(output_dir, entries)
+
+    monkeypatch.setattr(material_catalog, "_save_burst_manifest", fail_once)
+    output_dir = output / "game_material" / "burst-head"
+    failed_retry = export_game_materials(new_catalog, output, lambda *args: None)
+    files_after_failure = sorted(
+        (path.name, path.read_bytes())
+        for path in output_dir.iterdir()
+        if path.suffix == ".png" or path.name.endswith(".burst-head.json")
+    )
+
+    successful_retry = export_game_materials(new_catalog, output, lambda *args: None)
+    files_after_success = sorted(
+        (path.name, path.read_bytes())
+        for path in output_dir.iterdir()
+        if path.suffix == ".png" or path.name.endswith(".burst-head.json")
+    )
+
+    assert failed_retry.failed == 1
+    assert any("manifest save failed" in diagnostic for diagnostic in failed_retry.diagnostics)
+    assert successful_retry.failed == 0
+    assert files_after_success == files_after_failure
+    assert sorted(path.name for path in output_dir.glob("*.png")) == ["10080.png", f"10080_{new_catalog.burst_heads[0].fingerprint[:12]}.png"]
+    assert sorted(path.read_bytes() for path in output_dir.glob("*.png")) == [b"new source", b"old source"]
+    assert save_attempts == 2
+
+
+def test_burst_head_sidecar_save_failure_retry_leaves_no_partial_target(tmp_path, monkeypatch):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"head")
+    catalog = discover_game_materials(source.parents[1])
+    output = tmp_path / "output"
+    real_save = material_catalog._save_burst_sidecar
+    sidecar_attempts = 0
+
+    def fail_once(target, source_path, fingerprint):
+        nonlocal sidecar_attempts
+        sidecar_attempts += 1
+        if sidecar_attempts == 1:
+            raise OSError("sidecar disk full")
+        return real_save(target, source_path, fingerprint)
+
+    monkeypatch.setattr(material_catalog, "_save_burst_sidecar", fail_once)
+
+    first = export_game_materials(catalog, output, lambda *args: None)
+    output_dir = output / "game_material" / "burst-head"
+    assert first.failed == 1
+    assert not list(output_dir.glob("*.png"))
+    assert not list(output_dir.glob("*.burst-head.json"))
+    assert any("sidecar disk full" in diagnostic for diagnostic in first.diagnostics)
+
+    second = export_game_materials(catalog, output, lambda *args: None)
+
+    assert second.failed == 0
+    assert sorted(path.name for path in output_dir.glob("*.png")) == ["10080.png"]
+    assert sorted(path.name for path in output_dir.glob("*.burst-head.json")) == ["10080.png.burst-head.json"]
+    assert (output_dir / "10080.png").read_bytes() == b"head"
+    assert sidecar_attempts == 2
+
+
+def test_burst_head_manifest_rejects_multiple_sources_for_one_output(tmp_path):
+    first = tmp_path / "material" / "burst-head" / "first.png"
+    second = tmp_path / "other" / "burst-head" / "second.png"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    output_dir = tmp_path / "output" / "game_material" / "burst-head"
+    output_dir.mkdir(parents=True)
+    shared = output_dir / "shared.png"
+    shared.write_bytes(b"existing")
+    (output_dir / ".burst-head-manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    str(first): {"fingerprint": "first-fp", "output": shared.name},
+                    str(second): {"fingerprint": "second-fp", "output": shared.name},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    catalog = GameMaterialCatalog(
+        burst_heads=(
+            GameMaterialRecord("burst-head", str(first), "first", "first-fp"),
+            GameMaterialRecord("burst-head", str(second), "second", "second-fp"),
+        ),
+        atlases=(),
+        unmatched=(),
+    )
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.exported == 0
+    assert summary.failed >= 1
+    assert any("output" in diagnostic.lower() and "source" in diagnostic.lower() for diagnostic in summary.diagnostics)
+    assert sorted(path.name for path in output_dir.glob("*.png")) == ["shared.png"]
+    assert shared.read_bytes() == b"existing"
+
+
 @pytest.mark.parametrize(
     "manifest_bytes",
     [b"\xff", b"{", json.dumps({"version": 1, "entries": []}).encode("utf-8")],
