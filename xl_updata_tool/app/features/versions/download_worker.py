@@ -32,16 +32,22 @@ class CheckUpdateThread(QThread):
                 len(self.old_hashes) if self.old_hashes else 0,
             )
             info, versions = check_update()
+            if self.isInterruptionRequested():
+                return
             os.makedirs(self.output_dir, exist_ok=True)
 
             categories = {}
             for item in versions["data"]:
+                if self.isInterruptionRequested():
+                    return
                 name = item["name"].lower()
                 fname = f"{name}_{item['hash']}.json"
                 url = f"{BUNDLES_URL}/{fname}"
                 out = os.path.join(self.output_dir, fname)
                 if not os.path.exists(out):
                     data = http_get(url)
+                    if self.isInterruptionRequested():
+                        return
                     with open(out, "wb") as f:
                         f.write(data)
                     logger.debug("下载分类包: %s (%s 字节)", fname, len(data))
@@ -51,7 +57,11 @@ class CheckUpdateThread(QThread):
 
             new_hashes = set()
             for cat_path in categories.values():
+                if self.isInterruptionRequested():
+                    return
                 new_hashes |= extract_manifest_hashes(cat_path)
+            if self.isInterruptionRequested():
+                return
             logger.info("提取到 %s 个 bundle hash", len(new_hashes))
 
             delta = compute_delta(self.old_hashes or [], new_hashes)
@@ -78,63 +88,99 @@ class DownloadWorker(QThread):
         self.hashes = hashes
         self.output_dir = output_dir
         self._stop = False
+        self.outcome = None
 
     def stop(self):
         self._stop = True
 
     def run(self):
-        os.makedirs(self.output_dir, exist_ok=True)
-        logger.info("下载线程开始：%s 个文件 → %s", len(self.hashes), self.output_dir)
         done = 0
         skipped = 0
         failed = 0
-        for h in self.hashes:
-            if self._stop:
-                break
-            fname = f"{h}.bundle"
-            url = f"{BUNDLES_URL}/{fname}"
-            out = os.path.join(self.output_dir, fname)
-
-            if os.path.exists(out) and os.path.getsize(out) > 100:
-                done += 1
-                skipped += 1
-                self.progress.emit(h, done, len(self.hashes))
-                self.item_skip.emit(h, fname)
-                continue
-
-            ok = False
-            for attempt in range(3):
+        try:
+            os.makedirs(self.output_dir, exist_ok=True)
+            logger.info("下载线程开始：%s 个文件 → %s", len(self.hashes), self.output_dir)
+            for h in self.hashes:
                 if self._stop:
                     break
-                try:
-                    data = http_get(url)
-                    actual_md5 = hashlib.md5(data).hexdigest()
-                    if actual_md5.lower() != h.lower():
+                fname = f"{h}.bundle"
+                url = f"{BUNDLES_URL}/{fname}"
+                out = os.path.join(self.output_dir, fname)
+                self.progress.emit(h, done, len(self.hashes))
+
+                if os.path.exists(out) and os.path.getsize(out) > 100:
+                    done += 1
+                    skipped += 1
+                    self.progress.emit(h, done, len(self.hashes))
+                    self.item_skip.emit(h, fname)
+                    continue
+
+                ok = False
+                last_error = None
+                for attempt in range(3):
+                    if self._stop:
+                        break
+                    try:
+                        data = http_get(url)
+                        if self._stop:
+                            break
+                        actual_md5 = hashlib.md5(data).hexdigest()
+                        if actual_md5.lower() != h.lower():
+                            last_error = f"MD5 mismatch (actual {actual_md5})"
+                            if attempt < 2:
+                                time.sleep(1)
+                                self.error.emit(
+                                    f"{h[:16]}...: MD5 mismatch, retry {attempt + 2}/3"
+                                )
+                                continue
+                            self.error.emit(
+                                f"{h[:16]}...: {last_error}, failed after 3 attempts"
+                            )
+                            break
+                        # Manifest entries may be raw video/audio payloads.  Only
+                        # run the UnityFS prefix repair when the verified payload
+                        # actually contains a UnityFS header; a correct MD5 is
+                        # sufficient validation for other asset types.
+                        transform = fix_bundle_inplace if b"UnityFS" in data else None
+                        if self._stop:
+                            break
+                        atomic_write_bytes(out, data, transform=transform)
+                        ok = True
+                        break
+                    except Exception as e:
+                        last_error = str(e)
                         if attempt < 2:
                             time.sleep(1)
-                            self.error.emit(f"{h[:16]}...: MD5 mismatch, retry {attempt + 2}/3")
-                            continue
-                        self.error.emit(f"{h[:16]}...: MD5 failed after 3 attempts")
-                        break
-                    atomic_write_bytes(out, data, transform=fix_bundle_inplace)
-                    ok = True
+                        else:
+                            self.error.emit(f"{h[:16]}...: {e}")
+
+                if self._stop:
                     break
-                except Exception as e:
-                    if attempt < 2:
-                        time.sleep(1)
-                    else:
-                        self.error.emit(f"{h[:16]}...: {e}")
+                if ok:
+                    done += 1
+                    self.progress.emit(h, done, len(self.hashes))
+                    self.item_done.emit(h, fname, out)
+                else:
+                    failed += 1
+                    self.item_fail.emit(
+                        h,
+                        f"Failed after 3 attempts: {last_error or 'unknown error'}",
+                    )
 
-            if ok:
-                done += 1
-                self.progress.emit(h, done, len(self.hashes))
-                self.item_done.emit(h, fname, out)
+            if self._stop:
+                self.outcome = "cancelled"
+            elif failed:
+                self.outcome = "failed"
             else:
-                failed += 1
-                self.item_fail.emit(h, "Failed after 3 attempts")
-
-        logger.info(
-            "下载线程结束：共 %s 个，成功 %s，跳过 %s，失败 %s",
-            len(self.hashes), done - skipped, skipped, failed,
-        )
-        self.all_done.emit()
+                self.outcome = "success"
+        except Exception as error:
+            self.outcome = "aborted"
+            logger.error("下载线程异常: %s", error, exc_info=True)
+            self.error.emit(str(error))
+        finally:
+            logger.info(
+                "下载线程结束：共 %s 个，成功 %s，跳过 %s，失败 %s，终态 %s",
+                len(self.hashes), done - skipped, skipped, failed, self.outcome,
+            )
+            if self.outcome == "success":
+                self.all_done.emit()

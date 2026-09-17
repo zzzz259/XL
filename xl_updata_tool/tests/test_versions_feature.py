@@ -251,7 +251,7 @@ def test_download_ui_tracks_progress_filename_and_cancel(monkeypatch, qapp, tmp_
     assert controller._delete_buttons[100].isEnabled() is False
     assert controller._status_items[200].text() == "下载中 (3/10)"
     assert statuses[-1] == "增量下载 3/10 · new.bundle"
-    assert progress_updates[-1] == (3, 10, "增量下载: 3/10")
+    assert progress_updates[-1] == (3, 10, "增量下载: 3/10 · new.bundle")
 
     QTest.mouseClick(progress_button, Qt.LeftButton)
 
