@@ -57,8 +57,10 @@ def parse_skin_query_output(stdout) -> tuple[str, ...]:
 
     The CLI-compatible forms are explicit ``Skin: <name>`` rows, bare
     identifier entries in a ``Skin:``/``Skins:`` section, and indented or
-    ``-``/``*`` list entries in that section. Other section headers terminate
-    collection; log, timestamp, path, and status/prose lines are rejected.
+    ``-``/``*`` list entries in that section. Non-explicit entries must match
+    the resource-name shape ``[\\w][\\w.-]*`` (no whitespace). Other section
+    headers terminate collection; log, timestamp, path, and status/prose
+    lines are rejected.
     """
     names = []
     seen = set()
@@ -85,12 +87,11 @@ def parse_skin_query_output(stdout) -> tuple[str, ...]:
     def add_name(value, raw_line, explicit=False):
         value = value.strip()
         list_entry = bool(re.match(r"^\s*(?:[-*])\s+", raw_line))
-        indented_entry = bool(raw_line[:1].isspace())
         if list_entry:
             value = value[2:].strip()
         if not value or is_noise(value):
             return
-        if explicit or list_entry or indented_entry:
+        if explicit:
             valid_shape = bool(re.fullmatch(r"[\w][\w.-]*(?:[ \t]+[\w][\w.-]*)*", value))
         else:
             valid_shape = bool(re.fullmatch(r"[\w][\w.-]*", value))

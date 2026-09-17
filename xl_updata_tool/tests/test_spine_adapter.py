@@ -47,6 +47,10 @@ def test_parse_skin_query_output_accepts_indented_and_list_skin_entries():
     )
 
 
+def test_parse_skin_query_output_ignores_arbitrary_indented_prose():
+    assert parse_skin_query_output("Skins:\n  not a skin entry\n") == ()
+
+
 def test_query_skins_uses_authoritative_skin_command(monkeypatch, tmp_path):
     calls = []
 
