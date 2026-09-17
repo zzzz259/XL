@@ -244,11 +244,24 @@ class AudioController(QObject):
             self._selected_names.clear()
         if checked:
             self._selected_names.update(target_names)
+            self._mark_audio_names_read(target_names)
         else:
             self._selected_names.difference_update(target_names)
         self._apply_visible_selection()
         self.page.audio_table.clearSelection()
         self._update_selection_status()
+
+    def _mark_audio_names_read(self, names: set[str]) -> None:
+        """勾选音频时同步持久化未读状态和当前已加载的叶节点。"""
+        changed = False
+        for name in names:
+            relative_name = str(name).replace("\\", "/")
+            changed = self.service.mark_read(relative_name) or changed
+            filepath = os.path.join(str(self.service.audio_dir), *relative_name.split("/"))
+            self._update_loaded_audio_unread(False, filepath)
+        if changed:
+            refresh_audio_tree_unread(self.page.audio_table, self._catalog_index)
+            self.unread_changed.emit()
 
     def _apply_visible_selection(self) -> None:
         table = self.page.audio_table

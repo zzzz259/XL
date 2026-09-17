@@ -293,6 +293,31 @@ def test_audio_checkbox_indicator_toggles_reliably(qapp):
     controller.page.close()
 
 
+def test_checking_audio_marks_the_selected_leaf_read_immediately(qapp, tmp_path):
+    audio_path = tmp_path / "audio" / "album" / "专辑" / "track.wav"
+    audio_path.parent.mkdir(parents=True)
+    audio_path.write_bytes(b"audio")
+
+    controller = _build_audio_controller(qapp, tmp_path)
+    audio_files = controller.service.load_catalog()
+    controller._on_catalog_loaded(audio_files)
+    root = controller.page.audio_table.topLevelItem(0)
+    populate_audio_directory(root, controller._catalog_index, controller.service.format_size)
+    album = root.child(0)
+    populate_audio_directory(album, controller._catalog_index, controller.service.format_size)
+    leaf = album.child(0)
+    assert leaf.text(5) == "新"
+
+    controller.on_item_clicked(leaf, 0)
+    qapp.processEvents()
+
+    assert leaf.checkState(0) == Qt.Checked
+    assert leaf.data(0, Qt.UserRole)["unread"] is False
+    assert leaf.text(5) == ""
+    assert controller.service.has_unread is False
+    controller.page.close()
+
+
 def test_audio_directory_selection_checks_descendants_and_ctrl_adds(qapp):
     controller = _build_audio_controller(qapp)
     controller._audio_files = [
