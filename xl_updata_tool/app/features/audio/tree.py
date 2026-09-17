@@ -37,8 +37,8 @@ def refresh_audio_tree_unread(table, catalog_index=None):
             )
         else:
             unread = False
-            for child_index in range(item.childCount()):
-                unread = update_item(item.child(child_index)) or unread
+        for child_index in range(item.childCount()):
+            unread = update_item(item.child(child_index)) or unread
         _set_unread_marker(item, unread)
         return unread
 

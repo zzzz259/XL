@@ -10,7 +10,9 @@ from app.features.audio.tree import (
     populate_audio_directory,
     populate_audio_tree as feature_populate_audio_tree,
     populate_audio_tree_roots,
+    refresh_audio_tree_unread,
 )
+from app.shared.qt.tokens import DANGER
 from app.ui.features.audio_controller import populate_audio_tree as legacy_populate_audio_tree
 
 
@@ -81,4 +83,35 @@ def test_audio_catalog_index_supports_layered_lazy_tree(qapp):
         "第六专辑",
     ]
     assert roots[0].child(0).childCount() == 1  # 专辑曲目仍未构造
+    page.close()
+
+
+def test_audio_tree_propagates_unread_marker_to_loaded_directories_and_leaves(qapp):
+    files = [
+        {"name": "album/旅途轶事/event.wav", "dir": "album/旅途轶事", "ext": "WAV", "size": 1, "unread": True},
+        {"name": "voice/118/cn/line.wav", "dir": "voice/118/cn", "ext": "WAV", "size": 1, "unread": True},
+    ]
+    page = AudioPage()
+    index = AudioCatalogIndex(files)
+    roots = populate_audio_tree_roots(page.audio_table, index, AudioService.format_size)
+
+    populate_audio_directory(roots[0], index, AudioService.format_size)
+    populate_audio_directory(roots[0].child(0), index, AudioService.format_size)
+    populate_audio_directory(roots[1], index, AudioService.format_size)
+    populate_audio_directory(roots[1].child(0), index, AudioService.format_size)
+    populate_audio_directory(roots[1].child(0).child(0), index, AudioService.format_size)
+    refresh_audio_tree_unread(page.audio_table, index)
+
+    album = roots[0]
+    album_name = album.child(0)
+    album_file = album_name.child(0)
+    voice = roots[1]
+    character = voice.child(0)
+    language = character.child(0)
+    voice_file = language.child(0)
+
+    for item in (album, album_name, album_file, voice, character, language, voice_file):
+        assert item.text(5) == "新"
+        assert item.foreground(5).color().name() == DANGER
+
     page.close()

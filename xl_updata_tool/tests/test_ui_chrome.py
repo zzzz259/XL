@@ -14,6 +14,7 @@ from app.ui.main_window import MainWindow
 from app.features.audio.controller import AudioController
 from app.features.audio.page import AudioPage
 from app.features.audio.service import AudioService
+from app.features.audio.tree import populate_audio_directory
 from app.features.characters.page import CharacterPage
 from app.features.preview.page import PreviewPage
 from app.features.versions.page import VersionPage
@@ -399,7 +400,7 @@ def test_audio_unread_marker_propagates_to_outer_folders(qapp):
 
 
 def test_mark_all_audio_read_updates_leaf_data_and_all_parent_markers(qapp, tmp_path):
-    audio_dir = tmp_path / "output" / "audio"
+    audio_dir = tmp_path / "audio"
     first_path = audio_dir / "voice" / "064" / "cn" / "064_in_01.wav"
     second_path = audio_dir / "album" / "第五专辑" / "event.wav"
     first_path.parent.mkdir(parents=True)
@@ -407,10 +408,24 @@ def test_mark_all_audio_read_updates_leaf_data_and_all_parent_markers(qapp, tmp_
     first_path.write_bytes(b"cn")
     second_path.write_bytes(b"bgm")
     controller = _build_audio_controller(qapp, tmp_path)
-    controller.load_catalog()
+    audio_files = controller.service.load_catalog()
+    controller._on_catalog_loaded(audio_files)
+
+    def expand_directories(item):
+        populate_audio_directory(item, controller._catalog_index, controller.service.format_size)
+        for index in range(item.childCount()):
+            child = item.child(index)
+            if child.data(0, Qt.UserRole + 1):
+                expand_directories(child)
+
+    for index in range(controller.page.audio_table.topLevelItemCount()):
+        expand_directories(controller.page.audio_table.topLevelItem(index))
+
     controller.mark_all_read()
 
-    assert all(not item.data(0, Qt.UserRole)["unread"] for item in controller._audio_file_items)
+    leaves = [item for item in _walk_tree(controller.page.audio_table) if item.data(0, Qt.UserRole)]
+    assert leaves
+    assert all(not item.data(0, Qt.UserRole)["unread"] for item in leaves)
     assert all(item.text(5) == "" for item in _walk_tree(controller.page.audio_table))
     assert all(item.foreground(5).color().name() == TEXT_MUTED for item in _walk_tree(controller.page.audio_table))
 
