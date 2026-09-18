@@ -111,6 +111,7 @@ class PreviewPage(QWidget):
     export_requested = Signal(object)
     spine_selection_changed = Signal(object)
     export_selected_requested = Signal()
+    thumbnail_page_changed = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -142,6 +143,18 @@ class PreviewPage(QWidget):
         self.preview_progress.setFixedWidth(250)
         self.preview_progress.setVisible(False)
         command_layout.addWidget(self.preview_progress)
+        self.btn_thumbnail_previous = create_action_button("上一页", "secondary", None, self)
+        self.btn_thumbnail_previous.setObjectName("thumbnailPreviousButton")
+        self.btn_thumbnail_previous.setAccessibleName("立绘缩略图上一页")
+        command_layout.addWidget(self.btn_thumbnail_previous)
+        self.thumbnail_page_label = QLabel("第 1/1 页")
+        self.thumbnail_page_label.setObjectName("thumbnailPageLabel")
+        self.thumbnail_page_label.setAccessibleName("立绘缩略图页码")
+        command_layout.addWidget(self.thumbnail_page_label)
+        self.btn_thumbnail_next = create_action_button("下一页", "secondary", None, self)
+        self.btn_thumbnail_next.setObjectName("thumbnailNextButton")
+        self.btn_thumbnail_next.setAccessibleName("立绘缩略图下一页")
+        command_layout.addWidget(self.btn_thumbnail_next)
         command_layout.addStretch()
         layout.addWidget(command_bar)
 
@@ -184,8 +197,14 @@ class PreviewPage(QWidget):
         self.image_list.itemClicked.connect(self.item_clicked)
         self.image_list.itemDoubleClicked.connect(self.item_double_clicked)
         self.image_list.itemSelectionChanged.connect(self.selection_changed)
+        self.btn_thumbnail_previous.clicked.connect(lambda: self.set_thumbnail_page(self._thumbnail_page - 1))
+        self.btn_thumbnail_next.clicked.connect(lambda: self.set_thumbnail_page(self._thumbnail_page + 1))
         self.spine_tree.selection_changed.connect(self._on_spine_selection_changed)
         self._material_state = None
+        self._thumbnail_page = 0
+        self._thumbnail_page_size = 60
+        self._thumbnail_page_count = 1
+        self.image_list.content_changed.connect(self.refresh_thumbnail_pagination)
 
     def _build_spine_tab(self) -> None:
         self.tabs.spine_tab = QWidget(self.tabs)
@@ -343,6 +362,47 @@ class PreviewPage(QWidget):
 
     def _sync_character_empty_from_items(self, *_args) -> None:
         self.empty_label.setVisible(self.image_list.count() == 0)
+
+    def set_thumbnail_page(self, page: int) -> None:
+        self._thumbnail_page = min(max(0, int(page)), self._thumbnail_page_count - 1)
+        self._refresh_thumbnail_visibility()
+        self.thumbnail_page_changed.emit(self._thumbnail_page)
+
+    def refresh_thumbnail_pagination(self, *_args) -> None:
+        visible_count = sum(
+            1
+            for index in range(self.image_list.count())
+            if self._item_filter_visible(self.image_list.item(index))
+        )
+        self._thumbnail_page_count = max(1, (visible_count + self._thumbnail_page_size - 1) // self._thumbnail_page_size)
+        self._thumbnail_page = min(self._thumbnail_page, self._thumbnail_page_count - 1)
+        self._refresh_thumbnail_visibility()
+
+    def _item_filter_visible(self, item) -> bool:
+        data = item.data(Qt.UserRole)
+        return not isinstance(data, dict) or data.get("_filter_visible", True)
+
+    def _refresh_thumbnail_visibility(self) -> None:
+        visible_indices = [
+            index
+            for index in range(self.image_list.count())
+            if self._item_filter_visible(self.image_list.item(index))
+        ]
+        start = self._thumbnail_page * self._thumbnail_page_size
+        allowed = set(visible_indices[start : start + self._thumbnail_page_size])
+        for index in range(self.image_list.count()):
+            self.image_list.item(index).setHidden(index not in allowed)
+        self.thumbnail_page_label.setText(f"第 {self._thumbnail_page + 1}/{self._thumbnail_page_count} 页")
+        self.btn_thumbnail_previous.setEnabled(self._thumbnail_page > 0)
+        self.btn_thumbnail_next.setEnabled(self._thumbnail_page + 1 < self._thumbnail_page_count)
+
+    @property
+    def thumbnail_page(self) -> int:
+        return self._thumbnail_page
+
+    @property
+    def thumbnail_page_count(self) -> int:
+        return self._thumbnail_page_count
 
     def _material_status(self, record) -> str:
         fingerprint = str(getattr(record, "fingerprint", "") or "")

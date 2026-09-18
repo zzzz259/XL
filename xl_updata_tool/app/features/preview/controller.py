@@ -103,7 +103,10 @@ class PreviewController(QObject):
             data = item.data(Qt.UserRole)
             png = data.get("png", "") if isinstance(data, dict) else ""
             visible = not role or f"/{role}/" in png.replace("\\", "/")
-            item.setHidden(not visible)
+            if isinstance(data, dict):
+                data["_filter_visible"] = visible
+                item.setData(Qt.UserRole, data)
+        self.page.refresh_thumbnail_pagination()
         self.update_status()
 
     def update_status(self):
@@ -120,6 +123,7 @@ class PreviewController(QObject):
 
     def _on_thumbnail_loaded(self, image_path, thumbnail):
         self.page.image_list.addItem(build_preview_item(image_path, thumbnail, self.skel_map))
+        self.page.refresh_thumbnail_pagination()
 
     def _on_load_finished(self, loaded_paths):
         self._image_worker = None
@@ -331,6 +335,7 @@ class PreviewController(QObject):
             self.page.btn_export_selected.setText("导出选中 Spine")
             self.page.btn_export_selected.setEnabled(True)
         self.page.preview_progress.setVisible(False)
+        self.page.refresh_thumbnail_pagination()
 
     def cancel_selected_export(self):
         worker = self._selected_export_worker
