@@ -9,10 +9,36 @@ from app.features.preview.material_catalog import (
     GameMaterialCatalog,
     GameMaterialRecord,
     discover_game_materials,
+    discover_processed_game_materials,
     export_game_materials,
     is_burst_head_resource,
 )
 from app.features.preview.service import PreviewService
+
+
+def test_processed_material_catalog_reads_only_final_output_files(tmp_path):
+    material_dir = tmp_path / "data" / "material"
+    source_atlas = material_dir / "assets" / "fairygui" / "ui" / "Menu_fui.bytes"
+    source_atlas.parent.mkdir(parents=True)
+    source_atlas.write_bytes(b"raw package")
+    (source_atlas.parent / "Menu_atlas0.png").write_bytes(b"raw atlas")
+
+    output = tmp_path / "output"
+    burst = output / "game_material" / "burst-head"
+    package = output / "fgui" / "Menu"
+    burst.mkdir(parents=True)
+    package.mkdir(parents=True)
+    (burst / "10080.png").write_bytes(b"cut head")
+    (package / "button.png").write_bytes(b"cut sprite")
+    (package / "Menu_cut_info.json").write_text("[]", encoding="utf-8")
+
+    catalog = discover_processed_game_materials(output)
+
+    assert [record.display_name for record in catalog.burst_heads] == ["10080"]
+    assert len(catalog.atlases) == 1
+    assert catalog.atlases[0].package_name == "Menu"
+    assert [path.replace("\\", "/").split("/")[-1] for path in catalog.atlases[0].sprite_paths] == ["button.png"]
+    assert all("data/material" not in path.replace("\\", "/") for path in catalog.atlases[0].sprite_paths)
 
 
 def test_burst_head_token_variants_are_recognized_but_dialoghead_is_not(tmp_path):

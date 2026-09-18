@@ -20,6 +20,7 @@ from .material_catalog import (
     MaterialExportSummary,
     discover_game_materials as discover_materials,
     export_game_materials as export_materials,
+    discover_processed_game_materials as discover_processed_materials,
 )
 
 
@@ -109,6 +110,10 @@ class PreviewService:
 
     def discover_game_materials(self, metadata=None) -> GameMaterialCatalog:
         return discover_materials(self.material_dir, metadata)
+
+    def discover_processed_game_materials(self) -> GameMaterialCatalog:
+        """Read the final cut-material tree without scanning staging input."""
+        return discover_processed_materials(self.preview_dir.parent)
 
     def export_game_materials(
         self,

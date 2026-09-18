@@ -210,6 +210,53 @@ def discover_game_materials(material_dir, metadata=None) -> GameMaterialCatalog:
     return GameMaterialCatalog(tuple(burst_heads), tuple(atlases), tuple(unmatched))
 
 
+def discover_processed_game_materials(output_root) -> GameMaterialCatalog:
+    """Read only final, already-cut game materials from ``output``.
+
+    This is intentionally separate from :func:`discover_game_materials`, which
+    scans the temporary AS staging tree and is only suitable as an export input.
+    """
+    root = Path(output_root)
+    burst_root = root / "game_material" / "burst-head"
+    fgui_root = root / "fgui"
+    burst_heads: list[GameMaterialRecord] = []
+    atlases: list[AtlasResourceGroup] = []
+
+    if burst_root.is_dir():
+        for path in sorted(burst_root.iterdir(), key=lambda item: item.name.casefold()):
+            if not path.is_file() or path.suffix.casefold() not in _IMAGE_SUFFIXES:
+                continue
+            burst_heads.append(
+                GameMaterialRecord(
+                    kind="burst-head",
+                    source_path=str(path),
+                    display_name=path.stem,
+                    fingerprint=_fingerprint(path),
+                )
+            )
+
+    if fgui_root.is_dir():
+        for package_dir in sorted(
+            (path for path in fgui_root.iterdir() if path.is_dir()),
+            key=lambda item: item.name.casefold(),
+        ):
+            sprites = tuple(
+                str(path)
+                for path in sorted(package_dir.iterdir(), key=lambda item: item.name.casefold())
+                if path.is_file() and path.suffix.casefold() in _IMAGE_SUFFIXES
+            )
+            if sprites:
+                atlases.append(
+                    AtlasResourceGroup(
+                        package_name=package_dir.name,
+                        source_path=str(package_dir),
+                        sprite_paths=sprites,
+                    )
+                )
+
+    return GameMaterialCatalog(tuple(burst_heads), tuple(atlases), ())
+
+
 def _safe_filename(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
     cleaned = cleaned.strip(" .") or "resource"
