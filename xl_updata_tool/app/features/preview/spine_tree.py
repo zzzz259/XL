@@ -7,7 +7,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
 
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord, skin_key
 from .resource_state import PreviewResourceState
@@ -28,6 +28,12 @@ class PreviewSpineTree(QTreeWidget):
         self.setAccessibleName("角色 Spine 资源树")
         self.setColumnCount(2)
         self.setHeaderLabels(["角色 / 皮肤 / 文件", "状态"])
+        header = self.header()
+        header.setMinimumSectionSize(96)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.resizeSection(0, 560)
+        header.resizeSection(1, 96)
         self.setSelectionMode(QTreeWidget.SingleSelection)
         self.setUniformRowHeights(True)
         self._state = state

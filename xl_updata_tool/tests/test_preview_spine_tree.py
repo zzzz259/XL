@@ -160,3 +160,11 @@ def test_spine_recursive_check_ignores_invalid_leaves_and_selected_records(qapp)
     assert invalid_item.checkState(0) == Qt.Unchecked
     assert not (invalid_item.flags() & Qt.ItemIsUserCheckable)
     assert tree.selected_records() == (valid,)
+
+
+def test_spine_tree_keeps_a_wide_resource_name_column(qapp):
+    tree = PreviewSpineTree()
+
+    assert tree.header().sectionSize(0) >= 500
+    assert tree.header().sectionSize(1) == 96
+    tree.close()
