@@ -39,6 +39,7 @@ class PreviewController(QObject):
         self._image_worker = None
         self._export_worker = None
         self._selected_export_worker = None
+        self._selected_export_cancelled = False
         self._single_composite_worker = None
         self._single_export_worker = None
         self._batch_worker = None
@@ -289,6 +290,7 @@ class PreviewController(QObject):
         self._selected_export_worker.finished.connect(self._on_selected_export_summary)
         self._selected_export_worker.export_finished.connect(self._on_selected_export_finished)
         self._selected_export_worker.error.connect(self._on_selected_export_error)
+        self._selected_export_cancelled = False
         self.page.btn_reload.setText("取消导出")
         self.page.btn_reload.setEnabled(True)
         if hasattr(self.page, "btn_export_selected"):
@@ -315,7 +317,10 @@ class PreviewController(QObject):
         self._reset_selected_export_ui()
 
     def _on_selected_export_finished(self, success, summary):
-        self.status_changed.emit(summary if success else f"导出失败: {summary}")
+        if self._selected_export_cancelled:
+            self.status_changed.emit("导出已取消")
+        else:
+            self.status_changed.emit(summary if success else f"导出失败: {summary}")
         self._selected_export_worker = None
         self._reset_selected_export_ui()
 
@@ -333,6 +338,7 @@ class PreviewController(QObject):
             return
         worker.cancel()
         worker.wait(5000)
+        self._selected_export_cancelled = True
         self._selected_export_worker = None
         self._reset_selected_export_ui()
         self.status_changed.emit("导出已取消")
