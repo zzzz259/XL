@@ -2,32 +2,33 @@
 
 from __future__ import annotations
 
-import os
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
 
-from .resource_model import PreviewResourceCatalog, SpineSkinRecord, skin_key
+from .character_names import CharacterNameResolver, display_role_label, display_skin_label
+from .resource_model import PreviewResourceCatalog, SpineSkinRecord, display_skin_key, skin_key
 from .resource_state import PreviewResourceState
+from app.ui.theme import get_color
 
 
 class PreviewSpineTree(QTreeWidget):
-    """Display role → skin → Spine file nodes with recursive tri-state checks."""
+    """Display a compact role → skin tree with recursive tri-state checks."""
 
     selection_changed = Signal(object)
 
     _ROLE = "role"
     _SKIN = "skin"
-    _FILE = "file"
 
     def __init__(self, state: PreviewResourceState | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("previewSpineTree")
         self.setAccessibleName("角色 Spine 资源树")
         self.setColumnCount(2)
-        self.setHeaderLabels(["角色 / 皮肤 / 文件", "状态"])
+        self.setHeaderLabels(["角色 / 皮肤", "状态"])
         header = self.header()
         header.setMinimumSectionSize(96)
         header.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -38,33 +39,72 @@ class PreviewSpineTree(QTreeWidget):
         self.setUniformRowHeights(True)
         self._state = state
         self._catalog = PreviewResourceCatalog.from_records(())
+        self._character_name_resolver = None
         self._updating = False
+        self._mouse_multi_select = False
         self.itemChanged.connect(self._on_item_changed)
+
+    def mousePressEvent(self, event) -> None:
+        self._mouse_multi_select = bool(event.modifiers() & Qt.ControlModifier)
+        super().mousePressEvent(event)
 
     def set_resource_state(self, state: PreviewResourceState | None) -> None:
         self._state = state
         self._refresh_statuses()
 
+    def set_character_name_resolver(self, resolver: CharacterNameResolver | None) -> None:
+        self._character_name_resolver = resolver
+        if self._catalog.skins:
+            self.set_catalog(self._catalog)
+
     def set_catalog(self, catalog: PreviewResourceCatalog | None) -> None:
         """Replace displayed resources while retaining checks for stable skin keys."""
         previous = {skin_key(record) for record in self.selected_records()}
         self._catalog = catalog or PreviewResourceCatalog.from_records(())
-        records_by_role: OrderedDict[str | None, list[SpineSkinRecord]] = OrderedDict()
-        records = list(self._catalog.skins.values())
-        for record in self._catalog.unmatched:
-            if skin_key(record) not in {skin_key(item) for item in records}:
-                records.append(record)
-        for record in records:
-            records_by_role.setdefault(record.character_id, []).append(record)
+        records_by_group: OrderedDict[str, tuple[str | None, list[SpineSkinRecord]]] = OrderedDict()
+        for record in self._catalog.skins.values():
+            if record.resource_family == "eventcovers":
+                group_key = "eventcovers"
+            elif record.character_id:
+                group_key = f"role:{record.character_id}"
+            else:
+                group_key = f"unmatched:{record.resource_family}"
+            role_id, group_records = records_by_group.setdefault(
+                group_key, (record.character_id, [])
+            )
+            group_records.append(record)
 
         self._updating = True
         try:
             self.clear()
-            for role_id, role_records in sorted(
-                records_by_role.items(), key=lambda entry: (entry[0] is None, str(entry[0] or "").casefold())
-            ):
-                role_item = QTreeWidgetItem([role_id or "未匹配资源", ""])
-                role_item.setData(0, Qt.UserRole, {"kind": self._ROLE, "role_id": role_id})
+            def group_sort(entry):
+                key, (_role_id, _records) = entry
+                return (
+                    key != "eventcovers" and not key.startswith("unmatched:"),
+                    key.casefold(),
+                )
+
+            for group_key, (role_id, role_records) in sorted(records_by_group.items(), key=group_sort):
+                role_label = (
+                    "活动封面" if group_key == "eventcovers"
+                    else "未匹配资源" if group_key.startswith("unmatched:")
+                    else display_role_label(role_id, None, self._character_name_resolver)
+                )
+                role_item = QTreeWidgetItem([role_label, ""])
+                role_item.setData(
+                    0,
+                    Qt.UserRole,
+                    {
+                        "kind": self._ROLE,
+                        "role_id": role_id,
+                        "group": group_key,
+                        "resource_family": (
+                            "eventcovers"
+                            if group_key == "eventcovers"
+                            else "role"
+                        ),
+                    },
+                )
                 self._make_checkable(
                     role_item,
                     tristate=True,
@@ -72,46 +112,41 @@ class PreviewSpineTree(QTreeWidget):
                 )
                 self.addTopLevelItem(role_item)
 
-                skin_groups: OrderedDict[str, list[SpineSkinRecord]] = OrderedDict()
-                for record in sorted(role_records, key=lambda item: (item.display_name or item.skin_name).casefold()):
-                    skin_groups.setdefault(skin_key(record), []).append(record)
-                for record_key, grouped_records in skin_groups.items():
-                    primary = grouped_records[0]
-                    skin_item = QTreeWidgetItem([primary.display_name or primary.skin_name or "未命名皮肤", ""])
+                skin_groups: OrderedDict[tuple[str, str, str], list[SpineSkinRecord]] = OrderedDict()
+                family_order = {"cardspine": 0, "battlespine": 1, "eventcovers": 2, "spine": 3}
+                for record in sorted(
+                    role_records,
+                    key=lambda item: (
+                        family_order.get(item.resource_family, 9),
+                        display_skin_label(item.source_skel, item.character_id, item.resource_family).casefold(),
+                        item.source_skel.casefold(),
+                    ),
+                ):
+                    skin_groups.setdefault(display_skin_key(record), []).append(record)
+                for grouped_records in skin_groups.values():
+                    primary = self._primary_record(grouped_records)
+                    skin_item = QTreeWidgetItem([
+                        display_skin_label(
+                            primary.source_skel,
+                            primary.character_id,
+                            primary.resource_family,
+                        ),
+                        "",
+                    ])
                     skin_item.setData(
                         0,
                         Qt.UserRole,
                         {
                             "kind": self._SKIN,
                             "role_id": primary.character_id,
-                            "skin_key": record_key,
+                            "skin_key": skin_key(primary),
                             "records": tuple(grouped_records),
                         },
                     )
-                    self._make_checkable(
-                        skin_item,
-                        tristate=True,
-                        enabled=any(self._is_eligible(item) for item in grouped_records),
-                    )
+                    self._make_checkable(skin_item, enabled=any(
+                        self._is_eligible(item) for item in grouped_records
+                    ))
                     role_item.addChild(skin_item)
-                    for record in grouped_records:
-                        file_item = QTreeWidgetItem([os.path.basename(record.source_skel), ""])
-                        file_item.setData(
-                            0,
-                            Qt.UserRole,
-                            {
-                                "kind": self._FILE,
-                                "role_id": record.character_id,
-                                "skin_key": record_key,
-                                "skel_path": record.source_skel,
-                                "atlas_path": record.atlas_path,
-                                "record": record,
-                            },
-                        )
-                        self._make_checkable(file_item, enabled=self._is_eligible(record))
-                        if record.diagnostic:
-                            file_item.setToolTip(0, record.diagnostic)
-                        skin_item.addChild(file_item)
 
             self._refresh_statuses()
             self._restore_selection(previous)
@@ -124,14 +159,44 @@ class PreviewSpineTree(QTreeWidget):
         """Return checked skins, de-duplicated by their stable skin key."""
         result = []
         seen = set()
-        for file_item in self._file_items():
-            if file_item.checkState(0) != Qt.Checked:
+        for skin_item in self._skin_items():
+            if skin_item.checkState(0) != Qt.Checked:
                 continue
-            record = file_item.data(0, Qt.UserRole).get("record")
-            if record is not None and self._is_eligible(record) and skin_key(record) not in seen:
-                result.append(record)
-                seen.add(skin_key(record))
+            data = skin_item.data(0, Qt.UserRole) or {}
+            grouped_records = tuple(data.get("records", ()))
+            primary = self._primary_record(grouped_records)
+            if self._is_eligible(primary) and skin_key(primary) not in seen:
+                result.append(primary)
+                seen.add(skin_key(primary))
         return tuple(result)
+
+    def selected_record_groups(self) -> tuple[tuple[SpineSkinRecord, ...], ...]:
+        """Return every source part belonging to each checked visible skin."""
+        result = []
+        for skin_item in self._skin_items():
+            if skin_item.checkState(0) != Qt.Checked:
+                continue
+            data = skin_item.data(0, Qt.UserRole) or {}
+            grouped_records = tuple(data.get("records", ()))
+            if grouped_records and any(self._is_eligible(record) for record in grouped_records):
+                parts = OrderedDict()
+                for record in grouped_records:
+                    source_key = (
+                        record.source_skel.casefold(),
+                        record.atlas_path.casefold(),
+                    )
+                    parts.setdefault(source_key, []).append(record)
+                result.append(tuple(self._primary_record(records) for records in parts.values()))
+        return tuple(result)
+
+    def selected_skin_names(self) -> tuple[str, ...]:
+        """Return internal Spine skin names for the first selected visible group."""
+        for skin_item in self._skin_items():
+            if skin_item.checkState(0) != Qt.Checked:
+                continue
+            records = (skin_item.data(0, Qt.UserRole) or {}).get("records", ())
+            return tuple(dict.fromkeys(record.skin_name for record in records if record.skin_name))
+        return ()
 
     def set_selected_records(self, records: Iterable[SpineSkinRecord | Mapping | str]) -> None:
         """Set checks from records, stable keys, or identity mappings."""
@@ -148,9 +213,10 @@ class PreviewSpineTree(QTreeWidget):
 
         self._updating = True
         try:
-            for file_item in self._file_items():
-                record = file_item.data(0, Qt.UserRole).get("record")
-                file_item.setCheckState(0, Qt.Checked if record and skin_key(record) in wanted else Qt.Unchecked)
+            for skin_item in self._skin_items():
+                records = (skin_item.data(0, Qt.UserRole) or {}).get("records", ())
+                checked = any(skin_key(record) in wanted for record in records)
+                skin_item.setCheckState(0, Qt.Checked if checked else Qt.Unchecked)
             self._refresh_parent_checks()
         finally:
             self._updating = False
@@ -161,8 +227,11 @@ class PreviewSpineTree(QTreeWidget):
         if self._state is None:
             return
         changed = False
-        for record in self.selected_records():
-            changed = self._state.mark_read(skin_key(record)) or changed
+        for skin_item in self._skin_items():
+            if skin_item.checkState(0) != Qt.Checked:
+                continue
+            for record in (skin_item.data(0, Qt.UserRole) or {}).get("records", ()):
+                changed = self._state.mark_read(skin_key(record)) or changed
         if changed:
             self._refresh_statuses()
             self._state.save()
@@ -175,12 +244,27 @@ class PreviewSpineTree(QTreeWidget):
             changed = self._state.mark_read(skin_key(record)) or changed
         for record in self._catalog.unmatched:
             changed = self._state.mark_read(skin_key(record)) or changed
+        for record in self._catalog.eventcovers:
+            changed = self._state.mark_read(skin_key(record)) or changed
         if changed:
             self._state.save()
         self._refresh_statuses()
 
     def _record_fingerprint(self, record: SpineSkinRecord) -> str:
         return skin_key(record)
+
+    @staticmethod
+    def _primary_record(records: Iterable[SpineSkinRecord]) -> SpineSkinRecord:
+        grouped = tuple(records)
+        return min(
+            grouped,
+            key=lambda record: (
+                "_bg" in record.source_skel.casefold() or "bg" in record.display_name.casefold(),
+                record.skin_name.casefold() != "default",
+                not bool(record.atlas_path),
+                record.source_skel.casefold(),
+            ),
+        )
 
     def _make_checkable(
         self,
@@ -205,26 +289,26 @@ class PreviewSpineTree(QTreeWidget):
     def _is_eligible(record: SpineSkinRecord | None) -> bool:
         return bool(record and record.status == "ready" and record.atlas_path)
 
-    def _file_items(self):
+    def _skin_items(self):
         for role_index in range(self.topLevelItemCount()):
             role = self.topLevelItem(role_index)
             for skin_index in range(role.childCount()):
-                skin = role.child(skin_index)
-                for file_index in range(skin.childCount()):
-                    yield skin.child(file_index)
+                yield role.child(skin_index)
 
     def _restore_selection(self, wanted: set[str]) -> None:
-        for file_item in self._file_items():
-            record = file_item.data(0, Qt.UserRole).get("record")
-            if self._is_eligible(record) and skin_key(record) in wanted:
-                file_item.setCheckState(0, Qt.Checked)
+        for skin_item in self._skin_items():
+            records = (skin_item.data(0, Qt.UserRole) or {}).get("records", ())
+            if any(self._is_eligible(record) and skin_key(record) in wanted for record in records):
+                skin_item.setCheckState(0, Qt.Checked)
         self._refresh_parent_checks()
 
     def _refresh_parent_checks(self) -> None:
         for role_index in range(self.topLevelItemCount()):
             role = self.topLevelItem(role_index)
             for skin_index in range(role.childCount()):
-                self._set_parent_state(role.child(skin_index))
+                skin = role.child(skin_index)
+                if skin.childCount():
+                    self._set_parent_state(skin)
             self._set_parent_state(role)
 
     def _set_parent_state(self, item: QTreeWidgetItem) -> None:
@@ -247,8 +331,8 @@ class PreviewSpineTree(QTreeWidget):
 
     def _has_eligible_descendant(self, item: QTreeWidgetItem) -> bool:
         if not item.childCount():
-            record = item.data(0, Qt.UserRole).get("record")
-            return self._is_eligible(record)
+            records = (item.data(0, Qt.UserRole) or {}).get("records", ())
+            return any(self._is_eligible(record) for record in records)
         return any(self._has_eligible_descendant(item.child(index)) for index in range(item.childCount()))
 
     def _set_subtree_check_state(self, item: QTreeWidgetItem, state) -> None:
@@ -256,7 +340,7 @@ class PreviewSpineTree(QTreeWidget):
             item.setCheckState(0, Qt.Unchecked)
             return
         if not item.childCount():
-            item.setCheckState(0, state)
+            item.setCheckState(0, state if self._has_eligible_descendant(item) else Qt.Unchecked)
             return
         for index in range(item.childCount()):
             self._set_subtree_check_state(item.child(index), state)
@@ -267,6 +351,8 @@ class PreviewSpineTree(QTreeWidget):
             return
         self._updating = True
         try:
+            if item.checkState(0) == Qt.Checked and not self._mouse_multi_select:
+                self._clear_other_checks(item)
             if item.childCount():
                 state = item.checkState(0)
                 child_state = Qt.Checked if state == Qt.Checked else Qt.Unchecked
@@ -276,9 +362,26 @@ class PreviewSpineTree(QTreeWidget):
             self._refresh_parent_checks()
         finally:
             self._updating = False
+            self._mouse_multi_select = False
         self._emit_selection()
         if self._state is not None:
             self.mark_selected_read()
+
+    def _clear_other_checks(self, selected_item: QTreeWidgetItem) -> None:
+        for skin_item in self._skin_items():
+            if skin_item is selected_item or self._is_descendant(selected_item, skin_item):
+                continue
+            if skin_item.checkState(0) != Qt.Unchecked:
+                skin_item.setCheckState(0, Qt.Unchecked)
+
+    @staticmethod
+    def _is_descendant(parent: QTreeWidgetItem, item: QTreeWidgetItem) -> bool:
+        current = item.parent()
+        while current is not None:
+            if current is parent:
+                return True
+            current = current.parent()
+        return False
 
     def _refresh_statuses(self) -> None:
         previous_update_state = self._updating
@@ -297,9 +400,10 @@ class PreviewSpineTree(QTreeWidget):
         if item.childCount():
             is_new = any(self._refresh_item_status(item.child(index)) for index in range(item.childCount()))
         else:
-            record = item.data(0, Qt.UserRole).get("record")
-            is_new = self._is_eligible(record) and self._is_new(record)
+            records = (item.data(0, Qt.UserRole) or {}).get("records", ())
+            is_new = any(self._is_eligible(record) and self._is_new(record) for record in records)
         item.setText(1, "新" if is_new else "")
+        item.setForeground(1, QBrush(QColor(get_color("DANGER"))) if is_new else QBrush())
         return is_new
 
     def _is_new(self, record: SpineSkinRecord | None) -> bool:

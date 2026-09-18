@@ -396,3 +396,25 @@
 ### P5b 调查错误
 
 - [completed] Feature 导出适配器初版漏转发部分旧 Spine 函数，导致兼容导入失败；已根据旧 Worker 实际导入清单补齐入口，并通过导入 smoke 与全量测试。
+
+## 2026-09-19 图片预览工作台恢复与 PR 前收口
+
+### 历史约束复核
+
+- 回读根沟通计划、UX 问题清单、Issue #32 角色链路、Issue #35 音频流程、Issue #44 Preview 迁移、Issue #45 ownership 收口，以及对应 worklog、版本历史和近期提交。
+- 确认本轮不能只围绕最近的 Spine 默认配置记录，必须继续保持：`data/` 可重建、`output/` 最终交付、导入后处理时机、后台任务/取消、防重入、缓存/懒加载、未读聚合和 Feature ownership。
+
+### 当前交付
+
+- 预览资源在 AS 导入完成后处理；原始 Spine、角色成品、FGUI 和独立游戏素材分别保留在约定 output 目录。
+- 角色按角色 ID/资源类型/皮肤身份匹配；角色和 `bg` 通过一次 SpineViewer merge 调用完成导出。
+- 默认配置：`cardspine` 生成静态 PNG + 完整动画 MP4，`battlespine` 使用 `motion_stander` 生成静态 PNG，`eventcovers` 生成静态资源。
+- 自定义配置：保留传统图片/视频与高级参数，仅允许单个可见皮肤。
+- 默认 MP4 与 PNG 共用 `output/character/<角色ID>/`；默认视频省略 `--duration`，交给 SpineViewerCLI 自动导出完整动画。
+
+### 收口验证
+
+- 项目 Python 全量 pytest：通过。
+- 项目 Python Ruff、compileall、`git diff --check`：通过。
+- 真实 `cardspine_10080_4` + `_bg` merge 视频导出：成功，使用自动完整时长；临时产物已删除。
+- 暂存区已审查，未包含 `superpowers`、pytest 临时目录、`.venv`、`data/` 或 `output/`。

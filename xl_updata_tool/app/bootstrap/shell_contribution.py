@@ -45,6 +45,7 @@ class ApplicationShellContribution:
         importer = self.registry.get("importer")
 
         importer.controller.progress_stage.connect(shell._on_import_progress)
+        importer.controller.category_progress.connect(shell._on_import_category_progress)
         importer.controller.stage_finished.connect(shell._on_import_stage_finished)
         importer.controller.category_finished.connect(shell._on_import_category_finished)
         importer.controller.all_finished.connect(shell._on_import_all_finished)
@@ -55,7 +56,6 @@ class ApplicationShellContribution:
                 preview.page, current, total, stage
             )
         )
-        preview.page.close_requested.connect(lambda: self.activate("versions"))
         audio.page.close_requested.connect(lambda: self.activate("versions"))
 
         self.actions = (
@@ -68,6 +68,9 @@ class ApplicationShellContribution:
             ShellAction("导入AS", self.import_selected, "file-import", primary=True),
         )
         character.controller.restore_local()
+        preload_index = getattr(preview.controller, "preload_index", None)
+        if preload_index is not None:
+            shell.schedule(150, preload_index)
         return self.actions
 
     def activate(self, key: str) -> None:
@@ -150,7 +153,7 @@ class ApplicationShellContribution:
         isolate_bundle_dir = False
         if export_categories in ({"lua"}, {"audio"}):
             category = "lua" if export_categories == {"lua"} else "audio"
-            selected_fs, mapped, asset_count, map_path = importer.controller.service.select_bundles(
+            selected_fs, mapped, asset_count, map_path = importer.controller.select_bundles(
                 category, fs, bundle_dir
             )
             if mapped:

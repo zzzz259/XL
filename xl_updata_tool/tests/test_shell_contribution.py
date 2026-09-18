@@ -85,6 +85,7 @@ class _FeaturePage:
 
 class _ImporterController:
     progress_stage = _Signal()
+    category_progress = _Signal()
     stage_finished = _Signal()
     category_finished = _Signal()
     all_finished = _Signal()

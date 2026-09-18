@@ -11,6 +11,7 @@ from app.platform.diagnostics import logger
 
 class PreviewPostprocessWorker(QThread):
     progress_value = Signal(int, int, str)
+    detail_progress = Signal(int, int, str)
     finished_processing = Signal(object)
     cancelled_processing = Signal()
     error = Signal(str)
@@ -46,6 +47,7 @@ class PreviewPostprocessWorker(QThread):
             summary = self.service.preprocess_preview_resources(
                 progress_callback=self.progress_value.emit,
                 cancel_check=lambda: self._cancelled,
+                detail_progress_callback=self.detail_progress.emit,
             )
             if self._cancelled:
                 self.cancelled_processing.emit()

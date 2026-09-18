@@ -6,6 +6,8 @@ import pytest
 
 from app.features.preview.spine_adapter import (
     SpineQueryRunner,
+    get_animation_names,
+    get_animation_metadata,
     parse_skin_query_output,
 )
 
@@ -174,3 +176,41 @@ def test_query_skins_preserves_timeout_as_failure(monkeypatch, tmp_path):
 
     assert result.timed_out
     assert "timed out" in result.error
+
+
+def test_get_animation_names_uses_real_cli_flag_and_parses_duration_table(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=">>>>>>>>>>>>>>> Animations >>>>>>>>>>>>>>>\nName\tDuration\nidle\t1.0\nrun\t0.8\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+
+    names = get_animation_names(
+        str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas"), str(tmp_path / "SpineViewerCLI.exe")
+    )
+
+    assert names == ["idle", "run"]
+    assert calls[0][-1] == "--animation"
+
+
+def test_get_animation_metadata_returns_cli_durations(monkeypatch, tmp_path):
+    def fake_run(_command, **_kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=">>>>>>>>>>>>> Animations >>>>>>>>>>>>>>>\nName\tDuration\nidle\t1.0\nrun\t0.8\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+
+    metadata = get_animation_metadata(
+        str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas"), str(tmp_path / "SpineViewerCLI.exe")
+    )
+
+    assert metadata == {"idle": 1.0, "run": 0.8}

@@ -46,6 +46,37 @@ def _source_key(source_skel: Path, material_dir: Path) -> str:
     return f"{_safe_name(source_skel.stem)}_{digest}"
 
 
+def _logical_spine_name(path: Path, suffix: str) -> str:
+    """Drop Unity/AssetStudio transport suffixes from published filenames."""
+    name = path.name
+    lowered = name.casefold()
+    for physical_suffix in (f".{suffix}.prefab", f".{suffix}.bytes", f".{suffix}.txt"):
+        if lowered.endswith(physical_suffix):
+            return f"{name[:-len(physical_suffix)]}.{suffix}"
+    if lowered.endswith(f".{suffix}"):
+        return name
+    return f"{path.stem}.{suffix}"
+
+
+def _published_skel_name(path: Path) -> str:
+    return _logical_spine_name(path, "skel")
+
+
+def _published_atlas_name(path: Path) -> str:
+    return _logical_spine_name(path, "atlas")
+
+
+def _remove_physical_suffix_aliases(destination: Path, path: Path, suffix: str, target_name: str) -> None:
+    logical_name = _logical_spine_name(path, suffix).rsplit(".", 1)[0]
+    for candidate in destination.glob(f"{logical_name}.{suffix}.*"):
+        if candidate.name == target_name or not candidate.is_file():
+            continue
+        try:
+            candidate.unlink()
+        except OSError:
+            pass
+
+
 def _atlas_texture_names(atlas_path: Path) -> tuple[str, ...]:
     """Read page names from both .atlas and Unity .atlas.txt files."""
     if not atlas_path.is_file():
@@ -72,7 +103,7 @@ def _atlas_texture_names(atlas_path: Path) -> tuple[str, ...]:
 
 def _record_groups(catalog: PreviewResourceCatalog) -> OrderedDict[str, tuple[str | None, list[SpineSkinRecord]]]:
     groups: OrderedDict[str, tuple[str | None, list[SpineSkinRecord]]] = OrderedDict()
-    all_records = [*catalog.skins.values(), *catalog.unmatched]
+    all_records = list(catalog.skins.values())
     for record in all_records:
         source = _normalise_path(Path(record.source_skel))
         if source not in groups:
@@ -120,20 +151,23 @@ def publish_raw_spine_resources(
             skipped += 1
             diagnostics.append(f"Spine source missing: {source_skel}")
             continue
-        destination = spine_output / _safe_name(character_id or "unmatched", "unmatched") / _source_key(
+        resource_family = records[0].resource_family if records else "spine"
+        destination = spine_output / _safe_name(resource_family, "spine") / _source_key(
             source_skel, material
         )
         destination.mkdir(parents=True, exist_ok=True)
         files_for_index: list[str] = []
 
-        target_skel = destination / source_skel.name
+        target_skel = destination / _published_skel_name(source_skel)
+        _remove_physical_suffix_aliases(destination, source_skel, "skel", target_skel.name)
         if _copy_if_present(source_skel, target_skel):
             copied_files += 1
             files_for_index.append(target_skel.relative_to(output).as_posix())
 
         atlas_path = Path(records[0].atlas_path) if records and records[0].atlas_path else None
         if atlas_path and atlas_path.is_file():
-            target_atlas = destination / atlas_path.name
+            target_atlas = destination / _published_atlas_name(atlas_path)
+            _remove_physical_suffix_aliases(destination, atlas_path, "atlas", target_atlas.name)
             if _copy_if_present(atlas_path, target_atlas):
                 copied_files += 1
                 files_for_index.append(target_atlas.relative_to(output).as_posix())
@@ -153,6 +187,7 @@ def publish_raw_spine_resources(
         index_entries.append(
             {
                 "character_id": character_id,
+                "resource_family": resource_family,
                 "source_key": destination.name,
                 "source_skel": str(source_skel),
                 "files": sorted(set(files_for_index)),

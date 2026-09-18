@@ -16,6 +16,9 @@ _BURST_HEAD_TOKEN = re.compile(
     r"(?<![a-z0-9_-])(?:burst-head|burst_head|bursthead)(?![a-z0-9_-])",
     re.IGNORECASE,
 )
+_LOTTERY_BG_TOKEN = re.compile(r"(?<![a-z0-9])lottery[-_ ]?bg(?![a-z0-9])", re.IGNORECASE)
+_PASSPORT_PIC_TOKEN = re.compile(r"(?<![a-z0-9])passport[-_ ]?pic(?![a-z0-9])", re.IGNORECASE)
+_FGUI_MAGIC = b"FGUI"
 _IMAGE_SUFFIXES = frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tga", ".webp"})
 _ATLAS_SUFFIXES = ("_fui.bank", "_fui.bytes")
 _BURST_MANIFEST_NAME = ".burst-head-manifest.json"
@@ -49,6 +52,7 @@ class AtlasResourceGroup:
     package_name: str
     source_path: str
     sprite_paths: tuple[str, ...]
+    kind: str = "fgui"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +60,7 @@ class GameMaterialCatalog:
     burst_heads: tuple[GameMaterialRecord, ...]
     atlases: tuple[AtlasResourceGroup, ...]
     unmatched: tuple[GameMaterialRecord, ...]
+    standalone: tuple[GameMaterialRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +84,17 @@ def _path_variants(path) -> tuple[str, ...]:
 
 def _contains_burst_head_token(value) -> bool:
     return bool(_BURST_HEAD_TOKEN.search(_normalise_path(value)))
+
+
+def _material_kind(path) -> str | None:
+    value = _normalise_path(path)
+    if _contains_burst_head_token(value):
+        return "burst-head"
+    if _LOTTERY_BG_TOKEN.search(value):
+        return "lottery-bg"
+    if _PASSPORT_PIC_TOKEN.search(value):
+        return "passport-pic"
+    return None
 
 
 def _metadata_entry(path, metadata):
@@ -136,6 +152,14 @@ def is_burst_head_resource(path, metadata=None) -> bool:
     return _contains_burst_head_token(path) or _metadata_confirms_burst_head(path, metadata)
 
 
+def _is_fgui_package(path: Path) -> bool:
+    try:
+        with path.open("rb") as source:
+            return source.read(4) == _FGUI_MAGIC
+    except OSError:
+        return False
+
+
 def _fingerprint(path: Path) -> str:
     digest = hashlib.sha256()
     try:
@@ -152,6 +176,11 @@ def _atlas_package(path: Path) -> str | None:
     for suffix in _ATLAS_SUFFIXES:
         if lower_name.endswith(suffix):
             return path.name[: -len(suffix)]
+    if _is_fgui_package(path):
+        package_name = path.stem
+        if package_name.casefold().endswith("_fui"):
+            package_name = package_name[:-4]
+        return package_name or None
     return None
 
 
@@ -170,25 +199,31 @@ def discover_game_materials(material_dir, metadata=None) -> GameMaterialCatalog:
     """Discover Burst Head files, FGUI packages, and unclassified files."""
     root = Path(material_dir)
     if not root.is_dir():
-        return GameMaterialCatalog((), (), ())
+        return GameMaterialCatalog((), (), (), ())
 
     files = tuple(sorted((path for path in root.rglob("*") if path.is_file()), key=lambda item: _normalise_path(item).casefold()))
     atlas_files: dict[str, list[Path]] = {}
     burst_heads: list[GameMaterialRecord] = []
     unmatched: list[GameMaterialRecord] = []
+    standalone: list[GameMaterialRecord] = []
     for path in files:
         package_name = _atlas_package(path)
         if package_name:
             atlas_files.setdefault(package_name, []).append(path)
             continue
+        material_kind = _material_kind(path) or (
+            "burst-head" if _metadata_confirms_burst_head(path, metadata) else None
+        )
         record = GameMaterialRecord(
-            kind="burst-head" if is_burst_head_resource(path, metadata) else "unmatched",
+            kind=material_kind or "unmatched",
             source_path=str(path),
             display_name=path.stem,
             fingerprint=_fingerprint(path),
         )
         if record.kind == "burst-head":
             burst_heads.append(record)
+        elif record.kind in {"lottery-bg", "passport-pic"}:
+            standalone.append(record)
         else:
             unmatched.append(record)
 
@@ -204,10 +239,11 @@ def discover_game_materials(material_dir, metadata=None) -> GameMaterialCatalog:
                 package_name=package_name,
                 source_path=str(source_path),
                 sprite_paths=_discover_sprite_paths(source_path, package_name, files),
+                kind=_material_kind(package_name) or "fgui",
             )
         )
 
-    return GameMaterialCatalog(tuple(burst_heads), tuple(atlases), tuple(unmatched))
+    return GameMaterialCatalog(tuple(burst_heads), tuple(atlases), tuple(unmatched), tuple(standalone))
 
 
 def discover_processed_game_materials(output_root) -> GameMaterialCatalog:
@@ -221,6 +257,7 @@ def discover_processed_game_materials(output_root) -> GameMaterialCatalog:
     fgui_root = root / "fgui"
     burst_heads: list[GameMaterialRecord] = []
     atlases: list[AtlasResourceGroup] = []
+    standalone: list[GameMaterialRecord] = []
 
     if burst_root.is_dir():
         for path in sorted(burst_root.iterdir(), key=lambda item: item.name.casefold()):
@@ -235,11 +272,38 @@ def discover_processed_game_materials(output_root) -> GameMaterialCatalog:
                 )
             )
 
-    if fgui_root.is_dir():
+    for kind in ("lottery-bg", "passport-pic"):
+        material_root = root / "game_material" / kind
+        if not material_root.is_dir():
+            continue
+        for path in sorted(material_root.iterdir(), key=lambda item: item.name.casefold()):
+            if path.is_file() and path.suffix.casefold() in _IMAGE_SUFFIXES:
+                standalone.append(
+                    GameMaterialRecord(
+                        kind=kind,
+                        source_path=str(path),
+                        display_name=path.stem,
+                        fingerprint=_fingerprint(path),
+                    )
+                )
+
+    fgui_roots = [
+        (root / "game_material" / "fgui", "fgui"),
+        (root / "game_material" / "passport-pic", "passport-pic"),
+        (fgui_root, "fgui"),
+    ]
+    seen_fgui_packages: set[str] = set()
+    for current_fgui_root, default_kind in fgui_roots:
+        if not current_fgui_root.is_dir():
+            continue
         for package_dir in sorted(
-            (path for path in fgui_root.iterdir() if path.is_dir()),
+            (path for path in current_fgui_root.iterdir() if path.is_dir()),
             key=lambda item: item.name.casefold(),
         ):
+            package_key = package_dir.name.casefold()
+            if package_key in seen_fgui_packages:
+                continue
+            seen_fgui_packages.add(package_key)
             sprites = tuple(
                 str(path)
                 for path in sorted(package_dir.iterdir(), key=lambda item: item.name.casefold())
@@ -251,10 +315,11 @@ def discover_processed_game_materials(output_root) -> GameMaterialCatalog:
                         package_name=package_dir.name,
                         source_path=str(package_dir),
                         sprite_paths=sprites,
+                        kind=_material_kind(package_dir.name) or default_kind,
                     )
                 )
 
-    return GameMaterialCatalog(tuple(burst_heads), tuple(atlases), ())
+    return GameMaterialCatalog(tuple(burst_heads), tuple(atlases), (), tuple(standalone))
 
 
 def _safe_filename(value: str) -> str:
@@ -502,14 +567,79 @@ def _copy_burst_head(record: GameMaterialRecord, source_path: Path, target: Path
         raise
 
 
-def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) -> MaterialExportSummary:
+def _standalone_output_path(record: GameMaterialRecord, output_dir: Path) -> Path:
+    source = Path(record.source_path)
+    suffix = source.suffix or ".png"
+    base = output_dir / f"{_safe_filename(record.display_name or source.stem)}{suffix}"
+    sidecar = base.with_name(f"{base.name}.game-material.json")
+    if base.is_file() and sidecar.is_file():
+        try:
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            if payload.get("fingerprint") == record.fingerprint:
+                return base
+        except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+            pass
+    if not base.exists():
+        return base
+    candidate = output_dir / f"{base.stem}_{_safe_filename(record.fingerprint[:12] or 'source')}{suffix}"
+    index = 2
+    while candidate.exists():
+        candidate = output_dir / f"{base.stem}_{_safe_filename(record.fingerprint[:12] or 'source')}_{index}{suffix}"
+        index += 1
+    return candidate
+
+
+def _copy_standalone_material(record: GameMaterialRecord, output_dir: Path) -> Path:
+    source = Path(record.source_path)
+    if not source.is_file():
+        raise FileNotFoundError(record.source_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = _standalone_output_path(record, output_dir)
+    shutil.copy2(source, target)
+    target.with_name(f"{target.name}.game-material.json").write_text(
+        json.dumps(
+            {"version": 1, "source": _source_key(source), "fingerprint": record.fingerprint, "output": target.name},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def export_game_materials(
+    catalog: GameMaterialCatalog,
+    output_dir,
+    splitter,
+    progress_callback=None,
+) -> MaterialExportSummary:
     """Export known game materials while retaining existing output on failures."""
     root = Path(output_dir)
     burst_output = root / "game_material" / "burst-head"
-    fgui_output = root / "fgui"
+    fgui_output = root / "game_material" / "fgui"
     exported = 0
     failed = 0
     diagnostics: list[str] = []
+    # 只把实际会进入导出循环的记录计入总数，避免未知/未来扩展类型
+    # 被跳过后进度条永远无法到达 100%。
+    total_items = (
+        sum(record.kind == "burst-head" for record in catalog.burst_heads)
+        + sum(record.kind in {"lottery-bg", "passport-pic"} for record in catalog.standalone)
+        + len(catalog.atlases)
+    )
+    completed_items = 0
+
+    def announce(label: str) -> None:
+        if progress_callback:
+            progress_callback(completed_items, total_items, label)
+
+    def completed(label: str) -> None:
+        nonlocal completed_items
+        completed_items += 1
+        if progress_callback:
+            progress_callback(completed_items, total_items, label)
+
     burst_manifest, persisted_records, persistence_diagnostics, persistence_conflict = _load_burst_persistence(burst_output)
     failed += len(persistence_diagnostics)
     diagnostics.extend(persistence_diagnostics)
@@ -519,6 +649,8 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
         for record in catalog.burst_heads:
             if record.kind != "burst-head":
                 continue
+            label = f"burst-head/{record.display_name}"
+            announce(label)
             source_path = Path(record.source_path)
             if not source_path.is_file():
                 failed += 1
@@ -554,10 +686,30 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
             except Exception as error:
                 failed += 1
                 diagnostics.append(f"burst-head export failed for {record.source_path}: {error}")
+            finally:
+                completed(label)
+
+    for record in catalog.standalone:
+        if record.kind not in {"lottery-bg", "passport-pic"}:
+            continue
+        label = f"{record.kind}/{record.display_name}"
+        announce(label)
+        try:
+            _copy_standalone_material(record, root / "game_material" / record.kind)
+            exported += 1
+        except Exception as error:
+            failed += 1
+            diagnostics.append(f"{record.kind} export failed for {record.source_path}: {error}")
+        finally:
+            completed(label)
 
     for group in catalog.atlases:
         source_path = Path(group.source_path)
-        destination = fgui_output / _safe_filename(group.package_name)
+        group_kind = str(getattr(group, "kind", "fgui") or "fgui")
+        group_root = fgui_output if group_kind == "fgui" else root / "game_material" / _safe_filename(group_kind)
+        destination = group_root / _safe_filename(group.package_name)
+        label = f"{group_kind}/{group.package_name}"
+        announce(label)
         if not source_path.is_file():
             failed += 1
             diagnostics.append(f"atlas source missing: {group.source_path}")
@@ -571,6 +723,8 @@ def export_game_materials(catalog: GameMaterialCatalog, output_dir, splitter) ->
         except Exception as error:
             failed += 1
             diagnostics.append(f"atlas export failed for {group.package_name}: {error}")
+        finally:
+            completed(label)
 
     if burst_manifest_changed:
         try:

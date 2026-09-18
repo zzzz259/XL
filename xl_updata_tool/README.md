@@ -134,7 +134,7 @@ vgmstream 直解 bank 或 FSB 失败时，流程会回退到旧 QuickBMS/`fsb_au
 | 按钮 | 作用 |
 |---|---|
 | 版本列表 | 返回版本列表主界面 |
-| 图片预览 | 浏览导出的角色立绘（Spine 动画）|
+| 图片预览 | 浏览角色 Spine、导出立绘和游戏素材；默认 `cardspine` 的 PNG/MP4 均写入 `output/character/<角色ID>/`，视频按 SpineViewerCLI 动画完整时长导出 |
 | 音频 | 浏览、播放和导出已自动解析的游戏音频；新导出音频显示红色“新”状态 |
 | 角色 | 优先读取本地角色仓库/缓存；手动“开始解析”时加载 `output/lua/<版本>/`，数据仓库位于 `output/character_data/` |
 

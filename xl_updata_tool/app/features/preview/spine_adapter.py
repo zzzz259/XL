@@ -27,45 +27,130 @@ from app.platform.diagnostics import logger
 from app.platform.tool_locator import ToolLocator
 
 
+def _append_explicit_skin(command, skin_name):
+    """Append a CLI skin only when it is not Spine's implicit default skin."""
+    if skin_name and str(skin_name).casefold() != "default":
+        command.extend(["--skins", str(skin_name)])
+
+
+def _append_explicit_skins(command, skin_names):
+    for skin_name in tuple(skin_names or ()):
+        _append_explicit_skin(command, skin_name)
+
+
 def build_spine_export_command(job, spine_cli):
-    """Build a PNG export command from a ``SkinExportJob`` identity."""
-    if str(job.settings.format).casefold() != "png":
-        raise ValueError("Skin export jobs only support PNG format")
-    record = job.record
+    """Build a SpineViewerCLI export command from a ``SkinExportJob``.
+
+    A visible skin may consist of several source skeletons (for example the
+    character and its ``_bg`` model).  SpineViewerCLI's native ``merge``
+    command must receive every skeleton and matching atlas in one invocation;
+    do not render those parts independently and composite them afterwards.
+    """
+    raw_records = tuple(getattr(job, "records", ()) or (job.record,))
+    records = tuple(
+        dict.fromkeys(
+            (os.fspath(item.source_skel), os.fspath(item.atlas_path))
+            for item in raw_records
+        )
+    )
+    records = tuple(
+        next(item for item in raw_records if (os.fspath(item.source_skel), os.fspath(item.atlas_path)) == key)
+        for key in records
+    )
+    if not records:
+        records = (job.record,)
+    record = records[0]
     settings = job.settings
-    command = [
-        os.fspath(spine_cli),
-        "export",
-        os.fspath(record.source_skel),
-        "-f",
-        "Png",
-        "-o",
-        os.fspath(job.output_path),
-        "-a",
-        str(settings.animation or "idle"),
-        "--atlas",
-        os.fspath(record.atlas_path),
-        "--skins",
-        str(record.skin_name),
-        "--scale",
-        str(settings.scale),
-        "--max-resolution",
-        str(settings.max_resolution),
-        "--margin",
-        str(settings.margin),
-        "--time",
-        "0",
-        "--duration",
-        "0" if settings.static else "1",
-        "--fps",
-        str(settings.fps),
-    ]
+    normalized_format = str(settings.format).casefold()
+    format_name = {"png": "Png", "mp4": "Mp4", "gif": "Gif"}.get(normalized_format)
+    if format_name is None:
+        raise ValueError(f"Unsupported Spine export format: {settings.format}")
+
+    def _number(value):
+        number = float(value)
+        return str(int(number)) if number.is_integer() else str(number)
+
+    is_merge = len(records) > 1
+    command = [os.fspath(spine_cli), "merge" if is_merge else "export"]
+    command.extend(os.fspath(item.source_skel) for item in records)
+    command.extend(
+        [
+            "-f",
+            format_name,
+            "-o",
+            os.fspath(job.output_path),
+        ]
+    )
+    if is_merge:
+        for item in records:
+            # SpineViewerCLI's variadic ``<skels>`` positional argument has a
+            # parser quirk: the separated ``--atlases <path>`` form is
+            # consumed as an additional skel.  The equals form keeps the
+            # atlas value attached to its option and is required for merge.
+            command.append(f"--atlases={os.fspath(item.atlas_path)}")
+        command.extend(
+            ["--animations", "/".join(str(settings.animation or "idle") for _ in records)]
+        )
+    else:
+        command.extend(
+            [
+                "--animations",
+                str(settings.animation or "idle"),
+                "--atlas",
+                os.fspath(record.atlas_path),
+            ]
+        )
+    command.extend(
+        [
+            "--scale",
+            str(settings.scale),
+            "--max-resolution",
+            str(settings.max_resolution),
+            "--margin",
+            str(settings.margin),
+            "--time",
+            _number(settings.time_offset),
+        ]
+    )
     if settings.static:
+        command.extend(["--duration", "0", "--fps", "1"])
+    else:
+        if settings.duration is not None:
+            command.extend(["--duration", _number(settings.duration)])
+        command.extend(["--fps", str(settings.fps)])
+    selected_skins = tuple(getattr(settings, "skins", ()) or ())
+    if selected_skins == ("default",) and record.skin_name and record.skin_name.casefold() != "default":
+        selected_skins = (record.skin_name,)
+    # The native merge subcommand currently has no --skins option.  The
+    # grouped source records are already the selected visible skin; only the
+    # single-model export path can additionally select internal Spine skins.
+    if not is_merge:
+        _append_explicit_skins(command, selected_skins)
+    if settings.physics and settings.physics != "Update":
+        command.extend(["--physics", str(settings.physics)])
+    # ``merge`` does not expose the export command's warm-up option either.
+    if not is_merge and settings.warm_up:
+        command.extend(["--warm-up", _number(settings.warm_up)])
+    if settings.speed != 1:
+        command.extend(["--speed", _number(settings.speed)])
+    # The bundled CLI's ``merge`` command does not define
+    # ``--disable-track-loop``.  Passing that unknown flag is especially
+    # dangerous here because its variadic ``<skels>`` argument treats the
+    # flag as a third skeleton and then reports a misleading animation-count
+    # error.  A static merge already uses duration=0/fps=1, so no flag is
+    # needed; keep it only for the single-model export command.
+    if not is_merge and (settings.static or settings.disable_track_loop):
         command.append("--disable-track-loop")
+    if not settings.static and settings.loop:
+        command.append("--loop")
     if settings.transparent:
         command.extend(["--color", "#00000000"])
+    elif getattr(settings, "background_color", ""):
+        command.extend(["--color", str(settings.background_color)])
     if settings.pma:
         command.append("--pma")
+    if not settings.static and normalized_format == "gif":
+        command.append("--loop")
     return command
 
 
@@ -387,7 +472,6 @@ def composite_with_offset(char_path, bg_path, offset_xy, output_path):
         char_img = Image.open(char_path).convert("RGBA")
         bg_img = Image.open(bg_path).convert("RGBA")
         dx, dy = int(round(offset_xy[0])), int(round(offset_xy[1]))
-        # 画布范围：负偏移需要扩展左上角
         min_x = min(0, dx)
         min_y = min(0, dy)
         w = max(char_img.width, bg_img.width + dx) - min_x
@@ -398,8 +482,37 @@ def composite_with_offset(char_path, bg_path, offset_xy, output_path):
         canvas.save(output_path, "PNG")
         logger.info(f"偏移合成成功: {output_path} (offset={offset_xy})")
         return True
-    except Exception as e:
-        logger.error(f"偏移合成失败: {e}", exc_info=True)
+    except Exception as error:
+        logger.error(f"偏移合成失败: {error}", exc_info=True)
+        return False
+
+
+def composite_png_layers(image_paths, output_path, offsets=None):
+    """Alpha-composite an ordered list of rendered Spine layers."""
+    if not PILLOW_AVAILABLE:
+        logger.warning("Pillow 未安装，跳过多部件图片合成")
+        return False
+    try:
+        images = [Image.open(path).convert("RGBA") for path in image_paths]
+        if not images:
+            return False
+        positions = tuple(offsets or ((0, 0) for _ in images))
+        if len(positions) != len(images):
+            raise ValueError("layer offset count does not match image count")
+        min_x = min(int(round(position[0])) for position in positions)
+        min_y = min(int(round(position[1])) for position in positions)
+        max_x = max(int(round(position[0])) + image.width for position, image in zip(positions, images))
+        max_y = max(int(round(position[1])) + image.height for position, image in zip(positions, images))
+        canvas = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
+        for image, position in zip(images, positions):
+            canvas.alpha_composite(
+                image,
+                (int(round(position[0])) - min_x, int(round(position[1])) - min_y),
+            )
+        canvas.save(output_path, "PNG")
+        return True
+    except Exception as error:
+        logger.error("多部件图片合成失败: %s", error, exc_info=True)
         return False
 
 
@@ -407,14 +520,41 @@ def composite_with_offset(char_path, bg_path, offset_xy, output_path):
 # 动画名称获取
 # ---------------------------------------------------------------------------
 
-def get_animation_names(skel_path, atlas_path, spine_cli):
-    """使用 SpineViewerCLI query 获取模型的动画名称列表"""
-    animations = []
+def _parse_animation_table(output):
+    animations = {}
+    in_animation_section = False
+    for raw_line in str(output or "").splitlines():
+        line = raw_line.strip()
+        lowered = line.casefold()
+        if not line or line.startswith('#'):
+            continue
+        if "animations" in lowered and ">" in line:
+            in_animation_section = True
+            continue
+        if in_animation_section and line.startswith("<"):
+            break
+        if not in_animation_section or lowered in {"name", "name\tduration"}:
+            continue
+        fields = [field.strip() for field in line.split("\t")]
+        name = fields[0]
+        if not name or not re.fullmatch(r"[\w.-]+", name):
+            continue
+        try:
+            duration = float(fields[1]) if len(fields) > 1 else None
+        except ValueError:
+            duration = None
+        animations[name] = duration
+    return animations
+
+
+def get_animation_metadata(skel_path, atlas_path, spine_cli):
+    """Return animation names and CLI-reported durations keyed by name."""
+    metadata = {}
     try:
         cmd = [
             spine_cli, "query", skel_path,
             "--atlas", atlas_path,
-            "--animations",
+            "--animation",
         ]
         logger.debug(f"查询动画列表: {' '.join(cmd)}")
         proc = subprocess.run(
@@ -428,27 +568,29 @@ def get_animation_names(skel_path, atlas_path, spine_cli):
 
         output = proc.stdout.strip()
         if proc.returncode == 0 and output:
-            for line in output.split('\n'):
-                line = line.strip()
-                if line and not line.startswith('#') and not line.startswith('Animation'):
-                    animations.append(line)
+            metadata = _parse_animation_table(output)
 
-        if not animations:
+        if not metadata:
             logger.debug(f"CLI 未解析到动画列表，尝试从 .skel 文件提取。stdout: {output[:200]}")
     except subprocess.TimeoutExpired:
         logger.warning(f"查询动画列表超时: {skel_path}")
     except Exception as e:
         logger.warning(f"查询动画列表失败: {e}")
 
-    if not animations:
-        animations = extract_motion_names(skel_path)
-        if animations:
-            logger.info(f"从 .skel 文件提取到 {len(animations)} 个动画名称: {animations}")
+    if not metadata:
+        names = extract_motion_names(skel_path)
+        if names:
+            metadata = {name: None for name in names}
+            logger.info(f"从 .skel 文件提取到 {len(names)} 个动画名称: {names}")
 
-    if not animations:
-        animations = ["idle"]
+    if not metadata:
+        metadata = {"idle": None}
+    return metadata
 
-    return animations
+
+def get_animation_names(skel_path, atlas_path, spine_cli):
+    """使用 SpineViewerCLI query 获取模型的动画名称列表"""
+    return list(get_animation_metadata(skel_path, atlas_path, spine_cli))
 
 
 def extract_motion_names(skel_path):
@@ -472,7 +614,15 @@ def extract_motion_names(skel_path):
 # 动画帧导出
 # ---------------------------------------------------------------------------
 
-def export_animation_frames(skel_path, atlas_path, spine_cli, output_dir, base_name, animations):
+def export_animation_frames(
+    skel_path,
+    atlas_path,
+    spine_cli,
+    output_dir,
+    base_name,
+    animations,
+    skin_name=None,
+):
     """导出一个 .skel 文件的所有动画帧
 
     文件名格式: {base_name}_{animation}.png (idle 动画命名为 {base_name}.png)
@@ -492,8 +642,14 @@ def export_animation_frames(skel_path, atlas_path, spine_cli, output_dir, base_n
         logger.info(f"导出动画: {anim_name} -> {output_path}")
 
         export_ok = run_spine_export(
-            spine_cli, skel_path, atlas_path, output_path,
-            scale, max_resolution, anim_name
+            spine_cli,
+            skel_path,
+            atlas_path,
+            output_path,
+            scale,
+            max_resolution,
+            anim_name,
+            skin_name,
         )
 
         if export_ok:
@@ -525,7 +681,6 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
             "-o", output_path,
             "-a", "idle",
             "--atlas", atlas_path,
-            "--skins", skin_name,
             "--scale", str(scale),
             "--max-resolution", str(max_resolution),
             "--time", "0",
@@ -533,6 +688,7 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
             "--fps", "1",
             "--pma",
         ]
+        _append_explicit_skin(cmd, skin_name)
 
         try:
             logger.debug(f"导出皮肤: {skin_name} -> {output_path}")
@@ -578,7 +734,16 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
     return skin_success
 
 
-def run_spine_export(spine_cli, skel_path, atlas_path, output_path, scale, max_resolution, animation):
+def run_spine_export(
+    spine_cli,
+    skel_path,
+    atlas_path,
+    output_path,
+    scale,
+    max_resolution,
+    animation,
+    skin_name=None,
+):
     """执行 SpineViewerCLI export 命令（带 --pma 尝试 + fallback）"""
     cmd_pma = [
         spine_cli, "export", skel_path,
@@ -593,6 +758,7 @@ def run_spine_export(spine_cli, skel_path, atlas_path, output_path, scale, max_r
         "--fps", "1",
         "--pma",
     ]
+    _append_explicit_skin(cmd_pma, skin_name)
 
     try:
         logger.debug(f"执行命令: {' '.join(cmd_pma)}")
@@ -624,6 +790,7 @@ def run_spine_export(spine_cli, skel_path, atlas_path, output_path, scale, max_r
             "--duration", "1",
             "--fps", "1",
         ]
+        _append_explicit_skin(cmd_no_pma, skin_name)
         logger.debug(f"执行命令 (无--pma): {' '.join(cmd_no_pma)}")
         proc = subprocess.run(
             cmd_no_pma,
@@ -724,8 +891,7 @@ def export_spine_media_file(spine_cli, skel_path, atlas_path,
         ]
         if pma:
             cmd.append("--pma")
-        if skin_name:
-            cmd.extend(["--skins", skin_name])
+        _append_explicit_skin(cmd, skin_name)
         if fmt == "gif":
             cmd.append("--loop")
 

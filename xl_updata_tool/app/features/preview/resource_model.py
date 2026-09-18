@@ -6,6 +6,7 @@ import hashlib
 import json
 import posixpath
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 
@@ -23,6 +24,7 @@ class SpineSkinRecord:
     identity_fingerprint: str = ""
     fingerprint_kind: str = "attachment_set"
     diagnostic: str = ""
+    resource_family: str = "spine"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,16 +36,20 @@ class PreviewResourceCatalog:
     atlases: tuple[object, ...] = ()
     burst_heads: tuple[object, ...] = ()
     unmatched: tuple[SpineSkinRecord, ...] = ()
+    eventcovers: tuple[SpineSkinRecord, ...] = ()
 
     @classmethod
     def from_records(cls, records: Iterable[SpineSkinRecord]) -> "PreviewResourceCatalog":
         characters: dict[str, list[SpineSkinRecord]] = {}
         skins: dict[str, SpineSkinRecord] = {}
         unmatched: list[SpineSkinRecord] = []
+        eventcovers: list[SpineSkinRecord] = []
 
         for record in records:
             skins[skin_key(record)] = record
-            if record.character_id:
+            if record.resource_family == "eventcovers":
+                eventcovers.append(record)
+            elif record.character_id:
                 characters.setdefault(record.character_id, []).append(record)
             else:
                 unmatched.append(record)
@@ -52,6 +58,7 @@ class PreviewResourceCatalog:
             characters={key: tuple(value) for key, value in characters.items()},
             skins=skins,
             unmatched=tuple(unmatched),
+            eventcovers=tuple(eventcovers),
         )
 
 
@@ -78,3 +85,25 @@ def skin_key(record: SpineSkinRecord) -> str:
     )
     payload = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def spine_source_stem(path: str) -> str:
+    """Return a Spine source stem without Unity transport suffixes."""
+    name = Path(str(path).replace("\\", "/")).name
+    lowered = name.casefold()
+    for suffix in (".skel.prefab", ".skel.bytes", ".skel"):
+        if lowered.endswith(suffix):
+            return name[: -len(suffix)]
+    return Path(name).stem
+
+
+def display_skin_key(record: SpineSkinRecord) -> tuple[str, str, str]:
+    """Identify one user-facing skin source, excluding internal Spine skins."""
+    source_stem = spine_source_stem(record.source_skel)
+    if source_stem.casefold().endswith("_bg"):
+        source_stem = source_stem[:-3]
+    return (
+        record.resource_family,
+        record.character_id or "",
+        source_stem.casefold(),
+    )

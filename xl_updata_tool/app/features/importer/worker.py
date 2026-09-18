@@ -13,6 +13,7 @@ class ImportWorker(QThread):
     """将 ImportProcessor 映射到 ImportController 的现有信号契约。"""
 
     progress_stage = Signal(str, int, int)
+    category_progress = Signal(str, int, int)
     stage_finished = Signal(str)
     category_finished = Signal(str)
     all_finished = Signal(bool, str)
@@ -32,6 +33,7 @@ class ImportWorker(QThread):
             lua_output_dir=lua_output_dir,
             isolate_bundle_dir=isolate_bundle_dir,
             progress_stage_callback=self.progress_stage.emit,
+            category_progress_callback=self.category_progress.emit,
             stage_finished_callback=self.stage_finished.emit,
             category_finished_callback=self.category_finished.emit,
             all_finished_callback=self.all_finished.emit,

@@ -22,4 +22,6 @@ def create_feature(context, parent=None) -> FeatureRuntime:
         controller,
         status_signal=controller.status_changed,
         progress_signal=controller.progress_changed,
+        badge_signal=controller.badge_changed,
+        badge_state=lambda: controller.has_unread,
     )

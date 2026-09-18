@@ -2,6 +2,7 @@ from app.features.preview.resource_catalog import (
     discover_preview_resources,
     resolve_character_id,
 )
+from app.features.preview.resource_catalog import display_skin_name
 from app.features.preview.spine_adapter import SkinQueryResult
 
 
@@ -117,3 +118,54 @@ def test_discovery_supports_unity_skel_bytes_and_atlas_txt(tmp_path):
     assert record.source_skel == str(skel)
     assert record.atlas_path == str(atlas)
     assert runner.calls == [(str(skel), str(atlas))]
+
+
+def test_discovery_supports_assetstudio_prefab_spine_pair(tmp_path):
+    skel = tmp_path / "cardspine_10123_2.skel.prefab"
+    atlas = tmp_path / "cardspine_10123_2.atlas.prefab"
+    skel.write_bytes(b"skel")
+    atlas.write_text("atlas", encoding="utf-8")
+    runner = FakeQueryRunner(SkinQueryResult(skin_names=("skin_2",)))
+
+    catalog = discover_preview_resources(tmp_path, query_runner=runner)
+
+    record = catalog.characters["10123"][0]
+    assert record.source_skel == str(skel)
+    assert record.atlas_path == str(atlas)
+    assert runner.calls == [(str(skel), str(atlas))]
+
+
+def test_discovery_keeps_eventcovers_without_character_id(tmp_path):
+    source_dir = tmp_path / "assets" / "art" / "models" / "ui_spine" / "prefab" / "eventcovers"
+    source_dir.mkdir(parents=True)
+    skel = source_dir / "eventcovers_0038.skel.prefab"
+    atlas = source_dir / "eventcovers_0038.atlas.prefab"
+    skel.write_bytes(b"skel")
+    atlas.write_text("atlas", encoding="utf-8")
+
+    catalog = discover_preview_resources(tmp_path, query_runner=FakeQueryRunner())
+
+    assert len(catalog.eventcovers) == 1
+    record = catalog.eventcovers[0]
+    assert record.character_id is None
+    assert record.resource_family == "eventcovers"
+    assert record.source_skel == str(skel)
+
+
+def test_discovery_uses_source_skin_label_not_internal_default_or_motion_names(tmp_path):
+    skel = tmp_path / "cardspine_10080_2.skel"
+    skel.write_bytes(b"skel")
+    (tmp_path / "cardspine_10080_2.atlas").write_text("atlas", encoding="utf-8")
+    runner = FakeQueryRunner(SkinQueryResult(skin_names=("default", "motion_angry")))
+
+    catalog = discover_preview_resources(tmp_path, query_runner=runner)
+
+    records = catalog.characters["10080"]
+    assert {record.display_name for record in records} == {"皮肤 2"}
+    assert {record.skin_name for record in records} == {"default", "motion_angry"}
+
+
+def test_eventcover_display_name_is_chinese():
+    assert display_skin_name(
+        "eventcovers_0038.skel.prefab", None, "eventcovers"
+    ) == "活动封面 0038"

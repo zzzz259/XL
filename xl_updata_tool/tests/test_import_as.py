@@ -133,6 +133,44 @@ def test_import_as_replaces_only_selected_category(tmp_path):
     assert old_fgui.read_text(encoding="utf-8") == "keep"
 
 
+def test_import_as_commits_all_character_resource_roots(tmp_path):
+    material_dir = tmp_path / "material"
+    old_model = material_dir / "assets" / "art" / "models" / "old.skel"
+    old_burst = material_dir / "assets" / "art" / "texturesingle" / "bursthead" / "old.png"
+    old_fgui = material_dir / "assets" / "fairygui" / "old.txt"
+    old_model.parent.mkdir(parents=True)
+    old_burst.parent.mkdir(parents=True)
+    old_fgui.parent.mkdir(parents=True)
+    old_model.write_text("old", encoding="utf-8")
+    old_burst.write_bytes(b"old")
+    old_fgui.write_text("keep", encoding="utf-8")
+
+    staging = tmp_path / "staging" / "material"
+    new_model = staging / "assets" / "art" / "models" / "new.skel"
+    new_burst = staging / "assets" / "art" / "texturesingle" / "bursthead" / "new.png"
+    new_lottery = staging / "assets" / "art" / "texturesingle" / "lotterybg" / "new.png"
+    new_model.parent.mkdir(parents=True)
+    new_burst.parent.mkdir(parents=True)
+    new_lottery.parent.mkdir(parents=True)
+    new_model.write_text("new", encoding="utf-8")
+    new_burst.write_bytes(b"new burst")
+    new_lottery.write_bytes(b"new lottery")
+
+    worker = ImportProcessor(
+        [], str(tmp_path / "bundles"), str(material_dir), str(tmp_path / "AssetStudio.CLI.exe"),
+        export_categories={"character"},
+    )
+    worker._working_material_dir = str(staging)
+    worker._commit_staged_material()
+
+    assert (material_dir / "assets" / "art" / "models" / "new.skel").read_text(encoding="utf-8") == "new"
+    assert (material_dir / "assets" / "art" / "texturesingle" / "bursthead" / "new.png").read_bytes() == b"new burst"
+    assert (material_dir / "assets" / "art" / "texturesingle" / "lotterybg" / "new.png").read_bytes() == b"new lottery"
+    assert not old_model.exists()
+    assert not old_burst.exists()
+    assert old_fgui.read_text(encoding="utf-8") == "keep"
+
+
 def test_import_as_isolates_selected_bundles_for_assetstudio(tmp_path):
     bundle_dir = tmp_path / "bundles"
     bundle_dir.mkdir()

@@ -21,7 +21,7 @@ from app.platform.files import replace_directory
 from app.platform.lua_repository import cleanup_lua_staging, publish_lua_version
 from app.platform.tool_locator import ToolLocator
 from .lua_decrypt import decompile_lua_dir
-from app.features.importer.spec import CATEGORY_DIRS, EXPORT_SPECS, build_category_commands
+from app.features.importer.spec import CATEGORY_ROOTS, EXPORT_SPECS, build_category_commands
 
 
 # 兼容旧调用方；新的分类定义统一维护在 Importer Feature 的 ExportSpec 中。
@@ -46,7 +46,8 @@ class ImportProcessor:
                  export_types=None, export_categories=None, version_timestamp=None,
                  lua_output_dir=None, isolate_bundle_dir=False,
                  progress_stage_callback=None, stage_finished_callback=None,
-                 category_finished_callback=None, all_finished_callback=None,
+                 category_finished_callback=None, category_progress_callback=None,
+                 all_finished_callback=None,
                  cancel_check=None, as_env=None):
         self.bundle_paths = bundle_paths
         self.bundle_dir = bundle_dir
@@ -76,6 +77,7 @@ class ImportProcessor:
         self._progress_stage_callback = progress_stage_callback
         self._stage_finished_callback = stage_finished_callback
         self._category_finished_callback = category_finished_callback
+        self._category_progress_callback = category_progress_callback
         self._all_finished_callback = all_finished_callback
         self._cancel_check = cancel_check
 
@@ -88,6 +90,11 @@ class ImportProcessor:
     def _emit_progress_stage(self, label, current, total):
         if self._progress_stage_callback:
             self._progress_stage_callback(label, current, total)
+
+    def _emit_category_progress(self, label, current, total):
+        """Report progress inside the currently running AssetStudio command."""
+        if self._category_progress_callback:
+            self._category_progress_callback(label, current, total)
 
     def _emit_stage_finished(self, label):
         if self._stage_finished_callback:
@@ -294,6 +301,7 @@ class ImportProcessor:
                        "--game", "UnityCN", "--key_index", "23"] + extra_args + \
                       ["--group_assets", "ByContainer", "--export_type", "Convert"]
                 logger.info(f"[导入AS] {label} 开始（{i + 1}/{total}）: {' '.join(cmd)}")
+                self._emit_category_progress(label, 0, total_bundles)
                 t0 = time.time()
                 try:
                     proc = subprocess.Popen(
@@ -311,7 +319,14 @@ class ImportProcessor:
                             continue
                         if "Loading" in line and ".bundle" in line:
                             loaded += 1
-                            self._emit_progress(label, loaded, total_bundles)
+                            bundle_match = re.findall(
+                                r"([^\\/\s\"']+\.bundle)\b", line, flags=re.IGNORECASE
+                            )
+                            current_bundle = bundle_match[-1] if bundle_match else ""
+                            progress_label = (
+                                f"{label} · {current_bundle}" if current_bundle else label
+                            )
+                            self._emit_category_progress(progress_label, loaded, total_bundles)
                         else:
                             logger.debug(f"[导入AS] CLI: {line}")
                     proc.wait()
@@ -336,9 +351,12 @@ class ImportProcessor:
                 if self.export_categories:
                     for label in sorted(set(failed_labels)):
                         category = label.removeprefix("导出 ")
-                        relative = CATEGORY_DIRS.get(category)
-                        output_dir = os.path.join(self._working_material_dir, relative) if relative else ""
-                        if not output_dir or self._count_files(output_dir) == 0:
+                        roots = CATEGORY_ROOTS.get(category, ())
+                        has_output = any(
+                            self._count_files(os.path.join(self._working_material_dir, relative)) > 0
+                            for relative in roots
+                        )
+                        if not has_output:
                             hard_failed.append(label)
                 elif self._count_files(self._working_material_dir) == 0:
                     hard_failed = failed_labels
@@ -385,13 +403,14 @@ class ImportProcessor:
         replacements = []
         try:
             for category in sorted(self.export_categories):
-                relative = CATEGORY_DIRS.get(category)
-                if not relative:
+                relatives = CATEGORY_ROOTS.get(category, ())
+                if not relatives:
                     continue
-                source = os.path.join(self._working_material_dir, relative)
-                destination = os.path.join(material_root, relative)
-                os.makedirs(source, exist_ok=True)
-                replacements.append((source, destination, relative))
+                for relative in relatives:
+                    source = os.path.join(self._working_material_dir, relative)
+                    destination = os.path.join(material_root, relative)
+                    os.makedirs(source, exist_ok=True)
+                    replacements.append((source, destination, relative))
 
             # 先把所有旧分类移入备份区，再开始放入新分类，避免跨分类提交留下半成品。
             for _source, destination, relative in replacements:

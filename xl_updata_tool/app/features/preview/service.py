@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .catalog import (
@@ -12,7 +12,7 @@ from .catalog import (
     scan_cardspine_roles,
     scan_preview_roles,
 )
-from .resource_catalog import discover_preview_resources
+from .resource_catalog import discover_preview_resources, display_skin_name
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .resource_state import PreviewResourceState
 from .output_publisher import RawSpinePublishSummary, publish_raw_spine_resources
@@ -89,7 +89,12 @@ class PreviewService:
             self.preview_dir.parent,
         )
 
-    def preprocess_preview_resources(self, progress_callback=None, cancel_check=None) -> PreviewPreprocessSummary:
+    def preprocess_preview_resources(
+        self,
+        progress_callback=None,
+        cancel_check=None,
+        detail_progress_callback=None,
+    ) -> PreviewPreprocessSummary:
         """Build all non-user-selected preview outputs after AS import."""
         progress = progress_callback or (lambda _current, _total, _message: None)
         cancelled = cancel_check or (lambda: False)
@@ -105,7 +110,10 @@ class PreviewService:
 
         progress(2, 4, "切割游戏图集和大头照")
         material_catalog = self.discover_game_materials()
-        material_summary = self.export_game_materials(material_catalog)
+        material_summary = self.export_game_materials(
+            material_catalog,
+            progress_callback=detail_progress_callback,
+        )
         progress(3, 4, "写入图片预览资源索引")
         progress(4, 4, "图片资源预处理完成")
         return PreviewPreprocessSummary(catalog, spine_summary, material_summary)
@@ -132,7 +140,17 @@ class PreviewService:
                 if not isinstance(value, dict):
                     continue
                 try:
-                    records.append(SpineSkinRecord(**value))
+                    record = SpineSkinRecord(**value)
+                    records.append(
+                        replace(
+                            record,
+                            display_name=display_skin_name(
+                                record.source_skel,
+                                record.character_id,
+                                record.resource_family,
+                            ),
+                        )
+                    )
                 except (TypeError, ValueError):
                     continue
         return PreviewResourceCatalog.from_records(records)
@@ -141,9 +159,11 @@ class PreviewService:
         self,
         catalog: GameMaterialCatalog | None = None,
         splitter=None,
+        progress_callback=None,
     ) -> MaterialExportSummary:
         return export_materials(
             catalog or self.discover_game_materials(),
             self.preview_dir.parent,
             splitter if splitter is not None else UIPackageTool.split_atlas_to_package_dir,
+            progress_callback=progress_callback,
         )

@@ -630,3 +630,13 @@ app/features/audio/
 - [completed] 建立 Qt-free 音频目录索引与后台预热入口。
 - [completed] 将音频树改为按目录层级懒加载，并以逻辑选择集驱动目录递归勾选。
 - [completed] 完成全量测试、Qt 交互测试、性能基准、启动冒烟和文档同步；等待用户验收后建立本地检查点。
+
+## 2026-09-19 图片预览工作台恢复与导出收口
+
+- [completed] 回读历史沟通、UX 问题清单、Issue #32/#35/#44/#45 worklog 和提交历史，确认本轮继续遵守 output/data/logs、取消、缓存、未读和 Feature ownership 契约。
+- [completed] 预览资源在 AS 导入完成后处理；原始 Spine 与最终图片/图集/游戏素材分层保留，页面切换只读取已发布索引。
+- [completed] 角色 Spine 按角色/皮肤身份组织，角色与背景由一次 SpineViewer merge 导出；角色立绘、战斗小人和游戏素材使用各自的展示和未读状态。
+- [completed] 默认/自定义导出模式落地：默认按 `cardspine`、`battlespine`、`eventcovers` 分流；自定义只允许一个可见皮肤。
+- [completed] 修正默认视频输出路径和时长语义：MP4 与 PNG 共用 `output/character/<角色ID>/`，默认视频不传 `--duration`，由 SpineViewerCLI 自动输出完整动画。
+- [completed] 变更摘要、调查记录和验收记录已写入 `docs/changes/preview-workbench-2026-09-19.md` 与对应 `docs/worklog/` 目录。
+- [pending] 完成当前分支提交、推送并创建 PR；PR 前再次检查暂存内容不包含运行时数据、临时目录或过程性计划文件。

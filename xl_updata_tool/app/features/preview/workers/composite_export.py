@@ -2,25 +2,27 @@
 """批量合成图视频导出工作线程"""
 
 import os
-import time
+import subprocess
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
 from app.platform.diagnostics import logger
+from app.platform.processes import run_external_process
+from app.features.preview.export_plan import ExportSettings, SkinExportJob
+from app.features.preview.resource_model import SpineSkinRecord
 from app.features.preview.spine_adapter import (
-    ffmpeg_composite_videos,
-    cleanup_temp,
     extract_skin_name_from_png,
     find_composite_sources,
-    export_spine_media_file,
+    build_spine_export_command,
 )
 
 
 class CompositeExportWorker(QThread):
     """批量合成图视频导出工作线程
 
-    在后台线程串行处理合成图导出（角色MP4 + 背景MP4 + FFmpeg叠加），
+    在后台线程串行处理合成图导出（SpineViewerCLI 原生 merge），
     避免阻塞 UI。
     """
     progress = Signal(int, int, str)       # current, total, filename
@@ -64,7 +66,7 @@ class CompositeExportWorker(QThread):
         self.all_finished.emit(success, fail)
 
     def _export_one(self, png_path, skin_name=None):
-        """导出单个合成图视频，返回 bool 表示成功与否"""
+        """用一次 SpineViewerCLI merge 导出角色和背景。"""
         role_skel, role_atlas, bg_skel, bg_atlas = find_composite_sources(png_path, self.skel_map)
         if not role_skel or not bg_skel:
             logger.warning(f"批量合成导出: 缺少角色或背景骨骼数据: {png_path}")
@@ -74,12 +76,10 @@ class CompositeExportWorker(QThread):
             logger.error(f"SpineViewerCLI 不存在: {self.spine_cli}")
             return False
 
-        fmt = self.settings["format"]
-        animation = self.settings["animation"]
-        duration = self.settings["duration"]
-        fps = self.settings["fps"]
-        scale = self.settings["scale"]
-        pma = self.settings.get("pma", False)
+        fmt = str(self.settings["format"]).casefold()
+        if fmt not in {"mp4", "gif"}:
+            logger.error("合成图视频导出不支持格式: %s", fmt)
+            return False
 
         ext = ".mp4" if fmt == "mp4" else ".gif"
         base_name = os.path.splitext(os.path.basename(png_path))[0]
@@ -90,56 +90,70 @@ class CompositeExportWorker(QThread):
                                    "video" if fmt == "mp4" else "character")
         os.makedirs(output_dir, exist_ok=True)
 
-        # 唯一临时目录
-        temp_dir = os.path.join(self.project_root, "output", "temp",
-                                f"composite_{base_name}_{datetime.now().strftime('%H%M%S_%f')}")
-        os.makedirs(temp_dir, exist_ok=True)
-
-        role_temp_path = os.path.join(temp_dir, f"role_temp{ext}")
-        bg_temp_path = os.path.join(temp_dir, f"bg_temp{ext}")
         output_path = os.path.join(output_dir, f"{base_name}_composite_{timestamp}{ext}")
 
-        logger.info(f"批量合成视频导出: {base_name}")
-        logger.info(f"参数: 格式={fmt}, 时长={duration}s, 帧率={fps}fps, 缩放={scale}x, 预乘={pma}, 皮肤={skin_name or '无'}")
+        role_record = SpineSkinRecord(
+            character_id=None,
+            source_skel=role_skel,
+            atlas_path=role_atlas,
+            skin_name=skin_name or "default",
+            attachment_fingerprint="",
+            display_name=base_name,
+            status="ready",
+            resource_family="cardspine",
+        )
+        background_record = SpineSkinRecord(
+            character_id=None,
+            source_skel=bg_skel,
+            atlas_path=bg_atlas,
+            skin_name="default",
+            attachment_fingerprint="",
+            display_name=f"{base_name}_bg",
+            status="ready",
+            resource_family="cardspine",
+        )
+        settings = ExportSettings(
+            animation=self.settings["animation"],
+            static=False,
+            scale=int(self.settings["scale"]),
+            max_resolution=int(self.settings.get("max_resolution", 16000)),
+            margin=int(self.settings.get("margin", 10)),
+            transparent=bool(self.settings.get("transparent", False)),
+            pma=bool(self.settings.get("pma", False)),
+            format=fmt.title(),
+            fps=int(self.settings["fps"]),
+            time_offset=float(self.settings.get("time_offset", 0)),
+            duration=float(self.settings["duration"]),
+            loop=fmt == "gif",
+            skins=(skin_name or "default",),
+            background_color=str(self.settings.get("background_color", "#7f7f7f")),
+        )
+        job = SkinExportJob(
+            role_record,
+            Path(output_path),
+            settings,
+            records=(role_record, background_record),
+        )
 
         try:
-            # 步骤 1: 导出角色视频（应用皮肤）
-            if not export_spine_media_file(
-                self.spine_cli, role_skel, role_atlas, role_temp_path,
-                animation, duration, fps, scale, fmt,
-                label="角色", pma=pma, skin_name=skin_name
-            ):
-                logger.error(f"批量合成: 角色视频导出失败: {base_name}")
+            command = build_spine_export_command(job, self.spine_cli)
+            proc = run_external_process(
+                command,
+                tool="spine-cli",
+                cwd=os.path.dirname(self.spine_cli),
+                capture_output=True,
+                text=True,
+                timeout=300,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            if proc.returncode != 0:
+                logger.error("原生 merge 视频导出失败 [%s]: %s", base_name, proc.stderr[:500])
                 return False
-
-            # 步骤 2: 导出背景视频
-            if not export_spine_media_file(
-                self.spine_cli, bg_skel, bg_atlas, bg_temp_path,
-                animation, duration, fps, scale, fmt,
-                label="背景", pma=pma
-            ):
-                logger.error(f"批量合成: 背景视频导出失败: {base_name}")
+            if not os.path.exists(output_path):
+                logger.error("原生 merge 视频未生成输出: %s", base_name)
                 return False
-
-            # 步骤 3: FFmpeg 叠加合成
-            if not ffmpeg_composite_videos(
-                bg_temp_path, role_temp_path, output_path,
-                fps, fmt
-            ):
-                logger.error(f"批量合成: FFmpeg 叠加失败: {base_name}")
-                return False
-
-            if os.path.exists(output_path):
-                size = os.path.getsize(output_path)
-                logger.info(f"批量合成视频导出完成: {output_path} (大小: {size} bytes)")
-                return True
-            else:
-                logger.error(f"批量合成: 输出文件未生成: {base_name}")
-                return False
-
+            logger.info("原生 merge 视频导出完成: %s (大小: %s bytes)", output_path, os.path.getsize(output_path))
+            return True
         except Exception as e:
-            logger.error(f"批量合成视频导出异常 [{base_name}]: {e}")
+            logger.error(f"原生 merge 视频导出异常 [{base_name}]: {e}")
             return False
-        finally:
-            time.sleep(0.5)
-            cleanup_temp(temp_dir)

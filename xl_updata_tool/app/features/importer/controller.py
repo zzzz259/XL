@@ -14,6 +14,7 @@ class ImportController(QObject):
     """协调导入 Worker，并将旧信号收口为稳定结果。"""
 
     progress_stage = Signal(str, int, int)
+    category_progress = Signal(str, int, int)
     stage_finished = Signal(str)
     category_finished = Signal(str)
     all_finished = Signal(bool, str)
@@ -42,6 +43,7 @@ class ImportController(QObject):
             **kwargs,
         )
         self.worker.progress_stage.connect(self.progress_stage)
+        self.worker.category_progress.connect(self.category_progress)
         self.worker.stage_finished.connect(self.stage_finished)
         self.worker.category_finished.connect(self._on_category_finished)
         self.worker.all_finished.connect(self._on_all_finished)

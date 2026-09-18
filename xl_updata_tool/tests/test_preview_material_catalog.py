@@ -92,6 +92,35 @@ def test_material_discovery_groups_each_fui_package(tmp_path):
     assert catalog.atlases[1].source_path == str(ui / "Card_fui.bytes")
 
 
+def test_material_discovery_uses_fgui_magic_for_irregular_package_name(tmp_path):
+    ui = tmp_path / "assets" / "fairygui" / "ui"
+    ui.mkdir(parents=True)
+    package = ui / "MysteryPackage.bin"
+    package.write_bytes(b"FGUI" + b"not a complete package")
+    (ui / "MysteryPackage_atlas0.png").write_bytes(b"atlas")
+
+    catalog = discover_game_materials(tmp_path)
+
+    assert [group.package_name for group in catalog.atlases] == ["MysteryPackage"]
+    assert catalog.atlases[0].sprite_paths == (str(ui / "MysteryPackage_atlas0.png"),)
+
+
+def test_material_discovery_classifies_lottery_and_passport_standalone_resources(tmp_path):
+    lottery = tmp_path / "assets" / "art" / "texturesingle" / "lotterybg" / "LotteryBg_042.png"
+    passport = tmp_path / "assets" / "fairygui" / "ui" / "PassportPic_preview.png"
+    lottery.parent.mkdir(parents=True)
+    passport.parent.mkdir(parents=True)
+    lottery.write_bytes(b"lottery")
+    passport.write_bytes(b"passport")
+
+    catalog = discover_game_materials(tmp_path)
+
+    assert [(record.kind, record.display_name) for record in catalog.standalone] == [
+        ("lottery-bg", "LotteryBg_042"),
+        ("passport-pic", "PassportPic_preview"),
+    ]
+
+
 def test_game_material_export_uses_stable_directories_and_reports_failures(tmp_path):
     burst_path = tmp_path / "burst_head" / "10080.png"
     burst_path.parent.mkdir(parents=True)
@@ -113,9 +142,34 @@ def test_game_material_export_uses_stable_directories_and_reports_failures(tmp_p
     summary = export_game_materials(catalog, tmp_path / "output", splitter)
 
     assert (tmp_path / "output" / "game_material" / "burst-head" / "10080.png").is_file()
-    assert calls == [(str(atlas_path), str(tmp_path / "output" / "fgui" / "Card"), False)]
+    assert calls == [(str(atlas_path), str(tmp_path / "output" / "game_material" / "fgui" / "Card"), False)]
     assert summary.failed == 1
     assert "atlas parse failed" in summary.diagnostics[0]
+
+
+def test_game_material_export_reports_current_item_progress(tmp_path):
+    burst_path = tmp_path / "burst-head" / "10080.png"
+    atlas_path = tmp_path / "raw" / "Card_fui.bytes"
+    burst_path.parent.mkdir(parents=True)
+    atlas_path.parent.mkdir(parents=True)
+    burst_path.write_bytes(b"head")
+    atlas_path.write_bytes(b"atlas")
+    catalog = GameMaterialCatalog(
+        burst_heads=(GameMaterialRecord("burst-head", str(burst_path), "10080", "head-fp"),),
+        atlases=(AtlasResourceGroup("Card", str(atlas_path), ()),),
+        unmatched=(),
+    )
+    progress = []
+
+    export_game_materials(
+        catalog,
+        tmp_path / "output",
+        lambda *args: None,
+        progress_callback=lambda current, total, label: progress.append((current, total, label)),
+    )
+
+    assert progress[0] == (0, 2, "burst-head/10080")
+    assert progress[-1] == (2, 2, "fgui/Card")
 
 
 def test_burst_head_export_adds_deterministic_suffix_without_overwriting_source(tmp_path):
@@ -163,6 +217,49 @@ def test_burst_head_export_is_idempotent_for_the_same_source_and_fingerprint(tmp
     assert first.exported == second.exported == 1
     assert first.failed == second.failed == 0
     assert first_files == second_files == ["10080.png"]
+
+
+def test_export_game_materials_preserves_standalone_materials_in_separate_output_dirs(tmp_path):
+    lottery = tmp_path / "raw" / "LotteryBg_042.png"
+    passport = tmp_path / "raw" / "PassportPic_preview.png"
+    lottery.parent.mkdir(parents=True)
+    lottery.write_bytes(b"lottery")
+    passport.write_bytes(b"passport")
+    catalog = GameMaterialCatalog(
+        burst_heads=(),
+        atlases=(),
+        unmatched=(),
+        standalone=(
+            GameMaterialRecord("lottery-bg", str(lottery), lottery.stem, "lottery-fp"),
+            GameMaterialRecord("passport-pic", str(passport), passport.stem, "passport-fp"),
+        ),
+    )
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.exported == 2
+    assert list((tmp_path / "output" / "game_material" / "lottery-bg").glob("*.png"))
+    assert list((tmp_path / "output" / "game_material" / "passport-pic").glob("*.png"))
+
+
+def test_export_game_materials_routes_typed_fgui_package_to_typed_output_dir(tmp_path):
+    source = tmp_path / "raw" / "PassportPic_fui.bytes"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"package")
+    catalog = GameMaterialCatalog(
+        burst_heads=(),
+        atlases=(AtlasResourceGroup("PassportPic", str(source), (), "passport-pic"),),
+        unmatched=(),
+    )
+    calls = []
+
+    def splitter(source_path, destination_dir, is_override_exists=True):
+        calls.append((source_path, destination_dir, is_override_exists))
+
+    summary = export_game_materials(catalog, tmp_path / "output", splitter)
+
+    assert summary.failed == 0
+    assert calls == [(str(source), str(tmp_path / "output" / "game_material" / "passport-pic" / "PassportPic"), False)]
 
 
 def test_burst_head_manifest_save_failure_retry_does_not_duplicate_or_overwrite_sources(tmp_path, monkeypatch):
@@ -405,4 +502,4 @@ def test_preview_service_uses_uipackage_tool_splitter_by_default(tmp_path, monke
     monkeypatch.setattr(UIPackageTool, "split_atlas_to_package_dir", splitter)
     service.export_game_materials()
 
-    assert calls == [(str(source), str(tmp_path / "output" / "fgui" / "Card"), False)]
+    assert calls == [(str(source), str(tmp_path / "output" / "game_material" / "fgui" / "Card"), False)]

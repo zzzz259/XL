@@ -6,13 +6,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTabBar
 
 from app.features.preview.material_catalog import AtlasResourceGroup, GameMaterialCatalog, GameMaterialRecord
 from app.features.preview.page import PreviewPage
 from app.features.preview.resource_model import PreviewResourceCatalog, SpineSkinRecord
+from app.features.preview.output_browser import OutputBrowserEntry, path_fingerprint
 from app.features.preview.controller import PreviewController
 from app.features.preview.service import PreviewService
+from app.features.preview.resource_state import PreviewResourceState
 
 
 @pytest.fixture(scope="module")
@@ -43,6 +45,59 @@ def test_preview_page_exposes_three_named_tabs_and_legacy_character_controls(qap
     assert page.preview_progress.objectName() == "previewProgress"
     assert page.preview_status.objectName() == "pageStatus"
     assert page.btn_mark_all_read.objectName() == "markAllPreviewReadButton"
+    assert not hasattr(page, "btn_close_preview")
+    assert page.btn_reload.isHidden()
+    assert page.character_filter.isHidden()
+    assert page.btn_thumbnail_previous.isHidden()
+    assert page.btn_thumbnail_next.isHidden()
+    assert page.tabs.tabBar().tabButton(0, QTabBar.RightSide).text() == "●"
+
+
+def test_preview_page_cascades_tab_badges_and_icon_new_marker(qapp):
+    page = PreviewPage()
+    page.character_browser.set_entries(
+        [OutputBrowserEntry("菲尼斯", "E:/output/菲尼斯", "folder", 1, "folder-fp", True)]
+    )
+    page.tabs.set_tab_unread("角色导出立绘", True)
+
+    item = page.character_browser.item(0)
+    badge = page.tabs._tab_badges["角色导出立绘"]
+    assert "新" not in item.text()
+    assert item.data(Qt.UserRole)["is_new"] is True
+    assert badge.property("unread") is True
+
+    page.tabs.set_tab_unread("角色导出立绘", False)
+    assert badge.property("unread") is False
+    page.close()
+
+
+def test_character_root_return_button_is_disabled_at_root(qapp, tmp_path):
+    page = PreviewPage()
+    page.set_character_output_root(tmp_path, None)
+
+    assert not page.btn_character_up.isEnabled()
+    page.open_character_output_folder(tmp_path / "10080")
+    assert page.btn_character_up.isEnabled()
+    page.close()
+
+
+def test_icon_badge_is_removed_when_leaf_becomes_read(qapp, tmp_path):
+    image = tmp_path / "10080_4.png"
+    image.write_bytes(b"png")
+    state = PreviewResourceState(tmp_path / "state.json")
+    page = PreviewPage()
+    browser = page.character_browser
+    browser.set_entries(
+        [OutputBrowserEntry(image.name, str(image), "file", 0, path_fingerprint(image), True)]
+    )
+    item = browser.item(0)
+    assert item.data(Qt.UserRole)["is_new"] is True
+
+    state.mark_read(path_fingerprint(image))
+    browser.refresh_entry_statuses(state)
+
+    assert item.data(Qt.UserRole)["is_new"] is False
+    page.close()
 
 
 def test_preview_page_renders_spine_catalog_without_replacing_character_state(qapp):
@@ -80,14 +135,14 @@ def test_preview_page_accepts_game_material_catalog_and_has_explicit_empty_state
     )
 
     labels = [page.material_tree.topLevelItem(index).text(0) for index in range(page.material_tree.topLevelItemCount())]
-    assert labels == ["game_material/burst-head", "fgui/Battle"]
+    assert labels == ["game_material/burst-head", "game_material/fgui/Battle"]
     burst_data = page.material_tree.topLevelItem(0).data(0, Qt.UserRole)
     atlas_data = page.material_tree.topLevelItem(1).data(0, Qt.UserRole)
     assert burst_data["kind"] == "burst-head"
     assert burst_data["path"] == "game_material/burst-head"
     assert atlas_data["kind"] == "atlas"
     assert atlas_data["package"] == "Battle"
-    assert atlas_data["path"] == "fgui/Battle"
+    assert atlas_data["path"] == "game_material/fgui/Battle"
     assert atlas_data["source"] == "Battle_fui.bytes"
     assert page.material_empty_label.isHidden()
     assert not page.spine_empty_label.isHidden()
@@ -96,6 +151,26 @@ def test_preview_page_accepts_game_material_catalog_and_has_explicit_empty_state
 
     assert page.material_tree.topLevelItemCount() == 0
     assert not page.material_empty_label.isHidden()
+    page.close()
+
+
+def test_preview_page_renders_standalone_game_material_groups(qapp):
+    page = PreviewPage()
+    page.set_game_material_catalog(
+        GameMaterialCatalog(
+            burst_heads=(),
+            atlases=(),
+            unmatched=(),
+            standalone=(
+                GameMaterialRecord("lottery-bg", "output/game_material/lottery-bg/LotteryBg_042.png", "LotteryBg_042", "fp"),
+            ),
+        )
+    )
+
+    item = page.material_tree.topLevelItem(0)
+    assert item.text(0) == "game_material/lottery-bg"
+    assert item.data(0, Qt.UserRole)["kind"] == "lottery-bg"
+    assert page.material_browser.count() == 1
     page.close()
 
 
@@ -115,6 +190,33 @@ def test_controller_style_empty_updates_are_routed_to_the_current_tab(qapp):
     page.tabs.setCurrentWidget(page.tabs.character_tab)
     assert not page.empty_label.isHidden()
 
+    page.close()
+
+
+def test_controller_keeps_image_thread_alive_until_qthread_finished(qapp):
+    page = PreviewPage()
+    root = Path.cwd() / f".task5-preview-worker-{uuid4().hex}"
+    controller = PreviewController(
+        page,
+        PreviewService(root / "material", root / "output" / "character"),
+    )
+    worker = object()
+    controller._image_worker = worker
+
+    controller._on_load_finished([])
+
+    assert controller._image_worker is worker
+    page.close()
+
+
+def test_icon_browser_keeps_thumbnail_thread_alive_until_qthread_finished(qapp):
+    page = PreviewPage()
+    worker = object()
+    page.material_browser._thumbnail_worker = worker
+
+    page.material_browser._on_thumbnail_finished([])
+
+    assert page.material_browser._thumbnail_worker is worker
     page.close()
 
 

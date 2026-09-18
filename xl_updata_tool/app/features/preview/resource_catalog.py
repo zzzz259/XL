@@ -9,11 +9,44 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from .character_names import display_skin_number
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .spine_adapter import SkinQueryResult, SpineQueryRunner
 
 
 _CHARACTER_ID_KEYS = ("character_id", "characterId", "char_id", "charId", "role_id", "roleId", "id")
+_SPINE_SKEL_SUFFIXES = (".skel.prefab", ".skel.bytes", ".skel")
+
+
+def _spine_logical_stem(path) -> str:
+    """Return a Spine stem without AssetStudio/Unity physical suffixes."""
+    name = Path(path).name
+    lowered = name.casefold()
+    for suffix in _SPINE_SKEL_SUFFIXES:
+        if lowered.endswith(suffix):
+            return name[: -len(suffix)]
+    return Path(name).stem
+
+
+def display_skin_name(skel_path, character_id, resource_family) -> str:
+    """Build a compact source-skin label, never exposing internal skin names."""
+    skin_number = display_skin_number(skel_path, character_id, resource_family)
+    if resource_family in {"cardspine", "battlespine"}:
+        return f"皮肤 {skin_number}" if skin_number.isdigit() else skin_number
+    if resource_family == "eventcovers":
+        return f"活动封面 {skin_number}"
+    return skin_number or "未命名皮肤"
+
+
+def _resource_family(path) -> str:
+    normalized = str(path).replace("\\", "/").casefold()
+    if "/eventcovers/" in normalized or Path(path).name.casefold().startswith("eventcovers_"):
+        return "eventcovers"
+    if "/cardspine/" in normalized or Path(path).name.casefold().startswith("cardspine_"):
+        return "cardspine"
+    if "/battlespine/" in normalized or Path(path).name.casefold().startswith("battlespine_"):
+        return "battlespine"
+    return "spine"
 
 
 def _value_from_metadata(metadata, key):
@@ -91,11 +124,7 @@ def resolve_character_id(path, metadata) -> str | None:
             return candidate
 
     source_name = Path(path_text).name
-    stem = source_name
-    for suffix in (".skel.bytes", ".skel"):
-        if stem.casefold().endswith(suffix):
-            stem = stem[: -len(suffix)]
-            break
+    stem = _spine_logical_stem(source_name)
     convention = re.fullmatch(
         r"(?:cardspine|battlespine)[_-](\d{5})(?:[_-]\d+)?(?:_bg)?",
         stem,
@@ -115,12 +144,17 @@ def resolve_character_id(path, metadata) -> str | None:
 
 def _paired_atlas_path(skel_path: Path) -> Path:
     """Find the atlas beside normal and Unity-exported Spine files."""
-    name = skel_path.name
-    if name.casefold().endswith(".skel.bytes"):
-        stem = name[: -len(".skel.bytes")]
-    else:
-        stem = name[: -len(".skel")] if name.casefold().endswith(".skel") else skel_path.stem
-    candidates = (f"{stem}.atlas", f"{stem}.atlas.txt")
+    stem = _spine_logical_stem(skel_path)
+    suffix = ".prefab" if skel_path.name.casefold().endswith(".skel.prefab") else ""
+    candidates = tuple(
+        dict.fromkeys(
+            (
+                f"{stem}.atlas{suffix}",
+                f"{stem}.atlas",
+                f"{stem}.atlas.txt",
+            )
+        )
+    )
     for candidate in candidates:
         path = skel_path.with_name(candidate)
         if path.is_file():
@@ -219,7 +253,7 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
 
     skel_paths = {
         path
-        for pattern in ("*.skel", "*.skel.bytes")
+        for pattern in ("*.skel", "*.skel.bytes", "*.skel.prefab")
         for path in root.rglob(pattern)
         if path.is_file()
     }
@@ -227,7 +261,7 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
         atlas_path = _paired_atlas_path(skel_path)
         metadata = _metadata_for_path(character_data, skel_path)
         character_id = resolve_character_id(str(skel_path), metadata)
-        stem = skel_path.stem
+        resource_family = _resource_family(skel_path)
 
         if not atlas_path.is_file():
             records.append(
@@ -237,11 +271,12 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
                     atlas_path=str(atlas_path),
                     skin_name="",
                     attachment_fingerprint="",
-                    display_name=stem,
+                    display_name=display_skin_name(skel_path, character_id, resource_family),
                     status="invalid",
                     identity_fingerprint=_source_skin_identity(str(skel_path), str(atlas_path), ""),
                     fingerprint_kind="source_skin_identity",
                     diagnostic=f"atlas missing: {atlas_path}",
+                    resource_family=resource_family,
                 )
             )
             continue
@@ -256,13 +291,14 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
                     atlas_path=str(atlas_path),
                     skin_name="",
                     attachment_fingerprint="",
-                    display_name=stem,
+                    display_name=display_skin_name(skel_path, character_id, resource_family),
                     status="invalid",
                     identity_fingerprint=_query_identity_fingerprint(result, "")
                     or _source_skin_identity(str(skel_path), str(atlas_path), ""),
                     fingerprint_kind="source_skin_identity",
                     diagnostic=_query_diagnostic(result)
                     or "skin query did not return any skin names",
+                    resource_family=resource_family,
                 )
             )
             continue
@@ -283,12 +319,13 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
                     atlas_path=str(atlas_path),
                     skin_name=skin_name,
                     attachment_fingerprint=attachment_fingerprint,
-                    display_name=skin_name,
+                    display_name=display_skin_name(skel_path, character_id, resource_family),
                     status="ready",
                     identity_fingerprint=identity_fingerprint
                     or _source_skin_identity(str(skel_path), str(atlas_path), skin_name),
                     fingerprint_kind=("attachment_set" if attachment_fingerprint else "source_skin_identity"),
                     diagnostic=diagnostic,
+                    resource_family=resource_family,
                 )
             )
 

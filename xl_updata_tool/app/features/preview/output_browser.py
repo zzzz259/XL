@@ -59,9 +59,12 @@ class OutputBrowserCatalog:
             if path.is_dir():
                 count = sum(1 for child in path.rglob("*.png") if child.is_file())
                 fingerprint = folder_fingerprint(path)
-                entries.append(
-                    OutputBrowserEntry(path.name, str(path), "folder", count, fingerprint, state.is_new(fingerprint) if state else None)
+                is_new = (
+                    state.is_new_for(_image_file_fingerprints(path))
+                    if state
+                    else None
                 )
+                entries.append(OutputBrowserEntry(path.name, str(path), "folder", count, fingerprint, is_new))
             elif include_files and path.suffix.casefold() in _IMAGE_SUFFIXES:
                 fingerprint = path_fingerprint(path)
                 entries.append(
@@ -73,15 +76,20 @@ class OutputBrowserCatalog:
         return self.from_root(folder).entries
 
     def all_fingerprints(self) -> tuple[str, ...]:
-        values = []
+        """Return leaf image fingerprints; directory fingerprints are derived state."""
+        return self.file_fingerprints()
 
-        def visit(folder):
-            catalog = self.from_root(folder)
-            for entry in catalog.entries:
-                if entry.fingerprint:
-                    values.append(entry.fingerprint)
-                if entry.kind == "folder":
-                    visit(entry.path)
+    def file_fingerprints(self, recursive: bool = True) -> tuple[str, ...]:
+        return _image_file_fingerprints(self.root, recursive=recursive)
 
-        visit(self.root)
-        return tuple(values)
+
+def _image_file_fingerprints(root, *, recursive: bool = True) -> tuple[str, ...]:
+    folder = Path(root)
+    if not folder.is_dir():
+        return ()
+    paths = folder.rglob("*") if recursive else folder.iterdir()
+    return tuple(
+        path_fingerprint(path)
+        for path in sorted(paths, key=lambda item: str(item).casefold())
+        if path.is_file() and path.suffix.casefold() in _IMAGE_SUFFIXES
+    )

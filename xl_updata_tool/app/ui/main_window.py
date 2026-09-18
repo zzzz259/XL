@@ -7,10 +7,10 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QProgressBar, QMessageBox, QToolBar, QStatusBar,
     QToolButton,
-    QCheckBox, QComboBox, QProgressDialog,
+    QCheckBox, QComboBox, QDialog,
     QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QSettings
+from PySide6.QtCore import Qt, QTimer, QSettings, Signal
 
 try:
     import qtawesome as qta
@@ -33,6 +33,77 @@ DATA_DIR = get_data_dir()
 BUNDLES_DIR = os.path.join(DATA_DIR, "bundles")
 LUA_OUTPUT_DIR = os.path.join(get_base_dir(), "output", "lua")
 CHARACTER_DATA_DIR = os.path.join(get_base_dir(), "output", "character_data")
+
+
+class DualProgressDialog(QDialog):
+    """Shared import/postprocess dialog with outer and inner progress bars."""
+
+    canceled = Signal()
+
+    def __init__(self, label, cancel_text, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("任务进度")
+        self.setModal(False)
+        self.setMinimumWidth(560)
+        self.setMinimumHeight(220)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        self.label = QLabel(str(label))
+        self.label.setWordWrap(True)
+        layout.addWidget(self.label)
+        self.outer_label = QLabel("总体进度")
+        layout.addWidget(self.outer_label)
+        self.outer_progress = QProgressBar()
+        self.outer_progress.setRange(0, 100)
+        layout.addWidget(self.outer_progress)
+        self.inner_label = QLabel("当前分类进度")
+        layout.addWidget(self.inner_label)
+        self.inner_progress = QProgressBar()
+        self.inner_progress.setRange(0, 100)
+        layout.addWidget(self.inner_progress)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        self.cancel_button = QPushButton(str(cancel_text))
+        self.cancel_button.clicked.connect(self._cancel)
+        buttons.addWidget(self.cancel_button)
+        layout.addLayout(buttons)
+
+    def _cancel(self):
+        self.cancel_button.setEnabled(False)
+        self.canceled.emit()
+
+    def setLabelText(self, text):
+        self.label.setText(str(text))
+
+    def setRange(self, minimum, maximum):
+        self.inner_progress.setRange(minimum, maximum)
+
+    def setValue(self, value):
+        self.inner_progress.setValue(value)
+
+    def set_stage_progress(self, label, current, total):
+        self.outer_label.setText(str(label))
+        self.outer_progress.setRange(0, max(0, int(total)))
+        self.outer_progress.setValue(int(current))
+
+    def set_category_progress(self, label, current, total):
+        self.inner_label.setText(str(label))
+        self.inner_progress.setRange(0, max(0, int(total)))
+        self.inner_progress.setValue(int(current))
+
+    def reset_cancel(self):
+        self.cancel_button.setEnabled(True)
+
+    def setMinimumDuration(self, _value):
+        return None
+
+    def setAutoClose(self, _value):
+        return None
+
+    def setAutoReset(self, _value):
+        return None
 
 
 class MainWindow(QMainWindow):
@@ -332,14 +403,7 @@ class MainWindow(QMainWindow):
         ) == QMessageBox.Yes
 
     def create_progress_dialog(self, label, cancel_text):
-        dialog = QProgressDialog(label, cancel_text, 0, 100, self)
-        dialog.setWindowModality(Qt.NonModal)
-        dialog.setMinimumDuration(0)
-        dialog.setAutoClose(False)
-        dialog.setAutoReset(False)
-        dialog.setMinimumWidth(520)
-        dialog.setMinimumHeight(160)
-        return dialog
+        return DualProgressDialog(label, cancel_text, self)
 
     def _tbtn(self, t, accent=False, icon=None):
         b = QToolButton(); b.setText(t)
@@ -452,15 +516,20 @@ class MainWindow(QMainWindow):
         return
 
     def _on_import_progress(self, stage_name, current, total):
-        """导入AS进度更新（两行：阶段名 + 进度/处理中，避免来回跳）"""
+        """导入 AS 外层阶段进度。分类导出时由另一条信号更新内层进度。"""
         if getattr(self, "_import_progress_dialog", None):
-            if total > 0:
-                self._import_progress_dialog.setLabelText(f"{stage_name}\n已处理 {current}/{total}")
-                self._import_progress_dialog.setRange(0, total)
-                self._import_progress_dialog.setValue(current)
+            dialog = self._import_progress_dialog
+            if hasattr(dialog, "set_stage_progress"):
+                dialog.set_stage_progress(stage_name, current, total)
+                dialog.setLabelText(f"{stage_name}\n正在处理第 {current}/{total} 项" if total > 0 else f"{stage_name}\n处理中…")
             else:
-                self._import_progress_dialog.setLabelText(f"{stage_name}\n处理中...")
-                self._import_progress_dialog.setRange(0, 0)
+                if total > 0:
+                    dialog.setLabelText(f"{stage_name}\n已处理 {current}/{total}")
+                    dialog.setRange(0, total)
+                    dialog.setValue(current)
+                else:
+                    dialog.setLabelText(f"{stage_name}\n处理中...")
+                    dialog.setRange(0, 0)
         if total > 0:
             self.dl_progress.setMaximum(total)
             self.dl_progress.setValue(current)
@@ -468,6 +537,14 @@ class MainWindow(QMainWindow):
         else:
             self.dl_progress.setFormat(f"{stage_name}: 处理中...")
         self.status_bar.showMessage(f"导入AS: {stage_name} {current}/{total}" if total > 0 else f"导入AS: {stage_name} 处理中...")
+
+    def _on_import_category_progress(self, category_name, current, total):
+        """导入 AS 当前分类内部的 Bundle 进度。"""
+        dialog = getattr(self, "_import_progress_dialog", None)
+        if dialog is not None and hasattr(dialog, "set_category_progress"):
+            dialog.set_category_progress(category_name, current, total)
+        if total > 0:
+            self.status_bar.showMessage(f"导入AS: {category_name} {current}/{total}")
 
     def _on_import_stage_finished(self, stage_name):
         """导入AS阶段完成"""

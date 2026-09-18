@@ -46,6 +46,12 @@ class PreviewResourceState:
         self._read_fingerprints.add(value)
         return True
 
+    def mark_many_read(self, fingerprints: Iterable[str]) -> bool:
+        changed = False
+        for fingerprint in fingerprints:
+            changed = self.mark_read(fingerprint) or changed
+        return changed
+
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         file_descriptor, temporary_name = tempfile.mkstemp(

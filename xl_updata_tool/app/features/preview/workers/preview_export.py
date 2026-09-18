@@ -41,7 +41,16 @@ class PreviewExportWorker(QThread):
 
     def __init__(self, jobs, settings=None, runner=None, force=False, selected_roles=None, parent=None):
         super().__init__(parent)
-        self._job_mode = isinstance(settings, ExportSettings) and runner is not None
+        self._job_mode = callable(runner) and (
+            isinstance(settings, ExportSettings)
+            or (
+                bool(jobs)
+                and all(
+                    hasattr(job, "record") and hasattr(job, "settings")
+                    for job in jobs
+                )
+            )
+        )
         if self._job_mode:
             self.jobs = tuple(jobs)
             self.settings = settings
@@ -100,7 +109,10 @@ class PreviewExportWorker(QThread):
                 cancelled = True
                 break
 
-            label = job.record.display_name or job.record.skin_name
+            label = (
+                f"{job.record.resource_family}/{job.settings.format}: "
+                f"{job.record.display_name or job.record.skin_name}"
+            )
             self.skin_progress.emit(current, total, label)
             job.output_path.parent.mkdir(parents=True, exist_ok=True)
             if self.runner(job):
@@ -121,10 +133,12 @@ class PreviewExportWorker(QThread):
     def _write_metadata(job):
         metadata = {
             "record": asdict(job.record),
+            "records": [asdict(record) for record in getattr(job, "records", (job.record,))],
             "settings": asdict(job.settings),
+            "export_mode": getattr(job, "export_mode", "custom"),
             "output_path": str(job.output_path),
         }
-        metadata_path = job.output_path.parent / "metadata.json"
+        metadata_path = job.output_path.with_name(job.output_path.name + ".metadata.json")
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _find_assets_map(self):
@@ -199,7 +213,13 @@ class PreviewExportWorker(QThread):
 
             # 去重检查：force=False 时跳过已存在且非空的 PNG
             main_output = os.path.join(char_subdir, f"{base_name}.png")
-            if not self.force and os.path.exists(main_output) and os.path.getsize(main_output) > 0:
+            is_battlespine = "battlespine" in os.path.normcase(skel_path)
+            if (
+                not self.force
+                and not is_battlespine
+                and os.path.exists(main_output)
+                and os.path.getsize(main_output) > 0
+            ):
                 logger.info(f"跳过已存在的 PNG: {base_name}.png")
                 skipped_count += 1
                 continue
@@ -214,7 +234,13 @@ class PreviewExportWorker(QThread):
 
             # 导出 idle 动画作为主图
             export_ok = export_animation_frames(
-                skel_path, atlas_path, self.spine_cli, char_subdir, base_name, animations
+                skel_path,
+                atlas_path,
+                self.spine_cli,
+                char_subdir,
+                base_name,
+                animations,
+                "motion_stander" if is_battlespine else None,
             )
             if export_ok:
                 success_count += 1
