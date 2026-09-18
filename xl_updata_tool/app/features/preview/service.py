@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from .catalog import (
@@ -20,6 +21,13 @@ from .material_catalog import (
     discover_game_materials as discover_materials,
     export_game_materials as export_materials,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewPreprocessSummary:
+    catalog: object
+    spine: RawSpinePublishSummary
+    materials: MaterialExportSummary
 
 
 class PreviewService:
@@ -77,6 +85,27 @@ class PreviewService:
             self.material_dir,
             self.preview_dir.parent,
         )
+
+    def preprocess_preview_resources(self, progress_callback=None, cancel_check=None) -> PreviewPreprocessSummary:
+        """Build all non-user-selected preview outputs after AS import."""
+        progress = progress_callback or (lambda _current, _total, _message: None)
+        cancelled = cancel_check or (lambda: False)
+        progress(0, 4, "发现角色 Spine 和皮肤")
+        catalog = self.discover_preview_resources()
+        if cancelled():
+            return PreviewPreprocessSummary(catalog, RawSpinePublishSummary(), MaterialExportSummary())
+
+        progress(1, 4, "发布原始 Spine 资源")
+        spine_summary = self.publish_raw_spine_resources(catalog)
+        if cancelled():
+            return PreviewPreprocessSummary(catalog, spine_summary, MaterialExportSummary())
+
+        progress(2, 4, "切割游戏图集和大头照")
+        material_catalog = self.discover_game_materials()
+        material_summary = self.export_game_materials(material_catalog)
+        progress(3, 4, "写入图片预览资源索引")
+        progress(4, 4, "图片资源预处理完成")
+        return PreviewPreprocessSummary(catalog, spine_summary, material_summary)
 
     def discover_game_materials(self, metadata=None) -> GameMaterialCatalog:
         return discover_materials(self.material_dir, metadata)

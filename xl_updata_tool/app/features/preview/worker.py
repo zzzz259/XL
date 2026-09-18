@@ -2,6 +2,7 @@
 
 from .workers.image_loader import ImageLoadWorker
 from .workers.preview_export import PreviewExportWorker
+from .workers.preview_postprocess import PreviewPostprocessWorker
 from .workers.batch_export import BatchExportWorker
 from .workers.composite_export import CompositeExportWorker
 
@@ -10,4 +11,5 @@ __all__ = [
     "CompositeExportWorker",
     "ImageLoadWorker",
     "PreviewExportWorker",
+    "PreviewPostprocessWorker",
 ]

@@ -63,6 +63,20 @@ def test_importer_service_represents_legacy_full_import():
     assert result.succeeded
 
 
+def test_importer_service_schedules_preview_processing_after_assets_are_committed():
+    service = ImporterService("material", "lua")
+
+    result = service.result({"character", "fgui"}, {"character", "fgui"})
+
+    assert result.postprocess_categories == frozenset({"preview"})
+
+
+def test_importer_service_schedules_preview_for_legacy_full_import():
+    result = ImporterService("material", "lua").result((), {"all"})
+
+    assert result.postprocess_categories == frozenset({"preview"})
+
+
 def test_postprocessor_registry_filters_result_categories():
     result = ImporterService("material", "lua").result(
         {"lua", "audio"}, {"lua", "audio"}

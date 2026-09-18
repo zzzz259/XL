@@ -64,6 +64,10 @@ class ImporterService:
             for category in ("lua", "audio")
             if category in selected and category in completed
         )
+        preview_selected = "all" in selected or bool({"character", "fgui"} & selected)
+        preview_completed = "all" in completed or bool({"character", "fgui"} & completed)
+        if preview_selected and preview_completed:
+            postprocess = frozenset({*postprocess, "preview"})
         return ImportResult(
             categories=selected,
             completed_categories=completed,

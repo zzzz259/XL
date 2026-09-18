@@ -31,6 +31,17 @@ class FakeAudio:
         self.started.append(kwargs)
 
 
+class FakePreview:
+    def __init__(self):
+        self.processing_finished = FakeSignal()
+        self.processing_cancelled = FakeSignal()
+        self.processing_error = FakeSignal()
+        self.started = []
+
+    def start_postprocess(self, **kwargs):
+        self.started.append(kwargs)
+
+
 class FakeCharacters:
     def __init__(self):
         self.calls = []
@@ -66,3 +77,29 @@ def test_import_postprocess_workflow_routes_audio_then_lua():
 
     assert characters.calls == [({"directory": "output/lua/20260824"}, "dialog")]
     assert finished == [( (True, "导入完成"), {"audio_error": None})]
+
+
+def test_import_postprocess_workflow_routes_audio_then_preview_then_lua():
+    result = ImportResult(
+        categories=frozenset({"lua", "character", "audio"}),
+        completed_categories=frozenset({"lua", "character", "audio"}),
+        postprocess_categories=frozenset({"lua", "audio", "preview"}),
+    )
+    importer = FakeImporter(result)
+    audio = FakeAudio()
+    preview = FakePreview()
+    characters = FakeCharacters()
+    workflow = ImportPostprocessWorkflow(importer, audio, characters, FakeRegistry(), preview=preview)
+    finished = []
+    importer.result_ready.emit(result)
+
+    workflow.handle_import_finished(True, "导入完成", "dialog", lambda *args, **kwargs: finished.append((args, kwargs)))
+    audio.processing_finished.emit(True)
+
+    assert preview.started == [{"force": False, "shared_dialog": "dialog"}]
+    assert finished == []
+
+    preview.processing_finished.emit(True)
+
+    assert characters.calls == [(None, "dialog")]
+    assert finished == [((True, "导入完成"), {"audio_error": None})]

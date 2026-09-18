@@ -14,7 +14,7 @@ from .adapter import extract_skin_name_from_png, is_composite_png
 from .item import build_preview_item
 from .page import PreviewPage
 from .service import PreviewService
-from .worker import ImageLoadWorker, PreviewExportWorker
+from .worker import ImageLoadWorker, PreviewExportWorker, PreviewPostprocessWorker
 from .dialogs.export_settings import ExportSettingsDialog
 from .export_plan import ExportSettings, build_export_plan
 from .spine_adapter import build_spine_export_command
@@ -29,6 +29,10 @@ class PreviewController(QObject):
     export_finished = Signal(bool, str)
     context_menu_requested = Signal(QPoint)
     item_double_clicked = Signal(QListWidgetItem)
+    processing_finished = Signal(bool)
+    processing_cancelled = Signal(bool)
+    processing_error = Signal(str, bool)
+    processing_progress_value = Signal(int, int, str)
 
     def __init__(self, page: PreviewPage, service: PreviewService, parent=None):
         super().__init__(parent)
@@ -44,6 +48,8 @@ class PreviewController(QObject):
         self._single_export_worker = None
         self._batch_worker = None
         self._composite_worker = None
+        self._postprocess_worker = None
+        self._postprocess_shared = False
         self._batch_exporting = False
         self._batch_settings = {}
         self._batch_auto_open = False
@@ -52,6 +58,82 @@ class PreviewController(QObject):
         self._batch_comp_success = 0
         self._batch_comp_fail = 0
         self._connect_page()
+
+    @property
+    def processing_shared(self) -> bool:
+        return self._postprocess_shared
+
+    def start_postprocess(self, force: bool = False, shared_dialog=None) -> bool:
+        """Run image discovery/material publishing after AS import."""
+        del force  # The publisher is content-addressed and safe to repeat.
+        worker = self._postprocess_worker
+        if worker is not None and worker.isRunning():
+            self.status_changed.emit("图片资源预处理已在进行中")
+            return False
+        self.status_changed.emit("正在处理图片资源：发现 Spine、切割图集…")
+        worker = PreviewPostprocessWorker(self.service, self)
+        worker.progress_value.connect(self._on_postprocess_progress)
+        worker.finished_processing.connect(self._on_postprocess_finished)
+        worker.cancelled_processing.connect(self._on_postprocess_cancelled)
+        worker.error.connect(self._on_postprocess_error)
+        self._postprocess_worker = worker
+        self._postprocess_shared = shared_dialog is not None
+        if shared_dialog is not None:
+            shared_dialog.setLabelText("正在处理图片资源…\n发现 Spine、切割图集和大头照")
+            shared_dialog.setRange(0, 4)
+            shared_dialog.setValue(0)
+            shared_dialog.canceled.connect(worker.cancel)
+            shared_dialog.show()
+        worker.start()
+        return True
+
+    def cancel_postprocess(self) -> bool:
+        worker = self._postprocess_worker
+        if worker is None:
+            return True
+        worker.cancel()
+        if not worker.wait(30000):
+            logger.error("图片资源预处理线程未能在取消超时内退出")
+            return False
+        self._postprocess_worker = None
+        return True
+
+    def _on_postprocess_progress(self, current, total, message):
+        self.status_changed.emit(message)
+        self.processing_progress_value.emit(current, total, message)
+
+    def _finish_postprocess_worker(self):
+        worker = self._postprocess_worker
+        if worker is not None:
+            worker.deleteLater()
+        self._postprocess_worker = None
+
+    def _on_postprocess_finished(self, summary):
+        was_shared = self._postprocess_shared
+        self._postprocess_shared = False
+        self._finish_postprocess_worker()
+        material_summary = summary.materials
+        self.status_changed.emit(
+            f"图片资源预处理完成：Spine {summary.spine.published} 组，"
+            f"游戏素材成功 {material_summary.exported}，失败 {material_summary.failed}"
+        )
+        self.processing_finished.emit(was_shared)
+
+    def _on_postprocess_cancelled(self):
+        was_shared = self._postprocess_shared
+        self._postprocess_shared = False
+        self._finish_postprocess_worker()
+        self.status_changed.emit("图片资源预处理已取消，已完成的文件已保留")
+        if was_shared:
+            self.processing_cancelled.emit(was_shared)
+
+    def _on_postprocess_error(self, message):
+        was_shared = self._postprocess_shared
+        self._postprocess_shared = False
+        self._finish_postprocess_worker()
+        logger.error("图片资源预处理失败: %s", message)
+        self.status_changed.emit("图片资源预处理失败")
+        self.processing_error.emit(message, was_shared)
 
     def _connect_page(self):
         self.page.filter_changed.connect(self.apply_filter)
