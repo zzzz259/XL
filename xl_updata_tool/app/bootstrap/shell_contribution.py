@@ -45,16 +45,17 @@ class ApplicationShellContribution:
         importer = self.registry.get("importer")
 
         importer.controller.progress_stage.connect(shell._on_import_progress)
+        importer.controller.category_progress.connect(shell._on_import_category_progress)
         importer.controller.stage_finished.connect(shell._on_import_stage_finished)
         importer.controller.category_finished.connect(shell._on_import_category_finished)
         importer.controller.all_finished.connect(shell._on_import_all_finished)
         versions.controller.progress_changed.connect(shell._on_version_progress)
+        versions.controller.check_state_changed.connect(shell._on_check_state_changed)
         preview.controller.progress_changed.connect(
             lambda current, total, stage: shell._on_feature_progress(
                 preview.page, current, total, stage
             )
         )
-        preview.page.close_requested.connect(lambda: self.activate("versions"))
         audio.page.close_requested.connect(lambda: self.activate("versions"))
 
         self.actions = (
@@ -67,6 +68,9 @@ class ApplicationShellContribution:
             ShellAction("导入AS", self.import_selected, "file-import", primary=True),
         )
         character.controller.restore_local()
+        preload_index = getattr(preview.controller, "preload_index", None)
+        if preload_index is not None:
+            shell.schedule(150, preload_index)
         return self.actions
 
     def activate(self, key: str) -> None:
@@ -149,7 +153,7 @@ class ApplicationShellContribution:
         isolate_bundle_dir = False
         if export_categories in ({"lua"}, {"audio"}):
             category = "lua" if export_categories == {"lua"} else "audio"
-            selected_fs, mapped, asset_count, map_path = importer.controller.service.select_bundles(
+            selected_fs, mapped, asset_count, map_path = importer.controller.select_bundles(
                 category, fs, bundle_dir
             )
             if mapped:
@@ -251,6 +255,10 @@ class ApplicationShellContribution:
         current = self.registry.get("versions").controller.service.current()
         if not current and self.shell is not None:
             self.shell.status_bar.showMessage("首次启动, 自动检查更新...")
-            self.shell.schedule(1500, self.registry.get("versions").controller.check_update)
+            controller = self.registry.get("versions").controller
+            self.shell.schedule(
+                1500,
+                lambda: controller.check_update(notify_errors=False),
+            )
         elif self.shell is not None:
             self.shell.schedule(500, lambda: self.shell.status_bar.showMessage("就绪"))

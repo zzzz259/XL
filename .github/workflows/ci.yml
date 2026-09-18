@@ -25,14 +25,17 @@ jobs:
             xl_updata_tool/requirements.txt
             xl_updata_tool/requirements-dev.txt
 
+      - name: Create project virtual environment
+        run: python -m venv .venv
+
       - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 
       - name: Compile Python sources
-        run: python -B -c "import pathlib; files=list(pathlib.Path('app').rglob('*.py')) + list(pathlib.Path('tests').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
+        run: .\.venv\Scripts\python.exe -B -c "import pathlib; files=list(pathlib.Path('app').rglob('*.py')) + list(pathlib.Path('tests').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
 
       - name: Run tests
-        run: python -m pytest
+        run: .\.venv\Scripts\python.exe -m pytest
 
       - name: Lint tests and core modules
-        run: python -m ruff check tests app
+        run: .\.venv\Scripts\python.exe -m ruff check tests app

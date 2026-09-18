@@ -1,53 +1,97 @@
 """内置版本种子注册，不依赖 Qt。"""
 
 import os
-import ssl
-import urllib.request
+import json
 
 from app.platform import database as db
 from app.platform.bundle_parser import extract_manifest_hashes
 from app.platform.diagnostics import logger
+from app.platform.downloader import http_get
+
+
+def _save_extracted_sub_bundles(timestamp, catalog_paths):
+    asset_hashes = set()
+    for catalog_path in catalog_paths:
+        try:
+            asset_hashes |= extract_manifest_hashes(catalog_path)
+        except Exception as exc:
+            logger.warning("读取版本 %s 的分类清单失败 %s: %s", timestamp, catalog_path, exc)
+    if asset_hashes:
+        db.save_sub_bundles(timestamp, sorted(asset_hashes))
+    logger.info("版本 %s：解析并保存 %s 个 sub_bundle", timestamp, len(asset_hashes))
+    return len(asset_hashes)
+
+
+def repair_missing_sub_bundles(bundles_dir: str) -> dict[int, int]:
+    """从本地 current 分类包修复已有版本缺失的 sub_bundle 索引。"""
+    bundles_dir = os.path.abspath(bundles_dir)
+    repaired = {}
+    current_dir = os.path.join(bundles_dir, "current")
+    for row in db.get_all_versions():
+        timestamp = row[0]
+        if db.get_sub_bundle_count(timestamp):
+            continue
+        version = db.get_version(timestamp)
+        if not version or not version[8]:
+            continue
+        try:
+            versions_data = json.loads(version[8])
+        except (TypeError, json.JSONDecodeError) as exc:
+            logger.warning("版本 %s 的 versions_json 无法读取：%s", timestamp, exc)
+            continue
+        catalog_paths = []
+        for item in versions_data.get("data", []):
+            name = str(item.get("name", "")).lower()
+            file_hash = item.get("hash")
+            if not name or not file_hash:
+                continue
+            path = os.path.join(current_dir, f"{name}_{file_hash}.json")
+            if os.path.isfile(path):
+                catalog_paths.append(path)
+        if not catalog_paths:
+            continue
+        logger.info("版本 %s 的 sub_bundle 索引为空，开始从 current 修复", timestamp)
+        count = _save_extracted_sub_bundles(timestamp, catalog_paths)
+        if count:
+            repaired[timestamp] = count
+    return repaired
 
 
 def seed_bundled_versions(version_manager, bundles_dir: str) -> None:
     """注册内置版本及其 Bundle 清单；已有版本不会重复写入。"""
+    bundles_dir = os.path.abspath(bundles_dir)
     existing = {row[0] for row in db.get_all_versions()}
     logger.info(f"写入种子版本：已存在 {len(existing)} 个版本")
-    context = ssl.create_default_context()
     seed_dir = os.path.join(bundles_dir, "seeds")
-    headers = {
-        "User-Agent": "UnityPlayer/2021.3.45f2c1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)",
-        "X-Unity-Version": "2021.3.45f2c1",
-    }
 
     def download_catalog(name, file_hash):
         path = os.path.join(seed_dir, f"SEED_{name}_{file_hash[:12]}.json")
         if not os.path.exists(path):
             os.makedirs(seed_dir, exist_ok=True)
-            request = urllib.request.Request(
-                f"https://elpis.17995cdn.com/Android/Bundles/{name.lower()}_{file_hash}.json",
-                headers=headers,
+            data = http_get(
+                f"https://elpis.17995cdn.com/Android/Bundles/{name.lower()}_{file_hash}.json"
             )
-            data = urllib.request.urlopen(request, context=context, timeout=15).read()
             with open(path, "wb") as handle:
                 handle.write(data)
         return path
 
     def seed(timestamp, info, versions_data, notes, categories, is_current=False):
-        if timestamp in existing:
+        if timestamp in existing and db.get_sub_bundle_count(timestamp):
             logger.debug(f"种子版本 {timestamp} 已存在，跳过")
             return
-        version_manager.register_version(timestamp, info, versions_data, is_current=is_current)
-        db.add_notes(timestamp, notes)
-        asset_hashes = set()
+        if timestamp not in existing:
+            version_manager.register_version(timestamp, info, versions_data, is_current=is_current)
+            db.add_notes(timestamp, notes)
+        else:
+            logger.info(f"种子版本 {timestamp} 已存在但索引为空，开始修复")
+        catalog_paths = []
         for name, file_hash in categories:
             try:
-                asset_hashes |= extract_manifest_hashes(download_catalog(name, file_hash))
+                catalog_paths.append(download_catalog(name, file_hash))
             except Exception as exc:
                 logger.warning(f"读取种子清单失败 {name}/{file_hash}: {exc}")
-        if asset_hashes:
-            db.save_sub_bundles(timestamp, list(asset_hashes))
-        logger.info(f"种子版本 {timestamp}：注册完成，{len(asset_hashes)} 个 bundle")
+        count = _save_extracted_sub_bundles(timestamp, catalog_paths)
+        logger.info(f"种子版本 {timestamp}：注册/修复完成，{count} 个 bundle")
 
     seed(
         134091181056097516,
@@ -70,3 +114,4 @@ def seed_bundled_versions(version_manager, bundles_dir: str) -> None:
         "在线版本, 2026年6月29日",
         [("Arts", "30ed8244781b44cacc3c5d1ea10a976e"), ("Data", "5d2c794364dfe22100547764f60689fe"), ("Other", "dd50845a464e1eda86b027103d2cce43")],
     )
+    repair_missing_sub_bundles(bundles_dir)

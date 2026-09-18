@@ -1,0 +1,505 @@
+import json
+
+import pytest
+
+from app.features.preview import material_catalog
+from app.features.preview.fgui_atlas import UIPackageTool
+from app.features.preview.material_catalog import (
+    AtlasResourceGroup,
+    GameMaterialCatalog,
+    GameMaterialRecord,
+    discover_game_materials,
+    discover_processed_game_materials,
+    export_game_materials,
+    is_burst_head_resource,
+)
+from app.features.preview.service import PreviewService
+
+
+def test_processed_material_catalog_reads_only_final_output_files(tmp_path):
+    material_dir = tmp_path / "data" / "material"
+    source_atlas = material_dir / "assets" / "fairygui" / "ui" / "Menu_fui.bytes"
+    source_atlas.parent.mkdir(parents=True)
+    source_atlas.write_bytes(b"raw package")
+    (source_atlas.parent / "Menu_atlas0.png").write_bytes(b"raw atlas")
+
+    output = tmp_path / "output"
+    burst = output / "game_material" / "burst-head"
+    package = output / "fgui" / "Menu"
+    burst.mkdir(parents=True)
+    package.mkdir(parents=True)
+    (burst / "10080.png").write_bytes(b"cut head")
+    (package / "button.png").write_bytes(b"cut sprite")
+    (package / "Menu_cut_info.json").write_text("[]", encoding="utf-8")
+
+    catalog = discover_processed_game_materials(output)
+
+    assert [record.display_name for record in catalog.burst_heads] == ["10080"]
+    assert len(catalog.atlases) == 1
+    assert catalog.atlases[0].package_name == "Menu"
+    assert [path.replace("\\", "/").split("/")[-1] for path in catalog.atlases[0].sprite_paths] == ["button.png"]
+    assert all("data/material" not in path.replace("\\", "/") for path in catalog.atlases[0].sprite_paths)
+
+
+def test_burst_head_token_variants_are_recognized_but_dialoghead_is_not(tmp_path):
+    assert is_burst_head_resource(tmp_path / "burst-head" / "10080.png", {})
+    assert is_burst_head_resource(tmp_path / "burst_head" / "10081.png", {})
+    assert is_burst_head_resource(tmp_path / "bursthead" / "10082.png", {})
+    assert not is_burst_head_resource(tmp_path / "dialoghead" / "10080.png", {})
+    assert not is_burst_head_resource(tmp_path / "burst-head-extra" / "10080.png", {})
+
+
+def test_metadata_only_classifies_an_explicitly_matching_resource(tmp_path):
+    ordinary = tmp_path / "ordinary.png"
+    explicit = tmp_path / "resource.png"
+    ordinary.write_bytes(b"ordinary")
+    explicit.write_bytes(b"burst head")
+    metadata = {
+        "type": "burst-head",
+        "resources": {str(explicit): {"type": "burst-head"}},
+    }
+
+    assert not is_burst_head_resource(ordinary, metadata)
+    assert is_burst_head_resource(explicit, metadata)
+
+    catalog = discover_game_materials(tmp_path, metadata)
+    assert [record.source_path for record in catalog.burst_heads] == [str(explicit)]
+    assert [record.source_path for record in catalog.unmatched] == [str(ordinary)]
+
+
+@pytest.mark.parametrize("metadata_key", ["category", "container", "kind", "name", "path", "type"])
+def test_top_level_metadata_keys_never_classify_a_file_with_the_same_name(tmp_path, metadata_key):
+    ordinary = tmp_path / metadata_key
+    ordinary.write_bytes(b"ordinary")
+
+    assert not is_burst_head_resource(ordinary, {metadata_key: "burst-head"})
+    catalog = discover_game_materials(tmp_path, {metadata_key: "burst-head"})
+
+    assert catalog.burst_heads == ()
+    assert [record.source_path for record in catalog.unmatched] == [str(ordinary)]
+
+
+def test_material_discovery_groups_each_fui_package(tmp_path):
+    ui = tmp_path / "assets" / "fairygui" / "ui"
+    ui.mkdir(parents=True)
+    (ui / "Card_fui.bank").write_bytes(b"bank")
+    (ui / "Card_fui.bytes").write_bytes(b"bytes")
+    (ui / "Battle_fui.bytes").write_bytes(b"bytes")
+
+    catalog = discover_game_materials(tmp_path)
+
+    assert [group.package_name for group in catalog.atlases] == ["Battle", "Card"]
+    assert catalog.atlases[1].source_path == str(ui / "Card_fui.bytes")
+
+
+def test_material_discovery_uses_fgui_magic_for_irregular_package_name(tmp_path):
+    ui = tmp_path / "assets" / "fairygui" / "ui"
+    ui.mkdir(parents=True)
+    package = ui / "MysteryPackage.bin"
+    package.write_bytes(b"FGUI" + b"not a complete package")
+    (ui / "MysteryPackage_atlas0.png").write_bytes(b"atlas")
+
+    catalog = discover_game_materials(tmp_path)
+
+    assert [group.package_name for group in catalog.atlases] == ["MysteryPackage"]
+    assert catalog.atlases[0].sprite_paths == (str(ui / "MysteryPackage_atlas0.png"),)
+
+
+def test_material_discovery_classifies_lottery_and_passport_standalone_resources(tmp_path):
+    lottery = tmp_path / "assets" / "art" / "texturesingle" / "lotterybg" / "LotteryBg_042.png"
+    passport = tmp_path / "assets" / "fairygui" / "ui" / "PassportPic_preview.png"
+    lottery.parent.mkdir(parents=True)
+    passport.parent.mkdir(parents=True)
+    lottery.write_bytes(b"lottery")
+    passport.write_bytes(b"passport")
+
+    catalog = discover_game_materials(tmp_path)
+
+    assert [(record.kind, record.display_name) for record in catalog.standalone] == [
+        ("lottery-bg", "LotteryBg_042"),
+        ("passport-pic", "PassportPic_preview"),
+    ]
+
+
+def test_game_material_export_uses_stable_directories_and_reports_failures(tmp_path):
+    burst_path = tmp_path / "burst_head" / "10080.png"
+    burst_path.parent.mkdir(parents=True)
+    burst_path.write_bytes(b"head")
+    atlas_path = tmp_path / "assets" / "fairygui" / "ui" / "Card_fui.bytes"
+    atlas_path.parent.mkdir(parents=True)
+    atlas_path.write_bytes(b"bytes")
+    catalog = GameMaterialCatalog(
+        burst_heads=(GameMaterialRecord("burst-head", str(burst_path), "10080", "head-fp"),),
+        atlases=(AtlasResourceGroup("Card", str(atlas_path), ()),),
+        unmatched=(),
+    )
+    calls = []
+
+    def splitter(source_path, destination_dir, is_override_exists=True):
+        calls.append((source_path, destination_dir, is_override_exists))
+        raise RuntimeError("atlas parse failed")
+
+    summary = export_game_materials(catalog, tmp_path / "output", splitter)
+
+    assert (tmp_path / "output" / "game_material" / "burst-head" / "10080.png").is_file()
+    assert calls == [(str(atlas_path), str(tmp_path / "output" / "game_material" / "fgui" / "Card"), False)]
+    assert summary.failed == 1
+    assert "atlas parse failed" in summary.diagnostics[0]
+
+
+def test_game_material_export_reports_current_item_progress(tmp_path):
+    burst_path = tmp_path / "burst-head" / "10080.png"
+    atlas_path = tmp_path / "raw" / "Card_fui.bytes"
+    burst_path.parent.mkdir(parents=True)
+    atlas_path.parent.mkdir(parents=True)
+    burst_path.write_bytes(b"head")
+    atlas_path.write_bytes(b"atlas")
+    catalog = GameMaterialCatalog(
+        burst_heads=(GameMaterialRecord("burst-head", str(burst_path), "10080", "head-fp"),),
+        atlases=(AtlasResourceGroup("Card", str(atlas_path), ()),),
+        unmatched=(),
+    )
+    progress = []
+
+    export_game_materials(
+        catalog,
+        tmp_path / "output",
+        lambda *args: None,
+        progress_callback=lambda current, total, label: progress.append((current, total, label)),
+    )
+
+    assert progress[0] == (0, 2, "burst-head/10080")
+    assert progress[-1] == (2, 2, "fgui/Card")
+
+
+def test_burst_head_export_adds_deterministic_suffix_without_overwriting_source(tmp_path):
+    first = tmp_path / "burst-head" / "10080.png"
+    second = tmp_path / "other" / "10080.png"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    output = tmp_path / "output" / "game_material" / "burst-head"
+    output.mkdir(parents=True)
+    existing = output / "10080.png"
+    existing.write_bytes(b"existing")
+
+    catalog = GameMaterialCatalog(
+        burst_heads=(
+            GameMaterialRecord("burst-head", str(first), "10080", "first-fp"),
+            GameMaterialRecord("burst-head", str(second), "10080", "second-fp"),
+        ),
+        atlases=(),
+        unmatched=(),
+    )
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.exported == 2
+    assert existing.read_bytes() == b"existing"
+    assert (output / "10080_first-fp.png").read_bytes() == b"first"
+    assert (output / "10080_second-fp.png").read_bytes() == b"second"
+
+
+def test_burst_head_export_is_idempotent_for_the_same_source_and_fingerprint(tmp_path):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"head")
+    catalog = discover_game_materials(source.parents[1])
+    output = tmp_path / "output"
+
+    first = export_game_materials(catalog, output, lambda *args: None)
+    first_files = sorted(path.name for path in (output / "game_material" / "burst-head").glob("*.png"))
+    second_catalog = discover_game_materials(source.parents[1])
+    second = export_game_materials(second_catalog, output, lambda *args: None)
+    second_files = sorted(path.name for path in (output / "game_material" / "burst-head").glob("*.png"))
+
+    assert first.exported == second.exported == 1
+    assert first.failed == second.failed == 0
+    assert first_files == second_files == ["10080.png"]
+
+
+def test_export_game_materials_preserves_standalone_materials_in_separate_output_dirs(tmp_path):
+    lottery = tmp_path / "raw" / "LotteryBg_042.png"
+    passport = tmp_path / "raw" / "PassportPic_preview.png"
+    lottery.parent.mkdir(parents=True)
+    lottery.write_bytes(b"lottery")
+    passport.write_bytes(b"passport")
+    catalog = GameMaterialCatalog(
+        burst_heads=(),
+        atlases=(),
+        unmatched=(),
+        standalone=(
+            GameMaterialRecord("lottery-bg", str(lottery), lottery.stem, "lottery-fp"),
+            GameMaterialRecord("passport-pic", str(passport), passport.stem, "passport-fp"),
+        ),
+    )
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.exported == 2
+    assert list((tmp_path / "output" / "game_material" / "lottery-bg").glob("*.png"))
+    assert list((tmp_path / "output" / "game_material" / "passport-pic").glob("*.png"))
+
+
+def test_export_game_materials_routes_typed_fgui_package_to_typed_output_dir(tmp_path):
+    source = tmp_path / "raw" / "PassportPic_fui.bytes"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"package")
+    catalog = GameMaterialCatalog(
+        burst_heads=(),
+        atlases=(AtlasResourceGroup("PassportPic", str(source), (), "passport-pic"),),
+        unmatched=(),
+    )
+    calls = []
+
+    def splitter(source_path, destination_dir, is_override_exists=True):
+        calls.append((source_path, destination_dir, is_override_exists))
+
+    summary = export_game_materials(catalog, tmp_path / "output", splitter)
+
+    assert summary.failed == 0
+    assert calls == [(str(source), str(tmp_path / "output" / "game_material" / "passport-pic" / "PassportPic"), False)]
+
+
+def test_burst_head_manifest_save_failure_retry_does_not_duplicate_or_overwrite_sources(tmp_path, monkeypatch):
+    first = tmp_path / "burst-head" / "10080.png"
+    second = tmp_path / "other" / "10080.png"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_bytes(b"first source")
+    second.write_bytes(b"second source")
+    catalog = GameMaterialCatalog(
+        burst_heads=(
+            GameMaterialRecord("burst-head", str(first), "10080", "first-fingerprint"),
+            GameMaterialRecord("burst-head", str(second), "10080", "second-fingerprint"),
+        ),
+        atlases=(),
+        unmatched=(),
+    )
+    output = tmp_path / "output"
+    real_save = material_catalog._save_burst_manifest
+    save_attempts = 0
+
+    def fail_once(output_dir, entries):
+        nonlocal save_attempts
+        save_attempts += 1
+        if save_attempts == 1:
+            raise OSError("manifest disk full")
+        return real_save(output_dir, entries)
+
+    monkeypatch.setattr(material_catalog, "_save_burst_manifest", fail_once)
+
+    first_summary = export_game_materials(catalog, output, lambda *args: None)
+    output_dir = output / "game_material" / "burst-head"
+    first_files = sorted(path.name for path in output_dir.glob("*.png"))
+    first_contents = sorted(path.read_bytes() for path in output_dir.glob("*.png"))
+
+    second_summary = export_game_materials(catalog, output, lambda *args: None)
+    second_files = sorted(path.name for path in output_dir.glob("*.png"))
+    second_contents = sorted(path.read_bytes() for path in output_dir.glob("*.png"))
+
+    assert first_summary.failed == 1
+    assert any("manifest save failed" in diagnostic for diagnostic in first_summary.diagnostics)
+    assert second_summary.failed == 0
+    assert first_files == second_files
+    assert first_contents == second_contents == [b"first source", b"second source"]
+    assert len(second_files) == 2
+    assert save_attempts == 2
+
+
+def test_burst_head_source_update_manifest_save_failure_retry_reuses_new_target(tmp_path, monkeypatch):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"old source")
+    output = tmp_path / "output"
+
+    old_catalog = discover_game_materials(source.parents[1])
+    assert export_game_materials(old_catalog, output, lambda *args: None).failed == 0
+
+    source.write_bytes(b"new source")
+    new_catalog = discover_game_materials(source.parents[1])
+    real_save = material_catalog._save_burst_manifest
+    save_attempts = 0
+
+    def fail_once(output_dir, entries):
+        nonlocal save_attempts
+        save_attempts += 1
+        if save_attempts == 1:
+            raise OSError("manifest disk full")
+        return real_save(output_dir, entries)
+
+    monkeypatch.setattr(material_catalog, "_save_burst_manifest", fail_once)
+    output_dir = output / "game_material" / "burst-head"
+    failed_retry = export_game_materials(new_catalog, output, lambda *args: None)
+    files_after_failure = sorted(
+        (path.name, path.read_bytes())
+        for path in output_dir.iterdir()
+        if path.suffix == ".png" or path.name.endswith(".burst-head.json")
+    )
+
+    successful_retry = export_game_materials(new_catalog, output, lambda *args: None)
+    files_after_success = sorted(
+        (path.name, path.read_bytes())
+        for path in output_dir.iterdir()
+        if path.suffix == ".png" or path.name.endswith(".burst-head.json")
+    )
+
+    assert failed_retry.failed == 1
+    assert any("manifest save failed" in diagnostic for diagnostic in failed_retry.diagnostics)
+    assert successful_retry.failed == 0
+    assert files_after_success == files_after_failure
+    assert sorted(path.name for path in output_dir.glob("*.png")) == ["10080.png", f"10080_{new_catalog.burst_heads[0].fingerprint[:12]}.png"]
+    assert sorted(path.read_bytes() for path in output_dir.glob("*.png")) == [b"new source", b"old source"]
+    assert save_attempts == 2
+
+
+def test_burst_head_sidecar_save_failure_retry_leaves_no_partial_target(tmp_path, monkeypatch):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"head")
+    catalog = discover_game_materials(source.parents[1])
+    output = tmp_path / "output"
+    real_save = material_catalog._save_burst_sidecar
+    sidecar_attempts = 0
+
+    def fail_once(target, source_path, fingerprint):
+        nonlocal sidecar_attempts
+        sidecar_attempts += 1
+        if sidecar_attempts == 1:
+            raise OSError("sidecar disk full")
+        return real_save(target, source_path, fingerprint)
+
+    monkeypatch.setattr(material_catalog, "_save_burst_sidecar", fail_once)
+
+    first = export_game_materials(catalog, output, lambda *args: None)
+    output_dir = output / "game_material" / "burst-head"
+    assert first.failed == 1
+    assert not list(output_dir.glob("*.png"))
+    assert not list(output_dir.glob("*.burst-head.json"))
+    assert any("sidecar disk full" in diagnostic for diagnostic in first.diagnostics)
+
+    second = export_game_materials(catalog, output, lambda *args: None)
+
+    assert second.failed == 0
+    assert sorted(path.name for path in output_dir.glob("*.png")) == ["10080.png"]
+    assert sorted(path.name for path in output_dir.glob("*.burst-head.json")) == ["10080.png.burst-head.json"]
+    assert (output_dir / "10080.png").read_bytes() == b"head"
+    assert sidecar_attempts == 2
+
+
+def test_burst_head_manifest_rejects_multiple_sources_for_one_output(tmp_path):
+    first = tmp_path / "material" / "burst-head" / "first.png"
+    second = tmp_path / "other" / "burst-head" / "second.png"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    output_dir = tmp_path / "output" / "game_material" / "burst-head"
+    output_dir.mkdir(parents=True)
+    shared = output_dir / "shared.png"
+    shared.write_bytes(b"existing")
+    (output_dir / ".burst-head-manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    str(first): {"fingerprint": "first-fp", "output": shared.name},
+                    str(second): {"fingerprint": "second-fp", "output": shared.name},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    catalog = GameMaterialCatalog(
+        burst_heads=(
+            GameMaterialRecord("burst-head", str(first), "first", "first-fp"),
+            GameMaterialRecord("burst-head", str(second), "second", "second-fp"),
+        ),
+        atlases=(),
+        unmatched=(),
+    )
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.exported == 0
+    assert summary.failed >= 1
+    assert any("output" in diagnostic.lower() and "source" in diagnostic.lower() for diagnostic in summary.diagnostics)
+    assert sorted(path.name for path in output_dir.glob("*.png")) == ["shared.png"]
+    assert shared.read_bytes() == b"existing"
+
+
+@pytest.mark.parametrize(
+    "manifest_bytes",
+    [b"\xff", b"{", json.dumps({"version": 1, "entries": []}).encode("utf-8")],
+    ids=["unicode", "json", "structure"],
+)
+def test_corrupt_burst_manifest_is_reported_without_erasing_existing_output(tmp_path, manifest_bytes):
+    source = tmp_path / "material" / "burst-head" / "10080.png"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"new source")
+    output = tmp_path / "output" / "game_material" / "burst-head"
+    output.mkdir(parents=True)
+    existing = output / "10080.png"
+    existing.write_bytes(b"existing output")
+    (output / ".burst-head-manifest.json").write_bytes(manifest_bytes)
+    catalog = discover_game_materials(source.parents[1])
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.failed >= 1
+    assert any("manifest" in diagnostic.lower() for diagnostic in summary.diagnostics)
+    assert existing.read_bytes() == b"existing output"
+
+
+def test_missing_sources_are_reported_without_erasing_existing_output(tmp_path):
+    output = tmp_path / "output" / "game_material" / "burst-head"
+    output.mkdir(parents=True)
+    existing = output / "keep.png"
+    existing.write_bytes(b"keep")
+    missing = tmp_path / "burst-head" / "missing.png"
+    catalog = GameMaterialCatalog(
+        burst_heads=(GameMaterialRecord("burst-head", str(missing), "missing", "missing-fp"),),
+        atlases=(),
+        unmatched=(),
+    )
+
+    summary = export_game_materials(catalog, tmp_path / "output", lambda *args: None)
+
+    assert summary.failed == 1
+    assert "missing" in summary.diagnostics[0].lower()
+    assert existing.read_bytes() == b"keep"
+
+
+def test_preview_service_discovers_and_exports_game_materials(tmp_path):
+    service = PreviewService(tmp_path / "material", tmp_path / "output" / "character")
+    burst = tmp_path / "material" / "burst-head" / "10080.png"
+    burst.parent.mkdir(parents=True)
+    burst.write_bytes(b"head")
+    calls = []
+
+    def splitter(source_path, destination_dir, is_override_exists=True):
+        calls.append((source_path, destination_dir, is_override_exists))
+
+    catalog = service.discover_game_materials()
+    summary = service.export_game_materials(catalog, splitter)
+
+    assert len(catalog.burst_heads) == 1
+    assert summary.exported == 1
+    assert calls == []
+
+
+def test_preview_service_uses_uipackage_tool_splitter_by_default(tmp_path, monkeypatch):
+    service = PreviewService(tmp_path / "material", tmp_path / "output" / "character")
+    source = tmp_path / "material" / "assets" / "fairygui" / "ui" / "Card_fui.bytes"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"bytes")
+    calls = []
+
+    def splitter(source_path, destination_dir, is_override_exists=True):
+        calls.append((source_path, destination_dir, is_override_exists))
+
+    monkeypatch.setattr(UIPackageTool, "split_atlas_to_package_dir", splitter)
+    service.export_game_materials()
+
+    assert calls == [(str(source), str(tmp_path / "output" / "game_material" / "fgui" / "Card"), False)]

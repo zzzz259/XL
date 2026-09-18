@@ -8,7 +8,7 @@ from pathlib import Path
 from .bundle_selector import select_audio_bundles, select_lua_bundles
 from app.shared.contracts import ImportResult
 
-from .spec import CATEGORY_DIRS, normalise_categories
+from .spec import CATEGORY_ROOTS, normalise_categories
 
 
 class ImporterService:
@@ -64,6 +64,10 @@ class ImporterService:
             for category in ("lua", "audio")
             if category in selected and category in completed
         )
+        preview_selected = "all" in selected or bool({"character", "fgui"} & selected)
+        preview_completed = "all" in completed or bool({"character", "fgui"} & completed)
+        if preview_selected and preview_completed:
+            postprocess = frozenset({*postprocess, "preview"})
         return ImportResult(
             categories=selected,
             completed_categories=completed,
@@ -78,7 +82,7 @@ class ImporterService:
     @staticmethod
     def category_for_material_path(relative_path: str) -> str | None:
         value = str(relative_path).replace("\\", "/").strip("/")
-        for category, directory in CATEGORY_DIRS.items():
-            if value == directory or value.startswith(f"{directory}/"):
+        for category, directories in CATEGORY_ROOTS.items():
+            if any(value == directory or value.startswith(f"{directory}/") for directory in directories):
                 return category
         return None

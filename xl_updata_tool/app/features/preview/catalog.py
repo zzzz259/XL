@@ -8,13 +8,24 @@ def build_skel_map(material_dir: str) -> dict[str, tuple[str, str]]:
     result = {}
     if not os.path.isdir(material_dir):
         return result
-    for root, _dirs, files in os.walk(material_dir):
-        for filename in files:
-            if not filename.endswith(".skel"):
+    for root, dirs, files in os.walk(material_dir):
+        dirs.sort()
+        for filename in sorted(files):
+            if filename.endswith(".skel.bytes"):
+                base = filename[:-len(".skel.bytes")]
+                atlas_candidates = (f"{base}.atlas", f"{base}.atlas.txt")
+            elif filename.endswith(".skel"):
+                base = os.path.splitext(filename)[0]
+                atlas_candidates = (f"{base}.atlas", f"{base}.atlas.txt")
+            else:
                 continue
-            base = os.path.splitext(filename)[0]
             skel_path = os.path.join(root, filename)
-            result[base] = (skel_path, os.path.join(root, f"{base}.atlas"))
+            atlas_path = next(
+                (os.path.join(root, candidate) for candidate in atlas_candidates
+                 if os.path.isfile(os.path.join(root, candidate))),
+                os.path.join(root, atlas_candidates[0]),
+            )
+            result[base] = (skel_path, atlas_path)
     return result
 
 
@@ -25,8 +36,13 @@ def scan_cardspine_roles(material_dir: str) -> list[str]:
         return []
     for root, _dirs, files in os.walk(material_dir):
         for filename in files:
-            if filename.endswith(".skel"):
+            if filename.endswith(".skel.bytes"):
+                role = filename[:-len(".skel.bytes")]
+            elif filename.endswith(".skel"):
                 role = os.path.splitext(filename)[0]
+            else:
+                continue
+            if role:
                 if not role.endswith("_bg"):
                     roles.add(role)
     return sorted(roles)

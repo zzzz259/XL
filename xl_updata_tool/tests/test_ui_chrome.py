@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QObject, QPoint, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget, QTreeWidget
 
@@ -13,6 +14,7 @@ from app.ui.main_window import MainWindow
 from app.features.audio.controller import AudioController
 from app.features.audio.page import AudioPage
 from app.features.audio.service import AudioService
+from app.features.audio.tree import populate_audio_directory
 from app.features.characters.page import CharacterPage
 from app.features.preview.page import PreviewPage
 from app.features.versions.page import VersionPage
@@ -86,6 +88,66 @@ def test_auto_update_routes_through_version_controller(monkeypatch):
 
     window.runtime.shell_contribution.schedule_update_check.assert_called_once_with()
     check_update.assert_called_once_with()
+
+
+def test_check_update_button_feedback_locks_and_restores(qapp):
+    window = MainWindow.__new__(MainWindow)
+    window.btn_check = QPushButton("检查更新")
+    window._check_icon_spin = None
+    window._icon = lambda _name: None
+
+    window._on_check_state_changed(True)
+    assert not window.btn_check.isEnabled()
+    assert window.btn_check.text() == "检查更新中..."
+
+    window._on_check_state_changed(False)
+    assert window.btn_check.isEnabled()
+    assert window.btn_check.text() == "检查更新"
+
+
+def test_check_update_button_replaces_existing_qtawesome_spin(monkeypatch, qapp):
+    class FakeSpin:
+        instances = []
+
+        def __init__(self, parent, interval, step):
+            self.parent = parent
+            self.interval = interval
+            self.step = step
+            self.started = False
+            self.stopped = False
+            self.__class__.instances.append(self)
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            self.stopped = True
+
+    fake_qta = SimpleNamespace(
+        Spin=FakeSpin,
+        icon=lambda *_args, **_kwargs: QIcon(),
+    )
+    monkeypatch.setattr("app.ui.main_window.QT_AWESOME_AVAILABLE", True)
+    monkeypatch.setattr("app.ui.main_window.qta", fake_qta)
+    window = MainWindow.__new__(MainWindow)
+    window.btn_check = QPushButton("检查更新")
+    window._check_icon_spin = None
+    window._icon = lambda _name: QIcon()
+
+    window._on_check_state_changed(True)
+    first_spin = window._check_icon_spin
+    window._on_check_state_changed(True)
+    second_spin = window._check_icon_spin
+
+    assert first_spin.stopped is True
+    assert second_spin is not first_spin
+    assert second_spin.started is True
+    assert second_spin.interval == 80
+    assert second_spin.step == 30
+
+    window._on_check_state_changed(False)
+    assert second_spin.stopped is True
+    assert window._check_icon_spin is None
 
 
 def test_version_page_visibility_controls_whole_page(qapp):
@@ -231,6 +293,31 @@ def test_audio_checkbox_indicator_toggles_reliably(qapp):
     controller.page.close()
 
 
+def test_checking_audio_marks_the_selected_leaf_read_immediately(qapp, tmp_path):
+    audio_path = tmp_path / "audio" / "album" / "专辑" / "track.wav"
+    audio_path.parent.mkdir(parents=True)
+    audio_path.write_bytes(b"audio")
+
+    controller = _build_audio_controller(qapp, tmp_path)
+    audio_files = controller.service.load_catalog()
+    controller._on_catalog_loaded(audio_files)
+    root = controller.page.audio_table.topLevelItem(0)
+    populate_audio_directory(root, controller._catalog_index, controller.service.format_size)
+    album = root.child(0)
+    populate_audio_directory(album, controller._catalog_index, controller.service.format_size)
+    leaf = album.child(0)
+    assert leaf.text(5) == "新"
+
+    controller.on_item_clicked(leaf, 0)
+    qapp.processEvents()
+
+    assert leaf.checkState(0) == Qt.Checked
+    assert leaf.data(0, Qt.UserRole)["unread"] is False
+    assert leaf.text(5) == ""
+    assert controller.service.has_unread is False
+    controller.page.close()
+
+
 def test_audio_directory_selection_checks_descendants_and_ctrl_adds(qapp):
     controller = _build_audio_controller(qapp)
     controller._audio_files = [
@@ -338,7 +425,7 @@ def test_audio_unread_marker_propagates_to_outer_folders(qapp):
 
 
 def test_mark_all_audio_read_updates_leaf_data_and_all_parent_markers(qapp, tmp_path):
-    audio_dir = tmp_path / "output" / "audio"
+    audio_dir = tmp_path / "audio"
     first_path = audio_dir / "voice" / "064" / "cn" / "064_in_01.wav"
     second_path = audio_dir / "album" / "第五专辑" / "event.wav"
     first_path.parent.mkdir(parents=True)
@@ -346,10 +433,24 @@ def test_mark_all_audio_read_updates_leaf_data_and_all_parent_markers(qapp, tmp_
     first_path.write_bytes(b"cn")
     second_path.write_bytes(b"bgm")
     controller = _build_audio_controller(qapp, tmp_path)
-    controller.load_catalog()
+    audio_files = controller.service.load_catalog()
+    controller._on_catalog_loaded(audio_files)
+
+    def expand_directories(item):
+        populate_audio_directory(item, controller._catalog_index, controller.service.format_size)
+        for index in range(item.childCount()):
+            child = item.child(index)
+            if child.data(0, Qt.UserRole + 1):
+                expand_directories(child)
+
+    for index in range(controller.page.audio_table.topLevelItemCount()):
+        expand_directories(controller.page.audio_table.topLevelItem(index))
+
     controller.mark_all_read()
 
-    assert all(not item.data(0, Qt.UserRole)["unread"] for item in controller._audio_file_items)
+    leaves = [item for item in _walk_tree(controller.page.audio_table) if item.data(0, Qt.UserRole)]
+    assert leaves
+    assert all(not item.data(0, Qt.UserRole)["unread"] for item in leaves)
     assert all(item.text(5) == "" for item in _walk_tree(controller.page.audio_table))
     assert all(item.foreground(5).color().name() == TEXT_MUTED for item in _walk_tree(controller.page.audio_table))
 

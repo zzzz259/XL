@@ -12,6 +12,10 @@ import sys
 import time
 import gc
 import shutil
+from dataclasses import dataclass, field
+from collections import defaultdict
+import hashlib
+import json
 
 try:
     from PIL import Image
@@ -21,6 +25,365 @@ except ImportError:
 
 from app.platform.diagnostics import logger
 from app.platform.tool_locator import ToolLocator
+
+
+def _append_explicit_skin(command, skin_name):
+    """Append a CLI skin only when it is not Spine's implicit default skin."""
+    if skin_name and str(skin_name).casefold() != "default":
+        command.extend(["--skins", str(skin_name)])
+
+
+def _append_explicit_skins(command, skin_names):
+    for skin_name in tuple(skin_names or ()):
+        _append_explicit_skin(command, skin_name)
+
+
+def build_spine_export_command(job, spine_cli):
+    """Build a SpineViewerCLI export command from a ``SkinExportJob``.
+
+    A visible skin may consist of several source skeletons (for example the
+    character and its ``_bg`` model).  SpineViewerCLI's native ``merge``
+    command must receive every skeleton and matching atlas in one invocation;
+    do not render those parts independently and composite them afterwards.
+    """
+    raw_records = tuple(getattr(job, "records", ()) or (job.record,))
+    records = tuple(
+        dict.fromkeys(
+            (os.fspath(item.source_skel), os.fspath(item.atlas_path))
+            for item in raw_records
+        )
+    )
+    records = tuple(
+        next(item for item in raw_records if (os.fspath(item.source_skel), os.fspath(item.atlas_path)) == key)
+        for key in records
+    )
+    if not records:
+        records = (job.record,)
+    record = records[0]
+    settings = job.settings
+    normalized_format = str(settings.format).casefold()
+    format_name = {"png": "Png", "mp4": "Mp4", "gif": "Gif"}.get(normalized_format)
+    if format_name is None:
+        raise ValueError(f"Unsupported Spine export format: {settings.format}")
+
+    def _number(value):
+        number = float(value)
+        return str(int(number)) if number.is_integer() else str(number)
+
+    is_merge = len(records) > 1
+    command = [os.fspath(spine_cli), "merge" if is_merge else "export"]
+    command.extend(os.fspath(item.source_skel) for item in records)
+    command.extend(
+        [
+            "-f",
+            format_name,
+            "-o",
+            os.fspath(job.output_path),
+        ]
+    )
+    if is_merge:
+        for item in records:
+            # SpineViewerCLI's variadic ``<skels>`` positional argument has a
+            # parser quirk: the separated ``--atlases <path>`` form is
+            # consumed as an additional skel.  The equals form keeps the
+            # atlas value attached to its option and is required for merge.
+            command.append(f"--atlases={os.fspath(item.atlas_path)}")
+        command.extend(
+            ["--animations", "/".join(str(settings.animation or "idle") for _ in records)]
+        )
+    else:
+        command.extend(
+            [
+                "--animations",
+                str(settings.animation or "idle"),
+                "--atlas",
+                os.fspath(record.atlas_path),
+            ]
+        )
+    command.extend(
+        [
+            "--scale",
+            str(settings.scale),
+            "--max-resolution",
+            str(settings.max_resolution),
+            "--margin",
+            str(settings.margin),
+            "--time",
+            _number(settings.time_offset),
+        ]
+    )
+    if settings.static:
+        command.extend(["--duration", "0", "--fps", "1"])
+    else:
+        if settings.duration is not None:
+            command.extend(["--duration", _number(settings.duration)])
+        command.extend(["--fps", str(settings.fps)])
+    selected_skins = tuple(getattr(settings, "skins", ()) or ())
+    if selected_skins == ("default",) and record.skin_name and record.skin_name.casefold() != "default":
+        selected_skins = (record.skin_name,)
+    # The native merge subcommand currently has no --skins option.  The
+    # grouped source records are already the selected visible skin; only the
+    # single-model export path can additionally select internal Spine skins.
+    if not is_merge:
+        _append_explicit_skins(command, selected_skins)
+    if settings.physics and settings.physics != "Update":
+        command.extend(["--physics", str(settings.physics)])
+    # ``merge`` does not expose the export command's warm-up option either.
+    if not is_merge and settings.warm_up:
+        command.extend(["--warm-up", _number(settings.warm_up)])
+    if settings.speed != 1:
+        command.extend(["--speed", _number(settings.speed)])
+    # The bundled CLI's ``merge`` command does not define
+    # ``--disable-track-loop``.  Passing that unknown flag is especially
+    # dangerous here because its variadic ``<skels>`` argument treats the
+    # flag as a third skeleton and then reports a misleading animation-count
+    # error.  A static merge already uses duration=0/fps=1, so no flag is
+    # needed; keep it only for the single-model export command.
+    if not is_merge and (settings.static or settings.disable_track_loop):
+        command.append("--disable-track-loop")
+    if not settings.static and settings.loop:
+        command.append("--loop")
+    if settings.transparent:
+        command.extend(["--color", "#00000000"])
+    elif getattr(settings, "background_color", ""):
+        command.extend(["--color", str(settings.background_color)])
+    if settings.pma:
+        command.append("--pma")
+    if not settings.static and normalized_format == "gif":
+        command.append("--loop")
+    return command
+
+
+@dataclass(frozen=True, slots=True)
+class SkinQueryResult:
+    """Result of an authoritative Spine skin metadata query."""
+
+    skin_names: tuple[str, ...] = ()
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int = 0
+    error: str = ""
+    timed_out: bool = False
+    attachment_fingerprints: dict[str, str] = field(default_factory=dict)
+    identity_fingerprints: dict[str, str] = field(default_factory=dict)
+    attachment_fingerprint_kind: str = "unavailable"
+    diagnostic: str = ""
+
+    @property
+    def skins(self) -> tuple[str, ...]:
+        """Compatibility alias for callers that refer to queried skins."""
+        return self.skin_names
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0 and not self.error and not self.timed_out
+
+
+def parse_skin_query_output(stdout) -> tuple[str, ...]:
+    """Parse skin names from ``SpineViewerCLI query --skin`` output.
+
+    The CLI-compatible forms are explicit ``Skin: <name>`` rows, bare
+    identifier entries in a ``Skin:``/``Skins:`` section, and indented or
+    ``-``/``*`` list entries in that section. Non-explicit entries must match
+    the resource-name shape ``[\\w][\\w.-]*`` (no whitespace). Other section
+    headers terminate collection; log, timestamp, path, and status/prose
+    lines are rejected.
+    """
+    names = []
+    seen = set()
+    in_skin_section = False
+
+    def is_noise(value):
+        lowered_value = value.casefold()
+        return bool(
+            re.match(r"^\[?\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[t ]|\])", lowered_value)
+            or re.match(r"^\[?\d{1,2}:\d{2}:\d{2}(?:\]|\s)", lowered_value)
+            or re.match(
+                r"^(?:\[[^\]]+\]\s*)?(?:trace|debug|info|warn|warning|error)\b",
+                lowered_value,
+            )
+            or lowered_value.startswith("spineviewercli")
+            or lowered_value.startswith(
+                ("query ", "loading ", "loaded ", "resolved ", "found ", "status ", "total ")
+            )
+            or lowered_value in {"done", "complete", "completed", "success", "successful", "failed"}
+            or bool(re.search(r"\b(?:completed?|success(?:fully)?|failed?|failure|status|result)\b", lowered_value))
+            or bool(re.match(r"^(?:[a-z]:[\\/]|[\\/]|\.\.?[\\/])", lowered_value))
+        )
+
+    def add_name(value, raw_line, explicit=False):
+        value = value.strip()
+        list_entry = bool(re.match(r"^\s*(?:[-*])\s+", raw_line))
+        if list_entry:
+            value = value[2:].strip()
+        if not value or is_noise(value):
+            return
+        if explicit:
+            valid_shape = bool(re.fullmatch(r"[\w][\w.-]*(?:[ \t]+[\w][\w.-]*)*", value))
+        else:
+            valid_shape = bool(re.fullmatch(r"[\w][\w.-]*", value))
+        if valid_shape and value not in seen:
+            names.append(value)
+            seen.add(value)
+
+    def header_name(value):
+        value = value.strip()
+        if value.startswith("[") and value.endswith("]"):
+            return value[1:-1].strip().casefold()
+        if value.endswith(":"):
+            return value[:-1].strip().casefold()
+        return value.casefold() if value.casefold() in {
+            "skin", "skins", "skin name", "skin names",
+        } else None
+
+    for raw_line in str(stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        lowered = line.casefold()
+        if re.fullmatch(r">+\s*skins\s*>+", lowered):
+            in_skin_section = True
+            continue
+        if in_skin_section and re.fullmatch(r"<+", lowered):
+            in_skin_section = False
+            continue
+        if in_skin_section and lowered == "name":
+            continue
+        skin_row = re.match(r"^skin\s*:\s*(.*)$", line, flags=re.IGNORECASE)
+        if skin_row:
+            value = skin_row.group(1).strip()
+            if value:
+                add_name(value, raw_line, explicit=True)
+                in_skin_section = False
+            else:
+                in_skin_section = True
+            continue
+        if lowered.startswith("attachment:"):
+            continue
+        header = header_name(line)
+        if header in {"skin", "skins", "skin name", "skin names"}:
+            in_skin_section = True
+            continue
+        if header is not None:
+            in_skin_section = False
+            continue
+        if not in_skin_section or re.match(
+            r"^(?:\[[a-z]+\]|(?:trace|debug|info|warn|warning|error)\b|spineviewercli\b)",
+            lowered,
+        ):
+            continue
+        add_name(line, raw_line)
+    return tuple(names)
+
+
+def _parse_attachment_query_data(stdout):
+    """Parse ``Attachment: skin=...;slot=...;name=...`` identity rows."""
+    attachment_rows = defaultdict(list)
+    for raw_line in str(stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line.casefold().startswith("attachment:"):
+            continue
+        values = {}
+        for component in line.split(":", 1)[1].split(";"):
+            if "=" not in component:
+                continue
+            key, value = component.split("=", 1)
+            key = key.strip().casefold()
+            value = " ".join(value.strip().replace("\\", "/").split())
+            if key and value:
+                values[key] = value
+        skin_name = values.pop("skin", None)
+        if skin_name and values:
+            attachment_rows[skin_name].append(tuple(sorted(values.items())))
+
+    fingerprints = {}
+    for skin_name, rows in attachment_rows.items():
+        payload = json.dumps(sorted(rows), ensure_ascii=False, separators=(",", ":"))
+        fingerprints[skin_name] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return fingerprints
+
+
+def _source_skin_identity(skel_path, atlas_path, skin_name):
+    identity = {
+        "source_skel": os.path.abspath(os.fspath(skel_path)).replace("\\", "/"),
+        "atlas_path": os.path.abspath(os.fspath(atlas_path)).replace("\\", "/"),
+        "skin_name": skin_name,
+    }
+    payload = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+class SpineQueryRunner:
+    """Run SpineViewerCLI metadata queries without hiding process failures."""
+
+    def __init__(self, spine_cli=None, timeout=15):
+        self.spine_cli = os.fspath(spine_cli or ToolLocator.create().spineviewer_cli())
+        self.timeout = timeout
+
+    def query_skins(self, skel_path, atlas_path) -> SkinQueryResult:
+        # The CLI runs with its own tool directory as cwd. Always pass
+        # absolute resource paths so relative AppContext/test paths are not
+        # resolved against ``tools/SpineViewer``.
+        skel_path = os.path.abspath(os.fspath(skel_path))
+        atlas_path = os.path.abspath(os.fspath(atlas_path))
+        command = [
+            self.spine_cli,
+            "query",
+            str(skel_path),
+            "--atlas",
+            str(atlas_path),
+            "--skin",
+        ]
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=os.path.dirname(self.spine_cli) or None,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                env=ToolLocator.create().subprocess_env(),
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            stdout = proc.stdout or ""
+            stderr = proc.stderr or ""
+            skin_names = parse_skin_query_output(stdout) if proc.returncode == 0 else ()
+            attachment_fingerprints = _parse_attachment_query_data(stdout) if proc.returncode == 0 else {}
+            identity_fingerprints = {
+                name: _source_skin_identity(skel_path, atlas_path, name) for name in skin_names
+            }
+            attachment_kind = "attachment_set" if attachment_fingerprints else (
+                "source_skin_identity" if skin_names else "unavailable"
+            )
+            diagnostic = ""
+            if skin_names and not attachment_fingerprints:
+                diagnostic = (
+                    "SpineViewerCLI skin output did not expose attachment sets; "
+                    "attachment fingerprint unavailable; using source/skin identity fallback"
+                )
+            elif attachment_fingerprints.keys() != set(skin_names):
+                diagnostic = "SpineViewerCLI returned attachment data for only some skins"
+            return SkinQueryResult(
+                skin_names=skin_names,
+                stdout=stdout,
+                stderr=stderr,
+                returncode=proc.returncode,
+                error=("SpineViewerCLI query failed" if proc.returncode else ""),
+                attachment_fingerprints=attachment_fingerprints,
+                identity_fingerprints=identity_fingerprints,
+                attachment_fingerprint_kind=attachment_kind,
+                diagnostic=diagnostic,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return SkinQueryResult(
+                stdout=str(getattr(exc, "stdout", "") or ""),
+                stderr=str(getattr(exc, "stderr", "") or ""),
+                returncode=-1,
+                error=f"SpineViewerCLI query timed out after {self.timeout}s",
+                timed_out=True,
+                diagnostic="SpineViewerCLI skin query timed out",
+            )
+        except Exception as exc:
+            return SkinQueryResult(returncode=-1, error=str(exc))
 
 
 def extract_character_id(base_name):
@@ -109,7 +472,6 @@ def composite_with_offset(char_path, bg_path, offset_xy, output_path):
         char_img = Image.open(char_path).convert("RGBA")
         bg_img = Image.open(bg_path).convert("RGBA")
         dx, dy = int(round(offset_xy[0])), int(round(offset_xy[1]))
-        # 画布范围：负偏移需要扩展左上角
         min_x = min(0, dx)
         min_y = min(0, dy)
         w = max(char_img.width, bg_img.width + dx) - min_x
@@ -120,8 +482,37 @@ def composite_with_offset(char_path, bg_path, offset_xy, output_path):
         canvas.save(output_path, "PNG")
         logger.info(f"偏移合成成功: {output_path} (offset={offset_xy})")
         return True
-    except Exception as e:
-        logger.error(f"偏移合成失败: {e}", exc_info=True)
+    except Exception as error:
+        logger.error(f"偏移合成失败: {error}", exc_info=True)
+        return False
+
+
+def composite_png_layers(image_paths, output_path, offsets=None):
+    """Alpha-composite an ordered list of rendered Spine layers."""
+    if not PILLOW_AVAILABLE:
+        logger.warning("Pillow 未安装，跳过多部件图片合成")
+        return False
+    try:
+        images = [Image.open(path).convert("RGBA") for path in image_paths]
+        if not images:
+            return False
+        positions = tuple(offsets or ((0, 0) for _ in images))
+        if len(positions) != len(images):
+            raise ValueError("layer offset count does not match image count")
+        min_x = min(int(round(position[0])) for position in positions)
+        min_y = min(int(round(position[1])) for position in positions)
+        max_x = max(int(round(position[0])) + image.width for position, image in zip(positions, images))
+        max_y = max(int(round(position[1])) + image.height for position, image in zip(positions, images))
+        canvas = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
+        for image, position in zip(images, positions):
+            canvas.alpha_composite(
+                image,
+                (int(round(position[0])) - min_x, int(round(position[1])) - min_y),
+            )
+        canvas.save(output_path, "PNG")
+        return True
+    except Exception as error:
+        logger.error("多部件图片合成失败: %s", error, exc_info=True)
         return False
 
 
@@ -129,14 +520,41 @@ def composite_with_offset(char_path, bg_path, offset_xy, output_path):
 # 动画名称获取
 # ---------------------------------------------------------------------------
 
-def get_animation_names(skel_path, atlas_path, spine_cli):
-    """使用 SpineViewerCLI query 获取模型的动画名称列表"""
-    animations = []
+def _parse_animation_table(output):
+    animations = {}
+    in_animation_section = False
+    for raw_line in str(output or "").splitlines():
+        line = raw_line.strip()
+        lowered = line.casefold()
+        if not line or line.startswith('#'):
+            continue
+        if "animations" in lowered and ">" in line:
+            in_animation_section = True
+            continue
+        if in_animation_section and line.startswith("<"):
+            break
+        if not in_animation_section or lowered in {"name", "name\tduration"}:
+            continue
+        fields = [field.strip() for field in line.split("\t")]
+        name = fields[0]
+        if not name or not re.fullmatch(r"[\w.-]+", name):
+            continue
+        try:
+            duration = float(fields[1]) if len(fields) > 1 else None
+        except ValueError:
+            duration = None
+        animations[name] = duration
+    return animations
+
+
+def get_animation_metadata(skel_path, atlas_path, spine_cli):
+    """Return animation names and CLI-reported durations keyed by name."""
+    metadata = {}
     try:
         cmd = [
             spine_cli, "query", skel_path,
             "--atlas", atlas_path,
-            "--animations",
+            "--animation",
         ]
         logger.debug(f"查询动画列表: {' '.join(cmd)}")
         proc = subprocess.run(
@@ -150,27 +568,29 @@ def get_animation_names(skel_path, atlas_path, spine_cli):
 
         output = proc.stdout.strip()
         if proc.returncode == 0 and output:
-            for line in output.split('\n'):
-                line = line.strip()
-                if line and not line.startswith('#') and not line.startswith('Animation'):
-                    animations.append(line)
+            metadata = _parse_animation_table(output)
 
-        if not animations:
+        if not metadata:
             logger.debug(f"CLI 未解析到动画列表，尝试从 .skel 文件提取。stdout: {output[:200]}")
     except subprocess.TimeoutExpired:
         logger.warning(f"查询动画列表超时: {skel_path}")
     except Exception as e:
         logger.warning(f"查询动画列表失败: {e}")
 
-    if not animations:
-        animations = extract_motion_names(skel_path)
-        if animations:
-            logger.info(f"从 .skel 文件提取到 {len(animations)} 个动画名称: {animations}")
+    if not metadata:
+        names = extract_motion_names(skel_path)
+        if names:
+            metadata = {name: None for name in names}
+            logger.info(f"从 .skel 文件提取到 {len(names)} 个动画名称: {names}")
 
-    if not animations:
-        animations = ["idle"]
+    if not metadata:
+        metadata = {"idle": None}
+    return metadata
 
-    return animations
+
+def get_animation_names(skel_path, atlas_path, spine_cli):
+    """使用 SpineViewerCLI query 获取模型的动画名称列表"""
+    return list(get_animation_metadata(skel_path, atlas_path, spine_cli))
 
 
 def extract_motion_names(skel_path):
@@ -194,7 +614,15 @@ def extract_motion_names(skel_path):
 # 动画帧导出
 # ---------------------------------------------------------------------------
 
-def export_animation_frames(skel_path, atlas_path, spine_cli, output_dir, base_name, animations):
+def export_animation_frames(
+    skel_path,
+    atlas_path,
+    spine_cli,
+    output_dir,
+    base_name,
+    animations,
+    skin_name=None,
+):
     """导出一个 .skel 文件的所有动画帧
 
     文件名格式: {base_name}_{animation}.png (idle 动画命名为 {base_name}.png)
@@ -214,8 +642,14 @@ def export_animation_frames(skel_path, atlas_path, spine_cli, output_dir, base_n
         logger.info(f"导出动画: {anim_name} -> {output_path}")
 
         export_ok = run_spine_export(
-            spine_cli, skel_path, atlas_path, output_path,
-            scale, max_resolution, anim_name
+            spine_cli,
+            skel_path,
+            atlas_path,
+            output_path,
+            scale,
+            max_resolution,
+            anim_name,
+            skin_name,
         )
 
         if export_ok:
@@ -247,7 +681,6 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
             "-o", output_path,
             "-a", "idle",
             "--atlas", atlas_path,
-            "--skins", skin_name,
             "--scale", str(scale),
             "--max-resolution", str(max_resolution),
             "--time", "0",
@@ -255,6 +688,7 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
             "--fps", "1",
             "--pma",
         ]
+        _append_explicit_skin(cmd, skin_name)
 
         try:
             logger.debug(f"导出皮肤: {skin_name} -> {output_path}")
@@ -300,7 +734,16 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
     return skin_success
 
 
-def run_spine_export(spine_cli, skel_path, atlas_path, output_path, scale, max_resolution, animation):
+def run_spine_export(
+    spine_cli,
+    skel_path,
+    atlas_path,
+    output_path,
+    scale,
+    max_resolution,
+    animation,
+    skin_name=None,
+):
     """执行 SpineViewerCLI export 命令（带 --pma 尝试 + fallback）"""
     cmd_pma = [
         spine_cli, "export", skel_path,
@@ -315,6 +758,7 @@ def run_spine_export(spine_cli, skel_path, atlas_path, output_path, scale, max_r
         "--fps", "1",
         "--pma",
     ]
+    _append_explicit_skin(cmd_pma, skin_name)
 
     try:
         logger.debug(f"执行命令: {' '.join(cmd_pma)}")
@@ -346,6 +790,7 @@ def run_spine_export(spine_cli, skel_path, atlas_path, output_path, scale, max_r
             "--duration", "1",
             "--fps", "1",
         ]
+        _append_explicit_skin(cmd_no_pma, skin_name)
         logger.debug(f"执行命令 (无--pma): {' '.join(cmd_no_pma)}")
         proc = subprocess.run(
             cmd_no_pma,
@@ -446,8 +891,7 @@ def export_spine_media_file(spine_cli, skel_path, atlas_path,
         ]
         if pma:
             cmd.append("--pma")
-        if skin_name:
-            cmd.extend(["--skins", skin_name])
+        _append_explicit_skin(cmd, skin_name)
         if fmt == "gif":
             cmd.append("--loop")
 

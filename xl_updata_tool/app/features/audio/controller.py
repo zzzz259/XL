@@ -244,11 +244,24 @@ class AudioController(QObject):
             self._selected_names.clear()
         if checked:
             self._selected_names.update(target_names)
+            self._mark_audio_names_read(target_names)
         else:
             self._selected_names.difference_update(target_names)
         self._apply_visible_selection()
         self.page.audio_table.clearSelection()
         self._update_selection_status()
+
+    def _mark_audio_names_read(self, names: set[str]) -> None:
+        """勾选音频时同步持久化未读状态和当前已加载的叶节点。"""
+        changed = False
+        for name in names:
+            relative_name = str(name).replace("\\", "/")
+            changed = self.service.mark_read(relative_name) or changed
+            filepath = os.path.join(str(self.service.audio_dir), *relative_name.split("/"))
+            self._update_loaded_audio_unread(False, filepath)
+        if changed:
+            refresh_audio_tree_unread(self.page.audio_table, self._catalog_index)
+            self.unread_changed.emit()
 
     def _apply_visible_selection(self) -> None:
         table = self.page.audio_table
@@ -305,11 +318,21 @@ class AudioController(QObject):
             if info
         ]
 
+    def _update_loaded_audio_unread(self, unread: bool, filepath: str | None = None) -> None:
+        """同步已加载树叶节点的未读状态，避免 Qt 节点保留旧字典副本。"""
+        target = os.path.normcase(os.path.abspath(filepath)) if filepath else None
+        for root in self._audio_file_items:
+            for item in iter_audio_leaves(root):
+                info = item.data(0, Qt.UserRole) or {}
+                if target is not None:
+                    current = os.path.normcase(os.path.abspath(str(info.get("path", ""))))
+                    if current != target:
+                        continue
+                item.setData(0, Qt.UserRole, {**info, "unread": unread})
+
     def mark_all_read(self) -> None:
         changed = self.service.mark_all_read()
-        for item in self._audio_file_items:
-            info = item.data(0, Qt.UserRole) or {}
-            item.setData(0, Qt.UserRole, {**info, "unread": False})
+        self._update_loaded_audio_unread(False)
         refresh_audio_tree_unread(self.page.audio_table, self._catalog_index)
         self.unread_changed.emit()
         self.status_changed.emit("已将全部音频标记为已读" if changed else "当前没有未读音频")
@@ -362,11 +385,7 @@ class AudioController(QObject):
         self._audio_player.play()
         relative_name = os.path.relpath(filepath, str(self.service.audio_dir))
         self.service.mark_read(relative_name)
-        for item in self._audio_file_items:
-            info = item.data(0, Qt.UserRole) or {}
-            if info.get("path") == filepath:
-                item.setData(0, Qt.UserRole, {**info, "unread": False})
-                break
+        self._update_loaded_audio_unread(False, filepath)
         refresh_audio_tree_unread(self.page.audio_table, self._catalog_index)
         self.unread_changed.emit()
         self.page.audio_now_playing.setText(f"正在播放：{filename}")

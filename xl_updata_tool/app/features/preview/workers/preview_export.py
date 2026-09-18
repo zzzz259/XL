@@ -2,13 +2,17 @@
 """图片预览导出工作线程（.skel → PNG，含配对合成 + 皮肤导出 + FGUI 图集切割）"""
 
 import os
+import json
+import threading
+from dataclasses import asdict
 
 from PySide6.QtCore import QThread, Signal
 
 from app.platform.diagnostics import logger, timed
-from app.platform.paths import DATA_DIR, get_base_dir
+from app.platform.paths import DATA_DIR
 
 from app.features.preview.fgui import UIPackageTool
+from app.features.preview.material_catalog import discover_game_materials, export_game_materials
 from app.features.preview.adapter import (
     find_paired_files,
     composite_images,
@@ -20,6 +24,7 @@ from app.features.preview.adapter import (
     extract_character_id,
 )
 from app.features.preview.prefab_parser import parse_prefab, compute_pixel_offset, build_cardspine_bundle_map
+from app.features.preview.export_plan import ExportSettings
 
 
 class PreviewExportWorker(QThread):
@@ -28,28 +33,113 @@ class PreviewExportWorker(QThread):
     在后台线程执行 SpineViewerCLI 导出，避免阻塞 UI。
     支持去重：force=False 时跳过已存在的 PNG。
     """
-    progress = Signal(int, int)            # current, total
+    progress = Signal(int, int)            # legacy current, total
+    skin_progress = Signal(int, int, str)  # skin-job current, total, label
+    finished = Signal(str)                 # summary for identity-based jobs
     export_finished = Signal(bool, str)    # success, summary
     error = Signal(str)
 
-    def __init__(self, material_dir, output_dir, spine_cli, force=False, selected_roles=None, parent=None):
+    def __init__(self, jobs, settings=None, runner=None, force=False, selected_roles=None, parent=None):
         super().__init__(parent)
-        self.material_dir = material_dir
-        self.output_dir = output_dir
-        self.spine_cli = spine_cli
-        self.force = force
-        self.selected_roles = selected_roles
+        self._job_mode = callable(runner) and (
+            isinstance(settings, ExportSettings)
+            or (
+                bool(jobs)
+                and all(
+                    hasattr(job, "record") and hasattr(job, "settings")
+                    for job in jobs
+                )
+            )
+        )
+        if self._job_mode:
+            self.jobs = tuple(jobs)
+            self.settings = settings
+            self.runner = runner
+        else:
+            self.material_dir = jobs
+            self.output_dir = settings
+            self.spine_cli = runner
+            self.force = force
+            self.selected_roles = selected_roles
         self._cancelled = False
+        self._active = False
+        self._active_lock = threading.Lock()
+
+    def start(self, priority=None):
+        """Start once while active, returning whether a task was started."""
+        with self._active_lock:
+            if self._active:
+                return False
+            self._active = True
+        try:
+            if priority is None:
+                super().start()
+            else:
+                super().start(priority)
+        except Exception:
+            with self._active_lock:
+                self._active = False
+            raise
+        return True
 
     def cancel(self):
         self._cancelled = True
 
     def run(self):
         try:
-            self._do_export()
+            if self._job_mode:
+                self._run_jobs()
+            else:
+                self._do_export()
         except Exception as e:
             logger.error(f"预览导出线程异常: {e}", exc_info=True)
             self.error.emit(str(e))
+        finally:
+            with self._active_lock:
+                self._active = False
+
+    def _run_jobs(self):
+        total = len(self.jobs)
+        success_count = 0
+        failure_count = 0
+        cancelled = False
+
+        for current, job in enumerate(self.jobs, start=1):
+            if self._cancelled:
+                cancelled = True
+                break
+
+            label = (
+                f"{job.record.resource_family}/{job.settings.format}: "
+                f"{job.record.display_name or job.record.skin_name}"
+            )
+            self.skin_progress.emit(current, total, label)
+            job.output_path.parent.mkdir(parents=True, exist_ok=True)
+            if self.runner(job):
+                success_count += 1
+                self._write_metadata(job)
+            else:
+                failure_count += 1
+
+        if self._cancelled:
+            cancelled = True
+        summary = f"{success_count} succeeded, {failure_count} failed"
+        if cancelled:
+            summary += ", cancelled"
+        self.finished.emit(summary)
+        self.export_finished.emit(success_count > 0 and failure_count == 0 and not cancelled, summary)
+
+    @staticmethod
+    def _write_metadata(job):
+        metadata = {
+            "record": asdict(job.record),
+            "records": [asdict(record) for record in getattr(job, "records", (job.record,))],
+            "settings": asdict(job.settings),
+            "export_mode": getattr(job, "export_mode", "custom"),
+            "output_path": str(job.output_path),
+        }
+        metadata_path = job.output_path.with_name(job.output_path.name + ".metadata.json")
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _find_assets_map(self):
         """扫描 data/bundles/*/_map/assets_map.json，返回最新一个的路径（用于角色→bundle 映射）"""
@@ -123,7 +213,13 @@ class PreviewExportWorker(QThread):
 
             # 去重检查：force=False 时跳过已存在且非空的 PNG
             main_output = os.path.join(char_subdir, f"{base_name}.png")
-            if not self.force and os.path.exists(main_output) and os.path.getsize(main_output) > 0:
+            is_battlespine = "battlespine" in os.path.normcase(skel_path)
+            if (
+                not self.force
+                and not is_battlespine
+                and os.path.exists(main_output)
+                and os.path.getsize(main_output) > 0
+            ):
                 logger.info(f"跳过已存在的 PNG: {base_name}.png")
                 skipped_count += 1
                 continue
@@ -138,7 +234,13 @@ class PreviewExportWorker(QThread):
 
             # 导出 idle 动画作为主图
             export_ok = export_animation_frames(
-                skel_path, atlas_path, self.spine_cli, char_subdir, base_name, animations
+                skel_path,
+                atlas_path,
+                self.spine_cli,
+                char_subdir,
+                base_name,
+                animations,
+                "motion_stander" if is_battlespine else None,
             )
             if export_ok:
                 success_count += 1
@@ -224,37 +326,27 @@ class PreviewExportWorker(QThread):
         return success_count > 0
 
     def _export_fgui_atlas(self):
-        """处理所有 FGUI 图集：将 *_fui.bank 重命名为 *_fui.bytes，逐个切割到 output/fgui/<包名>/"""
-        fgui_dir = os.path.join(DATA_DIR, "material", "assets", "fairygui", "ui")
-        if not os.path.isdir(fgui_dir):
-            logger.info("FGUI 目录不存在，跳过切割")
+        """Cut every FGUI package from staging into the final output tree.
+
+        ``.bank`` is a container suffix used by the exporter; the parser only
+        needs the bytes, so the source is passed through without renaming or
+        mutating anything under ``data/material``.
+        """
+        if not os.path.isdir(self.material_dir):
+            logger.info("素材目录不存在，跳过游戏素材导出")
             return
-
-        # 先重命名 .bank → .bytes
-        for fname in os.listdir(fgui_dir):
-            if fname.endswith("_fui.bank"):
-                try:
-                    os.rename(
-                        os.path.join(fgui_dir, fname),
-                        os.path.join(fgui_dir, fname[:-5] + ".bytes"),
-                    )
-                    logger.info(f"已重命名 .bank 为 .bytes: {fname}")
-                except Exception as e:
-                    logger.error(f"重命名 .bank 失败: {fname}: {e}")
-
-        # 逐个包切割
-        bytes_files = sorted(f for f in os.listdir(fgui_dir) if f.endswith("_fui.bytes"))
-        if not bytes_files:
-            logger.info("未找到 *_fui.bytes 文件，跳过 FGUI 切割")
-            return
-
-        fgui_output_dir = os.path.join(get_base_dir(), "output", "fgui")
-        os.makedirs(fgui_output_dir, exist_ok=True)
-
-        for fname in bytes_files:
-            byte_path = os.path.join(fgui_dir, fname)
-            try:
-                UIPackageTool.split_atlas(byte_path, fgui_output_dir, is_override_exists=False)
-                logger.info(f"FGUI 图集切割完成: {fname}")
-            except Exception as e:
-                logger.error(f"FGUI 图集切割失败 {fname}: {e}")
+        catalog = discover_game_materials(self.material_dir)
+        output_root = os.path.dirname(os.path.abspath(self.output_dir))
+        summary = export_game_materials(
+            catalog,
+            output_root,
+            UIPackageTool.split_atlas_to_package_dir,
+        )
+        for diagnostic in summary.diagnostics:
+            logger.warning("游戏素材导出: %s", diagnostic)
+        logger.info(
+            "游戏素材导出完成: 成功 %s，失败 %s，输出=%s",
+            summary.exported,
+            summary.failed,
+            output_root,
+        )

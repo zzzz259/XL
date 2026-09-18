@@ -30,3 +30,29 @@ def test_scan_roles_filters_background_and_returns_sorted_names(tmp_path):
 
     assert scan_cardspine_roles(str(cardspine)) == ["alpha", "zeta"]
     assert scan_preview_roles(str(preview)) == ["role_a", "role_b"]
+
+
+def test_build_skel_map_duplicate_stems_use_sorted_last_entry(tmp_path):
+    first = tmp_path / "a" / "shared.skel"
+    second = tmp_path / "b" / "shared.skel"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+
+    assert build_skel_map(str(tmp_path))["shared"] == (
+        str(second), str(second.with_suffix(".atlas"))
+    )
+
+
+def test_skel_map_supports_unity_exported_spine_suffixes(tmp_path):
+    material = tmp_path / "material"
+    material.mkdir()
+    skel = material / "battlespine_10098_1.skel.bytes"
+    atlas = material / "battlespine_10098_1.atlas.txt"
+    skel.write_bytes(b"")
+    atlas.write_text("atlas", encoding="utf-8")
+
+    assert build_skel_map(str(material)) == {
+        "battlespine_10098_1": (str(skel), str(atlas))
+    }

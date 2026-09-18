@@ -27,6 +27,11 @@ class ExportSpec:
     key: str
     material_relative: str
     rules: tuple[ExportRule, ...]
+    material_relatives: tuple[str, ...] = ()
+
+    @property
+    def material_roots(self) -> tuple[str, ...]:
+        return (self.material_relative, *self.material_relatives)
 
     def commands(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
         return tuple((f"导出 {self.key}", rule.cli_args()) for rule in self.rules)
@@ -41,10 +46,38 @@ EXPORT_SPECS = {
         "assets/art/models",
         (
             ExportRule("TextAsset", container_regex=r"assets/art/models/cardspine"),
-            ExportRule("Texture2D", r"^(?!.*_[en]$)", r"assets/art/models/cardspine"),
-            ExportRule("TextAsset", r"battlespine_1\d{4}", r"assets/art/models/battlespine"),
-            ExportRule("Texture2D", r"battlespine_1\d{4}(?!.*_[en]$)", r"assets/art/models/battlespine"),
+            ExportRule(
+                "Texture2D",
+                r"^(?!.*(?:[_\-.](?:n|e|normal|normalmap))$).*",
+                r"assets/art/models/cardspine",
+            ),
+            ExportRule("TextAsset", container_regex=r"assets/art/models/battlespine"),
+            ExportRule(
+                "Texture2D",
+                r"^(?!.*(?:[_\-.](?:n|e|normal|normalmap))$).*",
+                r"assets/art/models/battlespine",
+            ),
+            ExportRule(
+                "TextAsset",
+                container_regex=r"assets/art/models/ui_spine/prefab/eventcovers",
+            ),
+            ExportRule(
+                "Texture2D",
+                r"^(?!.*(?:[_\-.](?:n|e|normal|normalmap))$).*",
+                r"assets/art/models/ui_spine/prefab/eventcovers",
+            ),
+            ExportRule(
+                "Texture2D",
+                r"^(?!.*(?:[_\-.](?:n|e|normal|normalmap))$).*",
+                r"assets/art/texturesingle/bursthead",
+            ),
+            ExportRule(
+                "Texture2D",
+                r"^(?!.*(?:[_\-.](?:n|e|normal|normalmap))$).*",
+                r"assets/art/texturesingle/lotterybg",
+            ),
         ),
+        ("assets/art/texturesingle/bursthead", "assets/art/texturesingle/lotterybg"),
     ),
     "fgui": ExportSpec(
         "fgui",
@@ -68,6 +101,7 @@ EXPORT_SPECS = {
 }
 
 CATEGORY_DIRS = {key: spec.material_relative for key, spec in EXPORT_SPECS.items()}
+CATEGORY_ROOTS = {key: spec.material_roots for key, spec in EXPORT_SPECS.items()}
 
 
 def normalise_categories(categories) -> frozenset[str]:

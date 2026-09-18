@@ -364,8 +364,19 @@ class UIPackage:
 class UIPackageTool:
     @staticmethod
     def split_atlas(byte_file: str, export_dir: str, is_override_exists: bool = True):
+        return UIPackageTool._split_atlas(byte_file, export_dir, is_override_exists, explicit_package_dir=False)
+
+    @staticmethod
+    def split_atlas_to_package_dir(byte_file: str, package_dir: str, is_override_exists: bool = True):
+        """Split an atlas directly into an explicitly selected package directory."""
+        return UIPackageTool._split_atlas(byte_file, package_dir, is_override_exists, explicit_package_dir=True)
+
+    @staticmethod
+    def _split_atlas(byte_file: str, export_dir: str, is_override_exists: bool, explicit_package_dir: bool):
+        byte_file = os.fspath(byte_file)
+        export_dir = os.fspath(export_dir)
         base_name = os.path.splitext(os.path.basename(byte_file))[0]
-        out_path = os.path.join(export_dir, base_name)
+        out_path = export_dir if explicit_package_dir else os.path.join(export_dir, base_name)
         os.makedirs(out_path, exist_ok=True)
         logger.info(f"FGUI 图集切割: {byte_file} -> {out_path}")
         info_output_file = os.path.join(out_path, f"{base_name}_cut_info.json")

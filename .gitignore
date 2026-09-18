@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+pytest-cache-files-*/
 
 # 运行时数据（数据库、下载的 bundle、临时文件）
 xl_updata_tool/data/
@@ -31,6 +33,7 @@ xl_updata_tool/tools/AssetStudio/Maps/
 
 # Codex 过程性计划与设计文档
 /docs/superpowers/
+/xl_updata_tool/docs/superpowers/
 
 # XL 项目构建产物、发布产物与私有运行时
 /xl_updata_tool/build/

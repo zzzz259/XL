@@ -14,19 +14,25 @@ class ImportPostprocessWorkflow:
     直接连接 Audio/Characters 的处理完成信号。
     """
 
-    def __init__(self, importer, audio, characters, registry):
+    def __init__(self, importer, audio, characters, registry, preview=None):
         self.importer = importer
         self.audio = audio
         self.characters = characters
         self.registry = registry
+        self.preview = preview
         self._latest_result: ImportResult | None = None
         self._message = ""
         self._progress_dialog = None
         self._finish: Callable[..., None] | None = None
+        self._audio_error = None
         self.importer.result_ready.connect(self._remember_result)
         self.audio.processing_finished.connect(self._on_audio_finished)
         self.audio.processing_cancelled.connect(self._on_audio_cancelled)
         self.audio.processing_error.connect(self._on_audio_error)
+        if self.preview is not None:
+            self.preview.processing_finished.connect(self._on_preview_finished)
+            self.preview.processing_cancelled.connect(self._on_preview_cancelled)
+            self.preview.processing_error.connect(self._on_preview_error)
 
     def _remember_result(self, result: ImportResult) -> None:
         self._latest_result = result
@@ -42,11 +48,11 @@ class ImportPostprocessWorkflow:
         if "audio" in self.registry.pending(result):
             self.audio.start_decrypt(force=False, shared_dialog=progress_dialog)
             return
-        self._finish_success(result)
+        self._start_next_postprocess(result)
 
     def _on_audio_finished(self, shared) -> None:
         if shared and self._finish is not None:
-            self._finish_success(self._latest_result or self.importer.last_result)
+            self._start_next_postprocess(self._latest_result or self.importer.last_result)
 
     def _on_audio_cancelled(self, shared) -> None:
         if shared and self._finish is not None:
@@ -59,10 +65,36 @@ class ImportPostprocessWorkflow:
 
     def _on_audio_error(self, error_message, shared) -> None:
         if shared and self._finish is not None:
-            self._finish_success(
-                self._latest_result or self.importer.last_result,
-                audio_error=error_message,
+            self._audio_error = error_message
+            self._start_next_postprocess(self._latest_result or self.importer.last_result)
+
+    def _start_next_postprocess(self, result) -> None:
+        pending = self.registry.pending(result)
+        if "preview" in pending and self.preview is not None:
+            self.preview.start_postprocess(force=False, shared_dialog=self._progress_dialog)
+            return
+        self._finish_success(result, audio_error=self._audio_error)
+
+    def _on_preview_finished(self, shared) -> None:
+        if shared and self._finish is not None:
+            self._finish_success(self._latest_result or self.importer.last_result, audio_error=self._audio_error)
+
+    def _on_preview_cancelled(self, shared) -> None:
+        if shared and self._finish is not None:
+            self._finish(
+                False,
+                "图片资源预处理已取消，已完成的文件已保留，可稍后重新处理图片资源。",
+                cancelled=True,
             )
+            self._clear()
+
+    def _on_preview_error(self, error_message, shared) -> None:
+        if shared and self._finish is not None:
+            self._finish(
+                False,
+                f"图片资源预处理失败：{error_message}",
+            )
+            self._clear()
 
     def _finish_success(self, result, audio_error=None) -> None:
         if self._finish is None:
@@ -80,3 +112,4 @@ class ImportPostprocessWorkflow:
         self._message = ""
         self._progress_dialog = None
         self._finish = None
+        self._audio_error = None

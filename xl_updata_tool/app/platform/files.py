@@ -1,10 +1,35 @@
 """文件落盘辅助函数。"""
 
+import errno
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
+
+
+_REPLACE_RETRY_DELAYS = (0.1, 0.25, 0.5, 1.0, 2.0, 4.0)
+
+
+def _is_transient_access_denied(error: OSError) -> bool:
+    return isinstance(error, PermissionError) and (
+        getattr(error, "winerror", None) == 5
+        or getattr(error, "errno", None) == errno.EACCES
+    )
+
+
+def _replace_with_retry(source: Path, destination: Path) -> None:
+    """重试 Windows 扫描器等外部进程造成的短暂目录占用。"""
+    for attempt, delay in enumerate((0.0, *_REPLACE_RETRY_DELAYS)):
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(source, destination)
+            return
+        except OSError as error:
+            if not _is_transient_access_denied(error) or attempt == len(_REPLACE_RETRY_DELAYS):
+                raise
 
 
 def atomic_write_bytes(
@@ -53,13 +78,13 @@ def replace_directory(source: str | os.PathLike[str], destination: str | os.Path
             tempfile.mkdtemp(prefix=f".{destination_path.name}.backup-", dir=destination_path.parent)
         )
         backup_path.rmdir()
-        os.replace(destination_path, backup_path)
+        _replace_with_retry(destination_path, backup_path)
 
     try:
-        os.replace(source_path, destination_path)
+        _replace_with_retry(source_path, destination_path)
     except Exception:
         if backup_path is not None and not destination_path.exists():
-            os.replace(backup_path, destination_path)
+            _replace_with_retry(backup_path, destination_path)
         raise
     else:
         if backup_path is not None:

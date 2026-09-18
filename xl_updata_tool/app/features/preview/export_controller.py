@@ -17,6 +17,7 @@ from app.features.preview.adapter import (
     find_composite_sources,
     is_composite_png,
 )
+from app.features.preview.spine_adapter import SpineQueryRunner
 from app.features.preview.worker import BatchExportWorker, CompositeExportWorker
 from app.platform.diagnostics import logger
 from app.platform.paths import get_base_dir
@@ -30,6 +31,53 @@ def _page(controller):
 
 def _status(controller, message):
     controller.status_changed.emit(message)
+
+
+def _resource_family_for_path(path):
+    name = os.path.basename(os.fspath(path)).casefold()
+    if name.startswith("battlespine"):
+        return "battlespine"
+    if name.startswith("cardspine"):
+        return "cardspine"
+    if name.startswith("eventcovers"):
+        return "eventcovers"
+    return None
+
+
+def _preferred_skin_name(settings, resource_family, explicit_skin=None):
+    """Resolve the skin used by the legacy single/batch export route."""
+    explicit = str(explicit_skin or "").strip()
+    if explicit and explicit.casefold() != "default":
+        return explicit
+    configured = tuple(
+        str(name).strip()
+        for name in (settings or {}).get("skins", ())
+        if str(name).strip()
+    )
+    if configured:
+        if str(resource_family or "").casefold() == "battlespine":
+            for name in configured:
+                if name.casefold() != "default":
+                    return name
+            return "motion_stander"
+        return configured[0]
+    if str(resource_family or "").casefold() == "battlespine":
+        return "motion_stander"
+    return explicit or None
+
+
+def _query_skin_names(spine_cli, skel_path, atlas_path, resource_family):
+    """Load internal skin names for legacy export dialogs."""
+    try:
+        result = SpineQueryRunner(spine_cli).query_skins(skel_path, atlas_path)
+        if result.ok and result.skin_names:
+            return result.skin_names
+        logger.warning("无法查询 Spine 皮肤，使用预设回退: %s", result.error or result.diagnostic)
+    except Exception as error:
+        logger.warning("查询 Spine 皮肤失败，使用预设回退: %s", error)
+    if str(resource_family or "").casefold() == "battlespine":
+        return ("default", "motion_stander")
+    return ()
 
 
 def export_composite_video(controller, png_path, default_format="MP4", skin_name=None):
@@ -54,7 +102,13 @@ def export_composite_video(controller, png_path, default_format="MP4", skin_name
                             "SpineViewerCLI.exe 未找到，请确认 tools/SpineViewer/ 目录完整")
         return
 
-    dialog = ExportSettingsDialog(role_skel, role_atlas, default_format, _page(controller))
+    dialog = ExportSettingsDialog(
+        role_skel,
+        role_atlas,
+        default_format,
+        _page(controller),
+        resource_family="cardspine",
+    )
     if dialog.exec() != QDialog.Accepted:
         return
     settings = dialog.get_settings()
@@ -96,10 +150,20 @@ def export_with_dialog(controller, skel_path, atlas_path, default_format="MP4", 
                             "SpineViewerCLI.exe 未找到，请确认 tools/SpineViewer/ 目录完整")
         return
 
-    dialog = ExportSettingsDialog(skel_path, atlas_path, default_format, _page(controller))
+    resource_family = _resource_family_for_path(skel_path)
+    skin_names = _query_skin_names(spine_cli, skel_path, atlas_path, resource_family)
+    dialog = ExportSettingsDialog(
+        skel_path,
+        atlas_path,
+        "PNG" if resource_family == "battlespine" else default_format,
+        _page(controller),
+        skin_names=skin_names,
+        resource_family=resource_family,
+    )
     if dialog.exec() != QDialog.Accepted:
         return
     settings = dialog.get_settings()
+    skin_name = _preferred_skin_name(settings, resource_family, skin_name)
     fmt = settings["format"]
     skel_base = os.path.splitext(os.path.basename(skel_path))[0]
     logger.info("导出设置: 格式=%s, 时长=%ss, 帧率=%sfps, 缩放=%sx, 预乘=%s, 皮肤=%s",
@@ -162,7 +226,16 @@ def batch_export_with_dialog(controller, entries_with_png, default_format="MP4")
         )
         first_skel, first_atlas = role_skel or "", role_atlas or ""
 
-    dialog = ExportSettingsDialog(first_skel, first_atlas, default_format, _page(controller))
+    resource_family = _resource_family_for_path(first_skel)
+    skin_names = _query_skin_names(spine_cli, first_skel, first_atlas, resource_family)
+    dialog = ExportSettingsDialog(
+        first_skel,
+        first_atlas,
+        "PNG" if resource_family == "battlespine" else default_format,
+        _page(controller),
+        skin_names=skin_names,
+        resource_family=resource_family,
+    )
     if dialog.exec() != QDialog.Accepted:
         logger.info("批量导出：用户取消设置对话框")
         return

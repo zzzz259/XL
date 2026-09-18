@@ -36,6 +36,8 @@ def test_default_feature_factories_create_isolated_runtime(qapp, tmp_path):
     assert all(feature.controller is not None for feature in features)
     assert features[0].status_signal is not None
     assert features[1].progress_signal is not None
+    assert features[1].badge_signal is not None
+    assert features[1].badge_state is not None
     assert features[2].badge_signal is not None
     assert features[3].badge_signal is not None
 

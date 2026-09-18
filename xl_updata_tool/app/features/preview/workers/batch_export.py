@@ -44,11 +44,15 @@ class BatchExportWorker(QThread):
 
         logger.info(f"批量导出开始：{total} 个文件，格式={fmt}, 动画={animation}, 时长={duration}s, 帧率={fps}, 缩放={scale}, 预乘={pma}")
 
-        ext = ".mp4" if fmt == "mp4" else ".gif"
+        format_name = {"png": "Png", "mp4": "Mp4", "gif": "Gif"}.get(fmt)
+        if format_name is None:
+            logger.error("批量导出不支持的格式: %s", fmt)
+            self.all_finished.emit(0, total)
+            return
+        ext = ".png" if fmt == "png" else (".mp4" if fmt == "mp4" else ".gif")
         output_dir = os.path.join(
             self.project_root,
-            "output",
-            "video" if fmt == "mp4" else "character"
+            "output", "video" if fmt == "mp4" else "character"
         )
         os.makedirs(output_dir, exist_ok=True)
 
@@ -59,6 +63,14 @@ class BatchExportWorker(QThread):
             skel_path = entry[0]
             atlas_path = entry[1]
             skin_name = entry[2] if len(entry) > 2 else None
+            configured_skins = tuple(self.settings.get("skins") or ())
+            if not skin_name or str(skin_name).casefold() == "default":
+                skin_name = configured_skins[0] if configured_skins else skin_name
+            if (
+                (not skin_name or str(skin_name).casefold() == "default")
+                and str(self.settings.get("resource_family", "")).casefold() == "battlespine"
+            ):
+                skin_name = "motion_stander"
 
             skel_base = os.path.splitext(os.path.basename(skel_path))[0]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -70,18 +82,27 @@ class BatchExportWorker(QThread):
             try:
                 cmd = [
                     self.spine_cli, "export", skel_path,
-                    "-f", "Mp4" if fmt == "mp4" else "Gif",
+                    "-f", format_name,
                     "-o", output_path,
-                    "-a", animation,
+                    "--animations", animation,
                     "--atlas", atlas_path,
-                    "--duration", str(duration),
-                    "--fps", str(fps),
+                    "--duration", "0" if fmt == "png" else str(duration),
+                    "--fps", "1" if fmt == "png" else str(fps),
                     "--scale", str(scale),
-                    "--color", "#00000000",
+                    "--max-resolution", str(self.settings.get("max_resolution", 16000)),
+                    "--margin", str(self.settings.get("margin", 10)),
+                    "--time", str(self.settings.get("time_offset", 0)),
+                    "--color", (
+                        "#00000000"
+                        if self.settings.get("transparent", True)
+                        else self.settings.get("background_color", "#7f7f7f")
+                    ),
                 ]
                 if pma:
                     cmd.append("--pma")
-                if skin_name:
+                if fmt == "png" or self.settings.get("disable_track_loop", False):
+                    cmd.append("--disable-track-loop")
+                if skin_name and str(skin_name).casefold() != "default":
                     cmd.extend(["--skins", skin_name])
                 if fmt == "gif":
                     cmd.append("--loop")
