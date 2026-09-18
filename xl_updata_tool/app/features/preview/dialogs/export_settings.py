@@ -10,8 +10,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from ..export_plan import ExportSettings
+
 class ExportSettingsDialog(QDialog):
     """导出参数设置对话框"""
+
+    Rejected = QDialog.DialogCode.Rejected
 
     def __init__(self, skel_path, atlas_path, default_format="MP4", parent=None):
         super().__init__(parent)
@@ -43,14 +47,16 @@ class ExportSettingsDialog(QDialog):
 
         # 输出格式
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["MP4", "GIF"])
-        self.format_combo.setCurrentText(default_format)
+        normalized_format = str(default_format).upper()
+        self.format_combo.addItems(["MP4", "GIF", "PNG"])
+        self.format_combo.setCurrentText(normalized_format if normalized_format in {"MP4", "GIF", "PNG"} else "MP4")
+        self.format_combo.setEnabled(normalized_format != "PNG")
         self.format_combo.currentIndexChanged.connect(self._update_file_label)
         form.addRow("输出格式:", self.format_combo)
 
         # 动画名称
         self.anim_combo = QComboBox()
-        self.anim_combo.addItems(["idle"])
+        self.anim_combo.addItems(["idle", "walk", "run"])
         self.anim_combo.setCurrentText("idle")
         form.addRow("动画名称:", self.anim_combo)
 
@@ -63,19 +69,32 @@ class ExportSettingsDialog(QDialog):
 
         # 帧率
         self.fps_spin = QSpinBox()
-        self.fps_spin.setRange(5, 60)
-        self.fps_spin.setValue(15)
+        self.fps_spin.setRange(1, 60)
+        self.fps_spin.setValue(1 if normalized_format == "PNG" else 15)
         self.fps_spin.setSuffix(" fps")
         form.addRow("帧率:", self.fps_spin)
 
         # 缩放
         self.scale_spin = QSpinBox()
         self.scale_spin.setRange(1, 8)
-        self.scale_spin.setValue(2)
+        self.scale_spin.setValue(4 if normalized_format == "PNG" else 2)
         self.scale_spin.setSuffix("x")
         form.addRow("缩放:", self.scale_spin)
 
         layout.addLayout(form)
+
+        self.max_resolution_spin = QSpinBox()
+        self.max_resolution_spin.setRange(256, 16384)
+        self.max_resolution_spin.setSingleStep(256)
+        self.max_resolution_spin.setValue(8192)
+        self.max_resolution_spin.setSuffix(" px")
+        form.addRow("最大分辨率:", self.max_resolution_spin)
+
+        self.margin_spin = QSpinBox()
+        self.margin_spin.setRange(0, 512)
+        self.margin_spin.setValue(0)
+        self.margin_spin.setSuffix(" px")
+        form.addRow("边距:", self.margin_spin)
 
         # 输出文件路径
         file_header = QLabel("输出文件:")
@@ -91,6 +110,10 @@ class ExportSettingsDialog(QDialog):
         self.pma_checkbox = QCheckBox("启用预乘 Alpha (--pma)")
         self.pma_checkbox.setChecked(True)
         layout.addWidget(self.pma_checkbox)
+
+        self.transparent_checkbox = QCheckBox("透明背景")
+        self.transparent_checkbox.setChecked(True)
+        layout.addWidget(self.transparent_checkbox)
 
         # 自动打开
         self.auto_open_cb = QCheckBox("导出完成后自动打开文件")
@@ -137,3 +160,16 @@ class ExportSettingsDialog(QDialog):
             "auto_open": self.auto_open_cb.isChecked(),
             "file_label": self.file_label.text(),
         }
+
+    def settings(self) -> ExportSettings:
+        """Return the typed settings used by identity-based PNG export."""
+        return ExportSettings(
+            animation=self.anim_combo.currentText().strip() or "idle",
+            scale=self.scale_spin.value(),
+            max_resolution=self.max_resolution_spin.value(),
+            margin=self.margin_spin.value(),
+            transparent=self.transparent_checkbox.isChecked(),
+            pma=self.pma_checkbox.isChecked(),
+            format="Png",
+            fps=self.fps_spin.value(),
+        )

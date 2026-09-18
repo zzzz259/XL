@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QListWidgetItem,
     QListWidget,
@@ -109,6 +110,7 @@ class PreviewPage(QWidget):
     selection_changed = Signal()
     export_requested = Signal(object)
     spine_selection_changed = Signal(object)
+    export_selected_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -189,12 +191,20 @@ class PreviewPage(QWidget):
         self.tabs.spine_tab = QWidget(self.tabs)
         spine_layout = QVBoxLayout(self.tabs.spine_tab)
         spine_layout.setContentsMargins(12, 12, 12, 12)
+        spine_command = QHBoxLayout()
+        self.btn_export_selected = create_action_button("导出选中 Spine", "primary", None, self.tabs.spine_tab)
+        self.btn_export_selected.setObjectName("exportSelectedSpineButton")
+        self.btn_export_selected.setAccessibleName("导出选中 Spine 皮肤")
+        spine_command.addWidget(self.btn_export_selected)
+        spine_command.addStretch()
+        spine_layout.addLayout(spine_command)
         self.spine_tree = PreviewSpineTree(parent=self.tabs.spine_tab)
         spine_layout.addWidget(self.spine_tree, 1)
         self.spine_empty_label = create_empty_state("暂无 Spine 资源", self.tabs.spine_tab)
         self.spine_empty_label.setVisible(True)
         spine_layout.addWidget(self.spine_empty_label)
         self.tabs.add_named_tab(self.tabs.spine_tab, "角色 Spine", "角色 Spine 分页")
+        self.btn_export_selected.clicked.connect(self.export_selected_requested)
 
     def _build_character_tab(self) -> None:
         self.tabs.character_tab = QWidget(self.tabs)

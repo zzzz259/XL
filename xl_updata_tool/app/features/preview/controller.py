@@ -15,6 +15,9 @@ from .item import build_preview_item
 from .page import PreviewPage
 from .service import PreviewService
 from .worker import ImageLoadWorker, PreviewExportWorker
+from .dialogs.export_settings import ExportSettingsDialog
+from .export_plan import ExportSettings, build_export_plan
+from .spine_adapter import build_spine_export_command
 
 
 class PreviewController(QObject):
@@ -35,6 +38,7 @@ class PreviewController(QObject):
         self.image_paths: list[str] = []
         self._image_worker = None
         self._export_worker = None
+        self._selected_export_worker = None
         self._single_composite_worker = None
         self._single_export_worker = None
         self._batch_worker = None
@@ -54,6 +58,14 @@ class PreviewController(QObject):
         self.page.context_menu_requested.connect(self.show_context_menu)
         self.page.item_double_clicked.connect(self.open_item)
         self.page.selection_changed.connect(self.update_status)
+        if hasattr(self.page, "export_selected_requested"):
+            self.page.export_selected_requested.connect(self._on_export_selected_requested)
+
+    def _on_export_selected_requested(self):
+        if self._selected_export_worker is not None:
+            self.cancel_selected_export()
+            return
+        self.start_selected_export()
 
     def load(self):
         """异步加载最终预览图片并刷新角色筛选。"""
@@ -141,6 +153,9 @@ class PreviewController(QObject):
 
     def reload_requested(self):
         """重新选择角色并导出预览图片。"""
+        if self._selected_export_worker is not None:
+            self.cancel_selected_export()
+            return
         from .dialogs.character_select import CharacterSelectDialog
 
         roles = self.service.cardspine_roles()
@@ -206,10 +221,121 @@ class PreviewController(QObject):
         QMessageBox.warning(self.page, "错误", f"预览导出失败:\n{message}")
 
     def cancel_export(self):
+        self.cancel_selected_export()
         if self._export_worker is not None:
             self._export_worker.cancel()
             self._export_worker.wait(2000)
             self._export_worker = None
+
+    def _default_skin_runner(self, spine_cli):
+        def run_job(job):
+            try:
+                command = build_spine_export_command(job, spine_cli)
+                result = subprocess.run(
+                    command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode != 0:
+                    logger.error("Spine 皮肤导出失败: %s", result.stderr.strip())
+                    return False
+                return job.output_path.is_file() and job.output_path.stat().st_size > 0
+            except (OSError, subprocess.SubprocessError) as error:
+                logger.error("Spine 皮肤导出异常: %s", error)
+                return False
+
+        return run_job
+
+    def start_selected_export(self, records=None, settings=None, runner=None) -> bool:
+        """Export checked Spine skins through the identity-based PNG worker."""
+        if self._selected_export_worker is not None:
+            return False
+        records = tuple(records if records is not None else self.page.selected_spine_records())
+        if not records:
+            self.status_changed.emit("未选择任何 Spine 皮肤")
+            return False
+
+        if settings is None:
+            first = records[0]
+            dialog = ExportSettingsDialog(first.source_skel, first.atlas_path, "PNG", self.page)
+            if dialog.exec() != QDialog.Accepted:
+                return False
+            settings = dialog.settings()
+        if not isinstance(settings, ExportSettings):
+            settings = ExportSettings(**settings)
+
+        jobs = build_export_plan(records, settings, self.service.preview_dir)
+        if not jobs:
+            self.status_changed.emit("没有可导出的 Spine 皮肤")
+            return False
+        if runner is None:
+            from app.platform.tool_locator import ToolLocator
+
+            spine_cli = ToolLocator.create().spineviewer_cli()
+            if not os.path.isfile(spine_cli):
+                self._notify_export_error(f"SpineViewerCLI 不存在：{spine_cli}")
+                return False
+            runner = self._default_skin_runner(spine_cli)
+
+        self._selected_export_worker = PreviewExportWorker(
+            jobs,
+            settings=settings,
+            runner=runner,
+            parent=self,
+        )
+        self._selected_export_worker.skin_progress.connect(self._on_selected_export_progress)
+        self._selected_export_worker.finished.connect(self._on_selected_export_summary)
+        self._selected_export_worker.export_finished.connect(self._on_selected_export_finished)
+        self._selected_export_worker.error.connect(self._on_selected_export_error)
+        self.page.btn_reload.setText("取消导出")
+        self.page.btn_reload.setEnabled(True)
+        if hasattr(self.page, "btn_export_selected"):
+            self.page.btn_export_selected.setText("取消导出")
+            self.page.btn_export_selected.setEnabled(True)
+        self.status_changed.emit(f"准备导出 {len(jobs)} 个 Spine 皮肤")
+        self._selected_export_worker.start()
+        return True
+
+    def _on_selected_export_progress(self, current, total, label):
+        self.page.preview_progress.setVisible(True)
+        self.page.preview_progress.setMaximum(total)
+        self.page.preview_progress.setValue(current)
+        self.page.preview_progress.setFormat(f"导出中... {current}/{total}")
+        self.status_changed.emit(f"导出中 [{current}/{total}]: {label}")
+        self.progress_changed.emit(current, total, f"导出 Spine 皮肤: {label}")
+
+    def _on_selected_export_summary(self, summary):
+        self.status_changed.emit(summary)
+
+    def _on_selected_export_error(self, message):
+        self.status_changed.emit(f"导出失败: {message}")
+        self._selected_export_worker = None
+        self._reset_selected_export_ui()
+
+    def _on_selected_export_finished(self, success, summary):
+        self.status_changed.emit(summary if success else f"导出失败: {summary}")
+        self._selected_export_worker = None
+        self._reset_selected_export_ui()
+
+    def _reset_selected_export_ui(self):
+        self.page.btn_reload.setText("重新加载图片")
+        self.page.btn_reload.setEnabled(True)
+        if hasattr(self.page, "btn_export_selected"):
+            self.page.btn_export_selected.setText("导出选中 Spine")
+            self.page.btn_export_selected.setEnabled(True)
+        self.page.preview_progress.setVisible(False)
+
+    def cancel_selected_export(self):
+        worker = self._selected_export_worker
+        if worker is None:
+            return
+        worker.cancel()
+        worker.wait(5000)
+        self._selected_export_worker = None
+        self._reset_selected_export_ui()
+        self.status_changed.emit("导出已取消")
 
     def cancel(self):
         self.cancel_export()
