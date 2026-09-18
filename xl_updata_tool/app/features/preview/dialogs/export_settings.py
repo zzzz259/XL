@@ -48,7 +48,7 @@ class ExportSettingsDialog(QDialog):
         # 输出格式
         self.format_combo = QComboBox()
         normalized_format = str(default_format).upper()
-        self.format_combo.addItems(["MP4", "GIF", "PNG"])
+        self.format_combo.addItems(["PNG"] if normalized_format == "PNG" else ["MP4", "GIF"])
         self.format_combo.setCurrentText(normalized_format if normalized_format in {"MP4", "GIF", "PNG"} else "MP4")
         self.format_combo.setEnabled(normalized_format != "PNG")
         self.format_combo.currentIndexChanged.connect(self._update_file_label)

@@ -58,6 +58,7 @@ def test_dialog_keeps_legacy_video_settings_fields(qapp):
     settings = dialog.get_settings()
 
     assert settings["format"] == "gif"
+    assert [dialog.format_combo.itemText(index) for index in range(dialog.format_combo.count())] == ["MP4", "GIF"]
     assert settings["duration"] == 2
     assert settings["fps"] == 15
     assert settings["scale"] == 2
