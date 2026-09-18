@@ -198,7 +198,8 @@ class PreviewController(QObject):
 
         material_catalog = self.service.discover_game_materials()
         summary = self.service.export_game_materials(material_catalog)
-        self.page.set_game_material_catalog(material_catalog, self.service.resource_state)
+        processed_catalog = self.service.discover_processed_game_materials()
+        self.page.set_game_material_catalog(processed_catalog, self.service.resource_state)
         if summary.failed:
             self.status_changed.emit(
                 f"资源发现完成：导出 {summary.exported} 项，失败 {summary.failed} 项"
