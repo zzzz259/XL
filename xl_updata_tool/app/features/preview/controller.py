@@ -531,6 +531,12 @@ class PreviewController(QObject):
         self.cancel_export()
         self._cancel_image_worker()
 
+    def close(self):
+        """Stop every preview worker before the Qt page is destroyed."""
+        self.cancel_export()
+        self._cancel_image_worker()
+        self.cancel_postprocess()
+
     def _cancel_image_worker(self):
         if self._image_worker is not None:
             self._image_worker.cancel()

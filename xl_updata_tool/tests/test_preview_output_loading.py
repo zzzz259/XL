@@ -19,7 +19,7 @@ def test_preview_load_uses_published_index_instead_of_source_discovery(monkeypat
 
     controller.load()
     app.processEvents()
-    controller.cancel_export()
+    controller.close()
 
     assert calls == []
     assert page.character_output_path.text() == str(tmp_path / "output" / "character")

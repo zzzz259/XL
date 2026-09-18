@@ -309,7 +309,7 @@ class PreviewPage(QWidget):
 
         # Legacy thumbnail list remains available to controller/tests during
         # migration, but the visible character surface is output-backed folders.
-        self.image_list = PreviewImageList()
+        self.image_list = PreviewImageList(self.tabs.character_tab)
         self.image_list.setObjectName("previewImageList")
         self.image_list.setAccessibleName("角色导出立绘列表")
         self.image_list.setViewMode(QListWidget.IconMode)
