@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import os
+
 import pytest
 
 from app.features.preview.spine_adapter import (
@@ -47,6 +49,18 @@ def test_parse_skin_query_output_accepts_indented_and_list_skin_entries():
     )
 
 
+def test_parse_skin_query_output_accepts_spineviewer_banner_format():
+    output = (
+        ">>>>>>>>>>>>>>> Skins >>>>>>>>>>>>>>>\n"
+        "Name\n"
+        "default\n"
+        "motion_angry\n"
+        "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n"
+    )
+
+    assert parse_skin_query_output(output) == ("default", "motion_angry")
+
+
 def test_parse_skin_query_output_ignores_arbitrary_indented_prose():
     assert parse_skin_query_output("Skins:\n  not a skin entry\n") == ()
 
@@ -73,6 +87,21 @@ def test_query_skins_uses_authoritative_skin_command(monkeypatch, tmp_path):
         str(tmp_path / "hero.atlas"),
         "--skin",
     ]
+
+
+def test_query_skins_absolutizes_resources_before_cli_call(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="Skin: base\n", stderr="")
+
+    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    runner = SpineQueryRunner(str(tmp_path / "SpineViewerCLI.exe"))
+    runner.query_skins("relative/hero.skel", "relative/hero.atlas")
+
+    assert calls[0][2] == os.path.abspath("relative/hero.skel")
+    assert calls[0][4] == os.path.abspath("relative/hero.atlas")
 
 
 def test_query_skins_preserves_cli_failure_details(monkeypatch, tmp_path):

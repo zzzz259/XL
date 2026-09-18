@@ -10,6 +10,7 @@ from .catalog import (
     scan_cardspine_roles,
     scan_preview_roles,
 )
+from .resource_catalog import discover_preview_resources
 from .resource_state import PreviewResourceState
 from .fgui_atlas import UIPackageTool
 from .material_catalog import (
@@ -59,6 +60,14 @@ class PreviewService:
 
     def preview_roles(self) -> list[str]:
         return scan_preview_roles(str(self.preview_dir))
+
+    def discover_preview_resources(self, character_data=None, query_runner=None):
+        """Discover Spine files and their internal skins from the staging tree."""
+        return discover_preview_resources(
+            self.material_dir,
+            character_data=character_data,
+            query_runner=query_runner,
+        )
 
     def discover_game_materials(self, metadata=None) -> GameMaterialCatalog:
         return discover_materials(self.material_dir, metadata)

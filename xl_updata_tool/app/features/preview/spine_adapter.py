@@ -154,6 +154,14 @@ def parse_skin_query_output(stdout) -> tuple[str, ...]:
         if not line or line.startswith("#"):
             continue
         lowered = line.casefold()
+        if re.fullmatch(r">+\s*skins\s*>+", lowered):
+            in_skin_section = True
+            continue
+        if in_skin_section and re.fullmatch(r"<+", lowered):
+            in_skin_section = False
+            continue
+        if in_skin_section and lowered == "name":
+            continue
         skin_row = re.match(r"^skin\s*:\s*(.*)$", line, flags=re.IGNORECASE)
         if skin_row:
             value = skin_row.group(1).strip()
@@ -226,6 +234,11 @@ class SpineQueryRunner:
         self.timeout = timeout
 
     def query_skins(self, skel_path, atlas_path) -> SkinQueryResult:
+        # The CLI runs with its own tool directory as cwd. Always pass
+        # absolute resource paths so relative AppContext/test paths are not
+        # resolved against ``tools/SpineViewer``.
+        skel_path = os.path.abspath(os.fspath(skel_path))
+        atlas_path = os.path.abspath(os.fspath(atlas_path))
         command = [
             self.spine_cli,
             "query",

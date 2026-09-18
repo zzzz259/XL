@@ -68,8 +68,35 @@ class PreviewController(QObject):
             return
         self.start_selected_export()
 
+    def discover_resources(self):
+        """Refresh the three resource views and publish game materials.
+
+        ``data/material`` is treated as read-only staging input here.  The
+        material exporter is the only path that writes derived resources, and
+        it always targets the service's output root.
+        """
+        self.status_changed.emit("正在发现角色 Spine、皮肤和游戏素材…")
+        catalog = self.service.discover_preview_resources()
+        self.page.set_spine_catalog(catalog, self.service.resource_state)
+
+        material_catalog = self.service.discover_game_materials()
+        summary = self.service.export_game_materials(material_catalog)
+        self.page.set_game_material_catalog(material_catalog, self.service.resource_state)
+        if summary.failed:
+            self.status_changed.emit(
+                f"资源发现完成：导出 {summary.exported} 项，失败 {summary.failed} 项"
+            )
+        else:
+            self.status_changed.emit(f"资源发现完成：发现 {len(catalog.skins)} 个皮肤")
+        return catalog
+
     def load(self):
         """异步加载最终预览图片并刷新角色筛选。"""
+        try:
+            self.discover_resources()
+        except Exception as error:
+            logger.error("预览资源发现失败: %s", error, exc_info=True)
+            self.status_changed.emit(f"资源发现失败: {error}")
         preview_dir = self.service.ensure_output_dir()
         self.skel_map = self.service.skel_map()
         self._populate_filter()
@@ -148,13 +175,25 @@ class PreviewController(QObject):
         self.start_export_from_tools()
 
     def start_export_from_tools(self, force=False, selected_roles=None) -> bool:
-        """使用项目内 Spine CLI 启动预览导出。"""
+        """Discover internal Spine skins, then export the selected skin records."""
         from app.platform.tool_locator import ToolLocator
 
         spine_cli = ToolLocator.create().spineviewer_cli()
-        self.page.preview_progress.setVisible(True)
-        self.page.preview_progress.setValue(0)
-        return self.start_export(spine_cli, force=force, selected_roles=selected_roles)
+        if not os.path.isfile(spine_cli):
+            self._notify_export_error(f"SpineViewerCLI 不存在：{spine_cli}")
+            return False
+        try:
+            catalog = self.discover_resources()
+        except Exception as error:
+            self._notify_export_error(f"资源发现失败：{error}")
+            return False
+        records = tuple(
+            record
+            for record in catalog.skins.values()
+            if record.status == "ready"
+            and (not selected_roles or record.character_id in set(selected_roles))
+        )
+        return self.start_selected_export(records)
 
     def reload_requested(self):
         """重新选择角色并导出预览图片。"""
@@ -163,7 +202,15 @@ class PreviewController(QObject):
             return
         from .dialogs.character_select import CharacterSelectDialog
 
-        roles = self.service.cardspine_roles()
+        try:
+            catalog = self.discover_resources()
+        except Exception as error:
+            self._notify_export_error(f"资源发现失败：{error}")
+            return
+        roles = sorted(
+            role_id for role_id, records in catalog.characters.items()
+            if role_id and any(record.status == "ready" for record in records)
+        )
         if not roles:
             QMessageBox.warning(self.page, "提示", "未找到角色立绘，请先导入资源")
             return
@@ -175,7 +222,12 @@ class PreviewController(QObject):
             QMessageBox.information(self.page, "提示", "未选择任何角色")
             return
         logger.info("重新加载预览图片，选中 %s 个角色", len(selected))
-        self.start_export_from_tools(force=False, selected_roles=selected)
+        records = tuple(
+            record
+            for record in catalog.skins.values()
+            if record.status == "ready" and record.character_id in selected
+        )
+        self.start_selected_export(records)
 
     def start_export(self, spine_cli: str, force=False, selected_roles=None) -> bool:
         if not self.service.material_dir.is_dir():
@@ -327,6 +379,8 @@ class PreviewController(QObject):
             self.status_changed.emit(summary if success else f"导出失败: {summary}")
         self._selected_export_worker = None
         self._reset_selected_export_ui()
+        if success and self.page.isVisible():
+            self.load()
 
     def _reset_selected_export_ui(self):
         self.page.btn_reload.setText("重新加载图片")

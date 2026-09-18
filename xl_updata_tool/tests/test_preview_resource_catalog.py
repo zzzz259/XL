@@ -102,3 +102,18 @@ def test_resolve_character_id_requires_reliable_identity():
     assert resolve_character_id("assets/cardspine_10080_4.skel", {}) == "10080"
     assert resolve_character_id("assets/unknown_model.skel", {}) is None
     assert resolve_character_id("assets/unknown_model.skel", {"character_id": "10080"}) == "10080"
+
+
+def test_discovery_supports_unity_skel_bytes_and_atlas_txt(tmp_path):
+    skel = tmp_path / "battlespine_10098_1.skel.bytes"
+    atlas = tmp_path / "battlespine_10098_1.atlas.txt"
+    skel.write_bytes(b"skel")
+    atlas.write_text("atlas", encoding="utf-8")
+    runner = FakeQueryRunner(SkinQueryResult(skin_names=("base",)))
+
+    catalog = discover_preview_resources(tmp_path, query_runner=runner)
+
+    record = catalog.characters["10098"][0]
+    assert record.source_skel == str(skel)
+    assert record.atlas_path == str(atlas)
+    assert runner.calls == [(str(skel), str(atlas))]

@@ -10,6 +10,7 @@ from app.features.preview.controller import PreviewController
 from app.features.preview.export_plan import ExportSettings
 from app.features.preview.page import PreviewPage
 from app.features.preview.resource_model import SpineSkinRecord
+from app.features.preview.resource_catalog import discover_preview_resources
 from app.features.preview.service import PreviewService
 
 
@@ -146,4 +147,27 @@ def test_cancelled_settings_dialog_does_not_start_worker(tmp_path, qapp, monkeyp
 
     assert controller.start_selected_export((ready_record(),), runner=RecordingRunner()) is False
     assert controller._selected_export_worker is None
+    page.close()
+
+
+def test_discover_resources_refreshes_spine_and_game_material_views(tmp_path, qapp, monkeypatch):
+    controller, page = make_controller(tmp_path, qapp)
+    spine_catalog = discover_preview_resources(tmp_path / "missing-material")
+    material_catalog = controller.service.discover_game_materials()
+    exported = []
+
+    monkeypatch.setattr(controller.service, "discover_preview_resources", lambda: spine_catalog)
+    monkeypatch.setattr(controller.service, "discover_game_materials", lambda: material_catalog)
+    monkeypatch.setattr(
+        controller.service,
+        "export_game_materials",
+        lambda catalog=None: exported.append(catalog) or type("Summary", (), {"exported": 1, "failed": 0, "diagnostics": ()})(),
+    )
+
+    result = controller.discover_resources()
+
+    assert result == spine_catalog
+    assert exported == [material_catalog]
+    assert page.spine_tree.topLevelItemCount() == 0
+    assert page.material_tree.topLevelItemCount() == 0
     page.close()

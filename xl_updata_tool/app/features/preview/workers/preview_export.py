@@ -9,9 +9,10 @@ from dataclasses import asdict
 from PySide6.QtCore import QThread, Signal
 
 from app.platform.diagnostics import logger, timed
-from app.platform.paths import DATA_DIR, get_base_dir
+from app.platform.paths import DATA_DIR
 
 from app.features.preview.fgui import UIPackageTool
+from app.features.preview.material_catalog import discover_game_materials, export_game_materials
 from app.features.preview.adapter import (
     find_paired_files,
     composite_images,
@@ -299,37 +300,27 @@ class PreviewExportWorker(QThread):
         return success_count > 0
 
     def _export_fgui_atlas(self):
-        """处理所有 FGUI 图集：将 *_fui.bank 重命名为 *_fui.bytes，逐个切割到 output/fgui/<包名>/"""
-        fgui_dir = os.path.join(DATA_DIR, "material", "assets", "fairygui", "ui")
-        if not os.path.isdir(fgui_dir):
-            logger.info("FGUI 目录不存在，跳过切割")
+        """Cut every FGUI package from staging into the final output tree.
+
+        ``.bank`` is a container suffix used by the exporter; the parser only
+        needs the bytes, so the source is passed through without renaming or
+        mutating anything under ``data/material``.
+        """
+        if not os.path.isdir(self.material_dir):
+            logger.info("素材目录不存在，跳过游戏素材导出")
             return
-
-        # 先重命名 .bank → .bytes
-        for fname in os.listdir(fgui_dir):
-            if fname.endswith("_fui.bank"):
-                try:
-                    os.rename(
-                        os.path.join(fgui_dir, fname),
-                        os.path.join(fgui_dir, fname[:-5] + ".bytes"),
-                    )
-                    logger.info(f"已重命名 .bank 为 .bytes: {fname}")
-                except Exception as e:
-                    logger.error(f"重命名 .bank 失败: {fname}: {e}")
-
-        # 逐个包切割
-        bytes_files = sorted(f for f in os.listdir(fgui_dir) if f.endswith("_fui.bytes"))
-        if not bytes_files:
-            logger.info("未找到 *_fui.bytes 文件，跳过 FGUI 切割")
-            return
-
-        fgui_output_dir = os.path.join(get_base_dir(), "output", "fgui")
-        os.makedirs(fgui_output_dir, exist_ok=True)
-
-        for fname in bytes_files:
-            byte_path = os.path.join(fgui_dir, fname)
-            try:
-                UIPackageTool.split_atlas(byte_path, fgui_output_dir, is_override_exists=False)
-                logger.info(f"FGUI 图集切割完成: {fname}")
-            except Exception as e:
-                logger.error(f"FGUI 图集切割失败 {fname}: {e}")
+        catalog = discover_game_materials(self.material_dir)
+        output_root = os.path.dirname(os.path.abspath(self.output_dir))
+        summary = export_game_materials(
+            catalog,
+            output_root,
+            UIPackageTool.split_atlas_to_package_dir,
+        )
+        for diagnostic in summary.diagnostics:
+            logger.warning("游戏素材导出: %s", diagnostic)
+        logger.info(
+            "游戏素材导出完成: 成功 %s，失败 %s，输出=%s",
+            summary.exported,
+            summary.failed,
+            output_root,
+        )

@@ -90,7 +90,12 @@ def resolve_character_id(path, metadata) -> str | None:
         if candidate:
             return candidate
 
-    stem = Path(path_text).stem
+    source_name = Path(path_text).name
+    stem = source_name
+    for suffix in (".skel.bytes", ".skel"):
+        if stem.casefold().endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
     convention = re.fullmatch(
         r"(?:cardspine|battlespine)[_-](\d{5})(?:[_-]\d+)?(?:_bg)?",
         stem,
@@ -106,6 +111,21 @@ def resolve_character_id(path, metadata) -> str | None:
     candidate = next(iter(unique_candidates))
     known_ids = _known_character_ids(metadata)
     return candidate if not known_ids or candidate in known_ids else None
+
+
+def _paired_atlas_path(skel_path: Path) -> Path:
+    """Find the atlas beside normal and Unity-exported Spine files."""
+    name = skel_path.name
+    if name.casefold().endswith(".skel.bytes"):
+        stem = name[: -len(".skel.bytes")]
+    else:
+        stem = name[: -len(".skel")] if name.casefold().endswith(".skel") else skel_path.stem
+    candidates = (f"{stem}.atlas", f"{stem}.atlas.txt")
+    for candidate in candidates:
+        path = skel_path.with_name(candidate)
+        if path.is_file():
+            return path
+    return skel_path.with_name(candidates[0])
 
 
 def _metadata_for_path(character_data, path):
@@ -197,8 +217,14 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
     runner = query_runner or SpineQueryRunner()
     records = []
 
-    for skel_path in sorted(root.rglob("*.skel"), key=lambda item: str(item).casefold()):
-        atlas_path = skel_path.with_suffix(".atlas")
+    skel_paths = {
+        path
+        for pattern in ("*.skel", "*.skel.bytes")
+        for path in root.rglob(pattern)
+        if path.is_file()
+    }
+    for skel_path in sorted(skel_paths, key=lambda item: str(item).casefold()):
+        atlas_path = _paired_atlas_path(skel_path)
         metadata = _metadata_for_path(character_data, skel_path)
         character_id = resolve_character_id(str(skel_path), metadata)
         stem = skel_path.stem
