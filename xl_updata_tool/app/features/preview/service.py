@@ -12,6 +12,7 @@ from .catalog import (
 )
 from .resource_catalog import discover_preview_resources
 from .resource_state import PreviewResourceState
+from .output_publisher import RawSpinePublishSummary, publish_raw_spine_resources
 from .fgui_atlas import UIPackageTool
 from .material_catalog import (
     GameMaterialCatalog,
@@ -67,6 +68,14 @@ class PreviewService:
             self.material_dir,
             character_data=character_data,
             query_runner=query_runner,
+        )
+
+    def publish_raw_spine_resources(self, catalog=None) -> RawSpinePublishSummary:
+        """Publish discovered source Spine groups without removing staging data."""
+        return publish_raw_spine_resources(
+            catalog or self.discover_preview_resources(),
+            self.material_dir,
+            self.preview_dir.parent,
         )
 
     def discover_game_materials(self, metadata=None) -> GameMaterialCatalog:
