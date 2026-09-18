@@ -161,6 +161,18 @@ class PreviewSpineTree(QTreeWidget):
             self._refresh_statuses()
             self._state.save()
 
+    def mark_all_read(self) -> None:
+        if self._state is None:
+            return
+        changed = False
+        for record in self._catalog.skins.values():
+            changed = self._state.mark_read(skin_key(record)) or changed
+        for record in self._catalog.unmatched:
+            changed = self._state.mark_read(skin_key(record)) or changed
+        if changed:
+            self._state.save()
+        self._refresh_statuses()
+
     def _record_fingerprint(self, record: SpineSkinRecord) -> str:
         return skin_key(record)
 

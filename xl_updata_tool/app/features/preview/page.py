@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QPoint, Qt, QSize, Signal, QFileInfo
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -28,7 +30,7 @@ from app.shared.qt.chrome import (
     create_status_label,
 )
 from .drag_list import DragListWidget
-from .output_browser import OutputBrowserCatalog, OutputBrowserEntry
+from .output_browser import OutputBrowserCatalog, OutputBrowserEntry, folder_fingerprint
 from .spine_tree import PreviewSpineTree
 
 
@@ -123,19 +125,33 @@ class PreviewIconBrowser(QListWidget):
         for entry in entries:
             if isinstance(entry, OutputBrowserEntry):
                 name, path, kind, child_count = entry.name, entry.path, entry.kind, entry.child_count
+                fingerprint, is_new = entry.fingerprint, entry.is_new
             else:
                 name = str(entry.get("name", "资源"))
                 path = str(entry.get("path", ""))
                 kind = str(entry.get("kind", "file"))
                 child_count = int(entry.get("child_count", 0))
+                fingerprint = str(entry.get("fingerprint", ""))
+                is_new = entry.get("is_new")
+            if is_new:
+                name = f"{name} · 新"
             icon = self._icon_provider.icon(QFileInfo(path))
             item = QListWidgetItem(icon, name)
-            item.setData(Qt.UserRole, {"path": path, "kind": kind, "child_count": child_count})
+            item.setData(
+                Qt.UserRole,
+                {
+                    "path": path,
+                    "kind": kind,
+                    "child_count": child_count,
+                    "fingerprint": fingerprint,
+                    "is_new": is_new,
+                },
+            )
             item.setToolTip(path)
             self.addItem(item)
 
-    def set_root(self, root) -> None:
-        self.set_entries(OutputBrowserCatalog.from_root(root).entries)
+    def set_root(self, root, state=None) -> None:
+        self.set_entries(OutputBrowserCatalog.from_root(root, state=state).entries)
 
     def _activate_item(self, item) -> None:
         data = item.data(Qt.UserRole) or {}
@@ -173,6 +189,9 @@ class PreviewPage(QWidget):
         command_bar, command_layout = create_command_bar(self)
         self.btn_reload = create_action_button("重新加载图片", "secondary", None, self)
         command_layout.addWidget(self.btn_reload)
+        self.btn_mark_all_read = create_action_button("全部标为已读", "secondary", None, self)
+        self.btn_mark_all_read.setObjectName("markAllPreviewReadButton")
+        command_layout.addWidget(self.btn_mark_all_read)
         filter_label = QLabel("角色")
         filter_label.setAccessibleName("角色筛选")
         command_layout.addWidget(filter_label)
@@ -245,6 +264,7 @@ class PreviewPage(QWidget):
         self.btn_thumbnail_next.clicked.connect(lambda: self.set_thumbnail_page(self._thumbnail_page + 1))
         self.spine_tree.selection_changed.connect(self._on_spine_selection_changed)
         self._material_state = None
+        self._material_catalog = None
         self._thumbnail_page = 0
         self._thumbnail_page_size = 60
         self._thumbnail_page_count = 1
@@ -333,6 +353,7 @@ class PreviewPage(QWidget):
         """Render game-material groups supplied by the Qt-free material catalog."""
         if state is not None:
             self._material_state = state
+        self._material_catalog = catalog
         self.material_tree.clear()
         burst_heads = tuple(getattr(catalog, "burst_heads", ()) or ()) if catalog is not None else ()
         atlases = tuple(getattr(catalog, "atlases", ()) or ()) if catalog is not None else ()
@@ -396,7 +417,16 @@ class PreviewPage(QWidget):
         browser_entries = []
         if burst_heads:
             browser_entries.append(
-                OutputBrowserEntry("burst-head", "game_material/burst-head", "folder", len(burst_heads))
+                OutputBrowserEntry(
+                    "burst-head",
+                    str(Path(burst_heads[0].source_path).parent),
+                    "folder",
+                    len(burst_heads),
+                    folder_fingerprint(Path(burst_heads[0].source_path).parent),
+                    self._material_state.is_new(folder_fingerprint(Path(burst_heads[0].source_path).parent))
+                    if self._material_state
+                    else None,
+                )
             )
         browser_entries.extend(
             OutputBrowserEntry(
@@ -404,6 +434,10 @@ class PreviewPage(QWidget):
                 str(getattr(atlas, "source_path", "")),
                 "folder",
                 len(tuple(getattr(atlas, "sprite_paths", ()) or ())),
+                folder_fingerprint(str(getattr(atlas, "source_path", ""))),
+                self._material_state.is_new(folder_fingerprint(str(getattr(atlas, "source_path", ""))))
+                if self._material_state
+                else None,
             )
             for atlas in atlases
         )
@@ -430,18 +464,18 @@ class PreviewPage(QWidget):
     def refresh_game_material_catalog(self, catalog, state=None) -> None:
         self.set_game_material_catalog(catalog, state)
 
-    def set_character_output_root(self, root) -> None:
+    def set_character_output_root(self, root, state=None) -> None:
         root_path = str(root)
         self.character_output_path.setText(root_path)
-        self.character_browser.set_root(root_path)
+        self.character_browser.set_root(root_path, state)
 
     def open_character_output_folder(self, folder) -> None:
         folder_path = str(folder)
         self.character_output_path.setText(folder_path)
         self.character_browser.set_root(folder_path)
 
-    def reset_character_output_root(self, root) -> None:
-        self.set_character_output_root(root)
+    def reset_character_output_root(self, root, state=None) -> None:
+        self.set_character_output_root(root, state)
 
     def _on_spine_selection_changed(self, records) -> None:
         self.spine_selection_changed.emit(records)

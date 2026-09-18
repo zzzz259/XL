@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import os
 from pathlib import Path
 
 
@@ -15,6 +17,29 @@ class OutputBrowserEntry:
     path: str
     kind: str
     child_count: int = 0
+    fingerprint: str = ""
+    is_new: bool | None = None
+
+
+def path_fingerprint(path) -> str:
+    value = Path(path)
+    try:
+        stat = value.stat()
+        payload = f"file:{os.path.normcase(os.path.abspath(os.fspath(value)))}:{stat.st_size}:{stat.st_mtime_ns}"
+    except OSError:
+        payload = f"missing:{os.path.normcase(os.path.abspath(os.fspath(value)))}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def folder_fingerprint(folder) -> str:
+    root = Path(folder)
+    children = sorted(
+        path_fingerprint(path)
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.casefold() in _IMAGE_SUFFIXES
+    )
+    payload = f"folder:{os.path.normcase(os.path.abspath(os.fspath(root)))}:{':'.join(children)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class OutputBrowserCatalog:
@@ -25,7 +50,7 @@ class OutputBrowserCatalog:
         self.entries = tuple(entries)
 
     @classmethod
-    def from_root(cls, root, *, include_files=True):
+    def from_root(cls, root, *, include_files=True, state=None):
         root_path = Path(root)
         if not root_path.is_dir():
             return cls(root_path)
@@ -33,10 +58,30 @@ class OutputBrowserCatalog:
         for path in sorted(root_path.iterdir(), key=lambda item: item.name.casefold()):
             if path.is_dir():
                 count = sum(1 for child in path.rglob("*.png") if child.is_file())
-                entries.append(OutputBrowserEntry(path.name, str(path), "folder", count))
+                fingerprint = folder_fingerprint(path)
+                entries.append(
+                    OutputBrowserEntry(path.name, str(path), "folder", count, fingerprint, state.is_new(fingerprint) if state else None)
+                )
             elif include_files and path.suffix.casefold() in _IMAGE_SUFFIXES:
-                entries.append(OutputBrowserEntry(path.name, str(path), "file"))
+                fingerprint = path_fingerprint(path)
+                entries.append(
+                    OutputBrowserEntry(path.name, str(path), "file", 0, fingerprint, state.is_new(fingerprint) if state else None)
+                )
         return cls(root_path, entries)
 
     def children(self, folder) -> tuple[OutputBrowserEntry, ...]:
         return self.from_root(folder).entries
+
+    def all_fingerprints(self) -> tuple[str, ...]:
+        values = []
+
+        def visit(folder):
+            catalog = self.from_root(folder)
+            for entry in catalog.entries:
+                if entry.fingerprint:
+                    values.append(entry.fingerprint)
+                if entry.kind == "folder":
+                    visit(entry.path)
+
+        visit(self.root)
+        return tuple(values)

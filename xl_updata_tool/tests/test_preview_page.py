@@ -42,6 +42,7 @@ def test_preview_page_exposes_three_named_tabs_and_legacy_character_controls(qap
     assert page.character_filter.accessibleName() == "角色筛选"
     assert page.preview_progress.objectName() == "previewProgress"
     assert page.preview_status.objectName() == "pageStatus"
+    assert page.btn_mark_all_read.objectName() == "markAllPreviewReadButton"
 
 
 def test_preview_page_renders_spine_catalog_without_replacing_character_state(qapp):

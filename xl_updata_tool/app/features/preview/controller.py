@@ -18,6 +18,8 @@ from .worker import ImageLoadWorker, PreviewExportWorker, PreviewPostprocessWork
 from .dialogs.export_settings import ExportSettingsDialog
 from .export_plan import ExportSettings, build_export_plan
 from .spine_adapter import build_spine_export_command
+from .output_browser import OutputBrowserCatalog, folder_fingerprint, path_fingerprint
+from .resource_model import skin_key
 
 
 class PreviewController(QObject):
@@ -148,9 +150,34 @@ class PreviewController(QObject):
             self.page.btn_character_up.clicked.connect(self._reset_character_output_root)
         if hasattr(self.page, "material_browser"):
             self.page.material_browser.path_activated.connect(self.page.material_browser.set_root)
+        if hasattr(self.page, "btn_mark_all_read"):
+            self.page.btn_mark_all_read.clicked.connect(self.mark_all_read)
 
     def _reset_character_output_root(self):
-        self.page.reset_character_output_root(self.service.preview_dir)
+        self.page.reset_character_output_root(self.service.preview_dir, self.service.resource_state)
+
+    def mark_all_read(self) -> None:
+        """Mark every preview resource read and refresh all visible views."""
+        state = self.service.resource_state
+        catalog = self.service.load_published_preview_resources()
+        for record in catalog.skins.values():
+            state.mark_read(skin_key(record))
+
+        material_catalog = self.service.discover_processed_game_materials()
+        for record in material_catalog.burst_heads:
+            state.mark_read(str(record.fingerprint))
+        for atlas in material_catalog.atlases:
+            state.mark_read(folder_fingerprint(atlas.source_path))
+            for sprite_path in atlas.sprite_paths:
+                state.mark_read(path_fingerprint(sprite_path))
+
+        for fingerprint in OutputBrowserCatalog(self.service.preview_dir).all_fingerprints():
+            state.mark_read(fingerprint)
+        state.save()
+        self.page.set_spine_catalog(catalog, state)
+        self.page.set_game_material_catalog(material_catalog, state)
+        self.page.set_character_output_root(self.service.preview_dir, state)
+        self.status_changed.emit("已将图片预览资源全部标记为已读")
 
     def _on_export_selected_requested(self):
         if self._selected_export_worker is not None:
@@ -195,7 +222,7 @@ class PreviewController(QObject):
             self.status_changed.emit(f"图片资源索引读取失败: {error}")
         preview_dir = self.service.ensure_output_dir()
         if hasattr(self.page, "set_character_output_root"):
-            self.page.set_character_output_root(preview_dir)
+            self.page.set_character_output_root(preview_dir, self.service.resource_state)
         self.skel_map = self.service.skel_map()
         self._populate_filter()
         self.page.image_list.clear()
