@@ -25,6 +25,7 @@ class ExportSettings:
     """The user-selected settings for one skin export batch."""
 
     animation: str = "idle"
+    static: bool = True
     scale: int = 4
     max_resolution: int = 8192
     margin: int = 0

@@ -33,6 +33,7 @@ def test_dialog_returns_png_export_settings_from_controls(qapp):
     assert isinstance(settings, ExportSettings)
     assert settings == ExportSettings(
         animation="walk",
+        static=True,
         scale=3,
         max_resolution=4096,
         margin=12,
@@ -43,6 +44,23 @@ def test_dialog_returns_png_export_settings_from_controls(qapp):
     )
     assert dialog.format_combo.isEnabled() is False
     assert dialog.format_combo.currentText() == "PNG"
+    assert dialog.mode_combo.currentText() == "静态图"
+    assert dialog.anim_combo.isEnabled() is False
+
+
+def test_dialog_can_explicitly_select_animation_mode(qapp):
+    dialog = ExportSettingsDialog(r"E:\\hero.skel", r"E:\\hero.atlas", "PNG")
+
+    dialog.mode_combo.setCurrentText("动画")
+    dialog.anim_combo.setCurrentText("walk")
+    dialog.fps_spin.setValue(12)
+
+    settings = dialog.settings()
+
+    assert settings.static is False
+    assert settings.animation == "walk"
+    assert settings.fps == 12
+    assert dialog.anim_combo.isEnabled() is True
 
 
 def test_dialog_cancel_does_not_produce_an_export_settings(qapp):

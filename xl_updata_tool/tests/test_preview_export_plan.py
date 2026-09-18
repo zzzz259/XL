@@ -33,6 +33,7 @@ def test_export_settings_have_explicit_immutable_defaults():
     settings = ExportSettings()
 
     assert settings.animation == "idle"
+    assert settings.static is True
     assert settings.scale == 4
     assert settings.max_resolution == 8192
     assert settings.margin == 0
@@ -59,7 +60,7 @@ def test_export_plan_uses_character_and_skin_identity(tmp_path):
 
 def test_export_command_uses_internal_skin_and_ui_settings(tmp_path):
     record = ready_record(character_id="10080", skin_name="skin_internal", attachment_fingerprint="abc")
-    job = build_export_plan((record,), ExportSettings(animation="walk", scale=2, margin=8), tmp_path)[0]
+    job = build_export_plan((record,), ExportSettings(animation="walk", static=False, scale=2, margin=8), tmp_path)[0]
 
     command = build_spine_export_command(job, "SpineViewerCLI.exe")
 
@@ -71,6 +72,17 @@ def test_export_command_uses_internal_skin_and_ui_settings(tmp_path):
     assert command[command.index("--fps") + 1] == "1"
     assert command[command.index("--color") + 1] == "#00000000"
     assert "--pma" in command
+
+
+def test_static_export_is_one_frame_and_does_not_loop(tmp_path):
+    record = ready_record()
+    job = build_export_plan((record,), ExportSettings(), tmp_path)[0]
+
+    command = build_spine_export_command(job, "SpineViewerCLI.exe")
+
+    assert command[command.index("--duration") + 1] == "0"
+    assert command[command.index("--fps") + 1] == "1"
+    assert "--disable-track-loop" in command
 
 
 def test_export_plan_skips_missing_character_and_non_ready_records(tmp_path):

@@ -42,7 +42,7 @@ def build_spine_export_command(job, spine_cli):
         "-o",
         os.fspath(job.output_path),
         "-a",
-        str(settings.animation),
+        str(settings.animation or "idle"),
         "--atlas",
         os.fspath(record.atlas_path),
         "--skins",
@@ -56,10 +56,12 @@ def build_spine_export_command(job, spine_cli):
         "--time",
         "0",
         "--duration",
-        "1",
+        "0" if settings.static else "1",
         "--fps",
         str(settings.fps),
     ]
+    if settings.static:
+        command.append("--disable-track-loop")
     if settings.transparent:
         command.extend(["--color", "#00000000"])
     if settings.pma:

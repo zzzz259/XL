@@ -36,7 +36,7 @@ class ExportSettingsDialog(QDialog):
         layout.setSpacing(12)
 
         # 标题
-        title = QLabel("导出 Spine 动画")
+        title = QLabel("导出 Spine 资源")
         title.setObjectName("dialogTitle")
         layout.addWidget(title)
 
@@ -54,11 +54,17 @@ class ExportSettingsDialog(QDialog):
         self.format_combo.currentIndexChanged.connect(self._update_file_label)
         form.addRow("输出格式:", self.format_combo)
 
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["静态图", "动画"])
+        self.mode_combo.setCurrentIndex(0 if normalized_format == "PNG" else 1)
+        form.addRow("导出模式:", self.mode_combo)
+
         # 动画名称
         self.anim_combo = QComboBox()
         self.anim_combo.addItems(["idle", "walk", "run"])
         self.anim_combo.setCurrentText("idle")
         form.addRow("动画名称:", self.anim_combo)
+        self.mode_combo.currentIndexChanged.connect(self._update_animation_controls)
 
         # 时长
         self.duration_spin = QSpinBox()
@@ -141,11 +147,12 @@ class ExportSettingsDialog(QDialog):
 
         self._skel_base = skel_base
         self._timestamp = timestamp
+        self._update_animation_controls()
         self._update_file_label()
 
     def _update_file_label(self):
         fmt = self.format_combo.currentText().lower()
-        ext = ".mp4" if fmt == "mp4" else ".gif"
+        ext = ".png" if fmt == "png" else (".mp4" if fmt == "mp4" else ".gif")
         fname = f"{self._skel_base}_{self._timestamp}{ext}"
         self.file_label.setText(fname)
 
@@ -165,6 +172,7 @@ class ExportSettingsDialog(QDialog):
         """Return the typed settings used by identity-based PNG export."""
         return ExportSettings(
             animation=self.anim_combo.currentText().strip() or "idle",
+            static=self.mode_combo.currentText() == "静态图",
             scale=self.scale_spin.value(),
             max_resolution=self.max_resolution_spin.value(),
             margin=self.margin_spin.value(),
@@ -173,3 +181,10 @@ class ExportSettingsDialog(QDialog):
             format="Png",
             fps=self.fps_spin.value(),
         )
+
+    def _update_animation_controls(self):
+        is_static = self.mode_combo.currentText() == "静态图"
+        self.anim_combo.setEnabled(not is_static)
+        self.fps_spin.setEnabled(not is_static)
+        if is_static:
+            self.fps_spin.setValue(1)
