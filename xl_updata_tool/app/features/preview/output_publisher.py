@@ -9,6 +9,7 @@ import re
 import shutil
 from collections import OrderedDict
 from dataclasses import dataclass
+from dataclasses import asdict
 from pathlib import Path
 
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
@@ -156,6 +157,7 @@ def publish_raw_spine_resources(
                 "source_skel": str(source_skel),
                 "files": sorted(set(files_for_index)),
                 "skins": sorted({record.skin_name for record in records if record.skin_name}),
+                "records": [asdict(record) for record in records],
             }
         )
         published += 1

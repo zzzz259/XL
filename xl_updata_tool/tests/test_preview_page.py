@@ -37,6 +37,8 @@ def test_preview_page_exposes_three_named_tabs_and_legacy_character_controls(qap
     assert page.spine_tree.objectName() == "previewSpineTree"
     assert page.material_tree.objectName() == "previewMaterialGroups"
     assert page.image_list.objectName() == "previewImageList"
+    assert page.character_browser.objectName() == "previewIconBrowser"
+    assert page.material_browser.objectName() == "previewIconBrowser"
     assert page.character_filter.accessibleName() == "角色筛选"
     assert page.preview_progress.objectName() == "previewProgress"
     assert page.preview_status.objectName() == "pageStatus"

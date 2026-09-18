@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QSize, Signal
+from PySide6.QtCore import QPoint, Qt, QSize, Signal, QFileInfo
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QGridLayout,
+    QFileIconProvider,
     QHBoxLayout,
     QLabel,
     QListWidgetItem,
@@ -27,6 +28,7 @@ from app.shared.qt.chrome import (
     create_status_label,
 )
 from .drag_list import DragListWidget
+from .output_browser import OutputBrowserCatalog, OutputBrowserEntry
 from .spine_tree import PreviewSpineTree
 
 
@@ -97,6 +99,48 @@ class PreviewImageList(DragListWidget):
         self.content_changed.emit()
         return result
 
+
+class PreviewIconBrowser(QListWidget):
+    """Large-icon output folder/file browser used by character and material tabs."""
+
+    path_activated = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setViewMode(QListWidget.IconMode)
+        self.setIconSize(QSize(128, 128))
+        self.setGridSize(QSize(180, 180))
+        self.setResizeMode(QListWidget.Adjust)
+        self.setMovement(QListWidget.Static)
+        self.setSpacing(12)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setObjectName("previewIconBrowser")
+        self._icon_provider = QFileIconProvider()
+        self.itemDoubleClicked.connect(self._activate_item)
+
+    def set_entries(self, entries) -> None:
+        self.clear()
+        for entry in entries:
+            if isinstance(entry, OutputBrowserEntry):
+                name, path, kind, child_count = entry.name, entry.path, entry.kind, entry.child_count
+            else:
+                name = str(entry.get("name", "资源"))
+                path = str(entry.get("path", ""))
+                kind = str(entry.get("kind", "file"))
+                child_count = int(entry.get("child_count", 0))
+            icon = self._icon_provider.icon(QFileInfo(path))
+            item = QListWidgetItem(icon, name)
+            item.setData(Qt.UserRole, {"path": path, "kind": kind, "child_count": child_count})
+            item.setToolTip(path)
+            self.addItem(item)
+
+    def set_root(self, root) -> None:
+        self.set_entries(OutputBrowserCatalog.from_root(root).entries)
+
+    def _activate_item(self, item) -> None:
+        data = item.data(Qt.UserRole) or {}
+        if data.get("kind") == "folder":
+            self.path_activated.emit(str(data.get("path", "")))
 
 class PreviewPage(QWidget):
     """图片预览页面，直接拥有控件并只发布页面级语义信号。"""
@@ -227,9 +271,24 @@ class PreviewPage(QWidget):
 
     def _build_character_tab(self) -> None:
         self.tabs.character_tab = QWidget(self.tabs)
-        character_layout = QGridLayout(self.tabs.character_tab)
-        character_layout.setContentsMargins(0, 0, 0, 0)
-        character_layout.setSpacing(0)
+        character_layout = QVBoxLayout(self.tabs.character_tab)
+        character_layout.setContentsMargins(12, 12, 12, 12)
+        character_layout.setSpacing(8)
+        character_toolbar = QHBoxLayout()
+        self.btn_character_up = create_action_button("返回上级", "secondary", None, self.tabs.character_tab)
+        self.btn_character_up.setObjectName("characterOutputUpButton")
+        character_toolbar.addWidget(self.btn_character_up)
+        self.character_output_path = QLabel("角色导出立绘")
+        self.character_output_path.setObjectName("characterOutputPath")
+        character_toolbar.addWidget(self.character_output_path)
+        character_toolbar.addStretch()
+        character_layout.addLayout(character_toolbar)
+        self.character_browser = PreviewIconBrowser(self.tabs.character_tab)
+        self.character_browser.setAccessibleName("角色导出立绘文件夹浏览")
+        character_layout.addWidget(self.character_browser, 1)
+
+        # Legacy thumbnail list remains available to controller/tests during
+        # migration, but the visible character surface is output-backed folders.
         self.image_list = PreviewImageList()
         self.image_list.setObjectName("previewImageList")
         self.image_list.setAccessibleName("角色导出立绘列表")
@@ -242,7 +301,7 @@ class PreviewPage(QWidget):
         self.image_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.image_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.image_list.setDragEnabled(True)
-        character_layout.addWidget(self.image_list, 0, 0)
+        self.image_list.setVisible(False)
         self.tabs.add_named_tab(self.tabs.character_tab, "角色导出立绘", "角色导出立绘分页")
 
     def _build_material_tab(self) -> None:
@@ -255,7 +314,10 @@ class PreviewPage(QWidget):
         self.material_tree.setColumnCount(2)
         self.material_tree.setHeaderLabels(["素材组", "状态"])
         self.material_tree.setSelectionMode(QTreeWidget.SingleSelection)
-        material_layout.addWidget(self.material_tree, 0, 0)
+        self.material_tree.setVisible(False)
+        self.material_browser = PreviewIconBrowser(self.tabs.material_tab)
+        self.material_browser.setAccessibleName("游戏素材文件夹浏览")
+        material_layout.addWidget(self.material_browser, 0, 0)
         self.material_empty_label = create_empty_state("暂无游戏素材", self.tabs.material_tab)
         material_layout.addWidget(self.material_empty_label, 1, 0)
         self.tabs.add_named_tab(self.tabs.material_tab, "游戏素材", "游戏素材分页")
@@ -331,6 +393,21 @@ class PreviewPage(QWidget):
                 group.addChild(child)
         self.material_tree.expandAll()
         self.material_empty_label.setVisible(self.material_tree.topLevelItemCount() == 0)
+        browser_entries = []
+        if burst_heads:
+            browser_entries.append(
+                OutputBrowserEntry("burst-head", "game_material/burst-head", "folder", len(burst_heads))
+            )
+        browser_entries.extend(
+            OutputBrowserEntry(
+                str(getattr(atlas, "package_name", "未命名图集")),
+                str(getattr(atlas, "source_path", "")),
+                "folder",
+                len(tuple(getattr(atlas, "sprite_paths", ()) or ())),
+            )
+            for atlas in atlases
+        )
+        self.material_browser.set_entries(browser_entries)
 
     set_material_catalog = set_game_material_catalog
     set_game_materials = set_game_material_catalog
@@ -352,6 +429,19 @@ class PreviewPage(QWidget):
 
     def refresh_game_material_catalog(self, catalog, state=None) -> None:
         self.set_game_material_catalog(catalog, state)
+
+    def set_character_output_root(self, root) -> None:
+        root_path = str(root)
+        self.character_output_path.setText(root_path)
+        self.character_browser.set_root(root_path)
+
+    def open_character_output_folder(self, folder) -> None:
+        folder_path = str(folder)
+        self.character_output_path.setText(folder_path)
+        self.character_browser.set_root(folder_path)
+
+    def reset_character_output_root(self, root) -> None:
+        self.set_character_output_root(root)
 
     def _on_spine_selection_changed(self, records) -> None:
         self.spine_selection_changed.emit(records)

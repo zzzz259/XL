@@ -143,6 +143,14 @@ class PreviewController(QObject):
         self.page.selection_changed.connect(self.update_status)
         if hasattr(self.page, "export_selected_requested"):
             self.page.export_selected_requested.connect(self._on_export_selected_requested)
+        if hasattr(self.page, "character_browser"):
+            self.page.character_browser.path_activated.connect(self.page.open_character_output_folder)
+            self.page.btn_character_up.clicked.connect(self._reset_character_output_root)
+        if hasattr(self.page, "material_browser"):
+            self.page.material_browser.path_activated.connect(self.page.material_browser.set_root)
+
+    def _reset_character_output_root(self):
+        self.page.reset_character_output_root(self.service.preview_dir)
 
     def _on_export_selected_requested(self):
         if self._selected_export_worker is not None:
@@ -173,13 +181,21 @@ class PreviewController(QObject):
         return catalog
 
     def load(self):
-        """异步加载最终预览图片并刷新角色筛选。"""
+        """Load published output without re-running source discovery."""
         try:
-            self.discover_resources()
+            catalog = self.service.load_published_preview_resources()
+            self.page.set_spine_catalog(catalog, self.service.resource_state)
+            self.page.set_game_material_catalog(
+                self.service.discover_processed_game_materials(),
+                self.service.resource_state,
+            )
+            self.status_changed.emit("正在读取已处理的图片资源…")
         except Exception as error:
-            logger.error("预览资源发现失败: %s", error, exc_info=True)
-            self.status_changed.emit(f"资源发现失败: {error}")
+            logger.error("已处理预览资源读取失败: %s", error, exc_info=True)
+            self.status_changed.emit(f"图片资源索引读取失败: {error}")
         preview_dir = self.service.ensure_output_dir()
+        if hasattr(self.page, "set_character_output_root"):
+            self.page.set_character_output_root(preview_dir)
         self.skel_map = self.service.skel_map()
         self._populate_filter()
         self.page.image_list.clear()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from .catalog import (
     scan_preview_roles,
 )
 from .resource_catalog import discover_preview_resources
+from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .resource_state import PreviewResourceState
 from .output_publisher import RawSpinePublishSummary, publish_raw_spine_resources
 from .fgui_atlas import UIPackageTool
@@ -114,6 +116,26 @@ class PreviewService:
     def discover_processed_game_materials(self) -> GameMaterialCatalog:
         """Read the final cut-material tree without scanning staging input."""
         return discover_processed_materials(self.preview_dir.parent)
+
+    def load_published_preview_resources(self) -> PreviewResourceCatalog:
+        """Load the postprocess index without querying or scanning source assets."""
+        index_path = self.preview_dir.parent / "preview_index.json"
+        if not index_path.is_file():
+            return PreviewResourceCatalog.from_records(())
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return PreviewResourceCatalog.from_records(())
+        records = []
+        for group in payload.get("spine", ()) if isinstance(payload, dict) else ():
+            for value in group.get("records", ()) if isinstance(group, dict) else ():
+                if not isinstance(value, dict):
+                    continue
+                try:
+                    records.append(SpineSkinRecord(**value))
+                except (TypeError, ValueError):
+                    continue
+        return PreviewResourceCatalog.from_records(records)
 
     def export_game_materials(
         self,

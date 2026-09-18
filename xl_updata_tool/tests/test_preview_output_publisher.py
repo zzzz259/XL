@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.features.preview.output_publisher import publish_raw_spine_resources
 from app.features.preview.resource_catalog import discover_preview_resources
+from app.features.preview.service import PreviewService
 
 
 class _Runner:
@@ -53,3 +54,16 @@ def test_publish_raw_spine_is_idempotent_and_reports_missing_atlas_textures(tmp_
     assert second.copied_files == first.copied_files
     assert any("texture" in message.lower() for message in second.diagnostics)
     assert len(list((tmp_path / "output" / "spine").rglob("*.skel"))) == 1
+
+
+def test_service_loads_published_spine_index_without_querying_source(tmp_path):
+    material_dir = tmp_path / "data" / "material"
+    _create_spine_source(material_dir, "battlespine_10082_1")
+    output_root = tmp_path / "output"
+    catalog = discover_preview_resources(material_dir, query_runner=_Runner())
+    publish_raw_spine_resources(catalog, material_dir, output_root)
+
+    service = PreviewService(material_dir, output_root / "character")
+    loaded = service.load_published_preview_resources()
+
+    assert [record.skin_name for record in loaded.skins.values()] == ["default"]
