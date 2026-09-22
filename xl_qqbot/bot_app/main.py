@@ -53,6 +53,9 @@ def _setup_logging() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # botpy 在导入时已先装了 root handler（WARNING 级），basicConfig 变 no-op，
+    # 必须显式把 root 提到 INFO，否则 bot_app 的业务日志全被静默丢弃
+    logging.getLogger().setLevel(logging.INFO)
 
 
 class _EventClient(botpy.Client):
