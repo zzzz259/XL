@@ -34,6 +34,7 @@ import aiohttp
 
 from .config import DEFAULT_BILI_MID, BilibiliTarget, Config
 from .groups import GroupStore
+from .tiers import GroupTier
 
 _logger = logging.getLogger(__name__)
 
@@ -462,11 +463,12 @@ class BilibiliStateStore:
 class BilibiliWatcher:
     """多目标两路轮询（图文 + 视频）并推送，模式与 Watcher 相同。"""
 
-    def __init__(self, config: Config, sender):
+    def __init__(self, config: Config, sender, tiers: GroupTier | None = None):
         self.config = config
         self.sender = sender
         self.group_store = GroupStore(config.watch.data_dir)
         self.state = BilibiliStateStore(config.watch.data_dir)
+        self.tiers = tiers or GroupTier()
         self.tmp_dir = os.path.join(config.watch.data_dir, "bili_tmp")
         self._client: Optional[BilibiliClient] = None
         self._stop_event = asyncio.Event()
@@ -569,9 +571,10 @@ class BilibiliWatcher:
         if not fresh_ids:
             return
 
-        group_openids = self._target_groups()
+        # bilibili_watch 门禁过滤目标群；过滤后为空不推进 state（与无群同语义）
+        group_openids = self.tiers.filter_groups("bilibili_watch", self._target_groups())
         if not group_openids:
-            _logger.warning("没有已知目标群，B 站图文动态本轮暂存不发")
+            _logger.warning("B 站图文动态无可达目标群（未学习或被门禁过滤），本轮暂存不发")
             return
 
         if target.mode == "full":
@@ -661,9 +664,10 @@ class BilibiliWatcher:
         fresh.sort(key=lambda v: (v["created"], v["bvid"]))
         fresh = fresh[:MAX_PER_ROUND]
 
-        group_openids = self._target_groups()
+        # bilibili_watch 门禁过滤目标群；过滤后为空不推进 state（与无群同语义）
+        group_openids = self.tiers.filter_groups("bilibili_watch", self._target_groups())
         if not group_openids:
-            _logger.warning("没有已知目标群，B 站视频动态本轮暂存不发")
+            _logger.warning("B 站视频动态无可达目标群（未学习或被门禁过滤），本轮暂存不发")
             return
 
         name = await self._resolve_name(client, target, state, videos=items)

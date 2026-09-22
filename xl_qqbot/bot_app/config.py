@@ -1,7 +1,7 @@
 import os
 import tomllib
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,25 @@ class BilibiliConfig:
 
 
 @dataclass(frozen=True)
+class GroupsConfig:
+    """群分级 + 功能门禁配置：[groups] 群列表 + [features] 功能所需级别。"""
+
+    debug: List[str] = field(default_factory=list)
+    test: List[str] = field(default_factory=list)
+    features: Dict[str, str] = field(default_factory=dict)  # 功能名 -> production/test/debug
+
+
+@dataclass(frozen=True)
+class RouterConfig:
+    """事件路由器：[router] 各级别服务端口与转发超时。"""
+
+    debug_port: int = 8781
+    test_port: int = 8782
+    production_port: int = 8783
+    forward_timeout: float = 8.0
+
+
+@dataclass(frozen=True)
 class Config:
     bot: BotConfig
     watch: WatchConfig
@@ -66,6 +85,8 @@ class Config:
     upload: UploadConfig
     message: MessageConfig
     bilibili: BilibiliConfig = field(default_factory=BilibiliConfig)
+    groups: GroupsConfig = field(default_factory=GroupsConfig)
+    router: RouterConfig = field(default_factory=RouterConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -148,6 +169,34 @@ def load_config(path: str = "config.toml") -> Config:
     if bilibili.interval_seconds < 1:
         raise ValueError("[bilibili] interval_seconds 必须 >= 1")
 
+    groups = raw.get("groups", {})
+    features_raw = raw.get("features", {})
+    if not isinstance(features_raw, dict):
+        raise ValueError("[features] 必须是表")
+    features: Dict[str, str] = {}
+    for name, tier in features_raw.items():
+        tier_value = str(tier).strip()
+        if tier_value not in ("production", "test", "debug"):
+            raise ValueError(
+                f"[features] {name} 级别非法: {tier_value!r}（只允许 production/test/debug）"
+            )
+        features[str(name).strip()] = tier_value
+    groups_config = GroupsConfig(
+        debug=[str(g).strip() for g in groups.get("debug", []) if str(g).strip()],
+        test=[str(g).strip() for g in groups.get("test", []) if str(g).strip()],
+        features=features,
+    )
+
+    router = raw.get("router", {})
+    router_config = RouterConfig(
+        debug_port=int(router.get("debug_port", RouterConfig.debug_port)),
+        test_port=int(router.get("test_port", RouterConfig.test_port)),
+        production_port=int(router.get("production_port", RouterConfig.production_port)),
+        forward_timeout=float(router.get("forward_timeout", RouterConfig.forward_timeout)),
+    )
+    if router_config.forward_timeout <= 0:
+        raise ValueError("[router] forward_timeout 必须 > 0")
+
     return Config(
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
@@ -164,4 +213,6 @@ def load_config(path: str = "config.toml") -> Config:
         upload=UploadConfig(file_base_url=file_base_url),
         message=MessageConfig(template=template),
         bilibili=bilibili,
+        groups=groups_config,
+        router=router_config,
     )

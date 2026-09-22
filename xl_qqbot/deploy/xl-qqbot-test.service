@@ -1,0 +1,20 @@
+[Unit]
+Description=XL QQ Bot - test tier service (port 8782)
+After=network-online.target xl-qqbot-router.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_qqbot-test
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/xl_qqbot-test
+# 共享主项目 venv，PYTHONPATH 指向本 worktree 源码
+ExecStart=/home/admin/xl_qqbot/.venv/bin/python -m bot_app.service --tier test --port 8782
+Restart=on-failure
+RestartSec=10
+CPUQuota=30%
+MemoryMax=200M
+Nice=10
+
+[Install]
+WantedBy=default.target

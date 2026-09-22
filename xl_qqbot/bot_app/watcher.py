@@ -18,6 +18,7 @@ from .outbox import (
     mark_image_done,
 )
 from .sender import QQSender
+from .tiers import GroupTier
 from .updater import NoticeStateStore, ServiceMute, read_new_events
 
 _logger = logging.getLogger(__name__)
@@ -26,13 +27,15 @@ UPDATE_START_TEXT = "检测到新版本，正在自动更新，期间将暂停�
 
 
 class Watcher:
-    def __init__(self, config: Config, sender: QQSender, mute: ServiceMute | None = None):
+    def __init__(self, config: Config, sender: QQSender, mute: ServiceMute | None = None,
+                 tiers: GroupTier | None = None):
         self.config = config
         self.sender = sender
         self.store = SentRecordStore(config.watch.data_dir)
         self.group_store = GroupStore(config.watch.data_dir)
         self.mute = mute or ServiceMute()
         self.notice = NoticeStateStore(config.watch.data_dir)
+        self.tiers = tiers or GroupTier()
         self._stop_event = asyncio.Event()
 
     def stop(self) -> None:
@@ -71,7 +74,8 @@ class Watcher:
         events, _ = read_new_events(events_path, offset)
         if not events:
             return
-        group_openids = self._target_groups()
+        # 更新播报按 update_notice 门禁过滤目标群；过滤后为空 = 无需播报，事件照常消费
+        group_openids = self.tiers.filter_groups("update_notice", self._target_groups())
         consumed = offset
         for event in events:
             if event.event != phase:
@@ -108,6 +112,15 @@ class Watcher:
         group_openids = self._target_groups()
         if not group_openids:
             _logger.warning("没有配置目标群 openid，跳过版本 %s", batch.version)
+            return
+        # 新角色图鉴推送按 character_push 门禁过滤；批次完成判定只看实际目标群
+        group_openids = self.tiers.filter_groups("character_push", group_openids)
+        if not group_openids:
+            _logger.info(
+                "character_push 在全部目标群均未开放，版本 %s 视为无需发送，清理 outbox 目录",
+                batch.version,
+            )
+            shutil.rmtree(batch.version_dir)
             return
 
         for image in batch.images:

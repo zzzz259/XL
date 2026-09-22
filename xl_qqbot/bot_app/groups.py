@@ -1,8 +1,26 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Set
+
+_logger = logging.getLogger(__name__)
+
+
+def learn_group_from_event(event_obj, group_store: "GroupStore") -> None:
+    """从事件载荷（dict 或带属性对象）学到群 openid 并登记。"""
+    group_openid = None
+    if isinstance(event_obj, dict):
+        group_openid = event_obj.get("group_openid")
+    else:
+        group_openid = getattr(event_obj, "group_openid", None)
+    if not group_openid:
+        return
+    # 当前官方事件（GROUP_AT_MESSAGE_CREATE / GROUP_ADD_ROBOT）均不携带群名，
+    # name 字段预留，便于后续事件扩展或人工补录。
+    group_store.add(openid=group_openid, name="")
+    _logger.info("从群事件学到群 openid: %s", group_openid)
 
 
 @dataclass(frozen=True)

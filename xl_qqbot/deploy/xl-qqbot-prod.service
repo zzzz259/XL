@@ -1,0 +1,18 @@
+[Unit]
+Description=XL QQ Bot - production tier service (port 8783)
+After=network-online.target xl-qqbot-router.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_qqbot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/admin/xl_qqbot/.venv/bin/python -m bot_app.service --tier production --port 8783
+Restart=on-failure
+RestartSec=10
+CPUQuota=30%
+MemoryMax=200M
+Nice=10
+
+[Install]
+WantedBy=default.target

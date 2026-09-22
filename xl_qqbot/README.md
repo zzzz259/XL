@@ -22,6 +22,48 @@
 - 纠错学习：用户从候选选定角色时记录到 `data/learned_aliases.json`（`{查询词: {角色ID: 次数, "users": [openid...]}}`）；同一查询词被 ≥2 个不同用户选定到同一角色 → 自动升级为该角色别名（不污染人工 aliases.json）。版本更新静音期对查询与选择都生效。
 - 依赖 `pypinyin`（requirements.txt），缺失时拼音策略降级不可用、其余策略照常，启动记 warning。
 
+## 进程架构：路由器 + 三级独立服务
+
+一个机器人账号服务多个群，群按 [groups] 分三级。真实运行**四个互不影响的进程**，调试级崩溃不影响正式服务：
+
+```
+QQ 平台 websocket
+      │
+┌─────▼─────────────────────────────┐
+│ 路由器  python -m bot_app.router   │  独占 QQ 网关（botpy）
+│  · 群学习 / GroupTier 分级         │  主动推送管道（稳定基础设施）：
+│  · 按群级别 HTTP 转发事件           │  Watcher(outbox+播报)、BilibiliWatcher
+│  · muted 现读 update_status.json  │  （tiers 门禁过滤目标群，语义不变）
+└─┬──────────┬──────────┬───────────┘
+  │ :8781    │ :8782    │ :8783
+┌─▼────┐ ┌───▼───┐ ┌────▼───────┐
+│debug │ │ test  │ │ production │   python -m bot_app.service --tier <级> --port <口>
+│服务   │ │ 服务   │ │ 服务        │   只处理图鉴查询/候选选择（QueryHandler）
+└──────┘ └───────┘ └────────────┘   候选状态在本进程内存；QQSender 仅 HTTP API
+```
+
+- 事件 envelope：`POST /event`，`{"type": "group_message"|"group_at"|"group_add_robot", "muted": bool, "data": {<原始事件 dict>}}`；`muted=true` 时服务按现有静音语义忽略查询与选择。`GET /health` 返回 `ok`。
+- 转发失败（服务未启动/超时/非 200）路由器只记 error 日志，不影响其他事件与推送。
+- 端口/超时配置在 `[router]`；级别服务监听 127.0.0.1 仅本机可达。
+- 部署：`scripts/install_router.sh` 为 debug/test 创建独立 git worktree（共享主项目 .venv，`PYTHONPATH` 指向各自 worktree）；`deploy/` 下四个 unit（router 50%/256M，服务各 30%/200M，均 Restart=on-failure、Nice=10）。
+- 旧一体化入口 `python -m bot_app.main` 保留可用（单进程跑全部），部署上由上述架构取代。
+
+## 群分级与功能门禁
+
+群分三级（累积语义：功能级别 L 在群级别 G 开放 ⟺ G ≥ L）：
+
+- `debug`（调试级）：全部功能
+- `test`（测试级）：测试级 + 正式级功能
+- `production`（正式级，默认）：仅正式级功能
+
+配置：`[groups]` 的 `debug`/`test` 列表填群 openid（不在列表的群即正式级）；`[features]` 配置各功能所需最低级别（`character_query` @查图鉴含候选选择、`character_push` 新角色图鉴推送、`update_notice` 更新播报、`bilibili_watch` B 站监视推送），缺省/未知功能名均为 `production`，非法级别值启动报错。
+
+语义要点：
+
+- 事件类（查询、候选选择）在门禁外静默忽略（DEBUG 日志）；推送类按级别过滤目标群。
+- `character_push` 过滤后无目标群时，该 outbox 批次视为无需发送并正常清理（不会卡 incomplete）；`bilibili_watch` 过滤后为空不推进已发状态（下轮自动重试）。
+- 级别每次现算：把群从 debug 列表移到别处立即生效，无需重启。
+
 ## 与 xl_updata_server 的交接约定
 
 - 上游 outbox：`/home/admin/xl_updata_server/data/outbox/<版本时间戳>/`
