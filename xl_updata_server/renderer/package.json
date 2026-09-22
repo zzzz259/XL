@@ -1,0 +1,14 @@
+{
+  "name": "xl-character-card-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "角色档案 1080px 长图 Node 渲染器",
+  "main": "card_image_renderer.js",
+  "bin": "render_batch.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3"
+  }
+}

@@ -1,0 +1,5 @@
+qq-botpy>=1.2
+aiohttp>=3.8.0
+pypinyin>=0.51
+pytest>=7.0
+pytest-asyncio>=0.21.0

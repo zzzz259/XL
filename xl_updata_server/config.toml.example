@@ -1,0 +1,28 @@
+[server]
+timezone = "Asia/Shanghai"
+normal_interval_seconds = 3600
+burst_interval_seconds = 60
+burst_duration_seconds = 1200
+# last_friday = 以最近一个周五 10:00 为锚每 21 天密集检查；也可写死 ISO 时间如 "2026-09-18T10:00:00+08:00"
+burst_anchor = "last_friday"
+
+[paths]
+data_dir = "data"
+java_bin = "java"
+unluac_jar = "../xl_updata_tool/tools/lua/unluac.jar"
+unluac_opmap = "../xl_updata_tool/tools/lua/opmap"
+# Node 可执行文件路径，用于调用 renderer/ 下的长图渲染器。
+node_bin = "node"
+# Optional CJK font path. Empty uses the renderer's system-font search.
+character_card_font = ""
+
+[cdn]
+base = "https://elpis.17995cdn.com/Android/Bundles"
+categories = ["Arts", "Data"]
+
+# false 时只建角色数据库，完全不渲染图鉴长图（弱机省 CPU/磁盘）
+[cards]
+enabled = true
+
+[security]
+assetbundle_key = "yunguihaowan1234"

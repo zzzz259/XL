@@ -1,0 +1,63 @@
+[bot]
+# QQ 开放平台机器人凭据（必填），创建机器人在 https://bot.open.qq.com
+appid = ""
+secret = ""
+
+[watch]
+# 上游 xl_updata_server 产出的 outbox 根目录
+outbox_dir = "/home/admin/xl_updata_server/data/outbox"
+# 轮询间隔（秒），默认 30
+interval_seconds = 30
+# 本机持久化目录：分发记录、学到的群 openid 等
+data_dir = "/home/admin/xl_qqbot/data"
+# @机器人+角色名 查询用的角色数据与图鉴图片目录
+character_data = "/home/admin/xl_updata_server/data/character_data/current.json"
+versions_dir = "/home/admin/xl_updata_server/data/versions"
+
+[target]
+# 目标群 openid 列表（可选覆盖）。
+# 留空（默认）= 发给所有已知的机器人所在群（已学习列表 + 后续事件学习）。
+# 手填列表 = 只发这些群，忽略学习列表。
+group_openids = []
+# 是否监听群事件（被添加进群、被@消息）自动登记群 openid。默认开启。
+auto_learn_from_events = true
+
+[upload]
+# 图片文件的公网可访问 URL 前缀（可选）。
+# 若配置，bot 会把本地文件路径映射成该 URL 下的可下载地址，再调用 SDK 的 URL 直传接口。
+# 例如：https://your-domain.com/xl_outbox
+# 留空则使用官方分片上传接口直接上传本地文件（未经验证，需凭据实测）。
+file_base_url = ""
+
+[message]
+# 发送文字模板，可用变量 {version} {name} {file_name}
+# 留空（默认）= 只发图不配文字
+template = ""
+
+[bilibili]
+# B 站 UP 主动态/视频监视。enabled=false 可关闭。
+enabled = true
+# 轮询间隔（秒），默认 300
+interval_seconds = 300
+# 登录态 SESSDATA（必填，否则接口被风控返回 412）。
+# 获取方式：浏览器登录 bilibili.com → F12 → 应用/存储 → Cookies → SESSDATA 的值。
+sessdata = ""
+
+# 监视目标（可多个，每个 [[bilibili.targets]] 一个）。
+# mode = "full"：图文动态发全文+逐张原图，视频发一行通知（官方号用）
+# mode = "notice"：图文和视频都只发一行通知，不拉详情、不下图
+# name 留空则运行时自动解析 UP 主名（acc/info，失败回退视频 author，再失败用 mid），解析结果缓存
+[[bilibili.targets]]
+mid = "3537105431038140"
+name = "星落官方"
+mode = "full"
+
+[[bilibili.targets]]
+mid = "11310554"
+name = ""
+mode = "notice"
+
+[[bilibili.targets]]
+mid = "1623229430"
+name = ""
+mode = "notice"

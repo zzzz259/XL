@@ -45,3 +45,12 @@ xl_updata_tool/tools/AssetStudio/Maps/
 .idea/
 .vscode/
 *.swp
+
+# 服务器/bot 子项目的运行时与凭据
+xl_updata_server/data/
+xl_updata_server/.venv/
+xl_updata_server/renderer/node_modules/
+xl_qqbot/data/
+xl_qqbot/.venv/
+xl_qqbot/config.toml
+xl_qqbot/bili_tmp/

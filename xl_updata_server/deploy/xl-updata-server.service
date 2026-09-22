@@ -1,0 +1,22 @@
+[Unit]
+Description=XL character update backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_updata_server
+ExecStart=/home/admin/xl_updata_server/.venv/bin/python /home/admin/xl_updata_server/run_server.py --config /home/admin/xl_updata_server/config.toml
+Restart=on-failure
+RestartSec=30
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+# 2 核 1.8G 小机保护：最多占一个核、低调度优先级、内存硬上限，避免拖垮整机
+Nice=10
+CPUQuota=100%
+MemoryHigh=700M
+MemoryMax=1G
+
+[Install]
+WantedBy=default.target
