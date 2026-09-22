@@ -55,10 +55,10 @@ bash scripts/install_renderer.sh    # Node 与 canvas 原生依赖（需要 sudo
 - `data/current_version.json`：当前已发布版本指针；更新发布采用临时目录完成后原子改名。
 - `data/versions/<timestamp>/character_data/current.json`：该版本角色数据。
 - `data/versions/<timestamp>/character_data/versions/<timestamp>.json`：同一份角色数据的版本快照。
-- `data/versions/<timestamp>/character_cards/<角色ID>_<角色名>_角色档案_长图.png`：非首跑时只包含本次新增角色；首跑会建立基线并渲染全部角色，但**不会**写入 outbox，避免 QQ Bot 一次发太多图刷屏。
-- `data/versions/<timestamp>/manifest.json`：版本统计，包括 `baseline` 标记、`lua_hashes`、`new_characters_count`、`character_cards` 成功/警告/失败明细、实际下载的 hash 列表。
+- `data/versions/<timestamp>/character_cards/<角色ID>_<角色名>_角色档案_长图.png`：非首跑时包含本次新增角色与**信息变更角色**（同 ID 角色数据有任意字段差异即重渲，新图覆盖同名旧文件；首跑建立基线渲染全部）。首跑**不会**写入 outbox，避免 QQ Bot 一次发太多图刷屏。
+- `data/versions/<timestamp>/manifest.json`：版本统计，包括 `baseline` 标记、`lua_hashes`、`new_characters_count`、`updated_characters_count`（信息变更角色数）、`character_cards` 成功/警告/失败明细、实际下载的 hash 列表。
 - `data/catalogs/`：Data 分类清单缓存。
-- `data/outbox/<timestamp>/`：仅当非首跑且本次有新增角色时生成，包含新增长图和 `manifest.json`（版本号、生成时间、新增角色 id/name/文件名列表）。首跑不生成 outbox。QQ Bot 轮询该目录，取走文件后自行删除；空目录可保留或清理，不影响后续版本。
+- `data/outbox/<timestamp>/`：仅当非首跑且本次有新增角色时生成（**变更角色不推送 QQ 群**），包含新增长图和 `manifest.json`（版本号、生成时间、新增角色 id/name/文件名列表）。首跑不生成 outbox。QQ Bot 轮询该目录，取走文件后自行删除；空目录可保留或清理，不影响后续版本。
 
 服务器版只下载 Data 分类的 Lua AB 包，提取白名单图鉴 Lua 后单 JVM 批量反编译。一次更新失败时临时版本目录会被丢弃，历史已发布版本不会自动删除；发布前临时目录中的 AB 包与中间工作目录会被删除，发布后版本目录只保留 `character_cards`、`character_data` 和 `manifest.json`。
 
