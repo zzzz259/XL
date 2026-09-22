@@ -127,6 +127,7 @@ cp config.toml.example config.toml
 - 去重：`data/bilibili_state.json` 结构 `{"targets": {"<mid>": {"last_opus_id", "last_video_created", "last_bvid", "name"}}}`；每目标独立基线，首轮以最新一条为准不补发，重启不重复。
 - 旧版 state 文件（顶层 `last_opus_id/last_video_created/last_bvid`）自动迁移到默认官方号 mid 下，已发基线保留不重发；旧配置（`[bilibili].mid` 单目标）无 `targets` 时等价为单目标 full 模式。
 - 每路每目标每轮最多推送 5 条，按时间升序，逐条推进 state，超出部分下一轮继续，防止历史洪水。
+- **定时密集检测**：每天 `burst_times`（默认 10:00/17:00，Asia/Shanghai）起持续 `burst_window_seconds`（默认 300s）进入密集期，期间每 `burst_interval_seconds`（默认 60s）检测一次，其余时间按 `interval_seconds`；`burst_times = []` 退回纯常规模式，窗口支持跨零点。
 - 单条图文详情拉取/解析失败记 warning 跳过并推进 state（避免坏数据卡死队列）；某目标某路接口失败只跳过该路该目标，不影响其他，绝不崩溃。
 
 配置项（`[bilibili]`）：
