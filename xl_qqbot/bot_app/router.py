@@ -223,6 +223,8 @@ async def _amain_router(config: Config) -> None:
 
 def main() -> None:
     _setup_logging()
+    # 必须在网关连接建立前注册原始事件解析器（ConnectionState 在 start 时构建 parser 表）
+    _install_raw_parsers()
     config = load_config("config.toml")
     asyncio.run(_amain_router(config))
 
