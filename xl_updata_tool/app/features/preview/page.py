@@ -27,7 +27,6 @@ from app.shared.qt.chrome import (
     create_action_button,
     create_command_bar,
     create_empty_state,
-    create_page_header,
     create_status_label,
 )
 from .drag_list import DragListWidget
@@ -352,15 +351,19 @@ class PreviewPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        top_bar, self.preview_title, _ = create_page_header("角色预览器 · 共 0 张图片", parent=self)
-        layout.addWidget(top_bar)
-
         command_bar, command_layout = create_command_bar(self)
+        self.command_layout = command_layout
         self.btn_reload = create_action_button("重新加载图片", "secondary", None, self)
         self.btn_reload.setVisible(False)
         self.btn_mark_all_read = create_action_button("全部标为已读", "secondary", None, self)
         self.btn_mark_all_read.setObjectName("markAllPreviewReadButton")
         command_layout.addWidget(self.btn_mark_all_read)
+        self.preview_progress = QProgressBar(self)
+        self.preview_progress.setObjectName("previewProgress")
+        self.preview_progress.setFixedHeight(24)
+        self.preview_progress.setFixedWidth(250)
+        self.preview_progress.setVisible(False)
+        command_layout.addWidget(self.preview_progress)
         filter_label = QLabel("角色")
         filter_label.setAccessibleName("角色筛选")
         command_layout.addWidget(filter_label)
@@ -370,11 +373,6 @@ class PreviewPage(QWidget):
         self.character_filter.setAccessibleName("角色筛选")
         self.character_filter.setVisible(False)
         filter_label.setVisible(False)
-        self.preview_progress = QProgressBar(self)
-        self.preview_progress.setObjectName("previewProgress")
-        self.preview_progress.setFixedHeight(24)
-        self.preview_progress.setFixedWidth(250)
-        self.preview_progress.setVisible(False)
         self.btn_thumbnail_previous = create_action_button("上一页", "secondary", None, self)
         self.btn_thumbnail_previous.setObjectName("thumbnailPreviousButton")
         self.btn_thumbnail_previous.setAccessibleName("立绘缩略图上一页")
@@ -470,6 +468,12 @@ class PreviewPage(QWidget):
         self.character_output_path = QLabel("角色导出立绘")
         self.character_output_path.setObjectName("characterOutputPath")
         character_toolbar.addWidget(self.character_output_path)
+        self.btn_open_character_folder = create_action_button(
+            "打开当前文件夹", "secondary", None, self.tabs.character_tab
+        )
+        self.btn_open_character_folder.setObjectName("openCharacterOutputFolderButton")
+        self.btn_open_character_folder.setAccessibleName("在资源管理器中打开当前立绘文件夹")
+        character_toolbar.addWidget(self.btn_open_character_folder)
         character_toolbar.addStretch()
         character_layout.addLayout(character_toolbar)
         self.character_browser = PreviewIconBrowser(self.tabs.character_tab)
@@ -504,6 +508,12 @@ class PreviewPage(QWidget):
         self.material_output_path = QLabel("游戏素材")
         self.material_output_path.setObjectName("materialOutputPath")
         material_toolbar.addWidget(self.material_output_path)
+        self.btn_open_material_folder = create_action_button(
+            "打开当前文件夹", "secondary", None, self.tabs.material_tab
+        )
+        self.btn_open_material_folder.setObjectName("openMaterialOutputFolderButton")
+        self.btn_open_material_folder.setAccessibleName("在资源管理器中打开当前游戏素材文件夹")
+        material_toolbar.addWidget(self.btn_open_material_folder)
         material_toolbar.addStretch()
         material_layout.addLayout(material_toolbar)
         self.material_tree = QTreeWidget(self.tabs.material_tab)

@@ -183,11 +183,34 @@ class PreviewController(QObject):
         if hasattr(self.page, "character_browser"):
             self.page.character_browser.path_activated.connect(self._open_character_folder)
             self.page.btn_character_up.clicked.connect(self._reset_character_output_root)
+            self.page.btn_open_character_folder.clicked.connect(self._open_current_character_folder)
         if hasattr(self.page, "material_browser"):
             self.page.material_browser.path_activated.connect(self._open_material_folder)
             self.page.btn_material_up.clicked.connect(self._go_material_up)
+            self.page.btn_open_material_folder.clicked.connect(self._open_current_material_folder)
         if hasattr(self.page, "btn_mark_all_read"):
             self.page.btn_mark_all_read.clicked.connect(self.mark_all_read)
+
+    def _open_current_character_folder(self) -> None:
+        folder = self.page.character_browser.root_path or str(self.service.preview_dir)
+        self._open_output_folder(folder)
+
+    def _open_current_material_folder(self) -> None:
+        folder = self.page.material_browser.root_path or str(
+            self.service.preview_dir.parent / "game_material"
+        )
+        self._open_output_folder(folder)
+
+    def _open_output_folder(self, folder: str) -> None:
+        path = os.path.normpath(os.path.abspath(folder))
+        if not os.path.isdir(path):
+            QMessageBox.warning(self.page, "文件夹不存在", f"当前预览文件夹不存在：\n{path}")
+            return
+        try:
+            subprocess.Popen(["explorer", path])
+        except Exception as error:
+            logger.error("打开预览输出文件夹失败: %s", error)
+            QMessageBox.warning(self.page, "打开文件夹失败", f"无法打开当前预览文件夹：\n{error}")
 
     def _reset_character_output_root(self):
         current = self.page.character_browser.root_path
@@ -416,7 +439,6 @@ class PreviewController(QObject):
         self.page.preview_progress.setMaximum(total)
         self.page.preview_progress.setValue(current)
         self.page.preview_progress.setFormat(f"加载中... {current}/{total}")
-        self.page.preview_title.setText(f"角色预览器 · 共 {total} 张图片 · 加载中 {current}/{total}")
         self.progress_changed.emit(current, total, "加载预览图片")
 
     def _on_thumbnail_loaded(self, image_path, thumbnail):
@@ -427,7 +449,6 @@ class PreviewController(QObject):
     def _on_load_finished(self, loaded_paths):
         self.image_paths = list(getattr(self, "_active_image_paths", loaded_paths))
         self.page.preview_progress.setVisible(False)
-        self.page.preview_title.setText(f"角色预览器 · 共 {len(self.image_paths)} 张图片")
         self.page.empty_label.setVisible(not self.image_paths)
         self.update_status()
         message = f"图片预览: 共 {len(self.image_paths)} 张图片"

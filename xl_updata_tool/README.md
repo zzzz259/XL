@@ -9,7 +9,6 @@
 - [版本历史](docs/版本历史.md)：按新版本到旧版本记录功能和修复变更。
 - [架构与协作基线](docs/架构与协作基线.md)：多人协作边界、失败恢复要求和提交前检查。
 - [代码所有权与边界](docs/代码所有权与边界.md)：功能域认领范围、公共架构区和多人协作修改规则。
-- [开发文档指南](docs/开发文档指南.md)：当前架构、模块职责、运行目录契约和验证方法。
 - [开发计划与沟通事项](docs/开发计划与沟通事项.md)：长期需求、阶段计划、用户确认项和提交前状态。
 
 ## 项目简介
@@ -88,7 +87,7 @@ MainWindow 作为 Shell 负责导航、页面宿主和通用任务状态；`app/
 
 发布包完全自包含：内置 Python/Qt、Java 运行时（Lua 反编译）、.NET 8 运行时（AssetStudio）以及 AssetStudio / SpineViewer / vgmstream / QuickBMS 等全部外部工具，目标机器无需安装 Python / Java / .NET。
 
-常用参数：`-Version 1.60.2` 指定版本号；`-SkipTests` 跳过 pytest/ruff；`-SkipRuntimes` 复用已生成的 `runtimes/`（快速迭代）；`-NoVenv` 直接用当前 Python 而不建 `build/.venv`。
+常用参数：`-Version 2.0.0` 指定版本号；`-SkipTests` 跳过 pytest/ruff；`-SkipRuntimes` 复用已生成的 `runtimes/`（快速迭代）；`-NoVenv` 直接用当前 Python 而不建 `build/.venv`。
 
 打 `v*` 标签推送后，GitHub Actions（`.github/workflows/release.yml`）会自动执行同样的构建并把 ZIP 与校验文件发布到 Release。
 

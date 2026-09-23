@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '发布版本号（不带 v 前缀，如 1.60.2）'
+        description: '发布版本号（不带 v 前缀，如 2.0.0）'
         required: false
-        default: '1.60.2'
+        default: '2.0.0'
 
 permissions:
   contents: write
@@ -59,9 +59,10 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
           files: |
             xl_updata_tool/release/*.zip
             xl_updata_tool/release/SHA256SUMS.txt
