@@ -59,8 +59,15 @@ forward_timeout = 8
 [bilibili]
 # B 站 UP 主动态/视频监视。enabled=false 可关闭。
 enabled = true
-# 轮询间隔（秒），默认 300
+# 常规轮询间隔（秒），默认 300
 interval_seconds = 300
+# 定时密集检测：每天 burst_times 起持续 burst_window_seconds，期间每 burst_interval_seconds 检测一次。
+# 留空（burst_times = []）退回纯 interval_seconds 模式。
+burst_times = ["10:00", "17:00"]
+burst_window_seconds = 300
+burst_interval_seconds = 60
+# 密集窗口判定用的时区
+timezone = "Asia/Shanghai"
 # 登录态 SESSDATA（必填，否则接口被风控返回 412）。
 # 获取方式：浏览器登录 bilibili.com → F12 → 应用/存储 → Cookies → SESSDATA 的值。
 sessdata = ""

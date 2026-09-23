@@ -1,26 +1,42 @@
-# XL 工具仓库
+# XL
 
-本仓库收集多个游戏逆向 / 资源处理工具，每个工具一个独立子目录，互不干扰。
+XL 是面向《星落》的多项目仓库，包含 Windows 桌面资源工具和 Linux 后端服务。2.0.0 是 `xl_updata_tool` 的正式发布版本；服务器和 QQ bot 是独立部署的配套项目。
 
-## 项目导航
+## 子项目
 
-| 项目 | 说明 |
-|---|---|
-| [xl_updata_tool](xl_updata_tool/) | 游戏更新管理工具：监控更新、下载资源包、追踪版本变化、导入 AssetStudio 浏览解析；项目测试位于 `xl_updata_tool/tests/` |
+| 子项目 | 用途 | 入口文档 |
+|---|---|---|
+| [`xl_updata_tool`](xl_updata_tool/README.md) | Windows 桌面端：检查版本、下载 bundle、解析 Lua/音频/图片与 Spine 资源，并导出到 `output/`。 | [快速开始与使用说明](xl_updata_tool/README.md) |
+| [`xl_updata_server`](xl_updata_server/README.md) | Linux 后台更新抓取、角色数据版本化、角色图鉴卡片渲染及 outbox 生成。 | [服务端文档](xl_updata_server/README.md) · [配置与运维](xl_updata_server/docs/配置与运维.md) |
+| [`xl_qqbot`](xl_qqbot/README.md) | QQ 群机器人：角色图鉴查询、更新图鉴分发、公告与 B 站动态监视。 | [Bot 文档](xl_qqbot/README.md) · [配置与运维](xl_qqbot/docs/配置与运维.md) |
 
-## 协作规范
+三个子项目有各自的 Python 依赖、虚拟环境和测试；服务器与 bot 通过文件目录和配置约定集成，不是桌面工具的运行依赖。
 
-- 协作流程：[CONTRIBUTING.md](CONTRIBUTING.md)
-- 结构 / 代码 / 命名规范：[项目规范.md](项目规范.md)
+## 文档导航
 
-## 目录结构
+- [文档地图](docs/README.md)：项目内正式文档、读者与信息归属。
+- [贡献与分支流程](CONTRIBUTING.md)：`debug` → `test` → `main`、PR、提交和发布约定。
+- [项目规范](项目规范.md)：monorepo、Python 环境、文档和生成文件约定。
+- [安全与凭据](SECURITY.md)：凭据、外部资源及安全问题报告。
+- 更新工具：[架构与运行时契约](xl_updata_tool/docs/架构与协作基线.md)、[开发指南](xl_updata_tool/docs/开发文档指南.md)、[版本历史](xl_updata_tool/docs/版本历史.md)。
 
-```
+## 长期分支
+
+- `debug`：日常开发集成。
+- `test`：候选变更与发布前验证。
+- `main`：稳定发布基线；Release 从此分支的版本 tag 或受限的手动流程产生。
+
+短期任务分支用于 PR，合并后删除，不作为长期分支。详细流程及当前 CI 行为见 [CONTRIBUTING](CONTRIBUTING.md)。
+
+## 仓库布局
+
+```text
 XL/
-├── README.md            ← 本文件（仓库总介绍）
-├── CONTRIBUTING.md      ← 协作规范
-├── 项目规范.md          ← 结构 / 代码 / 命名规范
-├── docs/                ← 仓库级共享文档（跨项目）
-└── xl_updata_tool/      ← 项目：游戏更新管理工具
-    └── ...
+├── .github/workflows/       # CI 与桌面工具 Release 自动化
+├── docs/                    # 仓库级文档索引
+├── xl_updata_tool/          # Windows 桌面应用
+├── xl_updata_server/        # Linux 更新服务
+└── xl_qqbot/                # QQ 机器人
 ```
+
+开始前请进入对应子项目 README。运行数据、凭据、虚拟环境和构建产物不要提交到仓库。

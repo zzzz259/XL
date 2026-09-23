@@ -25,10 +25,14 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import urllib.parse
+from datetime import datetime, timedelta
+from datetime import time as dt_time
 from pathlib import Path
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -46,6 +50,44 @@ NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
 
 TEXT_PREFIX = "【星落官方动态】"
 MAX_PER_ROUND = 5  # 每路每目标每轮最多推送条数，超出留到下一轮，防历史洪水
+
+_BURST_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+
+
+def parse_burst_times(values) -> list[tuple[int, int]]:
+    """校验并解析 ["HH:MM", ...] → [(hour, minute), ...]；非法格式抛 ValueError。"""
+    parsed = []
+    for value in values or []:
+        match = _BURST_TIME_RE.match(str(value).strip())
+        if not match:
+            raise ValueError(f"[bilibili] burst_times 格式应为 HH:MM: {value!r}")
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if hour > 23 or minute > 59:
+            raise ValueError(f"[bilibili] burst_times 时间非法: {value!r}")
+        parsed.append((hour, minute))
+    return parsed
+
+
+def select_poll_interval(
+    now: datetime,
+    normal_interval: int,
+    burst_times: list[tuple[int, int]],
+    window_seconds: int,
+    burst_interval: int,
+) -> int:
+    """当前时间落在任一 [t, t+window) 密集窗口（含跨零点）内返回 burst_interval，否则 normal。
+
+    burst_times 为空退回纯 normal 模式。
+    """
+    if not burst_times or window_seconds <= 0:
+        return normal_interval
+    for hour, minute in burst_times:
+        # 每个时刻检查今天与昨天的起点：窗口跨零点时昨天起点仍覆盖此刻
+        for day in (now.date(), now.date() - timedelta(days=1)):
+            start = datetime.combine(day, dt_time(hour, minute), tzinfo=now.tzinfo)
+            if start <= now < start + timedelta(seconds=window_seconds):
+                return burst_interval
+    return normal_interval
 
 # WBI 混合密钥表（官方算法，取拼接 key 按表重排后的前 32 位）
 MixinKeyTab = [
@@ -472,6 +514,21 @@ class BilibiliWatcher:
         self.tmp_dir = os.path.join(config.watch.data_dir, "bili_tmp")
         self._client: Optional[BilibiliClient] = None
         self._stop_event = asyncio.Event()
+        bili = config.bilibili
+        # 密集窗口时刻表在构造时校验（非法格式直接报错，不拖到运行时）
+        self._burst_times = parse_burst_times(bili.burst_times)
+        self._tz = ZoneInfo(bili.timezone)
+
+    def next_interval_seconds(self) -> int:
+        """下次轮询间隔：当前时间落在密集窗口内用 burst_interval，否则 interval_seconds。"""
+        bili = self.config.bilibili
+        return select_poll_interval(
+            now=datetime.now(self._tz),
+            normal_interval=bili.interval_seconds,
+            burst_times=self._burst_times,
+            window_seconds=bili.burst_window_seconds,
+            burst_interval=bili.burst_interval_seconds,
+        )
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -486,8 +543,10 @@ class BilibiliWatcher:
             _logger.info("B 站动态监视未启用（[bilibili].enabled=false）")
             return
         _logger.info(
-            "B 站动态监视启动 targets=%d interval=%ss",
+            "B 站动态监视启动 targets=%d interval=%ss burst_times=%s window=%ss burst_interval=%ss",
             len(self.config.bilibili.targets), self.config.bilibili.interval_seconds,
+            self.config.bilibili.burst_times, self.config.bilibili.burst_window_seconds,
+            self.config.bilibili.burst_interval_seconds,
         )
         try:
             while not self._stop_event.is_set():
@@ -498,7 +557,7 @@ class BilibiliWatcher:
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(),
-                        timeout=self.config.bilibili.interval_seconds,
+                        timeout=self.next_interval_seconds(),
                     )
                 except asyncio.TimeoutError:
                     pass

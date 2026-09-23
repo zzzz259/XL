@@ -1,7 +1,17 @@
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from typing import Dict, List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+_HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+
+
+def _validate_hhmm(value: str) -> None:
+    match = _HHMM_RE.match(value)
+    if not match or int(match.group(1)) > 23 or int(match.group(2)) > 59:
+        raise ValueError(f"[bilibili] burst_times 格式应为 HH:MM: {value!r}")
 
 
 @dataclass(frozen=True)
@@ -56,6 +66,11 @@ class BilibiliConfig:
     interval_seconds: int = 300
     sessdata: str = ""
     targets: List[BilibiliTarget] = field(default_factory=_default_bili_targets)
+    # 定时密集检测：每天 burst_times 起持续 burst_window_seconds，期间每 burst_interval_seconds 检测一次
+    burst_times: List[str] = field(default_factory=lambda: ["10:00", "17:00"])
+    burst_window_seconds: int = 300
+    burst_interval_seconds: int = 60
+    timezone: str = "Asia/Shanghai"
 
 
 @dataclass(frozen=True)
@@ -165,9 +180,23 @@ def load_config(path: str = "config.toml") -> Config:
         interval_seconds=int(bili.get("interval_seconds", BilibiliConfig.interval_seconds)),
         sessdata=str(bili.get("sessdata", "")).strip(),
         targets=_load_bili_targets(bili),
+        burst_times=[str(t).strip() for t in bili.get("burst_times", ["10:00", "17:00"])],
+        burst_window_seconds=int(bili.get("burst_window_seconds", 300)),
+        burst_interval_seconds=int(bili.get("burst_interval_seconds", 60)),
+        timezone=str(bili.get("timezone", "Asia/Shanghai")).strip(),
     )
     if bilibili.interval_seconds < 1:
         raise ValueError("[bilibili] interval_seconds 必须 >= 1")
+    for burst_time in bilibili.burst_times:
+        _validate_hhmm(burst_time)
+    if bilibili.burst_window_seconds < 1:
+        raise ValueError("[bilibili] burst_window_seconds 必须 >= 1")
+    if bilibili.burst_interval_seconds < 1:
+        raise ValueError("[bilibili] burst_interval_seconds 必须 >= 1")
+    try:
+        ZoneInfo(bilibili.timezone)
+    except ZoneInfoNotFoundError:
+        raise ValueError(f"[bilibili] timezone 非法: {bilibili.timezone!r}")
 
     groups = raw.get("groups", {})
     features_raw = raw.get("features", {})

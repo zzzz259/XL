@@ -25,6 +25,7 @@ class ProcessResult:
     card_failure_count: int = 0
     error: str | None = None
     new_character_count: int = 0
+    updated_character_count: int = 0  # 同 ID 但内容变更、被重渲的角色数（v1 全字段比较，从严）
 
 
 class UpdatePipeline:
