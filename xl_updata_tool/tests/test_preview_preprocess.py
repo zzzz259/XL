@@ -1,3 +1,5 @@
+import pytest
+
 from app.features.preview.material_catalog import GameMaterialCatalog, MaterialExportSummary
 from app.features.preview.output_publisher import RawSpinePublishSummary
 from app.features.preview.service import PreviewPreprocessSummary, PreviewService
@@ -32,3 +34,18 @@ def test_preprocess_builds_spine_and_game_material_outputs_after_import(tmp_path
         ("export-materials", material_catalog),
     ]
     assert progress[-1] == (4, 4, "图片资源预处理完成")
+
+
+def test_preprocess_fails_import_when_game_material_export_reports_failures():
+    service = PreviewService("data/material", "output/character")
+    service.discover_preview_resources = lambda: object()
+    service.publish_raw_spine_resources = lambda _catalog: RawSpinePublishSummary(published=1)
+    service.discover_game_materials = lambda: GameMaterialCatalog((), (), ())
+    service.export_game_materials = lambda *_args, **_kwargs: MaterialExportSummary(
+        exported=0,
+        failed=1,
+        diagnostics=("burst-head export failed: access denied",),
+    )
+
+    with pytest.raises(RuntimeError, match="游戏素材导出失败.*access denied"):
+        service.preprocess_preview_resources()

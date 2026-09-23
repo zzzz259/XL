@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '发布版本号（不带 v 前缀，如 1.60.2）'
+        description: '发布版本号（不带 v 前缀，如 2.0.0）'
         required: false
-        default: '1.60.2'
+        default: '2.0.0'
 
 permissions:
   contents: write
@@ -19,6 +19,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release source is main
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+            if ($env:GITHUB_REF -ne "refs/heads/main") {
+              throw "Manual Release dispatch must run from main (current ref: $env:GITHUB_REF)"
+            }
+          } else {
+            git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+            if ($LASTEXITCODE -ne 0) {
+              throw "Release tag must point to a commit reachable from main"
+            }
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -59,9 +75,10 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
           files: |
             xl_updata_tool/release/*.zip
             xl_updata_tool/release/SHA256SUMS.txt

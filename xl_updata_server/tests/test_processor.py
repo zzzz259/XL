@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import json
 
 import pytest
 
@@ -113,14 +114,15 @@ def test_processor_renders_only_new_characters(tmp_path, monkeypatch):
 
     assert result.processed is True
     assert result.card_count == 1
-    assert captured_ids["only"] == {"10003"}
+    assert captured_ids["only"] == {"10002", "10003"}  # 新增 ∪ 变更（10002 的 name B→B2）
+    assert result.updated_character_count == 1
 
     outbox = data_dir / "outbox" / "2"
     assert outbox.is_dir()
     assert (outbox / "10003_A_角色档案_长图.png").is_file()
     manifest = __import__("json").loads((outbox / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["version"] == 2
-    assert manifest["characters"][0]["character_id"] == "10003"
+    assert [item["character_id"] for item in manifest["characters"]] == ["10003"]  # 变更角色不进 outbox
 
 
 def test_processor_no_new_characters_skips_outbox(tmp_path, monkeypatch):
@@ -136,12 +138,15 @@ def test_processor_no_new_characters_skips_outbox(tmp_path, monkeypatch):
     _patch_cdn(processor, monkeypatch, timestamp=2)
     _patch_lua_pipeline(monkeypatch)
 
-    monkeypatch.setattr(
-        "server_app.processor.export_character_cards",
-        lambda *args, **kwargs: CardExportReport(
+    captured = {}
+
+    def fake_export(chars, out_dir, font, only_character_ids=None, **_kwargs):
+        captured["only"] = only_character_ids
+        return CardExportReport(
             seen=0, created=0, warned=0, failed=0, outputs=(), warnings=(), failures=()
-        ),
-    )
+        )
+
+    monkeypatch.setattr("server_app.processor.export_character_cards", fake_export)
     monkeypatch.setattr(
         "server_app.processor.parse_character_snapshot",
         lambda _dir: {"characters": {"10001": {"name": "A2"}}},
@@ -152,9 +157,14 @@ def test_processor_no_new_characters_skips_outbox(tmp_path, monkeypatch):
 
     assert result.processed is True
     assert result.card_count == 0
-    assert not (data_dir / "outbox" / "2").exists()
+    assert captured["only"] == {"10001"}  # 变更角色进入重渲集合
+    assert result.updated_character_count == 1
+    assert not (data_dir / "outbox" / "2").exists()  # 但变更不推送 outbox
     assert (staging / "character_data" / "current.json").is_file()
     assert (staging / "manifest.json").is_file()
+    manifest = __import__("json").loads((staging / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["updated_characters_count"] == 1
+    assert manifest["new_characters_count"] == 0
 
 
 def test_processor_cleans_bundles_and_work_before_return(tmp_path, monkeypatch):
@@ -331,3 +341,170 @@ def test_processor_writes_error_status_on_failure(tmp_path, monkeypatch):
     status = _json.loads((data_dir / "update_status.json").read_text(encoding="utf-8"))
     assert status["updating"] is False
     assert status["error"] == "boom"
+
+
+# ---------- 信息变更重渲（updated_characters） ----------
+
+
+def _setup_changed_scene(tmp_path, monkeypatch, current_chars, parsed_chars, timestamp=2):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    current = data_dir / "character_data" / "current.json"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.write_text(
+        json.dumps({"version": 1, "characters": current_chars}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    processor = ProductionUpdateProcessor(_config(data_dir))
+    _patch_cdn(processor, monkeypatch, timestamp=timestamp)
+    _patch_lua_pipeline(monkeypatch)
+    monkeypatch.setattr(
+        "server_app.processor.parse_character_snapshot",
+        lambda _dir: {"characters": parsed_chars},
+    )
+    return processor, data_dir
+
+
+def test_changed_only_rerenders_without_outbox(tmp_path, monkeypatch):
+    """仅变更：重渲变更角色，但不写 outbox（硬约束）。"""
+    processor, data_dir = _setup_changed_scene(
+        tmp_path, monkeypatch,
+        {"10001": {"name": "A", "desc": "旧"}},
+        {"10001": {"name": "A", "desc": "新"}},
+    )
+    captured = {}
+
+    def fake_export(chars, out_dir, font, only_character_ids=None, **_kwargs):
+        captured["only"] = only_character_ids
+        return CardExportReport(seen=1, created=1, warned=0, failed=0,
+                                outputs=(), warnings=(), failures=(), character_outputs=())
+
+    monkeypatch.setattr("server_app.processor.export_character_cards", fake_export)
+    result = processor(tmp_path / "staging")
+
+    assert captured["only"] == {"10001"}
+    assert result.new_character_count == 0
+    assert result.updated_character_count == 1
+    assert not (data_dir / "outbox").exists()
+
+
+def test_changed_card_overwrites_old_file(tmp_path, monkeypatch):
+    """变更角色的新长图覆盖同名旧文件（文件名规则不变）。"""
+    processor, _ = _setup_changed_scene(
+        tmp_path, monkeypatch,
+        {"10001": {"name": "A"}},
+        {"10001": {"name": "A", "story": "补充了档案"}},
+    )
+    staging = tmp_path / "staging"
+    card_path = staging / "character_cards" / "10001_A_角色档案_长图.png"
+    card_path.parent.mkdir(parents=True, exist_ok=True)
+    card_path.write_bytes(b"old-png")
+
+    def fake_export(chars, out_dir, font, only_character_ids=None, **_kwargs):
+        assert str(out_dir).endswith("character_cards")
+        card_path.write_bytes(b"new-png")  # 同名覆盖
+        return CardExportReport(seen=1, created=1, warned=0, failed=0,
+                                outputs=(card_path,), warnings=(), failures=(),
+                                character_outputs=(("10001", card_path),))
+
+    monkeypatch.setattr("server_app.processor.export_character_cards", fake_export)
+    result = processor(staging)
+
+    assert result.updated_character_count == 1
+    assert card_path.read_bytes() == b"new-png"
+
+
+def test_new_plus_changed_union_rendered_but_outbox_only_new(tmp_path, monkeypatch):
+    """新增 ∪ 变更一起渲染；outbox 只装新增。"""
+    processor, data_dir = _setup_changed_scene(
+        tmp_path, monkeypatch,
+        {"10001": {"name": "A"}},
+        {"10001": {"name": "A2"}, "10002": {"name": "B"}},
+    )
+    captured = {}
+    new_card = _make_card_file(tmp_path / "staging", "10002")
+
+    def fake_export(chars, out_dir, font, only_character_ids=None, **_kwargs):
+        captured["only"] = only_character_ids
+        return CardExportReport(seen=2, created=2, warned=0, failed=0,
+                                outputs=(new_card,), warnings=(), failures=(),
+                                character_outputs=(("10001", new_card), ("10002", new_card)))
+
+    monkeypatch.setattr("server_app.processor.export_character_cards", fake_export)
+    result = processor(tmp_path / "staging")
+
+    assert captured["only"] == {"10001", "10002"}
+    assert result.new_character_count == 1
+    assert result.updated_character_count == 1
+    outbox = data_dir / "outbox" / "2"
+    manifest = json.loads((outbox / "manifest.json").read_text(encoding="utf-8"))
+    assert [item["character_id"] for item in manifest["characters"]] == ["10002"]
+    staging_manifest = json.loads(
+        (tmp_path / "staging" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert staging_manifest["new_characters_count"] == 1
+    assert staging_manifest["updated_characters_count"] == 1
+
+
+def test_identical_characters_no_updates(tmp_path, monkeypatch):
+    """数据全等：无新增无变更，不重渲、无 outbox。"""
+    processor, data_dir = _setup_changed_scene(
+        tmp_path, monkeypatch,
+        {"10001": {"name": "A", "tags": ["x", "y"]}},
+        {"10001": {"name": "A", "tags": ["x", "y"]}},
+    )
+    captured = {}
+
+    def fake_export(chars, out_dir, font, only_character_ids=None, **_kwargs):
+        captured["only"] = only_character_ids
+        return CardExportReport(seen=0, created=0, warned=0, failed=0,
+                                outputs=(), warnings=(), failures=())
+
+    monkeypatch.setattr("server_app.processor.export_character_cards", fake_export)
+    result = processor(tmp_path / "staging")
+
+    assert captured["only"] == set()
+    assert result.new_character_count == 0
+    assert result.updated_character_count == 0
+    assert not (data_dir / "outbox").exists()
+
+
+def test_key_order_difference_is_not_a_change(tmp_path, monkeypatch):
+    """字段顺序不同但内容全等 → 规范化 JSON 比较视为无变更。"""
+    processor, _ = _setup_changed_scene(
+        tmp_path, monkeypatch,
+        {"10001": {"name": "A", "desc": "d", "star": 5}},
+        {"10001": {"star": 5, "name": "A", "desc": "d"}},
+    )
+    monkeypatch.setattr(
+        "server_app.processor.export_character_cards",
+        lambda *a, **k: CardExportReport(seen=0, created=0, warned=0, failed=0,
+                                         outputs=(), warnings=(), failures=()),
+    )
+    result = processor(tmp_path / "staging")
+    assert result.updated_character_count == 0
+
+
+def test_baseline_produces_no_updates(tmp_path, monkeypatch):
+    """首跑无基线：全部视为新增，不产生变更。"""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    processor = ProductionUpdateProcessor(_config(data_dir))
+    _patch_cdn(processor, monkeypatch, timestamp=2)
+    _patch_lua_pipeline(monkeypatch)
+    monkeypatch.setattr(
+        "server_app.processor.parse_character_snapshot",
+        lambda _dir: {"characters": {"10001": {"name": "A"}, "10002": {"name": "B"}}},
+    )
+    monkeypatch.setattr(
+        "server_app.processor.export_character_cards",
+        lambda *a, **k: CardExportReport(seen=2, created=2, warned=0, failed=0,
+                                         outputs=(), warnings=(), failures=()),
+    )
+    result = processor(tmp_path / "staging")
+    assert result.new_character_count == 2
+    assert result.updated_character_count == 0
+    manifest = json.loads(
+        (tmp_path / "staging" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["updated_characters_count"] == 0

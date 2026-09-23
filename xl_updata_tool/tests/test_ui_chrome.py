@@ -35,13 +35,18 @@ def test_feature_views_use_shared_page_chrome(qapp):
 
     for view in views:
         assert view.objectName() in {"viewContainer", "previewPage"}
-        assert view.findChild(QObject, "pageHeader") is not None
         assert view.findChild(QObject, "pageCommandBar") is not None
+
+    assert views[0].findChild(QObject, "pageHeader") is None
+    assert views[1].findChild(QObject, "pageHeader") is not None
+    assert views[2].findChild(QObject, "pageHeader") is not None
 
     preview = views[0]
     assert preview.findChild(QObject, "pageStatus") is not None
     assert preview.findChild(QObject, "previewProgress") is not None
     assert preview.findChild(QObject, "previewImageList") is not None
+    assert preview.findChild(QObject, "openCharacterOutputFolderButton") is not None
+    assert preview.findChild(QObject, "openMaterialOutputFolderButton") is not None
     empty_state = preview.findChild(QObject, "emptyState")
     assert empty_state is not None
     assert empty_state.parent().objectName() == "viewContent"

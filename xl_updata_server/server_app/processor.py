@@ -38,6 +38,11 @@ def _load_current(path: Path) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _canonical_character(data) -> str:
+    """规范化 JSON（sort_keys）表示，用于跨版本同 ID 角色的全字段比较。"""
+    return json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".part")
@@ -73,6 +78,7 @@ def build_manifest_payload(
     card_report: CardExportReport,
     staging: Path,
     baseline: bool = False,
+    updated_character_ids: set[str] | frozenset = frozenset(),
 ) -> dict:
     """Build the version manifest from the Lua-only processing result."""
     return {
@@ -81,6 +87,7 @@ def build_manifest_payload(
         "lua_hashes": list(lua_hashes),
         "character_ids": sorted(character_ids),
         "new_characters_count": len(new_character_ids),
+        "updated_characters_count": len(updated_character_ids),
         "character_cards": {
             "seen": card_report.seen,
             "created": card_report.created,
@@ -102,12 +109,24 @@ def _write_outbox(
     version: int,
     card_report: CardExportReport,
     characters: dict[str | int, dict[str, Any]],
+    only_character_ids: set[str],
 ) -> None:
-    """把新增长图复制到 outbox 并写清单，供 QQ Bot 消费。"""
+    """把新增长图复制到 outbox 并写清单，供 QQ Bot 消费。
+
+    硬约束：outbox 只写新增角色（变更重渲的长图不推送 QQ 群）。
+    过滤后没有新增产出时整个 outbox 目录都不建。
+    """
+    outputs = [
+        (character_id, source_path)
+        for character_id, source_path in card_report.character_outputs
+        if str(character_id) in only_character_ids
+    ]
+    if not outputs:
+        return
     outbox_dir = data_dir / "outbox" / str(version)
     outbox_dir.mkdir(parents=True, exist_ok=True)
     items: list[dict[str, str]] = []
-    for character_id, source_path in card_report.character_outputs:
+    for character_id, source_path in outputs:
         destination = outbox_dir / source_path.name
         shutil.copy2(source_path, destination)
         character = characters.get(character_id) or characters.get(int(character_id)) if character_id.isdigit() else None
@@ -243,7 +262,21 @@ class ProductionUpdateProcessor:
 
         is_baseline = current is None
         current_ids = set(current.get("characters", {}).keys()) if current else set()
+        current_characters = (
+            {str(key): value for key, value in (current.get("characters") or {}).items()}
+            if current else {}
+        )
+        parsed_characters = {str(key): value for key, value in characters.items()}
         new_character_ids = character_ids - current_ids
+        # 变更检测：同 ID 但规范化 JSON 有任意字段差异（v1 从严，全字段比较；首跑无基线不产生变更）
+        updated_character_ids: set[str] = set()
+        if not is_baseline:
+            for character_id in character_ids & current_ids:
+                if _canonical_character(parsed_characters.get(character_id)) != _canonical_character(
+                    current_characters.get(character_id)
+                ):
+                    updated_character_ids.add(character_id)
+        render_character_ids = new_character_ids | updated_character_ids
 
         stage_started = time.perf_counter()
         if self.config.render_cards:
@@ -251,17 +284,19 @@ class ProductionUpdateProcessor:
                 characters,
                 staging / "character_cards",
                 self.config.character_card_font,
-                only_character_ids=new_character_ids if current else None,
+                only_character_ids=render_character_ids if current else None,
                 node_bin=self.config.node_bin,
             )
             LOGGER.info(
                 "stage=export_character_cards elapsed=%.2fs characters_seen=%d cards_created=%d "
-                "cards_warned=%d cards_failed=%d",
+                "cards_warned=%d cards_failed=%d new=%d updated=%d",
                 time.perf_counter() - stage_started,
                 card_report.seen,
                 card_report.created,
                 card_report.warned,
                 card_report.failed,
+                len(new_character_ids),
+                len(updated_character_ids),
             )
         else:
             # 只建角色数据库的模式：完全不渲染，节省弱机的 CPU 与磁盘
@@ -271,10 +306,15 @@ class ProductionUpdateProcessor:
             )
             LOGGER.info("stage=export_character_cards skipped reason=cards.enabled=false")
 
-        if card_report.created and not is_baseline:
-            _write_outbox(self.config.data_dir, update_info.timestamp, card_report, characters)
+        if new_character_ids and not is_baseline:
+            _write_outbox(
+                self.config.data_dir, update_info.timestamp, card_report, characters,
+                only_character_ids=new_character_ids,
+            )
         elif is_baseline:
             LOGGER.info("stage=baseline skip_outbox version=%s reason=首跑建立基线，跳过 outbox 分发", update_info.timestamp)
+        elif not new_character_ids:
+            LOGGER.info("stage=skip_outbox version=%s reason=无新增角色（变更角色不推送 QQ 群）", update_info.timestamp)
 
         payload = {
             "version": update_info.timestamp,
@@ -294,6 +334,7 @@ class ProductionUpdateProcessor:
                 card_report=card_report,
                 staging=staging,
                 baseline=is_baseline,
+                updated_character_ids=updated_character_ids,
             ),
         )
 
@@ -304,11 +345,12 @@ class ProductionUpdateProcessor:
             shutil.rmtree(work_dir, ignore_errors=True)
 
         LOGGER.info(
-            "stage=total elapsed=%.2fs version=%s characters=%d new_characters=%d cards=%d card_failures=%d",
+            "stage=total elapsed=%.2fs version=%s characters=%d new_characters=%d updated_characters=%d cards=%d card_failures=%d",
             time.perf_counter() - total_started,
             update_info.timestamp,
             len(character_ids),
             len(new_character_ids),
+            len(updated_character_ids),
             card_report.created,
             card_report.failed,
         )
@@ -322,6 +364,7 @@ class ProductionUpdateProcessor:
             card_warning_count=card_report.warned,
             card_failure_count=card_report.failed,
             new_character_count=len(new_character_ids),
+            updated_character_count=len(updated_character_ids),
         )
 
     def _download_hashes(self, hashes: tuple[str, ...], directory: Path) -> tuple[Path, ...]:
