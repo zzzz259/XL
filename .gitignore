@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 pytest-cache-files-*/
 
+# 所有本地 Python 虚拟环境（仓库根、子项目和构建临时环境）
+.venv/
+**/.venv/
+
 # 运行时数据（数据库、下载的 bundle、临时文件）
 xl_updata_tool/data/
 xl_updata_tool/app/data/

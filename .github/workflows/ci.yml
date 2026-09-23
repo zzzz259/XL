@@ -2,12 +2,12 @@ name: XL CI
 
 on:
   push:
-    branches: [main, "feature/**", "fix/**", "chore/**"]
+    branches: [debug, test, main]
   pull_request:
-    branches: [main]
+    branches: [debug, test, main]
 
 jobs:
-  python:
+  desktop-tool:
     runs-on: windows-latest
     defaults:
       run:
@@ -37,5 +37,61 @@ jobs:
       - name: Run tests
         run: .\.venv\Scripts\python.exe -m pytest
 
-      - name: Lint tests and core modules
+      - name: Lint tests and application modules
         run: .\.venv\Scripts\python.exe -m ruff check tests app
+
+  update-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xl_updata_server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: xl_updata_server/requirements.txt
+
+      - name: Create project virtual environment
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: .venv/bin/python -m pip install -r requirements.txt pytest
+
+      - name: Compile Python sources
+        run: .venv/bin/python -m compileall -q server_app run_server.py
+
+      - name: Run tests
+        run: .venv/bin/python -m pytest -q
+
+  qq-bot:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xl_qqbot
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: xl_qqbot/requirements.txt
+
+      - name: Create project virtual environment
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: .venv/bin/python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: .venv/bin/python -m compileall -q bot_app
+
+      - name: Run tests
+        run: .venv/bin/python -m pytest -q
