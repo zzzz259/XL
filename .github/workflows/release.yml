@@ -19,6 +19,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release source is main
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+            if ($env:GITHUB_REF -ne "refs/heads/main") {
+              throw "Manual Release dispatch must run from main (current ref: $env:GITHUB_REF)"
+            }
+          } else {
+            git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+            if ($LASTEXITCODE -ne 0) {
+              throw "Release tag must point to a commit reachable from main"
+            }
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
