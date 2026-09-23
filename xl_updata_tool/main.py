@@ -36,7 +36,7 @@ def main(argv=None):
 
         app = QApplication(sys.argv)
         app.setApplicationName("XL Update Tool")
-        app.setApplicationVersion("1.60.2")
+        app.setApplicationVersion("2.0.0")
         font = QFont("Microsoft YaHei UI", 10)
         app.setFont(font)
         app_context = build_app_context(runtime)

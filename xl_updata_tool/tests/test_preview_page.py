@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTabBar
+from PySide6.QtWidgets import QApplication, QLabel, QTabBar
 
 from app.features.preview.material_catalog import AtlasResourceGroup, GameMaterialCatalog, GameMaterialRecord
 from app.features.preview.page import PreviewPage
@@ -51,6 +51,69 @@ def test_preview_page_exposes_three_named_tabs_and_legacy_character_controls(qap
     assert page.btn_thumbnail_previous.isHidden()
     assert page.btn_thumbnail_next.isHidden()
     assert page.tabs.tabBar().tabButton(0, QTabBar.RightSide).text() == "●"
+
+
+def test_preview_progress_is_next_to_mark_all_read_without_preview_count_header(qapp):
+    page = PreviewPage()
+
+    assert page.command_layout.indexOf(page.preview_progress) == (
+        page.command_layout.indexOf(page.btn_mark_all_read) + 1
+    )
+    assert not any(
+        label.text().startswith("角色预览器")
+        for label in page.findChildren(QLabel)
+    )
+    page.close()
+
+
+def test_output_folder_buttons_open_current_character_and_material_folders(qapp, tmp_path, monkeypatch):
+    from app.features.preview import controller as controller_module
+
+    opened = []
+    monkeypatch.setattr(controller_module.subprocess, "Popen", lambda command: opened.append(command))
+    preview_root = tmp_path / "output" / "character"
+    material_root = tmp_path / "output" / "game_material"
+    character_folder = preview_root / "10080 - character"
+    material_folder = material_root / "fgui" / "Battle"
+    character_folder.mkdir(parents=True)
+    material_folder.mkdir(parents=True)
+    page = PreviewPage()
+    _controller = PreviewController(
+        page,
+        PreviewService(tmp_path / "material", preview_root),
+    )
+    page.set_character_output_root(preview_root)
+    page.open_character_output_folder(character_folder)
+    page.open_material_output_folder(material_folder)
+
+    page.btn_open_character_folder.click()
+    page.btn_open_material_folder.click()
+
+    assert opened == [
+        ["explorer", os.path.normpath(str(character_folder))],
+        ["explorer", os.path.normpath(str(material_folder))],
+    ]
+    page.close()
+
+
+def test_material_folder_button_uses_game_material_root_at_catalog_root(qapp, tmp_path, monkeypatch):
+    from app.features.preview import controller as controller_module
+
+    opened = []
+    monkeypatch.setattr(controller_module.subprocess, "Popen", lambda command: opened.append(command))
+    output_root = tmp_path / "output"
+    material_root = output_root / "game_material"
+    material_root.mkdir(parents=True)
+    page = PreviewPage()
+    _controller = PreviewController(
+        page,
+        PreviewService(tmp_path / "material", output_root / "character"),
+    )
+
+    page.btn_open_material_folder.click()
+
+    assert opened == [["explorer", os.path.normpath(str(material_root))]]
+    page.close()
 
 
 def test_preview_page_cascades_tab_badges_and_icon_new_marker(qapp):

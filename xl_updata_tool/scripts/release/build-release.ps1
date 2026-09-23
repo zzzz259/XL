@@ -7,11 +7,11 @@
     PyInstaller 打包 -> 自检 -> 附带说明文件 -> 体积报告 -> 打 ZIP + SHA256。
 .EXAMPLE
     .\scripts\release\build-release.ps1
-    .\scripts\release\build-release.ps1 -Version 1.60.2 -SkipTests -SkipRuntimes
+    .\scripts\release\build-release.ps1 -Version 2.0.0 -SkipTests -SkipRuntimes
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '1.60.2',
+    [string]$Version = '2.0.0',
     [switch]$SkipTests,
     [switch]$SkipRuntimes,
     # 默认在 build/.venv 建隔离虚拟环境；加 -NoVenv 则直接使用当前 python

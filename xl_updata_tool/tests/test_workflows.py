@@ -103,3 +103,32 @@ def test_import_postprocess_workflow_routes_audio_then_preview_then_lua():
 
     assert characters.calls == [(None, "dialog")]
     assert finished == [((True, "导入完成"), {"audio_error": None})]
+
+
+def test_import_postprocess_workflow_does_not_skip_required_preview_processing():
+    result = ImportResult(
+        categories=frozenset({"character", "fgui"}),
+        completed_categories=frozenset({"character", "fgui"}),
+    )
+    importer = FakeImporter(result)
+    preview = FakePreview()
+    finished = []
+    workflow = ImportPostprocessWorkflow(
+        importer,
+        FakeAudio(),
+        FakeCharacters(),
+        FakeRegistry(),
+        preview=preview,
+    )
+    importer.result_ready.emit(result)
+
+    workflow.handle_import_finished(
+        True,
+        "导入完成",
+        "dialog",
+        lambda *args, **kwargs: finished.append((args, kwargs)),
+    )
+
+    assert preview.started == []
+    assert finished and finished[0][0][0] is False
+    assert "图片资源后处理未启动" in finished[0][0][1]
