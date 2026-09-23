@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from app.features.preview.output_publisher import publish_raw_spine_resources
@@ -54,6 +55,44 @@ def test_publish_raw_spine_is_idempotent_and_reports_missing_atlas_textures(tmp_
     assert second.copied_files == first.copied_files
     assert any("texture" in message.lower() for message in second.diagnostics)
     assert len(list((tmp_path / "output" / "spine").rglob("*.skel"))) == 1
+
+
+def test_publish_raw_spine_keeps_prior_version_when_same_source_path_changes(tmp_path):
+    material_dir = tmp_path / "data" / "material"
+    skel = _create_spine_source(material_dir, "cardspine_10080_4")
+    output_root = tmp_path / "output"
+    first_catalog = discover_preview_resources(material_dir, query_runner=_Runner())
+    publish_raw_spine_resources(first_catalog, material_dir, output_root, query_runner=_Runner())
+    first_archive = next((output_root / "spine").rglob("*.skel"))
+
+    skel.write_bytes(b"skeleton from a later game version")
+    second_catalog = discover_preview_resources(material_dir, query_runner=_Runner())
+    publish_raw_spine_resources(second_catalog, material_dir, output_root, query_runner=_Runner())
+
+    index = json.loads((output_root / "preview_index.json").read_text(encoding="utf-8"))
+    archived_skeletons = list((output_root / "spine").rglob("*.skel"))
+    assert len(index["spine"]) == 2
+    assert len(archived_skeletons) == 2
+    assert first_archive.read_bytes() == b"skeleton"
+    assert all(Path(entry["source_skel"]).is_file() for entry in index["spine"])
+
+
+def test_publish_raw_spine_recovers_old_archive_when_preview_index_is_missing(tmp_path):
+    material_dir = tmp_path / "data" / "material"
+    skel = _create_spine_source(material_dir, "cardspine_10081_4")
+    output_root = tmp_path / "output"
+    first_catalog = discover_preview_resources(material_dir, query_runner=_Runner())
+    publish_raw_spine_resources(first_catalog, material_dir, output_root, query_runner=_Runner())
+    (output_root / "preview_index.json").unlink()
+
+    skel.write_bytes(b"skeleton from a later game version")
+    second_catalog = discover_preview_resources(material_dir, query_runner=_Runner())
+    publish_raw_spine_resources(second_catalog, material_dir, output_root, query_runner=_Runner())
+
+    index = json.loads((output_root / "preview_index.json").read_text(encoding="utf-8"))
+    assert len(index["spine"]) == 2
+    assert len(list((output_root / "spine").rglob("*.skel"))) == 2
+    assert all(Path(entry["source_skel"]).is_file() for entry in index["spine"])
 
 
 def test_service_loads_published_spine_index_without_querying_source(tmp_path):

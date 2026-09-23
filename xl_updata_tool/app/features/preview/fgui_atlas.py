@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """FGUI 图集切割核心模块：解析 FairyGUI 二进制图集并切割为独立 PNG 图片"""
 
-import os
 import json
+import os
+import re
 import struct
 from enum import Enum
 from PIL import Image
@@ -389,6 +390,7 @@ class UIPackageTool:
         main_asset_name = base_name
         pkg.load_package(buffer, main_asset_name)
         sprites = pkg.sprites
+        is_chat_emoji = pkg.name.casefold() == "chatemoji"
         atlas_map = {}
         for item in pkg.get_items():
             if item.type == PackageItemType.Atlas:
@@ -396,24 +398,13 @@ class UIPackageTool:
                 atlas_path = os.path.join(file_dir, atlas_file)
                 if os.path.exists(atlas_path):
                     atlas_map[item.file] = Image.open(atlas_path).convert("RGBA")
-        sprite_name_count = {}
         for sprite_id, sprite in sprites.items():
             item = pkg.get_item(sprite_id)
-            if not item:
+            if not item and not is_chat_emoji:
                 continue
-            name = item.name
+            name = item.name if item else str(sprite_id)
             rect = sprite.rect
             rotated = sprite.rotated
-            atlas_file = sprite.atlas.file if sprite.atlas else "unknown_atlas"
-            output_file_name = f"{name}_{atlas_file}.png"
-            if output_file_name in sprite_name_count:
-                sprite_name_count[output_file_name] += 1
-                output_file_name = f"{name}_{atlas_file}_{sprite_name_count[output_file_name]}.png"
-            else:
-                sprite_name_count[output_file_name] = 0
-            output_path = os.path.join(out_path, output_file_name)
-            if not is_override_exists and os.path.exists(output_path):
-                continue
             atlas_key = sprite.atlas.file if sprite.atlas else None
             if not atlas_key or atlas_key not in atlas_map:
                 continue
@@ -426,12 +417,18 @@ class UIPackageTool:
             if x < 0 or y < 0 or x + width > atlas_width or y + height > atlas_height:
                 logger.warning(f"FGUI 精灵越界: {name}")
                 continue
-            sub_image = atlas_img.crop((x, y, x + width, y + height))
-            if rotated:
-                sub_image = sub_image.transpose(Image.ROTATE_90)
-                sub_image = sub_image.transpose(Image.ROTATE_180)
-            sub_image.save(output_path, "PNG")
+            safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(sprite_id if is_chat_emoji else name)).strip(" .") or "sprite"
+            output_file_name = f"{safe_name}.png"
+            output_path = os.path.join(out_path, output_file_name)
+            if is_override_exists or not os.path.exists(output_path):
+                sub_image = atlas_img.crop((x, y, x + width, y + height))
+                if rotated:
+                    sub_image = sub_image.transpose(Image.ROTATE_90)
+                    sub_image = sub_image.transpose(Image.ROTATE_180)
+                sub_image = sub_image.convert("RGBA")
+                sub_image.save(output_path, "PNG")
             cut_info.append({
+                "sprite_id": str(sprite_id),
                 "sprite_name": name,
                 "atlas_file": atlas_key,
                 "x": x, "y": y,

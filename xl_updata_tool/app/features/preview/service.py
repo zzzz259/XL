@@ -7,6 +7,8 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from app.platform.diagnostics import logger
+
 from .catalog import (
     build_skel_map,
     scan_cardspine_roles,
@@ -114,6 +116,19 @@ class PreviewService:
             material_catalog,
             progress_callback=detail_progress_callback,
         )
+        logger.info(
+            "图片素材预处理: BurstHead=%s, 图集=%s, 独立素材=%s, 导出成功=%s, 导出失败=%s",
+            len(material_catalog.burst_heads),
+            len(material_catalog.atlases),
+            len(material_catalog.standalone),
+            material_summary.exported,
+            material_summary.failed,
+        )
+        if material_summary.failed:
+            details = "; ".join(material_summary.diagnostics) or "没有可用的错误详情"
+            raise RuntimeError(
+                f"游戏素材导出失败（{material_summary.failed} 项）：{details}"
+            )
         progress(3, 4, "写入图片预览资源索引")
         progress(4, 4, "图片资源预处理完成")
         return PreviewPreprocessSummary(catalog, spine_summary, material_summary)

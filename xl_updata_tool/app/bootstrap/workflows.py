@@ -70,6 +70,19 @@ class ImportPostprocessWorkflow:
 
     def _start_next_postprocess(self, result) -> None:
         pending = self.registry.pending(result)
+        preview_imported = bool(
+            result
+            and {"character", "fgui"} & result.categories
+            and {"character", "fgui"} & result.completed_categories
+        )
+        if preview_imported and ("preview" not in pending or self.preview is None):
+            if self._finish is not None:
+                self._finish(
+                    False,
+                    "图片资源后处理未启动：角色或 FGUI 导入已完成，但预览后处理未注册。",
+                )
+                self._clear()
+            return
         if "preview" in pending and self.preview is not None:
             self.preview.start_postprocess(force=False, shared_dialog=self._progress_dialog)
             return
