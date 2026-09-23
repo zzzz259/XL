@@ -1,12 +1,21 @@
 from pathlib import Path
 import subprocess
 
+import pytest
+
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 
 
 def test_source_launchers_run_self_check_with_project_python():
     """The source launchers must not fall back to a global Python install."""
+    project_pythons = (
+        PROJECT_DIR / ".venv" / "Scripts" / "python.exe",
+        PROJECT_DIR.parent / ".venv" / "Scripts" / "python.exe",
+    )
+    if not any(python.is_file() for python in project_pythons):
+        pytest.skip("source launcher self-check requires the project .venv")
+
     for launcher in ("run.bat", "debug.bat"):
         result = subprocess.run(
             ["cmd.exe", "/d", "/c", "call", str(PROJECT_DIR / launcher), "--self-check"],
