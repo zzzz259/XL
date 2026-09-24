@@ -34,18 +34,22 @@ class FakeRunner:
 
 
 class FakeState:
-    def __init__(self, current):
+    def __init__(self, current, journal=None):
         self.current = current
+        self.journal = journal
 
     def get_current(self, *, current_path):
         assert current_path.name in {"debug", "test", "main"}
         return self.current
 
+    def load(self):
+        return self.journal
+
 
 class FakeTransaction:
-    def __init__(self, current, status="completed", recovery_status="nothing_to_recover"):
+    def __init__(self, current, status="completed", recovery_status="nothing_to_recover", journal=None):
         self.paths = type("Paths", (), {"current_path": Path("/deploy/current")})()
-        self.state = FakeState(current)
+        self.state = FakeState(current, journal)
         self.status = status
         self.recovery_status = recovery_status
         self.calls = []
@@ -259,3 +263,26 @@ def test_reconciles_committed_pointer_after_crash_before_cursor_write(tmp_path):
     assert runner.diff_calls == []
     assert transaction.calls == [("recover",)]
     assert store.get_cursor("debug") == NEW_SHA
+
+
+def test_recovery_reconciles_release_note_identity_before_advancing_main_cursor(tmp_path):
+    current = tmp_path / f"{NEW_SHA}-already-committed"
+    current.mkdir()
+    journal = type("Journal", (), {
+        "branch": "main", "sha": NEW_SHA, "phase": "completed",
+        "release_note": "Release highlights",
+    })()
+    transaction = FakeTransaction(current, recovery_status="already_recovered", journal=journal)
+    store = PollCursorStore(tmp_path / "poll-state.json")
+    store.set_cursor("main", OLD_SHA)
+    runner = FakeRunner(["xl_qqbot/bot_app/router.py"])
+    poller = BranchPoller(
+        FakeReleaseGitHub(), runner, lambda _branch: transaction, store
+    )
+
+    result = poller.poll_branch("main")
+
+    assert result.status == "up_to_date"
+    assert runner.diff_calls == []
+    assert store.get_cursor("main") == NEW_SHA
+    assert store.recorded_releases() == ({"v2.0.0"}, {NEW_SHA})

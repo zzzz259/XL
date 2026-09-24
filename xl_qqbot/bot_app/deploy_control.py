@@ -187,6 +187,8 @@ def build_deployment_app(
         if tier not in _ANNOUNCE_TIERS or phase not in (*_ANNOUNCEMENTS, "release_note"):
             return web.json_response({"ok": False, "error": "invalid tier or phase"}, status=400)
         if phase == "release_note":
+            if tier != "main":
+                return web.json_response({"ok": False, "error": "release notes are main-only"}, status=400)
             text = payload.get("text")
             if not isinstance(text, str) or not text.strip() or len(text) > 4000:
                 return web.json_response({"ok": False, "error": "invalid release note"}, status=400)

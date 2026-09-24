@@ -156,6 +156,10 @@ class BranchPoller:
             raise RuntimeError("GitHub returned an invalid branch SHA")
         latest_sha = latest_sha.lower()
         active_sha = _release_sha(current_release)
+        if cursor != active_sha:
+            self._reconcile_completed_release_note(
+                transaction, branch, active_sha
+            )
         if latest_sha == active_sha and cursor != latest_sha:
             self.cursors.set_cursor(branch, latest_sha)
             return PollResult(branch, "up_to_date", latest_sha)
@@ -190,10 +194,38 @@ class BranchPoller:
         result = transaction.execute(plan)
         if result.status != "completed":
             return PollResult(branch, f"deployment_{result.status}", latest_sha, result.message)
-        self.cursors.set_cursor(branch, latest_sha)
         if selected_note is not None:
             self.cursors.record_release(selected_note.tag, selected_note.sha)
+        self.cursors.set_cursor(branch, latest_sha)
         return PollResult(branch, "deployed", latest_sha)
+
+    def _reconcile_completed_release_note(
+        self, transaction: Any, branch: str, active_sha: str
+    ) -> None:
+        if branch != "main":
+            return
+        journal = transaction.state.load()
+        if (
+            journal is None
+            or journal.branch != branch
+            or journal.sha.lower() != active_sha
+            or journal.phase != "completed"
+            or not journal.release_note
+        ):
+            return
+        for entry in self.github.release_notes():
+            body = entry.get("body")
+            tag = entry.get("tag_name")
+            if (
+                isinstance(body, str)
+                and body.strip()[:4000] == journal.release_note
+                and isinstance(tag, str)
+                and tag.strip()
+            ):
+                note_sha = entry.get("target_sha", entry.get("sha", ""))
+                self.cursors.record_release(
+                    tag.strip(), note_sha if _valid_sha(note_sha) else ""
+                )
 
 
 def _branch(value: str) -> str:

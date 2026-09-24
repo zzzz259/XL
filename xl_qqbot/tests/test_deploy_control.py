@@ -245,6 +245,25 @@ async def test_authenticated_release_note_announcement_uses_supplied_content(tmp
 
 
 @pytest.mark.asyncio
+async def test_release_note_announcement_is_restricted_to_main_tier(tmp_path):
+    control = DeploymentControl(tmp_path / "maintenance.json")
+    sender = RecordingSender()
+    client = TestClient(TestServer(make_app(control, sender)))
+    await client.start_server()
+    try:
+        response = await client.post(
+            "/deployment/announce",
+            json={"tier": "debug", "phase": "release_note", "text": "Not a main release"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+        assert response.status == 400
+        assert sender.messages == []
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_control_api_rejects_missing_or_invalid_bearer_token(tmp_path):
     client = TestClient(TestServer(make_app(
         DeploymentControl(tmp_path / "maintenance.json"), RecordingSender(),
