@@ -184,8 +184,15 @@ def build_deployment_app(
             return web.json_response({"ok": False, "error": "expected object"}, status=400)
         tier = payload.get("tier")
         phase = payload.get("phase")
-        if tier not in _ANNOUNCE_TIERS or phase not in _ANNOUNCEMENTS:
+        if tier not in _ANNOUNCE_TIERS or phase not in (*_ANNOUNCEMENTS, "release_note"):
             return web.json_response({"ok": False, "error": "invalid tier or phase"}, status=400)
+        if phase == "release_note":
+            text = payload.get("text")
+            if not isinstance(text, str) or not text.strip() or len(text) > 4000:
+                return web.json_response({"ok": False, "error": "invalid release note"}, status=400)
+            text = text.strip()
+        else:
+            text = _ANNOUNCEMENTS[phase]
 
         configured_groups = target_groups() if callable(target_groups) else target_groups
         unique_groups = sorted(set(configured_groups))
@@ -197,7 +204,6 @@ def build_deployment_app(
                 or tiers.tier_of(group) == tier
             )
         ]
-        text = _ANNOUNCEMENTS[phase]
         results = {}
         for group in notice_groups:
             try:

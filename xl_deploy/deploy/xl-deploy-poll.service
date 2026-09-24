@@ -1,0 +1,17 @@
+[Unit]
+Description=XL branch deployment poller (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/xl_deploy/current/main
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/admin/.config/xl_deploy/secrets.env
+ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-deploy-poll.service/bin/python -m xl_deploy --config /home/admin/xl_deploy/config.toml
+NoNewPrivileges=true
+PrivateTmp=true
+Nice=10
+CPUQuota=50%
+MemoryMax=512M
+

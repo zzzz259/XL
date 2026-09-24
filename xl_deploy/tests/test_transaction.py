@@ -515,9 +515,9 @@ def test_preflight_creates_one_release_local_venv_per_impacted_unit(tmp_path):
 
     venv_commands = [args for args, _ in commands if args[1:3] == ["-m", "venv"]]
     assert plan.impacted_units == ("xl-updata-server.service",)
-    assert len(venv_commands) == 3
+    assert len(venv_commands) == 4
     venv_paths = [Path(args[-1]) for args in venv_commands]
-    assert len(set(venv_paths)) == 3
+    assert len(set(venv_paths)) == 4
     assert all(path.is_relative_to(release / ".venvs") for path in venv_paths)
     install_commands = [args for args, _ in commands if "pip" in args]
     assert len(install_commands) == 3
@@ -555,11 +555,15 @@ def test_preflight_compiles_backend_sources_before_any_service_stop(tmp_path):
         )
 
 
-def test_backend_health_check_uses_systemd_active_state_not_http(tmp_path, monkeypatch):
+def test_backend_health_check_runs_read_only_application_self_check(tmp_path, monkeypatch):
     from xl_deploy.runner import CommandRunner
 
     commands = []
-    runner = CommandRunner(executor=lambda args, **kwargs: commands.append(args))
+    runner = CommandRunner(
+        executor=lambda args, **kwargs: commands.append(args),
+        backend_config_path=tmp_path / "backend.toml",
+        deployment_root=tmp_path / "deploy",
+    )
 
     def forbidden_http(*args, **kwargs):
         raise AssertionError("backend does not expose an HTTP health endpoint")
@@ -567,9 +571,11 @@ def test_backend_health_check_uses_systemd_active_state_not_http(tmp_path, monke
     monkeypatch.setattr("urllib.request.urlopen", forbidden_http)
     runner.health_check(("xl-updata-server.service",))
 
-    assert commands == [[
+    assert commands[0] == [
         "systemctl", "--user", "is-active", "--quiet", "xl-updata-server.service"
-    ]]
+    ]
+    assert commands[1][1].replace("\\", "/").endswith("xl_updata_server/run_server.py")
+    assert commands[1][2:] == ["--healthcheck", "--config", str(tmp_path / "backend.toml")]
 
 
 def test_router_health_check_authenticates_and_retries_until_ready(monkeypatch):

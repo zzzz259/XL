@@ -19,6 +19,7 @@ ALLOWED_UNITS = frozenset(
         "xl-qqbot-prod.service",
         "xl-qqbot-router.service",
         "xl-updata-server.service",
+        "xl-deploy-poll.service",
     }
 )
 BOT_UNITS = frozenset(
@@ -37,6 +38,7 @@ BRANCH_UNITS = {
         "xl-qqbot-prod.service",
         "xl-qqbot-router.service",
         "xl-updata-server.service",
+        "xl-deploy-poll.service",
     ),
 }
 _SHA_PATTERN = frozenset("0123456789abcdefABCDEF")
@@ -55,6 +57,8 @@ class CommandRunner:
         repository: Path | str | None = None,
         executor: Callable[..., Any] | None = None,
         health_token: str | None = None,
+        backend_config_path: Path | str | None = None,
+        deployment_root: Path | str = "/home/admin/xl_deploy",
         health_timeout_seconds: float = 30,
         health_poll_interval_seconds: float = 1,
     ) -> None:
@@ -63,6 +67,8 @@ class CommandRunner:
         self.repository = Path(repository).resolve() if repository is not None else None
         self._executor = executor or _subprocess_executor
         self.health_token = health_token
+        self.backend_config_path = Path(backend_config_path) if backend_config_path else None
+        self.deployment_root = Path(deployment_root)
         self.health_timeout_seconds = health_timeout_seconds
         self.health_poll_interval_seconds = health_poll_interval_seconds
 
@@ -88,6 +94,21 @@ class CommandRunner:
             cwd=self.repository,
         )
         return release_path
+
+    def changed_paths(self, base_sha: str, head_sha: str) -> tuple[str, ...]:
+        base = _validated_sha(base_sha)
+        head = _validated_sha(head_sha)
+        if self.repository is None or not self.repository.is_dir():
+            raise RuntimeError("deployment source repository is not configured")
+        self._executor(["git", "fetch", "--no-tags", "origin", base, head], cwd=self.repository)
+        result = self._executor(
+            ["git", "diff", "--name-only", "-z", "--no-renames", f"{base}..{head}"],
+            cwd=self.repository,
+        )
+        output = getattr(result, "stdout", "")
+        if not isinstance(output, str):
+            raise TypeError("git diff returned invalid output")
+        return tuple(path for path in output.split("\0") if path)
 
     def preflight(
         self,
@@ -118,9 +139,11 @@ class CommandRunner:
                 requirements = release_path / "xl_qqbot" / "requirements.txt"
             elif unit in BACKEND_UNITS:
                 requirements = release_path / "xl_updata_server" / "requirements.txt"
+            elif unit == "xl-deploy-poll.service":
+                requirements = None
             else:
                 raise ValueError("systemd unit has no dependency manifest mapping")
-            if not requirements.is_file():
+            if requirements is not None and not requirements.is_file():
                 raise RuntimeError("candidate is missing a required dependency manifest")
             environment_path = service_venv_path(release_path, unit)
             if environment_path.exists() or environment_path.is_symlink():
@@ -129,10 +152,11 @@ class CommandRunner:
             self._executor(
                 [sys.executable, "-m", "venv", str(environment_path)]
             )
-            self._executor(
-                [str(python), "-m", "pip", "install", "--requirement", str(requirements)],
-                cwd=release_path,
-            )
+            if requirements is not None:
+                self._executor(
+                    [str(python), "-m", "pip", "install", "--requirement", str(requirements)],
+                    cwd=release_path,
+                )
         source_roots = (
             release_path / "xl_deploy",
             release_path / "xl_qqbot" / "bot_app",
@@ -177,6 +201,24 @@ class CommandRunner:
                     f"http://127.0.0.1:{port}/health", headers=headers
                 )
                 self._wait_for_http_health(request, unit)
+            elif unit == "xl-updata-server.service":
+                self._backend_health_check(unit)
+
+    def _backend_health_check(self, unit: str) -> None:
+        if self.backend_config_path is None:
+            raise RuntimeError("backend health-check config path is not configured")
+        release = self.deployment_root / "current" / "main"
+        service_python = service_venv_path(release, unit) / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        entrypoint = release / "xl_updata_server" / "run_server.py"
+        self._executor(
+            [
+                str(service_python), str(entrypoint), "--healthcheck", "--config",
+                str(self.backend_config_path),
+            ],
+            cwd=entrypoint.parent,
+        )
 
     def _wait_for_http_health(self, request: urllib.request.Request, unit: str) -> None:
         deadline = time.monotonic() + self.health_timeout_seconds

@@ -142,3 +142,26 @@ def test_transport_failures_fail_closed_without_leaking_exception_text():
         client.latest_sha("main")
     assert str(error.value) == "GitHub API transport failed"
     assert "secret" not in str(error.value)
+
+
+def test_release_notes_reads_bounded_pages_newest_first():
+    client, transport = make_client([Response(200, [{
+        "tag_name": "v1", "body": "notes", "published_at": "2026-09-24T00:00:00Z",
+    }])])
+
+    assert client.release_notes() == ({
+        "tag_name": "v1", "body": "notes", "published_at": "2026-09-24T00:00:00Z",
+    },)
+    assert "/releases?per_page=100&page=1" in transport.calls[0][1]
+
+
+def test_release_notes_excludes_drafts_prereleases_and_unpublished_entries():
+    client, _ = make_client([Response(200, [
+        {"tag_name": "published", "body": "notes", "published_at": "2026-09-24", "draft": False},
+        {"tag_name": "draft", "body": "draft notes", "published_at": None, "draft": True},
+        {"tag_name": "pre", "body": "pre notes", "published_at": "2026-09-23", "prerelease": True},
+    ])])
+
+    assert client.release_notes() == ({
+        "tag_name": "published", "body": "notes", "published_at": "2026-09-24", "draft": False,
+    },)

@@ -1,0 +1,13 @@
+[Unit]
+Description=Poll XL deployment branches every minute
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Persistent=true
+Unit=xl-deploy-poll.service
+
+[Install]
+WantedBy=timers.target
+

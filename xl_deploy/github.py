@@ -125,3 +125,22 @@ class GitHubClient:
         if latest.get("status") != "completed":
             return "pending"
         return "success" if latest.get("conclusion") == "success" else "failure"
+
+    def release_notes(self) -> tuple[dict[str, Any], ...]:
+        """Return a bounded set of published GitHub releases, newest first."""
+        entries: list[dict[str, Any]] = []
+        for page in range(1, self.config.max_pages + 1):
+            query = urlencode({"per_page": self.config.per_page, "page": page})
+            payload = self._get_json(f"{self._repository_url}/releases?{query}")
+            if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+                raise RuntimeError("GitHub releases response has an invalid shape")
+            entries.extend(
+                item for item in payload
+                if item.get("draft") is not True
+                and item.get("prerelease") is not True
+                and isinstance(item.get("published_at"), str)
+                and bool(item["published_at"].strip())
+            )
+            if len(payload) < self.config.per_page:
+                break
+        return tuple(entries)

@@ -219,6 +219,32 @@ async def test_announcement_reports_each_group_send_failure(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_authenticated_release_note_announcement_uses_supplied_content(tmp_path):
+    control = DeploymentControl(tmp_path / "maintenance.json")
+    sender = RecordingSender()
+    client = TestClient(TestServer(make_app(control, sender)))
+    await client.start_server()
+    try:
+        response = await client.post(
+            "/deployment/announce",
+            json={"tier": "main", "phase": "release_note", "text": "版本更新内容"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+        assert await response.json() == {
+            "ok": True,
+            "results": {DEBUG_GROUP: True, TEST_GROUP: True, PROD_GROUP: True},
+        }
+        assert set(sender.messages) == {
+            (DEBUG_GROUP, "版本更新内容"),
+            (TEST_GROUP, "版本更新内容"),
+            (PROD_GROUP, "版本更新内容"),
+        }
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_control_api_rejects_missing_or_invalid_bearer_token(tmp_path):
     client = TestClient(TestServer(make_app(
         DeploymentControl(tmp_path / "maintenance.json"), RecordingSender(),
