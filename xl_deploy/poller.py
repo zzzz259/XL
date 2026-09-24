@@ -149,7 +149,8 @@ class BranchPoller:
         current_release = transaction.state.get_current(current_path=pointer)
         if current_release is None:
             raise RuntimeError(f"{branch} current release is missing; explicit bootstrap is required")
-        cursor = self.cursors.get_cursor(branch) or _release_sha(current_release)
+        persisted_cursor = self.cursors.get_cursor(branch)
+        cursor = persisted_cursor or _release_sha(current_release)
 
         latest_sha = self.github.latest_sha(branch)
         if not _valid_sha(latest_sha):
@@ -160,8 +161,14 @@ class BranchPoller:
             self._reconcile_completed_release_note(
                 transaction, branch, active_sha
             )
-        if latest_sha == active_sha and cursor != latest_sha:
-            self.cursors.set_cursor(branch, latest_sha)
+        if latest_sha == active_sha:
+            if persisted_cursor != latest_sha:
+                ci_result = self.github.ci_result(branch, latest_sha)
+                if ci_result == "pending":
+                    return PollResult(branch, "ci_pending", latest_sha)
+                if ci_result != "success":
+                    return PollResult(branch, "ci_failed", latest_sha, ci_result)
+                self.cursors.set_cursor(branch, latest_sha)
             return PollResult(branch, "up_to_date", latest_sha)
         if cursor == latest_sha:
             if self.cursors.get_cursor(branch) is None:

@@ -41,6 +41,182 @@ case "${1:---dry-run}" in
   *) usage >&2; exit 2 ;;
 esac
 
+report_config_mappings() {
+  local config_path="$1"
+  local working_directory="$2"
+  if [[ "$config_path" != /* ]]; then
+    if [[ -z "$working_directory" ]]; then
+      printf 'Config/data mappings unavailable: relative config path has no WorkingDirectory: %s\n' "$config_path"
+      return
+    fi
+    config_path="$working_directory/$config_path"
+  fi
+  if [[ ! -f "$config_path" ]]; then
+    printf 'Config/data mappings unavailable: config is missing: %s\n' "$config_path"
+    return
+  fi
+  python3 - "$config_path" "$working_directory" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+config_path = Path(sys.argv[1]).resolve()
+working_directory = Path(sys.argv[2]).resolve() if sys.argv[2] else None
+try:
+    with config_path.open("rb") as stream:
+        config = tomllib.load(stream)
+except Exception as exc:
+    print(f"Config/data mappings unavailable: {config_path} ({type(exc).__name__})")
+    raise SystemExit(0)
+
+path_keys = {
+    "watch": ("data_dir", "outbox_dir", "character_data", "versions_dir"),
+    "paths": ("data_dir", "unluac_jar", "unluac_opmap", "character_card_font"),
+    "deployment": ("root", "repository", "state_dir", "releases_root", "current_root",
+                   "backend_config", "backend_data"),
+    "router": ("token_file",),
+}
+for section, keys in path_keys.items():
+    values = config.get(section, {})
+    if not isinstance(values, dict):
+        continue
+    for key in keys:
+        value = values.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        mapped = Path(value).expanduser()
+        label = "configured data directory" if key == "data_dir" else f"configured {key}"
+        if not mapped.is_absolute():
+            if section == "watch" and working_directory is None:
+                print(f"{label}: unresolved (relative path; effective WorkingDirectory unavailable)")
+                continue
+            base_dir = working_directory if section == "watch" else config_path.parent
+            mapped = base_dir / mapped
+        mapped = mapped.resolve()
+        state = "exists" if mapped.exists() else "missing"
+        print(f"{label}: {mapped} ({state})")
+PY
+}
+
+find_unit_working_directory() {
+  local unit_name="$1" unit_dir candidate
+  shift
+  for unit_dir in "$@"; do
+    candidate="$unit_dir/$unit_name"
+    if [[ -f "$candidate" ]]; then
+      sed -n 's/^WorkingDirectory=//p' "$candidate" | tail -n 1
+      return
+    fi
+  done
+}
+
+report_unit_source() {
+  local unit_file="$1" unit_name="$2" inherited_directory="${3:-}"
+  local working_directory config_path
+  working_directory="$(sed -n 's/^WorkingDirectory=//p' "$unit_file" | tail -n 1)"
+  [[ -n "$working_directory" ]] || working_directory="$inherited_directory"
+  printf '\nExisting unit definition: %s (unit %s)\n' "$unit_file" "$unit_name"
+  sed -n -E '/^(WorkingDirectory|EnvironmentFile)=/p' "$unit_file" | sed 's/^/  /'
+  config_path="$(sed -n -E 's/^ExecStart=.* --config[ =]([^ ]+).*$/\1/p' "$unit_file" | tail -n 1)"
+  if [[ -z "$config_path" && "$unit_name" == xl-qqbot* && -n "$working_directory" ]]; then
+    config_path="$working_directory/config.toml"
+  fi
+  if [[ -n "$config_path" ]]; then
+    printf '  Config mapping candidate: %s\n' "$config_path"
+    report_config_mappings "$config_path" "$working_directory" | sed 's/^/  /'
+  else
+    printf '  Config mapping: no --config argument or WorkingDirectory found in this definition\n'
+  fi
+}
+
+report_effective_unit() {
+  local unit_name="$1" effective_properties effective_directory effective_exec effective_config
+  if ! command -v systemctl >/dev/null 2>&1; then
+    printf '\nEffective unit state unavailable for %s: systemctl is missing.\n' "$unit_name"
+    return
+  fi
+  effective_properties="$(systemctl --user show "$unit_name" --no-pager \
+    --property=LoadState --property=FragmentPath --property=DropInPaths \
+    --property=WorkingDirectory --property=EnvironmentFiles 2>/dev/null || true)"
+  if [[ -z "$effective_properties" ]]; then
+    printf '\nEffective unit state unavailable for %s; source-level definitions are listed above.\n' "$unit_name"
+    return
+  fi
+  printf '\nEffective systemd properties for %s (secret values excluded):\n' "$unit_name"
+  printf '%s\n' "$effective_properties" | sed 's/^/  /'
+  effective_directory="$(sed -n 's/^WorkingDirectory=//p' <<<"$effective_properties" | tail -n 1)"
+  [[ "$effective_directory" == /* ]] || effective_directory=""
+  effective_exec="$(systemctl --user show "$unit_name" --no-pager --property=ExecStart --value 2>/dev/null || true)"
+  effective_config="$(printf '%s' "$effective_exec" | python3 "$REPO_ROOT/xl_deploy/operator_inventory.py" --extract-systemd-config)"
+  if [[ -z "$effective_config" && "$effective_exec" == *"--config"* ]]; then
+    printf '  Effective config mapping unresolved: explicit --config could not be parsed safely.\n'
+    return
+  fi
+  if [[ -z "$effective_config" && "$unit_name" == xl-qqbot* && -n "$effective_directory" ]]; then
+    effective_config="$effective_directory/config.toml"
+  fi
+  if [[ -n "$effective_config" ]]; then
+    printf '  Effective config mapping: %s\n' "$effective_config"
+    report_config_mappings "$effective_config" "$effective_directory" | sed 's/^/  /'
+  else
+    printf '  Effective config mapping: not resolved from systemd ExecStart/WorkingDirectory\n'
+  fi
+}
+
+is_project_unit_source() {
+  local unit_name="$1" unit_file="$2"
+  [[ "$unit_name" == xl-* ]] || grep -Eiq 'xl[-_ ]|/xl' "$unit_file"
+}
+
+report_existing_units() {
+  local unit_file unit_name dropin_file dropin_directory inherited_directory unit_dir
+  local found=false
+  local -a unit_dirs=()
+  local -A seen_dirs=()
+  local -A seen_units=()
+  while IFS= read -r unit_dir; do
+    [[ -n "$unit_dir" && -d "$unit_dir" && -z "${seen_dirs[$unit_dir]:-}" ]] || continue
+    seen_dirs["$unit_dir"]=1
+    unit_dirs+=("$unit_dir")
+  done < <(
+    systemd-analyze --user unit-paths 2>/dev/null || true
+    printf '%s\n' \
+      "$UNIT_DIR" "${XDG_CONFIG_HOME:-$HOME_DIR/.config}/systemd/user" \
+      "${XDG_DATA_HOME:-$HOME_DIR/.local/share}/systemd/user" \
+      "$HOME_DIR/.local/share/systemd/user" \
+      /etc/systemd/user /run/systemd/user /usr/local/lib/systemd/user \
+      /usr/lib/systemd/user /usr/share/systemd/user
+  )
+  for unit_dir in "${unit_dirs[@]}"; do
+    for unit_file in "$unit_dir"/*.service; do
+      [[ -f "$unit_file" ]] || continue
+      unit_name="${unit_file##*/}"
+      is_project_unit_source "$unit_name" "$unit_file" || continue
+      found=true
+      seen_units["$unit_name"]=1
+      inherited_directory="$(find_unit_working_directory "$unit_name" "${unit_dirs[@]}")"
+      report_unit_source "$unit_file" "$unit_name" "$inherited_directory"
+    done
+    for dropin_file in "$unit_dir"/*.service.d/*.conf; do
+      [[ -f "$dropin_file" ]] || continue
+      dropin_directory="${dropin_file%/*}"
+      unit_name="${dropin_directory##*/}"
+      unit_name="${unit_name%.d}"
+      is_project_unit_source "$unit_name" "$dropin_file" || continue
+      found=true
+      seen_units["$unit_name"]=1
+      inherited_directory="$(find_unit_working_directory "$unit_name" "${unit_dirs[@]}")"
+      report_unit_source "$dropin_file" "$unit_name" "$inherited_directory"
+    done
+  done
+  for unit_name in "${!seen_units[@]}"; do
+    report_effective_unit "$unit_name"
+  done
+  if [[ "$found" != true ]]; then
+    printf '\nNo existing user service unit files found in the discovered systemd search paths.\n'
+  fi
+}
+
 inventory() {
   printf 'Mode: %s\n' "$([[ "$activate" == true ]] && printf 'explicit activation' || printf 'read-only dry-run/inventory')"
   printf 'Deployment root: %s\n' "$DEPLOY_ROOT"
@@ -63,6 +239,7 @@ inventory() {
     if [[ -e "$path" ]]; then printf 'Existing operator path (preserved): %s\n' "$path"
     else printf 'Not present: %s\n' "$path"; fi
   done
+  report_existing_units
 }
 
 inventory

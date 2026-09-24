@@ -1,4 +1,8 @@
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
 
 from xl_deploy.router_client import RouterControlClient
 
@@ -69,3 +73,46 @@ def test_router_client_pause_resume_and_drain_use_per_tier_control():
     assert [json.loads(request.data)["enabled"] for request in requests if request.method == "POST"] == [
         True, True, False, False
     ]
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1:8784@attacker.example", "http://user@127.0.0.1:8784"],
+)
+def test_router_client_rejects_non_loopback_authorities(url):
+    with pytest.raises(ValueError, match="loopback"):
+        RouterControlClient(url, "secret")
+
+
+def test_default_transport_does_not_follow_router_redirects():
+    sink_requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/sink")
+            self.end_headers()
+
+        def do_GET(self):
+            sink_requests.append(self.path)
+            payload = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = RouterControlClient(f"http://127.0.0.1:{server.server_port}", "secret")
+    try:
+        with pytest.raises(RuntimeError, match="request failed"):
+            client.pause(("debug",))
+        assert sink_requests == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

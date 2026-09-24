@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from run_server import healthcheck
+import run_server
+from run_server import _executable_available, healthcheck
 
 
 def write_config(root: Path) -> Path:
@@ -54,3 +55,11 @@ def test_healthcheck_rejects_missing_required_lua_decoder_files(tmp_path, monkey
 
     with pytest.raises(RuntimeError, match="unluac"):
         healthcheck(config)
+
+
+def test_absolute_executable_path_must_be_executable(tmp_path, monkeypatch):
+    binary = tmp_path / "java"
+    binary.write_text("not executable", encoding="utf-8")
+    monkeypatch.setattr(run_server.os, "access", lambda _path, _mode: False)
+
+    assert not _executable_available(str(binary))

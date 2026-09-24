@@ -286,3 +286,21 @@ def test_recovery_reconciles_release_note_identity_before_advancing_main_cursor(
     assert runner.diff_calls == []
     assert store.get_cursor("main") == NEW_SHA
     assert store.recorded_releases() == ({"v2.0.0"}, {NEW_SHA})
+
+
+def test_active_remote_tip_does_not_advance_cursor_until_exact_sha_ci_succeeds(tmp_path):
+    current = tmp_path / f"{NEW_SHA}-already-active"
+    current.mkdir()
+    transaction = FakeTransaction(current)
+    store = PollCursorStore(tmp_path / "poll-state.json")
+    store.set_cursor("debug", OLD_SHA)
+    github = FakeGitHub(latest=NEW_SHA, ci="pending")
+    runner = FakeRunner([])
+    poller = BranchPoller(github, runner, lambda _branch: transaction, store)
+
+    result = poller.poll_branch("debug")
+
+    assert result.status == "ci_pending"
+    assert github.ci_calls == [("debug", NEW_SHA)]
+    assert runner.diff_calls == []
+    assert store.get_cursor("debug") == OLD_SHA

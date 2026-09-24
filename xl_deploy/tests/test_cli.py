@@ -40,6 +40,22 @@ def test_runtime_config_rejects_non_loopback_router_control_url(tmp_path):
         load_runtime_config(path)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8784@attacker.example",
+        "http://user@127.0.0.1:8784",
+        "http://127.0.0.1.evil.example:8784",
+    ],
+)
+def test_runtime_config_rejects_urls_that_only_look_like_loopback(tmp_path, url):
+    path = write_config(tmp_path)
+    path.write_text(path.read_text(encoding="utf-8").replace("http://127.0.0.1:8784", url), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="loopback"):
+        load_runtime_config(path)
+
+
 def test_router_secret_file_must_not_be_group_or_world_readable(tmp_path):
     secret = tmp_path / "router.token"
     secret.write_text("private-token\n", encoding="utf-8")

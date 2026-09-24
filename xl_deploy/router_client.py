@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import time
 from collections.abc import Callable, Sequence
 from typing import Any
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 START_NOTICE = "检测到更新，正在更新bot，期间将暂停服务"
 COMPLETION_NOTICE = "更新完毕"
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+def _open_without_redirects(request: Request, *, timeout: float):
+    return build_opener(_NoRedirectHandler).open(request, timeout=timeout)
 
 
 class RouterControlClient:
@@ -23,13 +33,12 @@ class RouterControlClient:
         timeout_seconds: float = 5,
         poll_interval_seconds: float = 0.25,
     ):
-        if not base_url.startswith("http://127.0.0.1:"):
-            raise ValueError("deployment control API must use loopback HTTP")
+        validate_loopback_url(base_url)
         if not token.strip() or timeout_seconds <= 0 or poll_interval_seconds <= 0:
             raise ValueError("router token and positive timeouts are required")
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self.transport = transport or urlopen
+        self.transport = transport or _open_without_redirects
         self.timeout_seconds = timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds
 
@@ -116,6 +125,31 @@ def _tier(value: str) -> str:
     if value not in {"debug", "test", "production", "main"}:
         raise ValueError("router tier is not allowlisted")
     return value
+
+
+def validate_loopback_url(value: str) -> None:
+    """Require a literal loopback IP authority, without userinfo or redirects."""
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname
+        port = parsed.port
+        is_loopback = host is not None and ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        is_loopback = False
+        port = None
+        parsed = None
+    if (
+        parsed is None
+        or parsed.scheme != "http"
+        or not is_loopback
+        or port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("deployment control API must use a literal loopback HTTP URL")
 
 
 def _merge_results(target: dict[str, bool], payload: dict[str, Any]) -> None:

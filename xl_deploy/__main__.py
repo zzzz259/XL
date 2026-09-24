@@ -15,7 +15,7 @@ import tomllib
 from xl_deploy.config import GitHubConfig
 from xl_deploy.github import GitHubClient
 from xl_deploy.poller import BranchPoller, PollCursorStore
-from xl_deploy.router_client import RouterControlClient
+from xl_deploy.router_client import RouterControlClient, validate_loopback_url
 from xl_deploy.runner import CommandRunner
 from xl_deploy.state import DeploymentState
 from xl_deploy.transaction import DeploymentPaths, DeploymentTransaction
@@ -65,8 +65,7 @@ def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
         raise RuntimeError("deployment configuration is incomplete or invalid") from exc
     if not result.github_owner.strip() or not result.github_repo.strip():
         raise ValueError("GitHub owner and repository must be non-empty")
-    if not result.router_base_url.startswith("http://127.0.0.1:"):
-        raise ValueError("deployment control API must use loopback HTTP")
+    validate_loopback_url(result.router_base_url)
     return result
 
 

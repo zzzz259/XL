@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import shutil
 import signal
 import sqlite3
@@ -45,7 +46,9 @@ def healthcheck(config_path: str) -> int:
 
 def _executable_available(value: str) -> bool:
     path = Path(value).expanduser()
-    return path.is_file() if path.is_absolute() or path.parent != Path(".") else shutil.which(value) is not None
+    if path.is_absolute() or path.parent != Path("."):
+        return path.is_file() and os.access(path, os.X_OK)
+    return shutil.which(value) is not None
 
 
 def main() -> int:

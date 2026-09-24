@@ -83,6 +83,27 @@ def test_bootstrap_defaults_to_inventory_and_requires_explicit_activation():
     assert "install -m 600" in script
 
 
+def test_bootstrap_inventory_reads_existing_unit_mappings_and_configured_data_roots():
+    script = read("xl_deploy/scripts/bootstrap.sh")
+
+    assert 'for unit_file in "$unit_dir"/*.service' in script
+    assert "WorkingDirectory" in script
+    assert "EnvironmentFile" in script
+    assert "data_dir" in script
+    assert "configured data directory" in script
+    assert 'report_config_mappings "$config_path" "$working_directory"' in script
+    assert 'mapped = base_dir / mapped' in script
+    assert 'config_path="$working_directory/$config_path"' in script
+    assert 'systemd-analyze --user unit-paths' in script
+    assert '"$unit_dir"/*.service.d/*.conf' in script
+    assert '"backend_config", "backend_data"' in script
+    assert 'systemctl --user show "$unit_name"' in script
+    assert "effective_config" in script
+    assert '[[ -z "$effective_config" && "$effective_exec" == *"--config"* ]]' in script
+    assert 'if section == "watch" and working_directory is None:' in script
+    assert "operator_inventory.py" in script
+
+
 def test_operator_scripts_refuse_users_other_than_the_hardcoded_admin_account():
     bootstrap = read("xl_deploy/scripts/bootstrap.sh")
     doctor = read("xl_deploy/scripts/doctor.sh")
