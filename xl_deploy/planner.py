@@ -28,7 +28,7 @@ class DeploymentTarget:
             tiers: tuple[str, ...] = ()
             notice: tuple[str, ...] = ()
             if qqbot_changed:
-                units.extend(("xl-qqbot-production.service", "xl-qqbot-router.service"))
+                units.extend(("xl-qqbot-prod.service", "xl-qqbot-router.service"))
                 # The router owns the shared gateway and forwards for every tier.
                 tiers = ("debug", "test", "production")
                 notice = ("main",)

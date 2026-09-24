@@ -17,10 +17,10 @@ def test_debug_and_test_branches_target_only_their_own_tier():
 @pytest.mark.parametrize(
     ("paths", "units", "tiers", "notice"),
     [
-        (["xl_qqbot/bot_app/router.py"], ("xl-qqbot-production.service", "xl-qqbot-router.service"), ("debug", "test", "production"), ("main",)),
+        (["xl_qqbot/bot_app/router.py"], ("xl-qqbot-prod.service", "xl-qqbot-router.service"), ("debug", "test", "production"), ("main",)),
         (["xl_updata_server/server_app/processor.py"], ("xl-updata-server.service",), (), ()),
         (["xl_qqbot/bot_app/service.py", "xl_updata_server/run_server.py"],
-         ("xl-qqbot-production.service", "xl-qqbot-router.service", "xl-updata-server.service"),
+         ("xl-qqbot-prod.service", "xl-qqbot-router.service", "xl-updata-server.service"),
          ("debug", "test", "production"), ("main",)),
     ],
 )
