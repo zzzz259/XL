@@ -20,14 +20,16 @@ from pathlib import Path
 
 import aiohttp
 import botpy
+from aiohttp import web
 from botpy.connection import ConnectionState
 
 from .bilibili import BilibiliWatcher
 from .config import Config, load_config
+from .deploy_control import DeploymentControl, build_deployment_app
 from .groups import GroupStore, learn_group_from_event
+from .sender import QQSender
 from .tiers import GroupTier
 from .updater import ServiceMute, read_update_status
-from .sender import QQSender
 from .watcher import Watcher
 
 _logger = logging.getLogger(__name__)
@@ -51,7 +53,8 @@ def _install_raw_parsers() -> None:
 
 
 async def run_gateway_client(make_client, appid: str, secret: str,
-                             stop_event: asyncio.Event, client_name: str = "网关客户端") -> None:
+                             stop_event: asyncio.Event, client_name: str = "网关客户端",
+                             readiness_control: DeploymentControl | None = None) -> None:
     """botpy 网关重连循环（连接被平台断开后整体重建，否则永久离线）。"""
     backoff = 5
     while not stop_event.is_set():
@@ -64,6 +67,9 @@ async def run_gateway_client(make_client, appid: str, secret: str,
             raise
         except Exception:
             _logger.exception("%s连接异常", client_name)
+        finally:
+            if readiness_control is not None:
+                readiness_control.ready = False
         if stop_event.is_set():
             break
         _logger.warning("%s连接结束，%d 秒后重连", client_name, backoff)
@@ -77,9 +83,11 @@ async def run_gateway_client(make_client, appid: str, secret: str,
 class TierForwarder:
     """按群级别把事件 envelope POST 到对应级别服务；失败记 error 日志不崩溃。"""
 
-    def __init__(self, ports: dict[str, int], timeout: float = 8.0):
+    def __init__(self, ports: dict[str, int], timeout: float = 8.0,
+                 deployment_control: DeploymentControl | None = None):
         self._ports = dict(ports)
         self._timeout = timeout
+        self._deployment_control = deployment_control
         self._session: aiohttp.ClientSession | None = None
 
     async def _ensure_session(self) -> None:
@@ -96,6 +104,12 @@ class TierForwarder:
         if port is None:
             _logger.error("级别 %s 没有配置服务端口，事件丢弃: %r", tier, payload.get("type"))
             return False
+        if (
+            self._deployment_control is not None
+            and not await self._deployment_control.begin_forward(tier)
+        ):
+            _logger.info("级别 %s 正处于维护状态，事件暂不转发", tier)
+            return False
         url = f"http://127.0.0.1:{port}/event"
         try:
             await self._ensure_session()
@@ -109,6 +123,9 @@ class TierForwarder:
             # 服务进程挂了/未启动：路由器不受影响，只记日志
             _logger.error("转发 %s 服务失败（服务可能未启动）: %s", tier, error)
             return False
+        finally:
+            if self._deployment_control is not None:
+                await self._deployment_control.end_forward(tier)
 
     async def close(self) -> None:
         if self._session is not None and not self._session.closed:
@@ -119,15 +136,19 @@ class _RouterClient(botpy.Client):
     """网关薄壳：群学习 → 分级 → 注入 muted → HTTP 转发。"""
 
     def __init__(self, group_store: GroupStore, tiers: GroupTier,
-                 forwarder: TierForwarder, update_status_path: Path):
+                 forwarder: TierForwarder, update_status_path: Path,
+                 deployment_control: DeploymentControl | None = None):
         super().__init__(intents=botpy.Intents(public_messages=True))
         self._group_store = group_store
         self._tiers = tiers
         self._forwarder = forwarder
         self._update_status_path = update_status_path
+        self._deployment_control = deployment_control
 
     async def on_ready(self):
         _logger.info("路由器网关连接就绪（机器人上线）")
+        if self._deployment_control is not None:
+            self._deployment_control.ready = True
 
     async def on_group_message_create(self, data: dict):
         await self._route("group_message", data)
@@ -179,6 +200,7 @@ async def _amain_router(config: Config) -> None:
     tiers = GroupTier(config.groups)
     watcher = Watcher(config, sender, mute, tiers)
     bili_watcher = BilibiliWatcher(config, sender, tiers)
+    deployment_control = DeploymentControl(Path(config.watch.data_dir) / "maintenance.json")
     forwarder = TierForwarder(
         ports={
             "debug": config.router.debug_port,
@@ -186,13 +208,30 @@ async def _amain_router(config: Config) -> None:
             "production": config.router.production_port,
         },
         timeout=config.router.forward_timeout,
+        deployment_control=deployment_control,
     )
     # 与 watcher 的 update_events.jsonl 同一目录约定（上游 xl_updata_server 数据目录）
     update_status_path = Path(config.watch.outbox_dir).parent / "update_status.json"
     stop_event = asyncio.Event()
+    deployment_app = build_deployment_app(
+        control=deployment_control,
+        bearer_token=config.router.deployment_token,
+        sender=sender,
+        tiers=tiers,
+        target_groups=watcher._target_groups,
+    )
+    deployment_runner = web.AppRunner(deployment_app)
+    await deployment_runner.setup()
+    deployment_site = web.TCPSite(
+        deployment_runner, "127.0.0.1", config.router.deployment_control_port
+    )
+    await deployment_site.start()
+    if not config.router.deployment_token:
+        _logger.warning("部署控制 API 已绑定回环地址，但 deployment_token 未配置，所有 API 请求均会被拒绝")
 
     def _shutdown() -> None:
         _logger.info("收到退出信号，准备关闭...")
+        deployment_control.ready = False
         stop_event.set()
         watcher.stop()
         bili_watcher.stop()
@@ -210,15 +249,19 @@ async def _amain_router(config: Config) -> None:
             bili_watcher.run(),
             run_gateway_client(
                 lambda: _RouterClient(
-                    GroupStore(config.watch.data_dir), tiers, forwarder, update_status_path
+                    GroupStore(config.watch.data_dir), tiers, forwarder,
+                    update_status_path, deployment_control,
                 ),
                 config.bot.appid, config.bot.secret, stop_event,
                 client_name="路由器网关",
+                readiness_control=deployment_control,
             ),
         )
     except asyncio.CancelledError:
         pass
     finally:
+        deployment_control.ready = False
+        await deployment_runner.cleanup()
         await forwarder.close()
         _logger.info("关闭 sender HTTP 会话")
         await sender.close()

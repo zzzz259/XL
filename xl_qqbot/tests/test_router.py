@@ -19,8 +19,9 @@ from bot_app.config import (
     WatchConfig,
     load_config,
 )
+from bot_app.deploy_control import DeploymentControl
 from bot_app.groups import GroupStore
-from bot_app.router import TierForwarder, _RouterClient
+from bot_app.router import TierForwarder, _RouterClient, run_gateway_client
 from bot_app.tiers import GroupTier
 
 DEBUG_G = "7D8F62B840FF97A1E3EF0E219575EFA8"
@@ -53,6 +54,8 @@ def test_config_router_defaults_and_parse():
         assert cfg.router.test_port == 8782
         assert cfg.router.production_port == 8783
         assert cfg.router.forward_timeout == 8.0
+        assert cfg.router.deployment_control_port == 8784
+        assert cfg.router.deployment_token == ""
     finally:
         os.unlink(path)
 
@@ -70,6 +73,18 @@ forward_timeout = 3
     finally:
         os.unlink(path)
 
+    path = write_toml(BASE_TOML + """
+[router]
+deployment_control_port = 9876
+deployment_token = "0123456789abcdef0123456789abcdef"
+""")
+    try:
+        cfg = load_config(path)
+        assert cfg.router.deployment_control_port == 9876
+        assert cfg.router.deployment_token == "0123456789abcdef0123456789abcdef"
+    finally:
+        os.unlink(path)
+
 
 def test_config_router_bad_timeout():
     path = write_toml(BASE_TOML + """
@@ -78,6 +93,31 @@ forward_timeout = 0
 """)
     try:
         with pytest.raises(ValueError, match="forward_timeout"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_config_router_rejects_invalid_deployment_control_settings():
+    for router_settings, expected in (
+        ("deployment_control_port = 70000", "deployment_control_port"),
+        ('deployment_token = "too-short"', "deployment_token"),
+    ):
+        path = write_toml(BASE_TOML + f"\n[router]\n{router_settings}\n")
+        try:
+            with pytest.raises(ValueError, match=expected):
+                load_config(path)
+        finally:
+            os.unlink(path)
+
+
+def test_config_router_rejects_deployment_control_port_collision():
+    path = write_toml(BASE_TOML + """
+[router]
+deployment_control_port = 8781
+""")
+    try:
+        with pytest.raises(ValueError, match="不能与服务端口重复"):
             load_config(path)
     finally:
         os.unlink(path)
@@ -126,6 +166,53 @@ async def test_forward_picks_port_by_tier():
         "http://127.0.0.1:8782/event",
         "http://127.0.0.1:8783/event",
     ]
+
+
+@pytest.mark.asyncio
+async def test_forwarder_respects_maintenance_and_tracks_inflight_requests(tmp_path):
+    control = DeploymentControl(tmp_path / "maintenance.json")
+    forwarder = TierForwarder({"debug": 8781}, deployment_control=control)
+    forwarder._session = FakeSession()
+    payload = {"type": "group_message"}
+
+    assert await forwarder.forward("debug", payload)
+    assert control.active_forwards("debug") == 0
+    await control.set_maintenance("debug", True)
+    assert not await forwarder.forward("debug", payload)
+    assert control.active_forwards("debug") == 0
+    assert forwarder._session.posts == [("http://127.0.0.1:8781/event", payload)]
+
+
+@pytest.mark.asyncio
+async def test_router_client_marks_gateway_ready(tmp_path):
+    control = DeploymentControl(tmp_path / "maintenance.json")
+    client = object.__new__(_RouterClient)
+    client._deployment_control = control
+
+    await client.on_ready()
+
+    assert control.ready
+
+
+@pytest.mark.asyncio
+async def test_gateway_disconnect_clears_readiness_before_shutdown():
+    control = DeploymentControl("maintenance.json")
+    control.ready = True
+    stopped = asyncio.Event()
+
+    class DisconnectedClient:
+        async def start(self, **kwargs):
+            stopped.set()
+
+    await run_gateway_client(
+        DisconnectedClient,
+        "appid",
+        "secret",
+        stopped,
+        readiness_control=control,
+    )
+
+    assert not control.ready
 
 
 @pytest.mark.asyncio
