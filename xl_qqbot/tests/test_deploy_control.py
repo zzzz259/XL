@@ -25,6 +25,51 @@ class RecordingSender:
         return group_openid not in self.failures
 
 
+def test_missing_maintenance_file_defaults_all_tiers_to_unmaintained(tmp_path):
+    control = DeploymentControl(tmp_path / "maintenance.json")
+
+    assert all(
+        not control.is_maintained(tier)
+        for tier in ("debug", "test", "production")
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{invalid json",
+        "[]",
+        "{}",
+        '{"tiers": []}',
+        '{"tiers": {"debug": true, "test": false}}',
+        '{"tiers": {"debug": true, "test": false, "production": false, "staging": false}}',
+        '{"tiers": {"debug": true, "test": false, "production": 0}}',
+    ],
+)
+def test_invalid_persisted_maintenance_state_fails_startup(tmp_path, payload):
+    path = tmp_path / "maintenance.json"
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="maintenance state"):
+        DeploymentControl(path)
+
+
+def test_unreadable_persisted_maintenance_state_fails_startup(tmp_path, monkeypatch):
+    path = tmp_path / "maintenance.json"
+    path.write_text('{"tiers": {"debug": true, "test": false, "production": false}}', encoding="utf-8")
+    original_read_text = type(path).read_text
+
+    def deny_state_read(candidate, *args, **kwargs):
+        if candidate == path:
+            raise PermissionError("simulated unreadable maintenance file")
+        return original_read_text(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(type(path), "read_text", deny_state_read)
+
+    with pytest.raises(RuntimeError, match="maintenance state"):
+        DeploymentControl(path)
+
+
 def make_app(control, sender, groups=None, features=None):
     return build_deployment_app(
         control=control,

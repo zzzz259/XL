@@ -35,18 +35,38 @@ class DeploymentControl:
 
     def _load(self) -> None:
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-            tiers = payload.get("tiers", {})
-            if not isinstance(tiers, dict):
-                return
-            self._maintenance.update({
-                tier: value for tier, value in tiers.items()
-                if tier in _TIERS and isinstance(value, bool)
-            })
-        except (OSError, ValueError, AttributeError):
-            # A missing or malformed state file must never prevent the gateway
-            # from starting; defaults resume normal forwarding.
+            contents = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            # A genuinely absent first-run file uses the safe all-disabled default.
             return
+        except OSError as exc:
+            raise RuntimeError(
+                f"cannot read maintenance state at {self.path}: {exc}"
+            ) from exc
+
+        try:
+            payload = json.loads(contents)
+            if not isinstance(payload, dict):
+                raise TypeError("top-level value must be an object")
+            tiers = payload.get("tiers")
+            if not isinstance(tiers, dict):
+                raise TypeError("'tiers' must be an object")
+            if set(tiers) != set(_TIERS):
+                missing = sorted(set(_TIERS) - set(tiers))
+                unknown = sorted(set(tiers) - set(_TIERS))
+                raise ValueError(
+                    f"tier keys must be exactly {_TIERS}; "
+                    f"missing={missing}, unknown={unknown}"
+                )
+            if any(not isinstance(value, bool) for value in tiers.values()):
+                raise ValueError("every tier state must be a boolean")
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise RuntimeError(
+                f"invalid maintenance state at {self.path}: {exc}"
+            ) from exc
+
+        # Do not expose partially validated state if any persisted tier is invalid.
+        self._maintenance = {tier: tiers[tier] for tier in _TIERS}
 
     def _save(self, tiers: dict[str, bool]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
