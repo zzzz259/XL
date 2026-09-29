@@ -20,26 +20,33 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: bootstrap.sh [--dry-run] [--activate]
+Usage: bootstrap.sh [--dry-run] [--activate [--migrate-existing]]
 
 Default: read-only inventory/dry-run. --activate installs user units and a
 sample deployment config only when destination files do not already exist.
-It never migrates or adopts legacy service directories/config/data, creates
-current release pointers, stops services, enables units, or starts the timer.
+It never adopts legacy service directories/config/data, creates current
+release pointers, stops services, enables units, or starts the timer.
+--migrate-existing is accepted only with --activate and backs up only inactive
+unit definitions in this user's unit directory before installing templates.
 EOF
 }
 
 activate=false
-if [[ "$#" -gt 1 ]]; then
-  usage >&2
+migrate_existing=false
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --dry-run) activate=false ;;
+    --activate) activate=true ;;
+    --migrate-existing) migrate_existing=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+if [[ "$migrate_existing" == true && "$activate" != true ]]; then
+  printf '%s\n' '--migrate-existing requires --activate.' >&2
   exit 2
 fi
-case "${1:---dry-run}" in
-  --dry-run) activate=false ;;
-  --activate) activate=true ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
 
 report_config_mappings() {
   local config_path="$1"
@@ -232,8 +239,7 @@ inventory() {
     fi
   done
   for path in \
-    "$HOME_DIR/xl_qqbot" "$HOME_DIR/xl-qqbot-debug" "$HOME_DIR/xl-qqbot-test" \
-    "$HOME_DIR/xl_qqbot-test" \
+    "$HOME_DIR/xl_qqbot" "$HOME_DIR/xl_qqbot-debug" "$HOME_DIR/xl_qqbot-test" \
     "$HOME_DIR/xl_updata_server" "$CONFIG_FILE" \
     "$SECRETS_FILE" "$ROUTER_TOKEN_FILE" "$UNIT_DIR"; do
     if [[ -e "$path" ]]; then printf 'Existing operator path (preserved): %s\n' "$path"
@@ -248,7 +254,7 @@ if [[ "$activate" != true ]]; then
   exit 0
 fi
 
-for directory in "$DEPLOY_ROOT" "$RELEASES" "$CURRENT" "$SECRET_DIR" "$UNIT_DIR"; do
+for directory in "$DEPLOY_ROOT" "$RELEASES" "$CURRENT" "$SECRET_DIR" "$UNIT_DIR" "$DEPLOY_ROOT/unit-backups"; do
   if [[ -L "$directory" ]]; then
     printf 'Refusing: managed path is a symlink: %s\n' "$directory" >&2
     exit 1
@@ -325,29 +331,85 @@ if [[ "$router_token_mode" != 600 ]]; then
   exit 1
 fi
 
-for name in xl-deploy-poll.service xl-deploy-poll.timer xl-qqbot-router.service \
-            xl-qqbot-debug.service xl-qqbot-test.service xl-qqbot-prod.service xl-updata-server.service; do
+unit_names=(xl-deploy-poll.service xl-deploy-poll.timer xl-qqbot-router.service
+            xl-qqbot-debug.service xl-qqbot-test.service xl-qqbot-prod.service
+            xl-updata-server.service)
+existing_units=()
+existing_dropins=()
+for name in "${unit_names[@]}"; do
   if [[ -e "$UNIT_DIR/$name" || -L "$UNIT_DIR/$name" ]]; then
-    printf 'Refusing to overwrite existing user unit: %s\n' "$UNIT_DIR/$name" >&2
+    if [[ "$migrate_existing" != true ]]; then
+      printf 'Refusing to overwrite existing user unit: %s\n' "$UNIT_DIR/$name" >&2
+      exit 1
+    fi
+    if [[ -L "$UNIT_DIR/$name" ]]; then
+      printf 'Refusing to migrate symlinked unit: %s\n' "$UNIT_DIR/$name" >&2
+      exit 1
+    fi
+    if systemctl --user is-active --quiet "$name"; then
+      printf 'Refusing to migrate active unit: %s\n' "$name" >&2
+      exit 1
+    fi
+    existing_units+=("$name")
+  fi
+  dropin="$UNIT_DIR/$name.d"
+  if [[ -L "$dropin" ]]; then
+    printf 'Refusing to migrate symlinked unit drop-in directory: %s\n' "$dropin" >&2
     exit 1
   fi
+  if [[ -e "$dropin" && ! -d "$dropin" ]]; then
+    printf 'Refusing to migrate non-directory unit drop-in path: %s\n' "$dropin" >&2
+    exit 1
+  fi
+  if [[ -d "$dropin" ]]; then
+    if [[ "$migrate_existing" != true ]]; then
+      printf 'Refusing to overwrite existing unit drop-in directory: %s\n' "$dropin" >&2
+      exit 1
+    fi
+    existing_dropins+=("$name.d")
+  fi
 done
+backup_dir=""
+if [[ "${#existing_units[@]}" -gt 0 || "${#existing_dropins[@]}" -gt 0 ]]; then
+  if [[ "$migrate_existing" != true ]]; then
+    printf '%s\n' 'Existing units found; use --migrate-existing only after stopping them.' >&2
+    exit 1
+  fi
+  backup_dir="$DEPLOY_ROOT/unit-backups/$(date -u +%Y%m%dT%H%M%SZ)"
+  if [[ -e "$backup_dir" || -L "$backup_dir" ]]; then
+    printf 'Refusing: unit backup path already exists: %s\n' "$backup_dir" >&2
+    exit 1
+  fi
+fi
 if [[ -L "$CONFIG_FILE" ]]; then
   printf 'Refusing to follow deployment config symlink: %s\n' "$CONFIG_FILE" >&2
   exit 1
 fi
 
-# All mutations below are additive and confined to admin's home. No old path,
-# service, config, credential or runtime data is moved or removed.
+# All mutations are confined to admin's home. Existing service/config/data
+# paths are never moved; explicit unit migration keeps recoverable backups.
 mkdir -p -- "$RELEASES" "$CURRENT" "$SECRET_DIR" "$UNIT_DIR"
 if [[ ! -e "$CONFIG_FILE" ]]; then
   install -m 600 "$REPO_ROOT/xl_deploy/config.toml.example" "$CONFIG_FILE"
 else
   printf 'Keeping existing deployment config unchanged: %s\n' "$CONFIG_FILE"
 fi
-for name in xl-deploy-poll.service xl-deploy-poll.timer xl-qqbot-router.service \
-            xl-qqbot-debug.service xl-qqbot-test.service xl-qqbot-prod.service xl-updata-server.service; do
+if [[ -n "$backup_dir" ]]; then
+  mkdir -m 700 -p -- "$backup_dir"
+  printf 'XL deployment unit migration manifest\nCreated UTC: %s\n' "$(date -u +%FT%TZ)" > "$backup_dir/manifest.txt"
+  chmod 600 "$backup_dir/manifest.txt"
+  for name in "${existing_units[@]}"; do
+    printf 'unit %s\n' "$name" >> "$backup_dir/manifest.txt"
+    mv -- "$UNIT_DIR/$name" "$backup_dir/$name"
+  done
+  for name in "${existing_dropins[@]}"; do
+    printf 'drop-in %s\n' "$name" >> "$backup_dir/manifest.txt"
+    mv -- "$UNIT_DIR/$name" "$backup_dir/$name"
+  done
+  printf 'Existing inactive unit definitions preserved in %s (migration manifest recorded).\n' "$backup_dir"
+fi
+for name in "${unit_names[@]}"; do
   install -m 644 "$TEMPLATE_DIR/$name" "$UNIT_DIR/$name"
 done
 systemctl --user daemon-reload
-printf '\nUnits installed but not enabled or started. Review configs, units and the old-service cutover first.\n'
+printf '\nUnits installed but not enabled or started. Never automatically remove unit backups; review configs and the old-service cutover first.\n'

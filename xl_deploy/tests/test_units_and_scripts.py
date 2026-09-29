@@ -32,6 +32,13 @@ def test_user_units_use_fixed_release_paths_and_keep_runtime_data_external():
         assert "sudo " not in content
         assert "[Install]" in content
 
+    assert "WorkingDirectory=/home/admin/xl_qqbot-debug" in read(
+        "xl_deploy/deploy/xl-qqbot-debug.service"
+    )
+    assert "WorkingDirectory=/home/admin/xl_qqbot-test" in read(
+        "xl_deploy/deploy/xl-qqbot-test.service"
+    )
+
 
 def test_poller_timer_runs_every_minute_as_a_user_unit():
     timer = read("xl_deploy/deploy/xl-deploy-poll.timer")
@@ -78,7 +85,7 @@ def test_bootstrap_defaults_to_inventory_and_requires_explicit_activation():
     assert "systemctl --user" in script
     assert "chmod 600" in script
     assert "rm -" not in script
-    assert "mv " not in script
+    assert "--migrate-existing" in script
     assert "cp -f" not in script
     assert "install -m 600" in script
 
@@ -128,6 +135,20 @@ def test_bootstrap_refuses_symlinked_managed_directories_and_existing_unit_links
     assert 'if [[ -L "$directory" ]]; then' in script
     assert '[[ -e "$UNIT_DIR/$name" || -L "$UNIT_DIR/$name" ]]' in script
     assert 'if [[ -L "$CONFIG_FILE" ]]; then' in script
+
+
+def test_bootstrap_has_explicit_reversible_existing_unit_migration():
+    script = read("xl_deploy/scripts/bootstrap.sh")
+
+    assert "--migrate-existing" in script
+    assert "unit-backups" in script
+    assert "systemctl --user is-active" in script
+    assert "Refusing to migrate active unit" in script
+    assert "migration manifest" in script.lower()
+    assert 'mv -- "$UNIT_DIR/$name" "$backup_dir/$name"' in script
+    assert 'existing_dropins+=("$name.d")' in script
+    assert "drop-in %s" in script
+    assert "Never automatically remove unit backups" in script
 
 
 def test_bootstrap_requires_mode_600_for_every_credential_config():

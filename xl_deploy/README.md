@@ -82,17 +82,30 @@ fi
 ```
 
 After release/current pointers and old-path mappings have been reviewed,
-activation is explicit and additive:
+activation is explicit. Because this host already has user units, first stop
+the exact affected services and verify each is inactive. Then activate with
+the explicit reversible migration flag:
 
 ```bash
-bash xl_deploy/scripts/bootstrap.sh --activate
+bash xl_deploy/scripts/bootstrap.sh --activate --migrate-existing
 ```
 
 Activation installs user unit files and a protected sample config only if
-absent. It refuses existing units, invalid pre-existing release pointers,
-unmapped legacy configs, or secrets not at mode 600. Missing baseline pointers
-remain missing; the installer never invents/adopts one. It does not stop/start
-bots, enable the timer, move old directories, or delete anything.
+absent. Existing inactive unit files and matching drop-in directories from
+`~/.config/systemd/user` are moved into a new timestamped
+`~/xl_deploy/unit-backups/` directory, with a mode-600 migration manifest.
+Active or symlinked units are refused. Never automatically remove unit backups;
+they are the recovery source for restoring the former unit definitions. To
+manually restore after stopping any newly installed affected unit, move the
+replacement files aside, move the recorded `unit` files and `drop-in`
+directories back to `~/.config/systemd/user/`, then run
+`systemctl --user daemon-reload`; inspect the manifest and paths first. If
+activation is interrupted part-way through, use that same manifest to restore
+only entries that were actually moved.
+The command does not stop/start bots, enable the timer, move old service/data
+directories, or delete anything. It refuses invalid release pointers, unmapped
+legacy configs, or secrets not at mode 600. Missing baseline pointers remain
+missing; the installer never invents/adopts one.
 Before enabling, explicitly seed each missing branch pointer from its verified
 branch/SHA into a new immutable release and preflight its per-unit virtualenvs;
 never point `current/` at an old mutable service checkout. Then ensure each
