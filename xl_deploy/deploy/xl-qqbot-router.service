@@ -1,0 +1,19 @@
+[Unit]
+Description=XL QQ Bot router and loopback deployment-control API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_qqbot
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/xl_deploy/current/main/xl_qqbot
+ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-qqbot-router.service/bin/python -m bot_app.router
+Restart=on-failure
+RestartSec=10
+CPUQuota=50%
+MemoryMax=256M
+Nice=10
+
+[Install]
+WantedBy=default.target

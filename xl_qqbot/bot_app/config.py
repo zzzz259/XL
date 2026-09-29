@@ -90,6 +90,8 @@ class RouterConfig:
     test_port: int = 8782
     production_port: int = 8783
     forward_timeout: float = 8.0
+    deployment_control_port: int = 8784
+    deployment_token: str = ""
 
 
 @dataclass(frozen=True)
@@ -222,9 +224,24 @@ def load_config(path: str = "config.toml") -> Config:
         test_port=int(router.get("test_port", RouterConfig.test_port)),
         production_port=int(router.get("production_port", RouterConfig.production_port)),
         forward_timeout=float(router.get("forward_timeout", RouterConfig.forward_timeout)),
+        deployment_control_port=int(
+            router.get("deployment_control_port", RouterConfig.deployment_control_port)
+        ),
+        deployment_token=str(router.get("deployment_token", "")).strip(),
     )
     if router_config.forward_timeout <= 0:
         raise ValueError("[router] forward_timeout 必须 > 0")
+    if router_config.deployment_control_port < 1 or router_config.deployment_control_port > 65535:
+        raise ValueError("[router] deployment_control_port 必须在 1 到 65535 之间")
+    service_ports = {
+        router_config.debug_port,
+        router_config.test_port,
+        router_config.production_port,
+    }
+    if router_config.deployment_control_port in service_ports:
+        raise ValueError("[router] deployment_control_port 不能与服务端口重复")
+    if router_config.deployment_token and len(router_config.deployment_token) < 32:
+        raise ValueError("[router] deployment_token 必须至少 32 个字符")
 
     return Config(
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),

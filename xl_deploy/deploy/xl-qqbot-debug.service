@@ -1,0 +1,19 @@
+[Unit]
+Description=XL QQ Bot debug tier
+After=network-online.target xl-qqbot-router.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_qqbot-debug
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/xl_deploy/current/debug/xl_qqbot
+ExecStart=/home/admin/xl_deploy/current/debug/.venvs/xl-qqbot-debug.service/bin/python -m bot_app.service --tier debug --port 8781
+Restart=on-failure
+RestartSec=10
+CPUQuota=30%
+MemoryMax=200M
+Nice=10
+
+[Install]
+WantedBy=default.target
