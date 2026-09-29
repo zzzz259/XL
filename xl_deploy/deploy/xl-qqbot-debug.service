@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/admin/xl-qqbot-debug
+WorkingDirectory=/home/admin/xl_qqbot-debug
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/admin/xl_deploy/current/debug/xl_qqbot
 ExecStart=/home/admin/xl_deploy/current/debug/.venvs/xl-qqbot-debug.service/bin/python -m bot_app.service --tier debug --port 8781
