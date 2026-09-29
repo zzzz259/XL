@@ -55,6 +55,11 @@ debug_port = 8781
 test_port = 8782
 production_port = 8783
 forward_timeout = 8
+# 部署控制 API 仅监听 127.0.0.1，供本机部署控制器调用。
+deployment_control_port = 8784
+# 使用至少 32 个随机字符；留空时部署 API 会拒绝所有请求。
+# 可用 python -c "import secrets; print(secrets.token_urlsafe(32))" 生成。
+deployment_token = ""
 
 [bilibili]
 # B 站 UP 主动态/视频监视。enabled=false 可关闭。

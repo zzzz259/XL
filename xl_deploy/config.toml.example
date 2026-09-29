@@ -1,0 +1,24 @@
+# Copy to /home/admin/xl_deploy/config.toml and edit all paths.
+# GitHub credentials come from the mode-600 EnvironmentFile secrets.env.
+# Relative paths resolve against this config file; paths below are explicit absolutes.
+[github]
+owner = "YOUR_GITHUB_OWNER"
+repo = "YOUR_REPOSITORY"
+
+[deployment]
+root = "/home/admin/xl_deploy"
+# Set to an operator-verified local Git checkout; do not assume an old service tree.
+repository = "/home/admin/REPLACE_WITH_REVIEWED_REPOSITORY_CHECKOUT"
+state_dir = "/home/admin/xl_deploy/state"
+releases_root = "/home/admin/xl_deploy/releases"
+current_root = "/home/admin/xl_deploy/current"
+# Existing backend config/data are external to releases and remain in place.
+backend_config = "/home/admin/xl_updata_server/config.toml"
+backend_data = "/home/admin/xl_updata_server/data"
+
+[router]
+base_url = "http://127.0.0.1:8784"
+# Create separately, enter the matching router bearer value, chmod 600.
+token_file = "/home/admin/.config/xl_deploy/router.token"
+
+# Branches are fixed in code: debug, test, main. The timer invokes one poll pass.
