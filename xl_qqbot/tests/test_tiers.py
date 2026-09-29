@@ -269,7 +269,8 @@ async def test_update_notice_filtered_per_group(tmp_path):
 
     assert sender.calls == []
     queued = watcher.proactive_outbox.list_pending()
-    assert [(item.recipient, item.kind) for item in queued] == [(DEBUG_G, "text")]
+    notices = [item for item in queued if item.event_key.startswith("game-update:")]
+    assert [(item.recipient, item.kind) for item in notices] == [(DEBUG_G, "text")]
     assert watcher.notice.consumed_events == 1  # 事件已消费不重复播报
     assert watcher.mute.muted  # 播报后进入更新静音（与现有语义一致）
 

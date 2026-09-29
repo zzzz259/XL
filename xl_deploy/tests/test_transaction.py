@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from xl_deploy.planner import plan_deployment
 from xl_deploy.state import DeploymentState
 from xl_deploy.transaction import DeploymentPaths, DeploymentTransaction
