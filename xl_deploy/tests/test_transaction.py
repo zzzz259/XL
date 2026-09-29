@@ -56,9 +56,11 @@ class FakeRouter:
         self.maintenance: set[str] = set()
         self.release_note_results: list[bool] = []
 
-    def announce(self, scope, text):
+    def announce(self, scope, text, *, notification_id):
         self.events.append(("announce", text, *scope))
-        return self.announce_results.pop(0) if self.announce_results else self.announce_ok
+        return (
+            self.announce_results.pop(0) if self.announce_results else self.announce_ok
+        )
 
     def pause(self, tiers):
         self.events.append(("pause", *tiers))
@@ -72,7 +74,7 @@ class FakeRouter:
         self.events.append(("resume", *tiers))
         self.maintenance.difference_update(tiers)
 
-    def announce_release_note(self, scope, text):
+    def announce_release_note(self, scope, text, *, notification_id):
         self.events.append(("release_note", text, *scope))
         return self.release_note_results.pop(0) if self.release_note_results else True
 
@@ -141,7 +143,9 @@ def combined_events(runner, router):
     return sorted(runner.events + router.events, key=lambda event: event[0])
 
 
-def test_happy_path_obeys_notice_pause_drain_stop_switch_start_health_resume_order(tmp_path):
+def test_happy_path_obeys_notice_pause_drain_stop_switch_start_health_resume_order(
+    tmp_path,
+):
     runner, router = FakeRunner(), FakeRouter()
     transaction = make_transaction(tmp_path, runner=runner, router=router)
 
@@ -149,8 +153,18 @@ def test_happy_path_obeys_notice_pause_drain_stop_switch_start_health_resume_ord
 
     assert result.status == "success"
     assert [event[0] for event in transaction.events] == [
-        "stage", "preflight", "announce", "pause", "drain", "stop", "switch",
-        "start", "health", "resume", "announce", "release_note",
+        "stage",
+        "preflight",
+        "announce",
+        "pause",
+        "drain",
+        "stop",
+        "switch",
+        "start",
+        "health",
+        "resume",
+        "announce",
+        "release_note",
     ]
     assert transaction.events[2] == ("announce", START_NOTICE, "debug")
     assert transaction.events[9] == ("resume", "debug")
@@ -169,7 +183,9 @@ def test_notice_failure_never_pauses_or_stops_live_services(tmp_path):
     with pytest.raises(RuntimeError, match="notice"):
         transaction.execute(make_plan())
 
-    assert not any(event[0] in {"pause", "drain", "stop", "switch"} for event in transaction.events)
+    assert not any(
+        event[0] in {"pause", "drain", "stop", "switch"} for event in transaction.events
+    )
     assert branch_current(transaction, "debug").name == OLD_SHA
 
 
@@ -181,7 +197,9 @@ def test_drain_timeout_aborts_before_stopping_units(tmp_path):
     with pytest.raises(TimeoutError, match="drain"):
         transaction.execute(make_plan())
 
-    assert not any(event[0] in {"stop", "switch", "start"} for event in transaction.events)
+    assert not any(
+        event[0] in {"stop", "switch", "start"} for event in transaction.events
+    )
     assert branch_current(transaction, "debug").name == OLD_SHA
     assert router.maintenance == set()
 
@@ -241,16 +259,21 @@ def test_deployment_paths_do_not_follow_current_pointer_leaf(tmp_path, monkeypat
 def test_backend_only_deployment_does_not_pause_or_announce_to_bot(tmp_path):
     runner, router = FakeRunner(), FakeRouter()
     transaction = make_transaction(tmp_path, runner=runner, router=router)
-    plan = plan_deployment("main", NEW_SHA, ["xl_updata_server/server_app/processor.py"])
+    plan = plan_deployment(
+        "main", NEW_SHA, ["xl_updata_server/server_app/processor.py"]
+    )
 
     result = transaction.execute(plan)
 
     assert result.status == "success"
     assert plan.impacted_units == ("xl-updata-server.service",)
-    assert not any(event[0] in {"announce", "pause", "drain", "resume"} for event in transaction.events)
-    assert transaction.events.index(("stop", "xl-updata-server.service")) < transaction.events.index(
-        ("switch", NEW_SHA)
+    assert not any(
+        event[0] in {"announce", "pause", "drain", "resume"}
+        for event in transaction.events
     )
+    assert transaction.events.index(
+        ("stop", "xl-updata-server.service")
+    ) < transaction.events.index(("switch", NEW_SHA))
     assert branch_current(transaction, "main").name.startswith(f"{NEW_SHA}-")
     assert branch_current(transaction, "debug").name == OLD_SHA
     assert branch_current(transaction, "test").name == "3" * 40
@@ -280,7 +303,11 @@ def test_health_failure_rolls_back_and_retains_both_releases(tmp_path):
     assert branch_current(transaction, "debug").name == OLD_SHA
     assert Path(transaction.state.load().candidate_release).exists()
     assert transaction.state.load().phase == "rolled_back"
-    assert transaction.events[-1] == ("announce", "部署失败，已回滚到上一版本。", "debug")
+    assert transaction.events[-1] == (
+        "announce",
+        "部署失败，已回滚到上一版本。",
+        "debug",
+    )
 
 
 def test_rollback_failure_keeps_maintenance_and_journal_evidence(tmp_path):
@@ -352,7 +379,10 @@ def test_failed_completion_notice_is_persisted_and_retried(tmp_path):
     assert transaction.state.load().phase == "completed"
     assert transaction.state.load().completion_notice_sent is True
     assert transaction.state.load().release_note_sent is True
-    assert [event[0] for event in transaction.events[-2:]] == ["announce", "release_note"]
+    assert [event[0] for event in transaction.events[-2:]] == [
+        "announce",
+        "release_note",
+    ]
 
 
 def test_new_deployment_is_blocked_until_pending_notice_is_recovered(tmp_path):
@@ -385,7 +415,9 @@ def test_failed_release_note_is_persisted_and_retried_without_rollback(tmp_path)
     assert branch_current(transaction, "debug").name.startswith(f"{NEW_SHA}-")
 
 
-def test_recovery_after_router_resume_retries_completion_instead_of_rolling_back(tmp_path):
+def test_recovery_after_router_resume_retries_completion_instead_of_rolling_back(
+    tmp_path,
+):
     runner, router = FakeRunner(), FakeRouter()
     transaction = make_transaction(tmp_path, runner=runner, router=router)
 
@@ -448,9 +480,13 @@ def test_command_runner_stages_exact_sha_as_argv_without_branch_interpolation(tm
     repository = tmp_path / "repo"
     repository.mkdir()
     candidate = tmp_path / "releases" / NEW_SHA
-    runner = CommandRunner(repository=repository, executor=lambda args, **kwargs: commands.append(args))
+    runner = CommandRunner(
+        repository=repository, executor=lambda args, **kwargs: commands.append(args)
+    )
 
-    result = runner.stage(SimpleNamespace(sha=NEW_SHA, branch="main; touch nope"), candidate)
+    result = runner.stage(
+        SimpleNamespace(sha=NEW_SHA, branch="main; touch nope"), candidate
+    )
 
     assert result == candidate
     assert commands == [
@@ -503,8 +539,12 @@ def test_preflight_creates_one_release_local_venv_per_impacted_unit(tmp_path):
     backend_requirements = release / "xl_updata_server" / "requirements.txt"
     bot_requirements.write_text("bot-only==1\n", encoding="utf-8")
     backend_requirements.write_text("backend-only==1\n", encoding="utf-8")
-    plan = plan_deployment("main", NEW_SHA, ["xl_updata_server/server_app/processor.py"])
-    runner = CommandRunner(executor=lambda args, **kwargs: commands.append((args, kwargs)))
+    plan = plan_deployment(
+        "main", NEW_SHA, ["xl_updata_server/server_app/processor.py"]
+    )
+    runner = CommandRunner(
+        executor=lambda args, **kwargs: commands.append((args, kwargs))
+    )
 
     runner.preflight(
         plan,
@@ -543,7 +583,9 @@ def test_preflight_compiles_backend_sources_before_any_service_stop(tmp_path):
     (release / "xl_qqbot").mkdir(parents=True)
     (release / "xl_qqbot" / "requirements.txt").write_text("", encoding="utf-8")
     (backend / "broken.py").write_text("def invalid(:\n", encoding="utf-8")
-    plan = plan_deployment("main", NEW_SHA, ["xl_updata_server/server_app/processor.py"])
+    plan = plan_deployment(
+        "main", NEW_SHA, ["xl_updata_server/server_app/processor.py"]
+    )
     runner = CommandRunner(executor=lambda args, **kwargs: None)
 
     with pytest.raises(SyntaxError):
@@ -555,7 +597,9 @@ def test_preflight_compiles_backend_sources_before_any_service_stop(tmp_path):
         )
 
 
-def test_backend_health_check_runs_read_only_application_self_check(tmp_path, monkeypatch):
+def test_backend_health_check_runs_read_only_application_self_check(
+    tmp_path, monkeypatch
+):
     from xl_deploy.runner import CommandRunner
 
     commands = []
@@ -572,10 +616,18 @@ def test_backend_health_check_runs_read_only_application_self_check(tmp_path, mo
     runner.health_check(("xl-updata-server.service",))
 
     assert commands[0] == [
-        "systemctl", "--user", "is-active", "--quiet", "xl-updata-server.service"
+        "systemctl",
+        "--user",
+        "is-active",
+        "--quiet",
+        "xl-updata-server.service",
     ]
     assert commands[1][1].replace("\\", "/").endswith("xl_updata_server/run_server.py")
-    assert commands[1][2:] == ["--healthcheck", "--config", str(tmp_path / "backend.toml")]
+    assert commands[1][2:] == [
+        "--healthcheck",
+        "--config",
+        str(tmp_path / "backend.toml"),
+    ]
 
 
 def test_router_health_check_authenticates_and_retries_until_ready(monkeypatch):
@@ -616,9 +668,9 @@ def test_router_health_check_authenticates_and_retries_until_ready(monkeypatch):
     runner.health_check(("xl-qqbot-router.service",))
 
     assert attempts == 2
-    assert commands == [[
-        "systemctl", "--user", "is-active", "--quiet", "xl-qqbot-router.service"
-    ]]
+    assert commands == [
+        ["systemctl", "--user", "is-active", "--quiet", "xl-qqbot-router.service"]
+    ]
 
 
 def test_router_health_check_fails_closed_without_token():

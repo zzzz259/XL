@@ -12,7 +12,6 @@ from bot_app.config import (
     UploadConfig,
     WatchConfig,
 )
-from bot_app.groups import GroupStore
 from bot_app.watcher import Watcher
 
 
@@ -73,11 +72,15 @@ async def test_watcher_sends_and_deletes():
         watcher = Watcher(config, sender)
         await watcher._tick()
 
-        assert len(sender.calls) == 1
-        assert sender.calls[0][1] == "【星落】v1-A"
+        assert sender.calls == []
+        queued = watcher.proactive_outbox.list_pending()
+        assert len(queued) == 1
+        assert queued[0].text == "【星落】v1-A"
+        assert queued[0].recipient == "g1"
+        assert (watcher.proactive_outbox.data_dir / queued[0].media_path).is_file()
         assert not os.path.exists(vdir)
         assert os.path.exists(os.path.join(data_dir, "sent", "v1", "manifest.json"))
-        assert os.path.exists(os.path.join(data_dir, "sent", "v1", "status.json"))
+        assert not os.path.exists(os.path.join(data_dir, "sent", "v1", "status.json"))
 
 
 @pytest.mark.asyncio
@@ -96,11 +99,9 @@ async def test_watcher_keeps_failed_version():
         watcher = Watcher(config, sender)
         await watcher._tick()
 
-        assert len(sender.calls) == 1
-        assert os.path.exists(vdir)
-        assert not os.path.exists(
-            os.path.join(vdir, "1_A_角色档案_长图.png.done")
-        )
+        assert sender.calls == []
+        assert watcher.proactive_outbox.count() == 1
+        assert not os.path.exists(vdir)
 
 
 @pytest.mark.asyncio
@@ -125,10 +126,14 @@ async def test_watcher_partial_success_keeps_version():
         watcher = Watcher(config, sender)
         await watcher._tick()
 
-        assert os.path.exists(vdir)
+        assert not os.path.exists(vdir)
         store = watcher.store
-        assert store.is_sent_to_group("v1", "1_A_角色档案_长图.png", "g1")
+        assert not store.is_sent_to_group("v1", "1_A_角色档案_长图.png", "g1")
         assert not store.is_sent_to_group("v1", "1_A_角色档案_长图.png", "g2")
+        assert [item.recipient for item in watcher.proactive_outbox.list_pending()] == [
+            "g1",
+            "g2",
+        ]
 
 
 @pytest.mark.asyncio
@@ -148,13 +153,14 @@ async def test_watcher_skips_already_sent_groups():
         watcher.store.mark_sent_to_group("v1", "1_A_角色档案_长图.png", "g1")
         await watcher._tick()
 
-        assert len(sender.calls) == 1
-        assert sender.calls[0][2] == ["g2"]
-        # g2 也成功后整个版本完成，outbox 目录会被删除
+        assert sender.calls == []
+        assert [item.recipient for item in watcher.proactive_outbox.list_pending()] == [
+            "g2"
+        ]
         assert not os.path.exists(vdir)
         store = watcher.store
         assert store.is_sent_to_group("v1", "1_A_角色档案_长图.png", "g1")
-        assert store.is_sent_to_group("v1", "1_A_角色档案_长图.png", "g2")
+        assert not store.is_sent_to_group("v1", "1_A_角色档案_长图.png", "g2")
 
 
 @pytest.mark.asyncio
@@ -174,8 +180,10 @@ async def test_watcher_uses_learned_groups_when_no_manual_list():
         watcher.group_store.add("learned_g1", "测试群")
         await watcher._tick()
 
-        assert len(sender.calls) == 1
-        assert sender.calls[0][2] == ["learned_g1"]
+        assert sender.calls == []
+        assert [item.recipient for item in watcher.proactive_outbox.list_pending()] == [
+            "learned_g1"
+        ]
         assert not os.path.exists(vdir)
 
 
@@ -184,7 +192,7 @@ async def test_watcher_manual_override_ignores_learned():
     with tempfile.TemporaryDirectory() as root:
         outbox_dir = os.path.join(root, "outbox")
         data_dir = os.path.join(root, "data")
-        vdir = make_version(
+        make_version(
             outbox_dir,
             "v1",
             [{"id": "1", "name": "A", "file_name": "1_A_角色档案_长图.png"}],
@@ -196,8 +204,10 @@ async def test_watcher_manual_override_ignores_learned():
         watcher.group_store.add("learned_g1", "测试群")
         await watcher._tick()
 
-        assert len(sender.calls) == 1
-        assert sender.calls[0][2] == ["manual_g1"]
+        assert sender.calls == []
+        assert [item.recipient for item in watcher.proactive_outbox.list_pending()] == [
+            "manual_g1"
+        ]
 
 
 @pytest.mark.asyncio

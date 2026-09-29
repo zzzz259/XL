@@ -17,13 +17,15 @@ from .bilibili import BilibiliWatcher
 from .config import load_config
 from .groups import GroupStore, learn_group_from_event
 from .matcher import CharacterMatcher
+from .proactive_dispatcher import ProactiveDispatcher
+from .proactive_outbox import ProactiveOutbox
+from .querier import CharacterQuerier
 from .query_handler import (
-    BOT_DISPLAY_NAME,
+    BOT_DISPLAY_NAME,  # noqa: F401  旧入口兼容
     QueryHandler,
     _extract_query,  # noqa: F401  旧测试/外部引用兼容
     event_to_dict,
 )
-from .querier import CharacterQuerier
 from .router import run_gateway_client
 from .selection import SelectionStore
 from .sender import QQSender
@@ -85,22 +87,32 @@ class _EventClient(botpy.Client):
         learn_group_from_event(event, self._group_store)
 
 
-async def _run_event_client(config, sender: QQSender, stop_event: asyncio.Event, mute: ServiceMute) -> None:
+async def _run_event_client(
+    config, sender: QQSender, stop_event: asyncio.Event, mute: ServiceMute
+) -> None:
     _install_group_message_parser()
     querier = CharacterQuerier(config.watch.character_data, config.watch.versions_dir)
     # matcher/selection 在重连循环外创建：网关断线重建 _EventClient 时候选状态与别名缓存不丢
     matcher = CharacterMatcher(config.watch.character_data, config.watch.data_dir)
     selection = SelectionStore()
     query_handler = QueryHandler(
-        querier, matcher, selection, sender,
-        tiers=GroupTier(config.groups), bot_openid=config.bot.openid, mute=mute,
+        querier,
+        matcher,
+        selection,
+        sender,
+        tiers=GroupTier(config.groups),
+        bot_openid=config.bot.openid,
+        mute=mute,
     )
 
     def _make_client() -> _EventClient:
         return _EventClient(GroupStore(config.watch.data_dir), query_handler)
 
     await run_gateway_client(
-        _make_client, config.bot.appid, config.bot.secret, stop_event,
+        _make_client,
+        config.bot.appid,
+        config.bot.secret,
+        stop_event,
         client_name="事件客户端",
     )
 
@@ -110,8 +122,12 @@ async def _amain(config) -> None:
     mute = ServiceMute()
     # 群分级 + 功能门禁：tiers 每次现算，配置改动立即生效
     tiers = GroupTier(config.groups)
-    watcher = Watcher(config, sender, mute, tiers)
-    bili_watcher = BilibiliWatcher(config, sender, tiers)
+    proactive_outbox = ProactiveOutbox(config.watch.data_dir)
+    proactive_dispatcher = ProactiveDispatcher(proactive_outbox, sender)
+    watcher = Watcher(config, sender, mute, tiers, proactive_outbox=proactive_outbox)
+    bili_watcher = BilibiliWatcher(
+        config, sender, tiers, proactive_outbox=proactive_outbox
+    )
     await sender.start()
     stop_event = asyncio.Event()
 
@@ -132,6 +148,7 @@ async def _amain(config) -> None:
         await asyncio.gather(
             watcher.run(),
             bili_watcher.run(),
+            proactive_dispatcher.run(stop_event),
             _run_event_client(config, sender, stop_event, mute),
         )
     except asyncio.CancelledError:

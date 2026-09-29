@@ -7,11 +7,14 @@ import hmac
 import json
 import logging
 import os
+import re
 import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from aiohttp import web
+
+from .proactive_outbox import ProactiveOutbox
 
 _logger = logging.getLogger(__name__)
 _TIERS = ("debug", "test", "production")
@@ -155,7 +158,7 @@ def build_deployment_app(
     *,
     control: DeploymentControl,
     bearer_token: str,
-    sender,
+    proactive_outbox: ProactiveOutbox,
     tiers,
     target_groups: Iterable[str] | Callable[[], Iterable[str]],
 ) -> web.Application:
@@ -166,14 +169,20 @@ def build_deployment_app(
         expected = bearer_token.encode("utf-8")
         supplied_header = request.headers.get("Authorization", "")
         scheme, separator, supplied_value = supplied_header.partition(" ")
-        supplied = supplied_value.encode("utf-8") if separator and scheme.lower() == "bearer" else b""
+        supplied = (
+            supplied_value.encode("utf-8")
+            if separator and scheme.lower() == "bearer"
+            else b""
+        )
         if not expected or not hmac.compare_digest(supplied, expected):
             return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
         return await handler(request)
 
     async def health(request: web.Request) -> web.Response:
         status = 200 if control.ready else 503
-        return web.json_response({"ok": control.ready, "ready": control.ready}, status=status)
+        return web.json_response(
+            {"ok": control.ready, "ready": control.ready}, status=status
+        )
 
     async def announce(request: web.Request) -> web.Response:
         try:
@@ -181,42 +190,66 @@ def build_deployment_app(
         except (ValueError, json.JSONDecodeError):
             return web.json_response({"ok": False, "error": "invalid json"}, status=400)
         if not isinstance(payload, dict):
-            return web.json_response({"ok": False, "error": "expected object"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "expected object"}, status=400
+            )
         tier = payload.get("tier")
         phase = payload.get("phase")
-        if tier not in _ANNOUNCE_TIERS or phase not in (*_ANNOUNCEMENTS, "release_note"):
-            return web.json_response({"ok": False, "error": "invalid tier or phase"}, status=400)
+        notification_id = payload.get("notification_id")
+        if tier not in _ANNOUNCE_TIERS or phase not in (
+            *_ANNOUNCEMENTS,
+            "release_note",
+        ):
+            return web.json_response(
+                {"ok": False, "error": "invalid tier or phase"}, status=400
+            )
+        if (
+            not isinstance(notification_id, str)
+            or re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", notification_id) is None
+        ):
+            return web.json_response(
+                {"ok": False, "error": "invalid notification_id"}, status=400
+            )
         if phase == "release_note":
             if tier != "main":
-                return web.json_response({"ok": False, "error": "release notes are main-only"}, status=400)
+                return web.json_response(
+                    {"ok": False, "error": "release notes are main-only"}, status=400
+                )
             text = payload.get("text")
             if not isinstance(text, str) or not text.strip() or len(text) > 4000:
-                return web.json_response({"ok": False, "error": "invalid release note"}, status=400)
+                return web.json_response(
+                    {"ok": False, "error": "invalid release note"}, status=400
+                )
             text = text.strip()
         else:
             text = _ANNOUNCEMENTS[phase]
 
-        configured_groups = target_groups() if callable(target_groups) else target_groups
+        configured_groups = (
+            target_groups() if callable(target_groups) else target_groups
+        )
         unique_groups = sorted(set(configured_groups))
         notice_groups = [
-            group for group in unique_groups
+            group
+            for group in unique_groups
             if tiers.available("update_notice", group)
-            and (
-                tier == "main"
-                or tiers.tier_of(group) == tier
-            )
+            and (tier == "main" or tiers.tier_of(group) == tier)
         ]
         results = {}
         for group in notice_groups:
             try:
-                results[group] = bool(await sender.send_text(group, text))
+                proactive_outbox.enqueue_text(
+                    f"deployment:{notification_id}", group, 0, text
+                )
+                results[group] = True
             except Exception:
-                _logger.exception("部署公告发送失败 group=%s phase=%s", group, phase)
+                _logger.exception(
+                    "部署公告持久入队失败 group=%s phase=%s", group, phase
+                )
                 results[group] = False
-        return web.json_response({
-            "ok": bool(results) and all(results.values()),
-            "results": results,
-        })
+                return web.json_response({"ok": False, "results": results}, status=503)
+        return web.json_response(
+            {"ok": bool(results) and all(results.values()), "results": results}
+        )
 
     async def maintenance(request: web.Request) -> web.Response:
         try:
@@ -224,23 +257,31 @@ def build_deployment_app(
         except (ValueError, json.JSONDecodeError):
             return web.json_response({"ok": False, "error": "invalid json"}, status=400)
         if not isinstance(payload, dict):
-            return web.json_response({"ok": False, "error": "expected object"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "expected object"}, status=400
+            )
         tier = payload.get("tier")
         enabled = payload.get("enabled")
         if tier not in (*_TIERS, "main") or not isinstance(enabled, bool):
-            return web.json_response({"ok": False, "error": "invalid tier or enabled"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "invalid tier or enabled"}, status=400
+            )
         affected_tiers = _TIERS if tier == "main" else (tier,)
         try:
             await control.set_maintenance_many(affected_tiers, enabled)
         except OSError:
             _logger.exception("部署维护状态持久化失败 tier=%s", tier)
-            return web.json_response({"ok": False, "error": "state persistence failed"}, status=500)
-        return web.json_response({
-            "ok": True,
-            "tier": tier,
-            "enabled": enabled,
-            "tiers": {item: control.is_maintained(item) for item in affected_tiers},
-        })
+            return web.json_response(
+                {"ok": False, "error": "state persistence failed"}, status=500
+            )
+        return web.json_response(
+            {
+                "ok": True,
+                "tier": tier,
+                "enabled": enabled,
+                "tiers": {item: control.is_maintained(item) for item in affected_tiers},
+            }
+        )
 
     async def drained(request: web.Request) -> web.Response:
         tier = request.query.get("tier", "")
@@ -248,7 +289,9 @@ def build_deployment_app(
             return web.json_response({"ok": False, "error": "invalid tier"}, status=400)
         affected_tiers = _TIERS if tier == "main" else (tier,)
         active = sum(control.active_forwards(item) for item in affected_tiers)
-        return web.json_response({"ok": True, "tier": tier, "drained": active == 0, "active": active})
+        return web.json_response(
+            {"ok": True, "tier": tier, "drained": active == 0, "active": active}
+        )
 
     app = web.Application(middlewares=[authenticate])
     app.router.add_get("/health", health)

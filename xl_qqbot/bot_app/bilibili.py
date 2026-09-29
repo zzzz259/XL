@@ -38,6 +38,7 @@ import aiohttp
 
 from .config import DEFAULT_BILI_MID, BilibiliTarget, Config
 from .groups import GroupStore
+from .proactive_outbox import ProactiveOutbox
 from .tiers import GroupTier
 
 _logger = logging.getLogger(__name__)
@@ -89,12 +90,73 @@ def select_poll_interval(
                 return burst_interval
     return normal_interval
 
+
 # WBI 混合密钥表（官方算法，取拼接 key 按表重排后的前 32 位）
 MixinKeyTab = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
-    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
-    37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
-    22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
+    46,
+    47,
+    18,
+    2,
+    53,
+    8,
+    23,
+    32,
+    15,
+    50,
+    10,
+    31,
+    58,
+    3,
+    45,
+    35,
+    27,
+    43,
+    5,
+    49,
+    33,
+    9,
+    42,
+    19,
+    29,
+    28,
+    14,
+    39,
+    12,
+    38,
+    41,
+    13,
+    37,
+    48,
+    7,
+    16,
+    24,
+    55,
+    40,
+    61,
+    26,
+    17,
+    0,
+    1,
+    60,
+    51,
+    30,
+    4,
+    22,
+    25,
+    54,
+    21,
+    56,
+    59,
+    6,
+    63,
+    57,
+    62,
+    11,
+    36,
+    20,
+    34,
+    44,
+    52,
 ]
 
 MOBILE_CHROME_UA = (
@@ -176,7 +238,7 @@ class BilibiliClient:
         """视频投稿列表（WBI 签名，ps=5 按最新排序），失败抛 BilibiliApiError。"""
         params = await self._signed_params({"mid": str(mid), "ps": "5"})
         data = await self._get_json(ARC_SEARCH_URL, params, mid)
-        vlist = ((data.get("list") or {}).get("vlist"))
+        vlist = (data.get("list") or {}).get("vlist")
         if not isinstance(vlist, list):
             return []
         return [v for v in vlist if isinstance(v, dict)]
@@ -229,7 +291,9 @@ class BilibiliClient:
         self, url: str, params: Optional[Dict[str, str]], mid: Optional[int] = None
     ) -> dict:
         await self._ensure_session()
-        async with self._session.get(url, params=params, headers=self._headers(mid)) as resp:
+        async with self._session.get(
+            url, params=params, headers=self._headers(mid)
+        ) as resp:
             body = await resp.text()
         if resp.status != 200:
             raise BilibiliApiError(f"HTTP {resp.status}: {body[:120]}")
@@ -247,6 +311,7 @@ class BilibiliClient:
 
 
 # ---------- 解析（全部防御式，失败返回 None 由调用方记 warning 跳过） ----------
+
 
 def parse_opus_feed_item(item) -> Optional[dict]:
     """图文 feed 单条解析：取 opus_id（强制 int）/标题/封面/跳转链接。"""
@@ -285,9 +350,7 @@ def _paragraph_pics(para: dict) -> List[str]:
     if not isinstance(pics, list):
         return []
     return [
-        str(p.get("url") or "")
-        for p in pics
-        if isinstance(p, dict) and p.get("url")
+        str(p.get("url") or "") for p in pics if isinstance(p, dict) and p.get("url")
     ]
 
 
@@ -300,9 +363,15 @@ def parse_opus_detail(item, opus_id=None) -> Optional[dict]:
         _logger.warning("图文详情不是对象，已跳过: opus=%s", opus_id)
         return None
     if _safe_int(item.get("type"), 0) != 0:
-        _logger.warning("图文详情 type=%s 非 0（非图文），已跳过: opus=%s", item.get("type"), opus_id)
+        _logger.warning(
+            "图文详情 type=%s 非 0（非图文），已跳过: opus=%s",
+            item.get("type"),
+            opus_id,
+        )
         return None
-    id_str = str(item.get("id_str") or ("" if opus_id is None else str(opus_id))).strip()
+    id_str = str(
+        item.get("id_str") or ("" if opus_id is None else str(opus_id))
+    ).strip()
     if not id_str:
         _logger.warning("图文详情缺少 id_str，已跳过: opus=%s", opus_id)
         return None
@@ -372,6 +441,7 @@ def parse_video_item(item) -> Optional[dict]:
 
 # ---------- 推送文字 ----------
 
+
 def format_opus_text(dyn: dict) -> str:
     """full 模式图文推送文字：前缀 + 标题\\n正文；无文字内容返回空串（只发图）。"""
     text = (dyn.get("text") or "").strip()
@@ -392,6 +462,7 @@ def video_link(bvid: str) -> str:
 
 
 # ---------- 状态（按目标分键，兼容迁移旧版顶层键） ----------
+
 
 class TargetState:
     """单个 UP 主的持久化状态视图（基线用键存在性判断，未设过即首轮）。"""
@@ -432,7 +503,10 @@ class TargetState:
         return str(self._entry.get("last_bvid") or "")
 
     def is_newer_video(self, created, bvid) -> bool:
-        return (_safe_int(created), str(bvid)) > (self.last_video_created, self.last_bvid)
+        return (_safe_int(created), str(bvid)) > (
+            self.last_video_created,
+            self.last_bvid,
+        )
 
     def mark_video(self, created, bvid) -> None:
         self._entry["last_video_created"] = _safe_int(created)
@@ -472,8 +546,13 @@ class BilibiliStateStore:
         state = self._state
         if isinstance(state.get("targets"), dict):
             changed = False
-            for key in ("last_opus_id", "last_video_created", "last_bvid",
-                        "last_id_str", "last_pub_ts"):
+            for key in (
+                "last_opus_id",
+                "last_video_created",
+                "last_bvid",
+                "last_id_str",
+                "last_pub_ts",
+            ):
                 if key in state:
                     state.pop(key)
                     changed = True
@@ -489,7 +568,9 @@ class BilibiliStateStore:
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._path.with_suffix(".part")
-        temporary.write_text(json.dumps(self._state, ensure_ascii=False), encoding="utf-8")
+        temporary.write_text(
+            json.dumps(self._state, ensure_ascii=False), encoding="utf-8"
+        )
         temporary.replace(self._path)
 
     def target(self, mid) -> TargetState:
@@ -505,9 +586,18 @@ class BilibiliStateStore:
 class BilibiliWatcher:
     """多目标两路轮询（图文 + 视频）并推送，模式与 Watcher 相同。"""
 
-    def __init__(self, config: Config, sender, tiers: GroupTier | None = None):
+    def __init__(
+        self,
+        config: Config,
+        sender,
+        tiers: GroupTier | None = None,
+        proactive_outbox: ProactiveOutbox | None = None,
+    ):
         self.config = config
         self.sender = sender
+        self.proactive_outbox = proactive_outbox or ProactiveOutbox(
+            config.watch.data_dir
+        )
         self.group_store = GroupStore(config.watch.data_dir)
         self.state = BilibiliStateStore(config.watch.data_dir)
         self.tiers = tiers or GroupTier()
@@ -544,8 +634,10 @@ class BilibiliWatcher:
             return
         _logger.info(
             "B 站动态监视启动 targets=%d interval=%ss burst_times=%s window=%ss burst_interval=%ss",
-            len(self.config.bilibili.targets), self.config.bilibili.interval_seconds,
-            self.config.bilibili.burst_times, self.config.bilibili.burst_window_seconds,
+            len(self.config.bilibili.targets),
+            self.config.bilibili.interval_seconds,
+            self.config.bilibili.burst_times,
+            self.config.bilibili.burst_window_seconds,
             self.config.bilibili.burst_interval_seconds,
         )
         try:
@@ -575,7 +667,11 @@ class BilibiliWatcher:
     # ---------- 名字解析 ----------
 
     async def _resolve_name(
-        self, client, target: BilibiliTarget, state: TargetState, videos: Optional[List[dict]] = None
+        self,
+        client,
+        target: BilibiliTarget,
+        state: TargetState,
+        videos: Optional[List[dict]] = None,
     ) -> str:
         """display 名优先级：配置 name → state 缓存 → acc/info → vlist author → mid 字符串。
 
@@ -607,11 +703,15 @@ class BilibiliWatcher:
 
     # ---------- 图文路 ----------
 
-    async def _tick_opus(self, client, target: BilibiliTarget, state: TargetState) -> None:
+    async def _tick_opus(
+        self, client, target: BilibiliTarget, state: TargetState
+    ) -> None:
         try:
             items = await client.fetch_opus_feed(target.mid)
         except BilibiliApiError as error:
-            _logger.warning("B 站图文列表请求失败 mid=%s，跳过本轮图文路: %s", target.mid, error)
+            _logger.warning(
+                "B 站图文列表请求失败 mid=%s，跳过本轮图文路: %s", target.mid, error
+            )
             return
         entries = [e for e in (parse_opus_feed_item(i) for i in items) if e is not None]
         if not entries:
@@ -621,27 +721,37 @@ class BilibiliWatcher:
             # 首次运行以当前最新一条为基线，不补发历史
             baseline = max(e["opus_id"] for e in entries)
             state.mark_opus(baseline)
-            _logger.info("图文路首次轮询 mid=%s，以最新 opus=%s 为基线", target.mid, baseline)
+            _logger.info(
+                "图文路首次轮询 mid=%s，以最新 opus=%s 为基线", target.mid, baseline
+            )
             return
 
-        fresh_ids = sorted({
-            e["opus_id"] for e in entries if state.is_newer_opus(e["opus_id"])
-        })[:MAX_PER_ROUND]
+        fresh_ids = sorted(
+            {e["opus_id"] for e in entries if state.is_newer_opus(e["opus_id"])}
+        )[:MAX_PER_ROUND]
         if not fresh_ids:
             return
 
         # bilibili_watch 门禁过滤目标群；过滤后为空不推进 state（与无群同语义）
-        group_openids = self.tiers.filter_groups("bilibili_watch", self._target_groups())
+        group_openids = self.tiers.filter_groups(
+            "bilibili_watch", self._target_groups()
+        )
         if not group_openids:
-            _logger.warning("B 站图文动态无可达目标群（未学习或被门禁过滤），本轮暂存不发")
+            _logger.warning(
+                "B 站图文动态无可达目标群（未学习或被门禁过滤），本轮暂存不发"
+            )
             return
 
         if target.mode == "full":
             for opus_id in fresh_ids:
                 dyn = await self._load_opus_detail(client, opus_id)
-                if dyn is not None:
-                    await self._send_opus_full(client, target, dyn, group_openids)
-                # 逐条推进并落盘（详情失败也推进，避免单条坏数据卡死队列）
+                if dyn is None:
+                    break
+                queued = await self._queue_opus_full(
+                    client, target, dyn, group_openids, opus_id=opus_id
+                )
+                if not queued:
+                    break
                 state.mark_opus(opus_id)
         else:
             entries_by_id = {e["opus_id"]: e for e in entries}
@@ -651,61 +761,101 @@ class BilibiliWatcher:
                 title = str(entry.get("title") or "").strip() or "新动态"
                 text = format_notice_text(name, title, opus_link(opus_id))
                 for group_openid in group_openids:
-                    await self.sender.send_text(group_openid, text)
+                    self.proactive_outbox.enqueue_text(
+                        f"bilibili:opus:{target.mid}:{opus_id}:notice",
+                        group_openid,
+                        0,
+                        text,
+                    )
                 state.mark_opus(opus_id)
                 _logger.info(
-                    "已推送 B 站图文通知 mid=%s opus=%s groups=%d", target.mid, opus_id, len(group_openids)
+                    "已将 B 站图文通知写入发件箱 mid=%s opus=%s groups=%d",
+                    target.mid,
+                    opus_id,
+                    len(group_openids),
                 )
 
     async def _load_opus_detail(self, client, opus_id) -> Optional[dict]:
         try:
             item = await client.fetch_opus_detail(opus_id)
         except BilibiliApiError as error:
-            _logger.warning("图文详情拉取失败，跳过该条 opus=%s: %s", opus_id, error)
+            _logger.warning(
+                "图文详情拉取失败，保留游标以便重试 opus=%s: %s", opus_id, error
+            )
             return None
         dyn = parse_opus_detail(item, opus_id=opus_id)
         if dyn is None:
-            _logger.warning("图文详情解析失败，跳过该条 opus=%s", opus_id)
+            _logger.warning("图文详情解析失败，保留游标以便重试 opus=%s", opus_id)
         return dyn
 
-    async def _send_opus_full(
-        self, client, target: BilibiliTarget, dyn: dict, group_openids: List[str]
-    ) -> None:
+    async def _queue_opus_full(
+        self,
+        client,
+        target: BilibiliTarget,
+        dyn: dict,
+        group_openids: List[str],
+        *,
+        opus_id: int,
+    ) -> bool:
         text = format_opus_text(dyn)
         if text:
-            # 先发文字再逐张发图
             for group_openid in group_openids:
-                await self.sender.send_text(group_openid, text)
+                self.proactive_outbox.enqueue_text(
+                    f"bilibili:opus:{target.mid}:{opus_id}:full-text",
+                    group_openid,
+                    0,
+                    text,
+                )
         else:
             _logger.info("图文动态 %s 无文字内容，只发图片", dyn["id_str"])
 
         for index, pic_url in enumerate(dyn["pics"]):
             try:
                 path = await client.download_image(
-                    pic_url, self.tmp_dir, name=f"opus_{dyn['id_str']}_{index}", mid=target.mid
+                    pic_url,
+                    self.tmp_dir,
+                    name=f"opus_{dyn['id_str']}_{index}",
+                    mid=target.mid,
                 )
             except BilibiliApiError as error:
-                _logger.warning("下载动态图片失败，跳过该图 url=%s error=%s", pic_url, error)
-                continue
+                _logger.warning(
+                    "下载动态图片失败，保留图文游标以便重试 url=%s error=%s",
+                    pic_url,
+                    error,
+                )
+                return False
+            for group_openid in group_openids:
+                self.proactive_outbox.enqueue_image(
+                    f"bilibili:opus:{target.mid}:{opus_id}:image",
+                    group_openid,
+                    index,
+                    path,
+                )
             try:
-                await self.sender.send_image(path, "", group_openids)
-            finally:
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+                os.remove(path)
+            except OSError:
+                _logger.warning("动态图片临时文件未能清理 path=%s", path)
         _logger.info(
-            "已推送 B 站图文动态 mid=%s id=%s pics=%d groups=%d link=%s",
-            target.mid, dyn["id_str"], len(dyn["pics"]), len(group_openids), dyn["link"],
+            "已将 B 站图文写入发件箱 mid=%s id=%s pics=%d groups=%d link=%s",
+            target.mid,
+            dyn["id_str"],
+            len(dyn["pics"]),
+            len(group_openids),
+            dyn["link"],
         )
+        return True
 
     # ---------- 视频路（两模式统一通知格式） ----------
 
-    async def _tick_videos(self, client, target: BilibiliTarget, state: TargetState) -> None:
+    async def _tick_videos(
+        self, client, target: BilibiliTarget, state: TargetState
+    ) -> None:
         try:
             items = await client.fetch_videos(target.mid)
         except BilibiliApiError as error:
-            _logger.warning("B 站视频列表请求失败 mid=%s，跳过本轮视频路: %s", target.mid, error)
+            _logger.warning(
+                "B 站视频列表请求失败 mid=%s，跳过本轮视频路: %s", target.mid, error
+            )
             return
         videos = [v for v in (parse_video_item(i) for i in items) if v is not None]
         if not videos:
@@ -714,7 +864,11 @@ class BilibiliWatcher:
         if not state.has_video_baseline:
             newest = max(videos, key=lambda v: (v["created"], v["bvid"]))
             state.mark_video(newest["created"], newest["bvid"])
-            _logger.info("视频路首次轮询 mid=%s，以最新 bvid=%s 为基线", target.mid, newest["bvid"])
+            _logger.info(
+                "视频路首次轮询 mid=%s，以最新 bvid=%s 为基线",
+                target.mid,
+                newest["bvid"],
+            )
             return
 
         fresh = [v for v in videos if state.is_newer_video(v["created"], v["bvid"])]
@@ -724,9 +878,13 @@ class BilibiliWatcher:
         fresh = fresh[:MAX_PER_ROUND]
 
         # bilibili_watch 门禁过滤目标群；过滤后为空不推进 state（与无群同语义）
-        group_openids = self.tiers.filter_groups("bilibili_watch", self._target_groups())
+        group_openids = self.tiers.filter_groups(
+            "bilibili_watch", self._target_groups()
+        )
         if not group_openids:
-            _logger.warning("B 站视频动态无可达目标群（未学习或被门禁过滤），本轮暂存不发")
+            _logger.warning(
+                "B 站视频动态无可达目标群（未学习或被门禁过滤），本轮暂存不发"
+            )
             return
 
         name = await self._resolve_name(client, target, state, videos=items)
@@ -734,12 +892,19 @@ class BilibiliWatcher:
             title = video["title"] or "新视频"
             text = format_notice_text(name, title, video_link(video["bvid"]))
             for group_openid in group_openids:
-                await self.sender.send_text(group_openid, text)
-            # 逐条推进并落盘，进程中途崩溃也不会重复推送
+                self.proactive_outbox.enqueue_text(
+                    f"bilibili:video:{target.mid}:{video['bvid']}",
+                    group_openid,
+                    0,
+                    text,
+                )
             state.mark_video(video["created"], video["bvid"])
             _logger.info(
-                "已推送 B 站视频通知 mid=%s bvid=%s title=%r groups=%d",
-                target.mid, video["bvid"], video["title"], len(group_openids),
+                "已将 B 站视频通知写入发件箱 mid=%s bvid=%s title=%r groups=%d",
+                target.mid,
+                video["bvid"],
+                video["title"],
+                len(group_openids),
             )
 
     def _target_groups(self) -> List[str]:

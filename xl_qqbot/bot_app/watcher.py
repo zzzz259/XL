@@ -4,19 +4,15 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List, Set
 
 from .config import Config
 from .groups import GroupStore
 from .outbox import (
-    CharacterImage,
     SentRecordStore,
     VersionBatch,
-    is_batch_complete,
-    is_image_done,
     list_version_batches,
-    mark_image_done,
 )
+from .proactive_outbox import ProactiveOutbox
 from .sender import QQSender
 from .tiers import GroupTier
 from .updater import NoticeStateStore, ServiceMute, read_new_events
@@ -27,10 +23,19 @@ UPDATE_START_TEXT = "检测到新版本，正在自动更新，期间将暂停�
 
 
 class Watcher:
-    def __init__(self, config: Config, sender: QQSender, mute: ServiceMute | None = None,
-                 tiers: GroupTier | None = None):
+    def __init__(
+        self,
+        config: Config,
+        sender: QQSender,
+        mute: ServiceMute | None = None,
+        tiers: GroupTier | None = None,
+        proactive_outbox: ProactiveOutbox | None = None,
+    ):
         self.config = config
         self.sender = sender
+        self.proactive_outbox = proactive_outbox or ProactiveOutbox(
+            config.watch.data_dir
+        )
         self.store = SentRecordStore(config.watch.data_dir)
         self.group_store = GroupStore(config.watch.data_dir)
         self.mute = mute or ServiceMute()
@@ -56,54 +61,65 @@ class Watcher:
                 pass
 
     async def _tick(self) -> None:
-        # 顺序保证：先播报"开始" → 再发 outbox 新图 → 最后播报"结束"
-        await self._consume_update_events("start")
-        batches = list_version_batches(self.config.watch.outbox_dir)
-        for batch in batches:
-            await self._process_batch(batch)
-        await self._consume_update_events("finish", batches)
-
-    async def _consume_update_events(self, phase: str, batches: List[VersionBatch] | None = None) -> None:
-        """按序消费更新事件流水；本阶段不匹配的事件留给下一阶段，保证播报顺序。
-
-        事件由服务器处理器按序追加（start 在前 finish 在后），事件持久化在
-        update_events.jsonl，比轮询间隔更短的更新也不会漏报。
-        """
+        """将更新事件按日志顺序展开为 start -> 对应图片 -> finish。"""
         events_path = Path(self.config.watch.outbox_dir).parent / "update_events.jsonl"
         offset = self.notice.consumed_events
-        events, _ = read_new_events(events_path, offset)
-        if not events:
-            return
-        # 更新播报按 update_notice 门禁过滤目标群；过滤后为空 = 无需播报，事件照常消费
-        group_openids = self.tiers.filter_groups("update_notice", self._target_groups())
+        events, new_offset = read_new_events(events_path, offset)
+        batches = {
+            batch.version: batch
+            for batch in list_version_batches(self.config.watch.outbox_dir)
+        }
         consumed = offset
         for event in events:
-            if event.event != phase:
-                break  # 留给下一阶段（事件有序，遇到别的类型即停）
-            if not group_openids:
-                consumed += 1
-                continue
-            if phase == "start":
-                for group_openid in group_openids:
-                    await self.sender.send_text(group_openid, UPDATE_START_TEXT)
+            if event.event == "start":
+                self._enqueue_update_event(event)
                 self.mute.muted = True
-                _logger.info("已播报更新开始 version=%s", event.version)
-                consumed += 1
-            else:
-                # 更新结束语必须等本批 outbox 图全部发完（用户要求"等新角色发完"）
-                if any(not is_batch_complete(b) for b in (batches or [])):
-                    break
-                if event.error:
-                    text = "版本更新失败，服务已恢复，将等待下次自动重试"
-                else:
-                    text = f"版本更新结束，一共有{event.new_characters}个新角色"
-                for group_openid in group_openids:
-                    await self.sender.send_text(group_openid, text)
+                _logger.info("已将更新开始通知写入发件箱 version=%s", event.version)
+            elif event.event == "finish":
+                batch = batches.pop(str(event.version), None)
+                if batch is not None:
+                    await self._process_batch(batch)
+                self._enqueue_update_event(event)
                 self.mute.muted = False
-                _logger.info("已播报更新结束 version=%s new=%d error=%s", event.version, event.new_characters, event.error)
-                consumed += 1
-        if consumed != offset:
+                _logger.info(
+                    "已将更新结束通知写入发件箱 version=%s new=%d error=%s",
+                    event.version,
+                    event.new_characters,
+                    event.error,
+                )
+            else:
+                _logger.error(
+                    "未知游戏更新事件，停止消费以保留日志顺序 line=%s event=%s",
+                    event.line_number,
+                    event.event,
+                )
+                break
+            consumed = event.line_number
             self.notice.mark_consumed(consumed)
+
+        # Batch output may be visible before its finish event is appended. Queue
+        # such remaining batches only after all preceding lifecycle events.
+        if consumed == (events[-1].line_number if events else offset):
+            for batch in sorted(batches.values(), key=lambda item: item.version):
+                await self._process_batch(batch)
+            if new_offset > consumed:
+                self.notice.mark_consumed(new_offset)
+
+    def _enqueue_update_event(self, event) -> None:
+        """Durably enqueue the event for every update-notice-enabled group."""
+        group_openids = self.tiers.filter_groups("update_notice", self._target_groups())
+        if not group_openids:
+            return
+        if event.event == "start":
+            text = UPDATE_START_TEXT
+        elif event.error:
+            text = "版本更新失败，服务已恢复，将等待下次自动重试"
+        else:
+            text = f"版本更新结束，一共有{event.new_characters}个新角色"
+        for group_openid in group_openids:
+            self.proactive_outbox.enqueue_text(
+                self._update_event_key(event), group_openid, 0, text
+            )
 
     async def _process_batch(self, batch: VersionBatch) -> None:
         manifest = self._read_manifest(batch.version_dir)
@@ -124,13 +140,39 @@ class Watcher:
             return
 
         for image in batch.images:
-            if is_image_done(batch.version_dir, image.file_name):
-                continue
-            await self._send_image(batch.version, image, group_openids)
+            content = self.config.message.template.format(
+                version=batch.version,
+                name=image.name,
+                file_name=image.file_name,
+            )
+            event_key = (
+                f"game-card:{batch.version}:{image.id or 'unknown'}:{image.file_name}"
+            )
+            pending_groups = [
+                group_openid
+                for group_openid in group_openids
+                if not self.store.is_sent_to_group(
+                    batch.version, image.file_name, group_openid
+                )
+            ]
+            for group_openid in pending_groups:
+                self.proactive_outbox.enqueue_image(
+                    event_key,
+                    group_openid,
+                    ordinal=0,
+                    source_path=image.file_path,
+                    content=content,
+                )
 
-        if is_batch_complete(batch):
-            shutil.rmtree(batch.version_dir)
-            _logger.info("版本 %s 全部分发完成，已删除 outbox 目录", batch.version)
+        # All target rows and their copied attachments are now durable. The
+        # dispatcher owns delivery/retry; only now may the source batch clear.
+        shutil.rmtree(batch.version_dir)
+        _logger.info(
+            "版本 %s 全部图鉴已持久入队 groups=%d images=%d",
+            batch.version,
+            len(group_openids),
+            len(batch.images),
+        )
 
     def _read_manifest(self, version_dir: str) -> dict:
         path = os.path.join(version_dir, "manifest.json")
@@ -140,41 +182,11 @@ class Watcher:
         except (json.JSONDecodeError, OSError):
             return {}
 
-    async def _send_image(
-        self,
-        version: str,
-        image: CharacterImage,
-        group_openids: List[str],
-    ) -> None:
-        content = self.config.message.template.format(
-            version=version,
-            name=image.name,
-            file_name=image.file_name,
-        )
-        pending_groups = [
-            g
-            for g in group_openids
-            if not self.store.is_sent_to_group(version, image.file_name, g)
-        ]
-        if not pending_groups:
-            mark_image_done(image.version_dir, image.file_name)
-            return
+    @staticmethod
+    def _update_event_key(event) -> str:
+        return f"game-update:{event.line_number}:{event.event}:{event.version}"
 
-        results = await self.sender.send_image(
-            image.file_path, content, pending_groups
-        )
-
-        all_ok = True
-        for group_openid, success in results.items():
-            if success:
-                self.store.mark_sent_to_group(version, image.file_name, group_openid)
-            else:
-                all_ok = False
-
-        if all_ok:
-            mark_image_done(image.version_dir, image.file_name)
-
-    def _target_groups(self) -> List[str]:
+    def _target_groups(self) -> list[str]:
         manual = self.config.target.group_openids
         if manual:
             return sorted(set(manual))

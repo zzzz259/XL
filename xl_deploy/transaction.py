@@ -14,7 +14,14 @@ START_NOTICE = "检测到更新，正在更新bot，期间将暂停服务"
 COMPLETION_NOTICE = "更新完毕"
 RECOVERY_NOTICE = "部署失败，已回滚到上一版本。"
 _TERMINAL_PHASES = frozenset(
-    {"completed", "rolled_back", "aborted", "no_op", "preflight_failed", "notice_failed"}
+    {
+        "completed",
+        "rolled_back",
+        "aborted",
+        "no_op",
+        "preflight_failed",
+        "notice_failed",
+    }
 )
 _SHA_CHARS = frozenset("0123456789abcdefABCDEF")
 
@@ -34,7 +41,11 @@ class DeploymentPaths:
             path = Path(getattr(self, name))
             # Validate the pointer's filesystem location without following its
             # final symlink, which intentionally targets a release directory.
-            path = path.parent.resolve() / path.name if name == "current_path" else path.resolve()
+            path = (
+                path.parent.resolve() / path.name
+                if name == "current_path"
+                else path.resolve()
+            )
             try:
                 path.relative_to(releases)
             except ValueError:
@@ -84,19 +95,25 @@ class DeploymentTransaction:
             return DeploymentResult("no_op", sha, "No impacted services")
         existing = self.state.load()
         if existing is not None and existing.phase not in _TERMINAL_PHASES:
-            raise RuntimeError("a pending deployment must be recovered before a new update")
+            raise RuntimeError(
+                "a pending deployment must be recovered before a new update"
+            )
         _validate_units(units)
         self._validate_paths()
         branch_pointer = self._branch_pointer(branch)
         previous = self.state.get_current(current_path=branch_pointer)
         if previous is None:
-            raise RuntimeError("a verified current release is required before transactional deployment")
+            raise RuntimeError(
+                "a verified current release is required before transactional deployment"
+            )
         transaction_id = str(uuid.uuid4())
         candidate = self.paths.releases_root / f"{sha}-{transaction_id}"
         release_note_value = getattr(plan, "release_note", None)
         release_note = (
             release_note_value.strip()
-            if isinstance(release_note_value, str) and release_note_value.strip() and scope
+            if isinstance(release_note_value, str)
+            and release_note_value.strip()
+            and scope
             else None
         )
         journal = Journal(
@@ -118,8 +135,13 @@ class DeploymentTransaction:
         try:
             self.events.append(("stage", sha))
             staged_path = self.runner.stage(plan, candidate)
-            if Path(staged_path).resolve() != candidate.resolve() or not candidate.is_dir():
-                raise RuntimeError("staging did not produce the exact immutable candidate directory")
+            if (
+                Path(staged_path).resolve() != candidate.resolve()
+                or not candidate.is_dir()
+            ):
+                raise RuntimeError(
+                    "staging did not produce the exact immutable candidate directory"
+                )
             journal = self._update(journal, phase="staged")
             self.events.append(("preflight", sha))
             self.runner.preflight(
@@ -139,17 +161,35 @@ class DeploymentTransaction:
             if scope:
                 journal = self._update(journal, phase="announcing_start")
                 self.events.append(("announce", START_NOTICE, *scope))
-                if not _all_succeeded(self.router.announce(scope, START_NOTICE)):
-                    journal = self._update(journal, phase="notice_failed", error="start notice delivery failed")
-                    raise RuntimeError("start notice delivery failed; services were not stopped")
+                if not _all_succeeded(
+                    self.router.announce(
+                        scope,
+                        START_NOTICE,
+                        notification_id=f"{journal.transaction_id}:starting",
+                    )
+                ):
+                    journal = self._update(
+                        journal,
+                        phase="notice_failed",
+                        error="start notice delivery failed",
+                    )
+                    raise RuntimeError(
+                        "start notice delivery failed; services were not stopped"
+                    )
             if tiers:
-                journal = self._update(journal, phase="pausing", maintenance_enabled=True)
+                journal = self._update(
+                    journal, phase="pausing", maintenance_enabled=True
+                )
                 self.events.append(("pause", *tiers))
                 self.router.pause(tiers)
-                journal = self._update(journal, phase="draining", maintenance_enabled=True)
+                journal = self._update(
+                    journal, phase="draining", maintenance_enabled=True
+                )
                 self.events.append(("drain", *tiers))
                 if not self.router.drain(tiers, self.drain_timeout_seconds):
-                    raise TimeoutError("router drain timed out; services were not stopped")
+                    raise TimeoutError(
+                        "router drain timed out; services were not stopped"
+                    )
             journal = self._update(
                 journal,
                 phase="stopping",
@@ -158,7 +198,9 @@ class DeploymentTransaction:
             )
             self.events.append(("stop", *units))
             self.runner.stop(units)
-            journal = self._update(journal, phase="stopped", evidence={"services_stopped": "true"})
+            journal = self._update(
+                journal, phase="stopped", evidence={"services_stopped": "true"}
+            )
 
             self.events.append(("switch", sha))
             journal = self._update(journal, phase="switching")
@@ -173,10 +215,14 @@ class DeploymentTransaction:
             self.runner.health_check(units)
 
             if tiers:
-                journal = self._update(journal, phase="resuming", maintenance_enabled=True)
+                journal = self._update(
+                    journal, phase="resuming", maintenance_enabled=True
+                )
                 self.events.append(("resume", *tiers))
                 self.router.resume(tiers)
-            journal = self._update(journal, phase="announcing_completion", maintenance_enabled=False)
+            journal = self._update(
+                journal, phase="announcing_completion", maintenance_enabled=False
+            )
             return self._deliver_announcements(journal)
         except Exception as exc:
             latest = self.state.load() or journal
@@ -190,7 +236,9 @@ class DeploymentTransaction:
                 except Exception as resume_error:  # noqa: BLE001 - preserve maintenance and journal.
                     return self._keep_maintenance(latest, exc, resume_error)
             phase = "notice_failed" if latest.phase == "notice_failed" else "aborted"
-            self._update(latest, phase=phase, maintenance_enabled=False, error=_safe_error(exc))
+            self._update(
+                latest, phase=phase, maintenance_enabled=False, error=_safe_error(exc)
+            )
             raise
 
     def rollback(self, journal: Journal | None = None) -> DeploymentResult:
@@ -213,7 +261,9 @@ class DeploymentTransaction:
                         current_path=self._branch_pointer(journal.branch)
                     )
                     if current != Path(journal.previous_release or "").resolve():
-                        raise RuntimeError("pending recovery notice does not match the active rollback release")
+                        raise RuntimeError(
+                            "pending recovery notice does not match the active rollback release"
+                        )
                     self.runner.health_check(journal.impacted_units)
                 except Exception as exc:  # noqa: BLE001 - do not claim recovery until the old release is healthy.
                     return self._keep_maintenance(journal, exc, exc)
@@ -230,7 +280,9 @@ class DeploymentTransaction:
                         current_path=self._branch_pointer(journal.branch)
                     )
                     if current != Path(journal.candidate_release).resolve():
-                        raise RuntimeError("pending announcement does not match the active release")
+                        raise RuntimeError(
+                            "pending announcement does not match the active release"
+                        )
                     self.runner.health_check(journal.impacted_units)
                     if journal.phase == "resuming" and journal.impacted_tiers:
                         self.events.append(("resume", *journal.impacted_tiers))
@@ -244,7 +296,9 @@ class DeploymentTransaction:
                     return self._rollback(journal, exc)
                 return self._deliver_announcements(journal)
             if journal.evidence.get("stop_attempted") == "true":
-                return self._rollback(journal, RuntimeError("recovering interrupted deployment"))
+                return self._rollback(
+                    journal, RuntimeError("recovering interrupted deployment")
+                )
             if journal.maintenance_enabled and journal.impacted_tiers:
                 self.events.append(("resume", *journal.impacted_tiers))
                 self.router.resume(journal.impacted_tiers)
@@ -254,7 +308,9 @@ class DeploymentTransaction:
                 maintenance_enabled=False,
                 error="recovered before service stop",
             )
-            return DeploymentResult("aborted", journal.sha, "Candidate was not activated")
+            return DeploymentResult(
+                "aborted", journal.sha, "Candidate was not activated"
+            )
 
     def _deliver_announcements(self, journal: Journal) -> DeploymentResult:
         scope = journal.announcement_scope
@@ -267,7 +323,11 @@ class DeploymentTransaction:
             )
             try:
                 self.events.append(("announce", COMPLETION_NOTICE, *scope))
-                delivered = self.router.announce(scope, COMPLETION_NOTICE)
+                delivered = self.router.announce(
+                    scope,
+                    COMPLETION_NOTICE,
+                    notification_id=f"{journal.transaction_id}:complete",
+                )
                 if not _all_succeeded(delivered):
                     journal = self._update(
                         journal,
@@ -275,7 +335,9 @@ class DeploymentTransaction:
                         error="completion notice delivery failed",
                         evidence={"completion_notice_error": "delivery failed"},
                     )
-                    return DeploymentResult("announcement_pending", journal.sha, "Deployment is healthy")
+                    return DeploymentResult(
+                        "announcement_pending", journal.sha, "Deployment is healthy"
+                    )
             except Exception as exc:  # noqa: BLE001 - delivery must be retried, not rolled back.
                 journal = self._update(
                     journal,
@@ -283,7 +345,9 @@ class DeploymentTransaction:
                     error=_safe_error(exc),
                     evidence={"completion_notice_error": _safe_error(exc)},
                 )
-                return DeploymentResult("announcement_pending", journal.sha, "Deployment is healthy")
+                return DeploymentResult(
+                    "announcement_pending", journal.sha, "Deployment is healthy"
+                )
             journal = self._update(journal, completion_notice_sent=True, error=None)
 
         if scope and journal.release_note and not journal.release_note_sent:
@@ -295,7 +359,11 @@ class DeploymentTransaction:
             )
             try:
                 self.events.append(("release_note", journal.release_note, *scope))
-                delivered = self.router.announce_release_note(scope, journal.release_note)
+                delivered = self.router.announce_release_note(
+                    scope,
+                    journal.release_note,
+                    notification_id=f"{journal.transaction_id}:release-note",
+                )
                 if not _all_succeeded(delivered):
                     journal = self._update(
                         journal,
@@ -303,7 +371,9 @@ class DeploymentTransaction:
                         error="release note delivery failed",
                         evidence={"release_note_error": "delivery failed"},
                     )
-                    return DeploymentResult("announcement_pending", journal.sha, "Deployment is healthy")
+                    return DeploymentResult(
+                        "announcement_pending", journal.sha, "Deployment is healthy"
+                    )
             except Exception as exc:  # noqa: BLE001 - delivery must be retried, not rolled back.
                 journal = self._update(
                     journal,
@@ -311,7 +381,9 @@ class DeploymentTransaction:
                     error=_safe_error(exc),
                     evidence={"release_note_error": _safe_error(exc)},
                 )
-                return DeploymentResult("announcement_pending", journal.sha, "Deployment is healthy")
+                return DeploymentResult(
+                    "announcement_pending", journal.sha, "Deployment is healthy"
+                )
             journal = self._update(journal, release_note_sent=True, error=None)
 
         journal = self._update(
@@ -337,7 +409,9 @@ class DeploymentTransaction:
             self.events.append(("stop", *journal.impacted_units))
             self.runner.stop(journal.impacted_units)
             if journal.previous_release is None:
-                raise RuntimeError("previous release is missing; rollback cannot proceed")
+                raise RuntimeError(
+                    "previous release is missing; rollback cannot proceed"
+                )
             previous = Path(journal.previous_release).resolve()
             self.state.set_current(
                 previous, current_path=self._branch_pointer(journal.branch)
@@ -383,16 +457,22 @@ class DeploymentTransaction:
             error=_safe_error(cause),
             evidence=evidence,
         )
-        return DeploymentResult("rollback_failed", journal.sha, _safe_error(rollback_error))
+        return DeploymentResult(
+            "rollback_failed", journal.sha, _safe_error(rollback_error)
+        )
 
     def _deliver_recovery_notice(
         self, journal: Journal, *, cause: BaseException | None = None
     ) -> DeploymentResult:
         if journal.announcement_scope and not journal.recovery_notice_sent:
             try:
-                self.events.append(("announce", RECOVERY_NOTICE, *journal.announcement_scope))
+                self.events.append(
+                    ("announce", RECOVERY_NOTICE, *journal.announcement_scope)
+                )
                 delivered = self.router.announce(
-                    journal.announcement_scope, RECOVERY_NOTICE
+                    journal.announcement_scope,
+                    RECOVERY_NOTICE,
+                    notification_id=f"{journal.transaction_id}:recovery",
                 )
                 if not _all_succeeded(delivered):
                     journal = self._update(
@@ -402,7 +482,9 @@ class DeploymentTransaction:
                         evidence={"recovery_notice_error": "delivery failed"},
                     )
                     return DeploymentResult(
-                        "announcement_pending", journal.sha, "Previous release is healthy"
+                        "announcement_pending",
+                        journal.sha,
+                        "Previous release is healthy",
                     )
             except Exception as exc:  # noqa: BLE001 - persist and retry operator notice.
                 journal = self._update(
@@ -421,7 +503,9 @@ class DeploymentTransaction:
             maintenance_enabled=False,
             recovery_notice_sent=True,
         )
-        return DeploymentResult("rolled_back", journal.sha, _safe_error(cause) if cause else "")
+        return DeploymentResult(
+            "rolled_back", journal.sha, _safe_error(cause) if cause else ""
+        )
 
     def _validate_paths(self) -> None:
         releases = self.paths.releases_root.resolve()
@@ -453,13 +537,19 @@ class DeploymentTransaction:
 
 
 def _validate_sha(sha: object) -> str:
-    if not isinstance(sha, str) or len(sha) != 40 or any(char not in _SHA_CHARS for char in sha):
+    if (
+        not isinstance(sha, str)
+        or len(sha) != 40
+        or any(char not in _SHA_CHARS for char in sha)
+    ):
         raise ValueError("SHA must be exactly 40 hexadecimal characters")
     return sha.lower()
 
 
 def _validate_units(units: tuple[str, ...]) -> None:
-    if len(set(units)) != len(units) or any(unit not in ALLOWED_UNITS for unit in units):
+    if len(set(units)) != len(units) or any(
+        unit not in ALLOWED_UNITS for unit in units
+    ):
         raise ValueError("impacted systemd unit is not in the deployment allowlist")
 
 
@@ -468,7 +558,9 @@ def _all_succeeded(result: Any) -> bool:
         return True
     if isinstance(result, dict) and result:
         for value in result.values():
-            if value is not True and not (isinstance(value, dict) and value.get("success") is True):
+            if value is not True and not (
+                isinstance(value, dict) and value.get("success") is True
+            ):
                 return False
         return True
     return False
