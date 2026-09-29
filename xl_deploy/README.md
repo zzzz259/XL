@@ -128,13 +128,25 @@ systemctl --user enable --now xl-deploy-poll.timer
 
 ## Update order, recovery, and notices
 
-For QQ bot tiers, the controller sends exactly
+For QQ bot tiers, the controller first asks the router to durably enqueue
 `检测到更新，正在更新bot，期间将暂停服务` before pausing/draining and stopping
-affected services. It stages and preflights the immutable release first,
-switches only that branch pointer, starts services and checks readiness, then
-resumes routing. Only after health checks pass does it send `更新完毕`; any new
-non-empty release announcement follows. Backend-only updates do not announce
-to QQ unless the plan includes bot tiers.
+affected services. A successful response means the persistent router FIFO
+accepted the message; it does not mean QQ has already delivered it. Deployment
+continues during the 02:00–08:00 Asia/Shanghai send curfew, while the queued
+start/completion/release/rollback messages wait for 08:00. It stages and
+preflights the immutable release first, switches only that branch pointer,
+starts services and checks readiness, then resumes routing. Only after health
+checks pass does it durably enqueue `更新完毕`; any new non-empty release
+announcement follows in FIFO order. Backend-only updates do not announce to QQ
+unless the plan includes bot tiers.
+
+Each notification request carries an idempotency key derived from the durable
+deployment transaction ID and phase (plus tier). Replaying a transaction journal
+therefore does not add duplicate queue rows. If the router cannot persist a
+notice, it rejects the request and the deploy transaction must not proceed past
+the start-notice gate. Router queue delivery remains at-least-once: a crash
+after QQ accepts a message but before the local acknowledgement may cause a
+duplicate.
 
 The durable journal records each phase. After interruption the next poll
 attempts recovery before another deployment: it retries a pending completion

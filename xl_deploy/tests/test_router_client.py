@@ -3,7 +3,6 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-
 from xl_deploy.router_client import RouterControlClient
 
 
@@ -32,10 +31,16 @@ def test_router_client_authenticates_and_posts_exact_announcement_text():
 
     client = RouterControlClient("http://127.0.0.1:8784", "secret", transport=transport)
 
-    assert client.announce(("debug",), "检测到更新，正在更新bot，期间将暂停服务") == {"group": True}
+    assert client.announce(
+        ("debug",),
+        "检测到更新，正在更新bot，期间将暂停服务",
+        notification_id="tx-1:starting",
+    ) == {"group": True}
     assert requests[0].get_header("Authorization") == "Bearer secret"
     assert json.loads(requests[0].data) == {
-        "tier": "debug", "phase": "starting"
+        "tier": "debug",
+        "phase": "starting",
+        "notification_id": "tx-1:starting:debug",
     }
 
 
@@ -48,9 +53,14 @@ def test_router_client_sends_release_note_text_to_authenticated_endpoint():
 
     client = RouterControlClient("http://127.0.0.1:8784", "secret", transport=transport)
 
-    assert client.announce_release_note(("main",), "Release body") == {"group": True}
+    assert client.announce_release_note(
+        ("main",), "Release body", notification_id="tx-1:release"
+    ) == {"group": True}
     assert json.loads(requests[0].data) == {
-        "tier": "main", "phase": "release_note", "text": "Release body"
+        "tier": "main",
+        "phase": "release_note",
+        "notification_id": "tx-1:release:main",
+        "text": "Release body",
     }
 
 
@@ -69,10 +79,19 @@ def test_router_client_pause_resume_and_drain_use_per_tier_control():
     assert client.drain(("debug", "test"), timeout_seconds=1)
     client.resume(("debug", "test"))
 
-    assert [request.method for request in requests] == ["POST", "POST", "GET", "GET", "POST", "POST"]
-    assert [json.loads(request.data)["enabled"] for request in requests if request.method == "POST"] == [
-        True, True, False, False
+    assert [request.method for request in requests] == [
+        "POST",
+        "POST",
+        "GET",
+        "GET",
+        "POST",
+        "POST",
     ]
+    assert [
+        json.loads(request.data)["enabled"]
+        for request in requests
+        if request.method == "POST"
+    ] == [True, True, False, False]
 
 
 @pytest.mark.parametrize(
@@ -90,7 +109,9 @@ def test_default_transport_does_not_follow_router_redirects():
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             self.send_response(302)
-            self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/sink")
+            self.send_header(
+                "Location", f"http://127.0.0.1:{self.server.server_port}/sink"
+            )
             self.end_headers()
 
         def do_GET(self):

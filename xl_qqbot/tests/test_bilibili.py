@@ -2,11 +2,10 @@ import asyncio
 import json
 import os
 import tempfile
-import urllib.parse
 
 import pytest
 
-import bot_app.bilibili as bilibili
+from bot_app import bilibili
 from bot_app.bilibili import (
     BilibiliApiError,
     BilibiliClient,
@@ -39,6 +38,7 @@ UP2 = 1623229430
 
 # ---------- fixtures（按实测返回结构构造） ----------
 
+
 def feed_item(opus_id, content="标题"):
     return {
         "opus_id": opus_id,
@@ -57,17 +57,27 @@ def pic_para(*urls):
     return {"para_type": 2, "pic": {"pics": [{"url": u} for u in urls]}}
 
 
-def detail_item(opus_id="1001", pub_ts="1700000100", title="维护公告",
-                paragraphs=(), dtype=0, id_str=None):
+def detail_item(
+    opus_id="1001",
+    pub_ts="1700000100",
+    title="维护公告",
+    paragraphs=(),
+    dtype=0,
+    id_str=None,
+):
     return {
         "id_str": id_str if id_str is not None else str(opus_id),
         "type": dtype,
         "modules": [
-            {"module_type": "MODULE_TYPE_AUTHOR",
-             "module_author": {"name": "星落官方", "pub_ts": pub_ts}},
+            {
+                "module_type": "MODULE_TYPE_AUTHOR",
+                "module_author": {"name": "星落官方", "pub_ts": pub_ts},
+            },
             {"module_type": "MODULE_TYPE_TITLE", "module_title": {"text": title}},
-            {"module_type": "MODULE_TYPE_CONTENT",
-             "module_content": {"paragraphs": list(paragraphs)}},
+            {
+                "module_type": "MODULE_TYPE_CONTENT",
+                "module_content": {"paragraphs": list(paragraphs)},
+            },
             {"module_type": "MODULE_TYPE_STAT", "module_stat": {"like": 1}},
         ],
     }
@@ -96,11 +106,20 @@ class FakeSender:
 class FakeClient:
     """按目标分桶的 fake 客户端。"""
 
-    def __init__(self, feeds=None, details=None, videos=None, acc_names=None,
-                 feed_errors=None, videos_errors=None, acc_errors=None, detail_error=None):
-        self.feeds = feeds or {}          # mid -> [feed items]
-        self.details = details or {}      # opus_id -> detail item
-        self.videos = videos or {}        # mid -> [vlist items]
+    def __init__(
+        self,
+        feeds=None,
+        details=None,
+        videos=None,
+        acc_names=None,
+        feed_errors=None,
+        videos_errors=None,
+        acc_errors=None,
+        detail_error=None,
+    ):
+        self.feeds = feeds or {}  # mid -> [feed items]
+        self.details = details or {}  # opus_id -> detail item
+        self.videos = videos or {}  # mid -> [vlist items]
         self.acc_names = acc_names or {}  # mid -> data.name
         self.feed_errors = feed_errors or set()
         self.videos_errors = videos_errors or set()
@@ -158,7 +177,9 @@ def make_config(data_dir, *, groups=("g1", "g2"), targets=None, bili_kwargs=None
         bili["targets"] = targets
     return Config(
         bot=BotConfig(appid="1", secret="2"),
-        watch=WatchConfig(outbox_dir="/tmp/outbox", interval_seconds=30, data_dir=data_dir),
+        watch=WatchConfig(
+            outbox_dir="/tmp/outbox", interval_seconds=30, data_dir=data_dir
+        ),
         target=TargetConfig(group_openids=list(groups), auto_learn_from_events=False),
         upload=UploadConfig(file_base_url=""),
         message=MessageConfig(template=""),
@@ -174,11 +195,20 @@ def make_watcher(data_dir, client, sender=None, *, groups=("g1", "g2"), targets=
     return watcher
 
 
+def queued_texts(watcher, recipient="g1"):
+    return [
+        message.text
+        for message in watcher.proactive_outbox.list_pending()
+        if message.kind == "text" and message.recipient == recipient
+    ]
+
+
 def write_toml(content):
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False, encoding="utf-8")
-    f.write(content)
-    f.close()
-    return f.name
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".toml", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(content)
+        return f.name
 
 
 def default_targets():
@@ -186,6 +216,7 @@ def default_targets():
 
 
 # ---------- parse_opus_feed_item ----------
+
 
 def test_parse_feed_item_ok():
     entry = parse_opus_feed_item(feed_item(1234567890123456789, "新版本"))
@@ -210,11 +241,17 @@ def test_parse_feed_item_bad_skipped():
 
 # ---------- parse_opus_detail ----------
 
+
 def test_parse_detail_full():
     item = detail_item(
-        "1001", "1700000100", "维护公告",
-        [text_para("大家好", "，本周维护"), text_para("第二条"),
-         pic_para("https://i0.hdslb.com/p1.jpg", "https://i0.hdslb.com/p2.jpg")],
+        "1001",
+        "1700000100",
+        "维护公告",
+        [
+            text_para("大家好", "，本周维护"),
+            text_para("第二条"),
+            pic_para("https://i0.hdslb.com/p1.jpg", "https://i0.hdslb.com/p2.jpg"),
+        ],
     )
     dyn = parse_opus_detail(item, opus_id=1001)
     assert dyn["id_str"] == "1001"
@@ -227,23 +264,29 @@ def test_parse_detail_full():
 def test_parse_detail_defensive_garbage():
     assert parse_opus_detail(None) is None
     assert parse_opus_detail({"id_str": "1", "type": 0}) is None  # modules 缺失
-    assert parse_opus_detail(detail_item("9", dtype=1)) is None   # 非图文
-    item = detail_item("1006", paragraphs=[None, "junk", {"para_type": 1}, {"para_type": 2}])
+    assert parse_opus_detail(detail_item("9", dtype=1)) is None  # 非图文
+    item = detail_item(
+        "1006", paragraphs=[None, "junk", {"para_type": 1}, {"para_type": 2}]
+    )
     dyn = parse_opus_detail(item)
     assert dyn is not None and dyn["pics"] == []
 
 
 # ---------- parse_video_item ----------
 
+
 def test_parse_video_item_ok_and_bad():
     assert parse_video_item(video_item("BV9", "新 PV", 1700000300)) == {
-        "bvid": "BV9", "title": "新 PV", "created": 1700000300,
+        "bvid": "BV9",
+        "title": "新 PV",
+        "created": 1700000300,
     }
     assert parse_video_item({"title": "无", "created": 1}) is None
     assert parse_video_item("junk") is None
 
 
 # ---------- WBI 签名（回归保留） ----------
+
 
 def test_mixin_key_uses_mixin_key_tab():
     orig = "".join(chr(0x21 + i) for i in range(64))
@@ -252,8 +295,12 @@ def test_mixin_key_uses_mixin_key_tab():
 
 
 def test_mixin_key_fixed_vector():
-    assert _mixin_key("7cd93d052cfacdfdf227d66c03c87f54" + "9f6c0dc1bd875914a3d3be45b5e1c6e5") == \
-        "142de2c9ddf4e99c87d3fc87f7f1ccdd"
+    assert (
+        _mixin_key(
+            "7cd93d052cfacdfdf227d66c03c87f54" + "9f6c0dc1bd875914a3d3be45b5e1c6e5"
+        )
+        == "142de2c9ddf4e99c87d3fc87f7f1ccdd"
+    )
 
 
 @pytest.mark.asyncio
@@ -336,7 +383,9 @@ async def test_fetch_videos_and_acc_info_use_wbi_signing():
     assert params["mid"] == str(MID) and params["ps"] == "5"
     assert "wts" in params and "w_rid" in params
 
-    session2 = FakeSession(FakeResponse(200, json.dumps({"code": 0, "data": {"name": "某某UP"}})))
+    session2 = FakeSession(
+        FakeResponse(200, json.dumps({"code": 0, "data": {"name": "某某UP"}}))
+    )
     client2 = BilibiliClient(session=session2)
     client2._wbi_key_pair = fake_keys
     info = await client2.fetch_acc_info(UP1)
@@ -352,12 +401,15 @@ async def test_fetch_412_and_nonzero_code_raise():
     with pytest.raises(BilibiliApiError, match="412"):
         await BilibiliClient(session=session).fetch_opus_feed(MID)
 
-    session2 = FakeSession(FakeResponse(200, json.dumps({"code": -352, "message": "风控"})))
+    session2 = FakeSession(
+        FakeResponse(200, json.dumps({"code": -352, "message": "风控"}))
+    )
     with pytest.raises(BilibiliApiError, match="-352"):
         await BilibiliClient(session=session2).fetch_videos(MID)
 
 
 # ---------- 状态：分目标、迁移、名字缓存 ----------
+
 
 def test_state_per_target_isolated():
     with tempfile.TemporaryDirectory() as root:
@@ -394,8 +446,15 @@ def test_state_migration_from_legacy_top_level():
     with tempfile.TemporaryDirectory() as root:
         path = os.path.join(root, "bilibili_state.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"last_opus_id": 100, "last_video_created": 1000,
-                       "last_bvid": "BV0", "last_id_str": "9"}, f)
+            json.dump(
+                {
+                    "last_opus_id": 100,
+                    "last_video_created": 1000,
+                    "last_bvid": "BV0",
+                    "last_id_str": "9",
+                },
+                f,
+            )
         store = BilibiliStateStore(root)
         migrated = store.target(MID)
         assert migrated.last_opus_id == 100
@@ -427,17 +486,27 @@ def test_state_name_cache_roundtrip():
 
 # ---------- watcher：基线与多目标 ----------
 
+
 @pytest.mark.asyncio
 async def test_first_run_baselines_every_target_and_track():
     with tempfile.TemporaryDirectory() as root:
         client = FakeClient(
             feeds={MID: [feed_item(101), feed_item(100)], UP1: [feed_item(55)]},
-            videos={MID: [video_item("BV0", "基线", 1000)], UP1: [video_item("BVup", "up基线", 500)]},
+            videos={
+                MID: [video_item("BV0", "基线", 1000)],
+                UP1: [video_item("BVup", "up基线", 500)],
+            },
         )
         sender = FakeSender()
-        watcher = make_watcher(root, client, sender, targets=default_targets() + [
-            BilibiliTarget(mid=UP1, name="", mode="notice"),
-        ])
+        watcher = make_watcher(
+            root,
+            client,
+            sender,
+            targets=default_targets()
+            + [
+                BilibiliTarget(mid=UP1, name="", mode="notice"),
+            ],
+        )
         await watcher._tick()
 
         assert sender.events == []
@@ -446,10 +515,11 @@ async def test_first_run_baselines_every_target_and_track():
         assert watcher.state.target(MID).last_bvid == "BV0"
         assert watcher.state.target(UP1).last_bvid == "BVup"
         assert client.detail_calls == []  # 基线轮不拉详情
-        assert client.acc_calls == []     # 基线轮不解析名字
+        assert client.acc_calls == []  # 基线轮不解析名字
 
 
 # ---------- watcher：full 模式图文 ----------
+
 
 @pytest.mark.asyncio
 async def test_full_opus_sends_text_then_pics():
@@ -462,22 +532,34 @@ async def test_full_opus_sends_text_then_pics():
         client.feeds[MID] = [feed_item(103), feed_item(102), feed_item(101)]
         client.details = {
             102: detail_item("102", "1700000200", "公告二", [text_para("正文二")]),
-            103: detail_item("103", "1700000300", "公告三",
-                             [text_para("正文三"), pic_para("https://i0.hdslb.com/p1.jpg")]),
+            103: detail_item(
+                "103",
+                "1700000300",
+                "公告三",
+                [text_para("正文三"), pic_para("https://i0.hdslb.com/p1.jpg")],
+            ),
         }
         await watcher._tick()
 
         assert client.detail_calls == [102, 103]  # 升序拉详情
-        kinds = [e[0] for e in sender.events]
-        assert kinds == ["text", "text", "text", "text", "image"]
-        assert sender.events[0][2] == "【星落官方动态】公告二\n正文二"
-        assert sender.events[2][2] == "【星落官方动态】公告三\n正文三"
-        img = sender.events[4]
-        assert not os.path.exists(img[1])  # 临时图已清理
+        messages = watcher.proactive_outbox.list_pending()
+        assert [(item.kind, item.recipient) for item in messages] == [
+            ("text", "g1"),
+            ("text", "g2"),
+            ("text", "g1"),
+            ("text", "g2"),
+            ("image", "g1"),
+            ("image", "g2"),
+        ]
+        assert messages[0].text == "【星落官方动态】公告二\n正文二"
+        assert messages[2].text == "【星落官方动态】公告三\n正文三"
+        assert (watcher.proactive_outbox.data_dir / messages[4].media_path).is_file()
+        assert not os.path.exists(os.path.join(watcher.tmp_dir, "opus_103_0.png"))
         assert watcher.state.target(MID).last_opus_id == 103
 
 
 # ---------- watcher：notice 模式 ----------
+
 
 @pytest.mark.asyncio
 async def test_notice_opus_sends_one_line_no_detail_and_caches_name():
@@ -492,20 +574,27 @@ async def test_notice_opus_sends_one_line_no_detail_and_caches_name():
         await watcher._tick()  # 基线
         assert client.acc_calls == []
 
-        client.feeds[UP1] = [feed_item(202, "二周年贺图"), feed_item(201, "一周年"), feed_item(200, "旧")]
+        client.feeds[UP1] = [
+            feed_item(202, "二周年贺图"),
+            feed_item(201, "一周年"),
+            feed_item(200, "旧"),
+        ]
         await watcher._tick()
 
         assert client.detail_calls == []  # notice 不拉详情
         assert client.acc_calls == [UP1]  # 首次发送时解析名字
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
-        assert texts == [
+        assert queued_texts(watcher) == [
             "你关注的测试UP主更新啦：一周年\nhttps://www.bilibili.com/opus/201",
             "你关注的测试UP主更新啦：二周年贺图\nhttps://www.bilibili.com/opus/202",
         ]
         assert watcher.state.target(UP1).last_opus_id == 202
         # 名字已缓存进 state，且下一轮有新内容时不再请求 acc/info
         assert watcher.state.target(UP1).name == "测试UP主"
-        client.feeds[UP1] = [feed_item(203, "第三条"), feed_item(202, "旧"), feed_item(201, "旧")]
+        client.feeds[UP1] = [
+            feed_item(203, "第三条"),
+            feed_item(202, "旧"),
+            feed_item(201, "旧"),
+        ]
         await watcher._tick()
         assert client.acc_calls == [UP1]
         assert watcher.state.target(UP1).last_opus_id == 203
@@ -522,8 +611,9 @@ async def test_notice_opus_title_fallback_and_empty_content():
         sender = FakeSender()
         watcher.sender = sender
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
-        assert texts == ["你关注的某UP更新啦：新动态\nhttps://www.bilibili.com/opus/301"]
+        assert queued_texts(watcher) == [
+            "你关注的某UP更新啦：新动态\nhttps://www.bilibili.com/opus/301"
+        ]
 
 
 @pytest.mark.asyncio
@@ -535,11 +625,12 @@ async def test_full_mode_video_uses_notice_format_with_config_name():
         await watcher._tick()
         assert client.acc_calls == []  # 配置名非空，不解析
 
-        client.videos[MID] = [video_item("BV2", "二周年 PV", 1700000100), video_item("BV0", "基线", 1000)]
+        client.videos[MID] = [
+            video_item("BV2", "二周年 PV", 1700000100),
+            video_item("BV0", "基线", 1000),
+        ]
         await watcher._tick()
-        assert all(e[0] == "text" for e in sender.events)
-        texts = [e[2] for e in sender.events if e[1] == "g1"]
-        assert texts == [
+        assert queued_texts(watcher) == [
             "你关注的星落官方更新啦：二周年 PV\nhttps://www.bilibili.com/video/BV2",
         ]
         assert watcher.state.target(MID).last_bvid == "BV2"
@@ -563,8 +654,7 @@ async def test_notice_video_name_from_vlist_author_when_acc_fails():
             video_item("BVup", "up 基线", 500, author="视频作者名"),
         ]
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
-        assert texts == [
+        assert queued_texts(watcher) == [
             "你关注的视频作者名更新啦：新切片\nhttps://www.bilibili.com/video/BVnew",
         ]
         # author 解析成功同样缓存
@@ -581,12 +671,16 @@ async def test_name_mid_fallback_not_cached_and_retries():
         targets = [BilibiliTarget(mid=UP2, name="", mode="notice")]
         watcher = make_watcher(root, client, targets=targets)
         await watcher._tick()  # 基线 BVa
-        client.videos[UP2] = [video_item("BVb", "新稿", 20), video_item("BVa", "基线", 10)]
+        client.videos[UP2] = [
+            video_item("BVb", "新稿", 20),
+            video_item("BVa", "基线", 10),
+        ]
         sender = FakeSender()
         watcher.sender = sender
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
-        assert texts == [f"你关注的{UP2}更新啦：新稿\nhttps://www.bilibili.com/video/BVb"]
+        assert queued_texts(watcher) == [
+            f"你关注的{UP2}更新啦：新稿\nhttps://www.bilibili.com/video/BVb"
+        ]
         assert watcher.state.target(UP2).name == ""  # 兜底不缓存
         # 下一轮有新视频时重试 acc/info（不永久 stuck）
         client.videos[UP2].insert(0, video_item("BVc", "再新", 30))
@@ -596,6 +690,7 @@ async def test_name_mid_fallback_not_cached_and_retries():
 
 # ---------- watcher：目标/路互不影响、上限、迁移 ----------
 
+
 @pytest.mark.asyncio
 async def test_target_failure_independence():
     with tempfile.TemporaryDirectory() as root:
@@ -604,7 +699,9 @@ async def test_target_failure_independence():
             videos={UP1: [video_item("BVup", "基线", 500)]},
             feed_errors={MID},  # 官方号图文路 412
         )
-        targets = default_targets() + [BilibiliTarget(mid=UP1, name="UP主甲", mode="notice")]
+        targets = default_targets() + [
+            BilibiliTarget(mid=UP1, name="UP主甲", mode="notice")
+        ]
         sender = FakeSender()
         watcher = make_watcher(root, client, sender, targets=targets)
         await watcher._tick()
@@ -614,28 +711,33 @@ async def test_target_failure_independence():
         # 下一轮 UP1 图文照常发通知
         client.feeds[UP1] = [feed_item(56, "新动态"), feed_item(55, "旧")]
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
-        assert texts == ["你关注的UP主甲更新啦：新动态\nhttps://www.bilibili.com/opus/56"]
+        assert queued_texts(watcher) == [
+            "你关注的UP主甲更新啦：新动态\nhttps://www.bilibili.com/opus/56"
+        ]
 
 
 @pytest.mark.asyncio
 async def test_notice_opus_max_five_per_round():
     with tempfile.TemporaryDirectory() as root:
-        client = FakeClient(feeds={UP1: [feed_item(0, "基线")]}, acc_names={UP1: "某UP"})
+        client = FakeClient(
+            feeds={UP1: [feed_item(0, "基线")]}, acc_names={UP1: "某UP"}
+        )
         targets = [BilibiliTarget(mid=UP1, name="", mode="notice")]
         watcher = make_watcher(root, client, targets=targets)
         await watcher._tick()
 
-        client.feeds[UP1] = [feed_item(i, f"动态{i}") for i in range(8)]  # 基线 0 + 新 1..7
+        client.feeds[UP1] = [
+            feed_item(i, f"动态{i}") for i in range(8)
+        ]  # 基线 0 + 新 1..7
         sender = FakeSender()
         watcher.sender = sender
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
+        texts = queued_texts(watcher)
         assert len(texts) == 5
         assert watcher.state.target(UP1).last_opus_id == 5
 
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
+        texts = queued_texts(watcher)
         assert len(texts) == 7  # 剩余 2 条补发
         assert watcher.state.target(UP1).last_opus_id == 7
 
@@ -648,17 +750,19 @@ async def test_video_max_five_per_round():
         watcher = make_watcher(root, client, targets=targets)
         await watcher._tick()
 
-        client.videos[UP1] = [video_item(f"BV{i}", f"视频{i}", 1000 + i) for i in range(1, 8)]
+        client.videos[UP1] = [
+            video_item(f"BV{i}", f"视频{i}", 1000 + i) for i in range(1, 8)
+        ]
         sender = FakeSender()
         watcher.sender = sender
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
+        texts = queued_texts(watcher)
         assert len(texts) == 5
         assert "视频1" in texts[0] and "视频5" in texts[-1]
         assert watcher.state.target(UP1).last_bvid == "BV5"
 
         await watcher._tick()
-        texts = [e[2] for e in sender.events if e[0] == "text" and e[1] == "g1"]
+        texts = queued_texts(watcher)
         assert len(texts) == 7
 
 
@@ -667,10 +771,14 @@ async def test_migrated_state_does_not_resend():
     with tempfile.TemporaryDirectory() as root:
         path = os.path.join(root, "bilibili_state.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"last_opus_id": 100, "last_video_created": 1000, "last_bvid": "BV0"}, f)
+            json.dump(
+                {"last_opus_id": 100, "last_video_created": 1000, "last_bvid": "BV0"}, f
+            )
         client = FakeClient(
             feeds={MID: [feed_item(100, "已发"), feed_item(99, "更老")]},
-            videos={MID: [video_item("BV0", "已发", 1000), video_item("BVx", "更老", 999)]},
+            videos={
+                MID: [video_item("BV0", "已发", 1000), video_item("BVx", "更老", 999)]
+            },
         )
         sender = FakeSender()
         watcher = make_watcher(root, client, sender)  # 默认单目标 full
@@ -682,17 +790,25 @@ async def test_migrated_state_does_not_resend():
 @pytest.mark.asyncio
 async def test_restart_does_not_resend_multiple_targets():
     with tempfile.TemporaryDirectory() as root:
-        targets = default_targets() + [BilibiliTarget(mid=UP1, name="某UP", mode="notice")]
+        targets = default_targets() + [
+            BilibiliTarget(mid=UP1, name="某UP", mode="notice")
+        ]
         client = FakeClient(
             feeds={MID: [feed_item(101)], UP1: [feed_item(55)]},
-            videos={MID: [video_item("BV0", "基线", 1000)], UP1: [video_item("BVup", "基线", 500)]},
+            videos={
+                MID: [video_item("BV0", "基线", 1000)],
+                UP1: [video_item("BVup", "基线", 500)],
+            },
         )
         watcher = make_watcher(root, client, targets=targets)
         await watcher._tick()
 
         client2 = FakeClient(
             feeds={MID: [feed_item(101)], UP1: [feed_item(55)]},
-            videos={MID: [video_item("BV0", "基线", 1000)], UP1: [video_item("BVup", "基线", 500)]},
+            videos={
+                MID: [video_item("BV0", "基线", 1000)],
+                UP1: [video_item("BVup", "基线", 500)],
+            },
         )
         sender2 = FakeSender()
         watcher2 = make_watcher(root, client2, sender2, targets=targets)
@@ -703,7 +819,10 @@ async def test_restart_does_not_resend_multiple_targets():
 @pytest.mark.asyncio
 async def test_no_target_groups_keeps_state_for_retry():
     with tempfile.TemporaryDirectory() as root:
-        client = FakeClient(feeds={MID: [feed_item(101)]}, videos={MID: [video_item("BV0", "基线", 1000)]})
+        client = FakeClient(
+            feeds={MID: [feed_item(101)]},
+            videos={MID: [video_item("BV0", "基线", 1000)]},
+        )
         watcher = make_watcher(root, client, groups=[])
         await watcher._tick()
         assert watcher.state.target(MID).last_opus_id == 101
@@ -748,11 +867,16 @@ async def test_learned_groups_used_when_no_manual_list():
         watcher._client = FakeClient(feeds={MID: [feed_item(101)]})
         await watcher._tick()
         watcher._client.feeds[MID] = [feed_item(102)]
-        watcher._client.details = {102: detail_item("102", "1700000200", "公告", [text_para("正文")])}
+        watcher._client.details = {
+            102: detail_item("102", "1700000200", "公告", [text_para("正文")])
+        }
         sender = FakeSender()
         watcher.sender = sender
         await watcher._tick()
-        assert [(e[0], e[1]) for e in sender.events] == [("text", "learned_g1")]
+        assert [
+            (message.kind, message.recipient)
+            for message in watcher.proactive_outbox.list_pending()
+        ] == [("text", "learned_g1")]
 
 
 @pytest.mark.asyncio
@@ -765,9 +889,14 @@ async def test_disabled_run_returns_immediately():
 
 # ---------- format ----------
 
+
 def test_format_notice_text():
-    assert format_notice_text("星落官方", "二周年 PV", "https://www.bilibili.com/video/BV2") == \
-        "你关注的星落官方更新啦：二周年 PV\nhttps://www.bilibili.com/video/BV2"
+    assert (
+        format_notice_text(
+            "星落官方", "二周年 PV", "https://www.bilibili.com/video/BV2"
+        )
+        == "你关注的星落官方更新啦：二周年 PV\nhttps://www.bilibili.com/video/BV2"
+    )
 
 
 def test_format_opus_text_empty_returns_empty():
@@ -776,6 +905,7 @@ def test_format_opus_text_empty_returns_empty():
 
 
 # ---------- config ----------
+
 
 def test_config_bilibili_defaults():
     path = write_toml(
