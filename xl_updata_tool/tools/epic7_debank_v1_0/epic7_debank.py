@@ -219,7 +219,15 @@ def _terminate_process_tree(process):
 
 def _run_process(command, cwd, timeout=None, cancel_check=None):
     """可轮询取消的外部进程执行器，返回退出码或 ``cancelled``。"""
-    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    # 必须带 CREATE_NO_WINDOW：XL.exe 是 PyInstaller 无控制台（windowed）构建，
+    # 只给 CREATE_NEW_PROCESS_GROUP 会让 Windows 为每个控制台子程序
+    # （vgmstream-cli / quickbms）新分配一个黑窗，即"无数弹窗"。
+    creationflags = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if os.name == "nt"
+        else 0
+    )
     process = subprocess.Popen(
         command,
         cwd=cwd,
