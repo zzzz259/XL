@@ -57,6 +57,8 @@ Pop-Location
 
 CI 配置位于 `.github/workflows/`。本地变更分支、PR 目标和自动化触发范围必须保持一致；分支保护规则需在 GitHub 仓库设置中单独启用，workflow 本身不等于分支保护。
 
+服务器自动部署由仓库级 [`xl_deploy`](xl_deploy/README.md) 控制器执行，不是 GitHub Actions CI 本身直接部署。服务器轮询器每分钟检查 `debug`、`test`、`main`；只有对应分支和精确提交 SHA 的 `XL CI` 成功后才会处理，并根据分支与变更路径选择服务。因此“推送成功”不代表所有服务器服务都会更新：服务端运行时代码需进入 `main` 才会部署到 `xl-updata-server.service`，`debug`/`test` 仅映射各自 Bot。后端单独更新不会触发 QQ Bot 更新通知。完整映射、通知、数据保留、健康检查与回滚规则以 [`xl_deploy/README.md`](xl_deploy/README.md) 为准。
+
 ## 文档与仓库卫生
 
 - 先查 [文档地图](docs/README.md)，在对应子项目的正式文档中维护事实，避免复制同一份长说明。
