@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -22,6 +23,7 @@ from .paths import get_logs_dir
 LOGGER_NAME = "xl_updata_tool"
 logger = logging.getLogger(LOGGER_NAME)
 logger.propagate = False
+_current_session: LogSession | None = None
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,8 @@ class LogSession:
     app_log: Path
     error_log: Path
     debug_log: Path | None = None
+    external_dir: Path | None = None
+    events_log: Path | None = None
 
 
 class _ContextFilter(logging.Filter):
@@ -40,7 +44,98 @@ class _ContextFilter(logging.Filter):
         record.parent_task = context.parent_task
         record.component = context.component
         record.stage = context.stage
+        record.session_id = _current_session.session_id if _current_session else "-"
+        if not hasattr(record, "event"):
+            record.event = "log.record"
         return True
+
+
+class _SummaryFilter(logging.Filter):
+    """Keep app.log readable while detailed task records live in task logs."""
+
+    _SUMMARY_EVENTS = {
+        "task.start", "task.finish", "task.failed", "task.outcome",
+        "stage.start", "stage.complete", "stage.failed",
+        "process.exit", "process.failed", "process.timeout",
+    }
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if getattr(record, "event", "log.record") in self._SUMMARY_EVENTS:
+            return True
+        if getattr(record, "task_id", "-") == "-":
+            return record.levelno >= logging.INFO
+        return False
+
+
+class _TaskRoutingFilter(logging.Filter):
+    def __init__(self, task_id: str):
+        super().__init__()
+        self.task_id = task_id
+        self.context_filter = _ContextFilter()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        self.context_filter.filter(record)
+        return record.task_id == self.task_id
+
+
+class _JsonlHandler(logging.Handler):
+    """Route detailed events to task files and retain only summaries globally."""
+
+    def __init__(self, path: Path, session_dir: Path):
+        super().__init__(logging.DEBUG)
+        self.path = path
+        self.session_dir = session_dir
+        self._streams = {}
+
+    def emit(self, record: logging.LogRecord) -> None:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created).astimezone().isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "event": getattr(record, "event", "log.record"),
+            "message": record.getMessage(),
+            "session_id": getattr(record, "session_id", "-"),
+            "task_id": getattr(record, "task_id", "-"),
+            "parent_task_id": getattr(record, "parent_task", "-"),
+            "component": getattr(record, "component", "app"),
+            "stage": getattr(record, "stage", "-"),
+            "process_id": record.process,
+            "thread_id": record.thread,
+        }
+        for name in ("error_code", "outcome", "details"):
+            value = getattr(record, name, None)
+            if value is not None:
+                payload[name] = value
+        if record.exc_info:
+            formatter = self.formatter or logging.Formatter()
+            payload["exception"] = formatter.formatException(record.exc_info)
+        line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
+        task_id = payload["task_id"]
+        target = self.session_dir / "tasks" / task_id / "events.jsonl" if task_id != "-" else self.path
+        try:
+            self._write(target, line)
+            if task_id != "-" and _SummaryFilter().filter(record):
+                self._write(self.path, line)
+        except OSError:
+            # Structured diagnostics are best-effort and must never break app work.
+            pass
+
+    def _write(self, path: Path, line: str) -> None:
+        stream = self._streams.get(path)
+        if stream is None or stream.closed:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            stream = path.open("a", encoding="utf-8")
+            self._streams[path] = stream
+        stream.write(line)
+        stream.flush()
+
+    def close(self) -> None:
+        for stream in self._streams.values():
+            try:
+                stream.close()
+            except OSError:
+                pass
+        self._streams.clear()
+        super().close()
 
 
 def configure_logging(runtime=None, *, debug_mode: bool | None = None, logs_dir: str | os.PathLike[str] | None = None) -> LogSession:
@@ -48,8 +143,12 @@ def configure_logging(runtime=None, *, debug_mode: bool | None = None, logs_dir:
     if debug_mode is None:
         debug_mode = bool(getattr(runtime, "debug", False))
 
+    global _current_session
+
     _remove_handlers()
-    logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
+    # 正式版也必须保留足够的故障诊断细节；控制台仍由自己的 handler
+    # 保持简洁，文件 handler 则始终接收 DEBUG。
+    logger.setLevel(logging.DEBUG)
 
     root = Path(logs_dir or os.environ.get("XL_LOG_DIR") or get_logs_dir())
     log_dir_error = None
@@ -76,8 +175,8 @@ def configure_logging(runtime=None, *, debug_mode: bool | None = None, logs_dir:
 
     app_log = session_dir / "app.log"
     error_log = session_dir / "error.log"
-    _add_file_handler(app_log, logging.INFO, formatter)
-    _add_file_handler(error_log, logging.WARNING, formatter)
+    _add_file_handler(app_log, logging.DEBUG, formatter, summary_only=True)
+    _add_file_handler(error_log, logging.WARNING, formatter, summary_only=True)
 
     debug_log = None
     if debug_mode:
@@ -87,9 +186,49 @@ def configure_logging(runtime=None, *, debug_mode: bool | None = None, logs_dir:
     if log_dir_error:
         logger.warning("logging.directory_unavailable directory=%s error=%s", root, log_dir_error)
 
-    session = LogSession(session_id, session_dir, app_log, error_log, debug_log)
+    external_dir = session_dir / "external"
+    events_log = session_dir / "events.jsonl"
+    session = LogSession(session_id, session_dir, app_log, error_log, debug_log, external_dir, events_log)
+    _current_session = session
+    try:
+        json_handler = _JsonlHandler(events_log, session_dir)
+        json_handler.addFilter(_ContextFilter())
+        logger.addHandler(json_handler)
+    except OSError as exc:
+        logger.warning("logging.events_unavailable path=%s error=%s", events_log, exc)
     logger.info("logging.configured mode=%s session=%s directory=%s", "DEBUG" if debug_mode else "NORMAL", session_id, session_dir)
     return session
+
+
+def get_log_session() -> LogSession | None:
+    """Return the active session so subprocess diagnostics share its directory."""
+    return _current_session
+
+
+def begin_task_log(task_id: str):
+    """Attach a detailed text log for one task; caller must close it at task end."""
+    session = get_log_session()
+    if session is None or not task_id or task_id == "-":
+        return None
+    path = session.directory / "tasks" / task_id / "task.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(path, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("logging.task_file_unavailable task_id=%s path=%s error=%s", task_id, path, exc)
+        return None
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(_formatter())
+    handler.addFilter(_TaskRoutingFilter(task_id))
+    logger.addHandler(handler)
+    return handler
+
+
+def end_task_log(handler) -> None:
+    if handler is None:
+        return
+    logger.removeHandler(handler)
+    handler.close()
 
 
 def setup_logger(debug_mode: bool = False, logs_dir: str | os.PathLike[str] | None = None):
@@ -101,7 +240,7 @@ def setup_logger(debug_mode: bool = False, logs_dir: str | os.PathLike[str] | No
 def _formatter() -> logging.Formatter:
     return logging.Formatter(
         "%(asctime)s.%(msecs)03d %(levelname)-8s [%(component)s] "
-        "[task=%(task_id)s] [stage=%(stage)s] %(message)s",
+        "[task=%(task_id)s] [parent=%(parent_task)s] [stage=%(stage)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -115,7 +254,7 @@ def _remove_handlers() -> None:
             pass
 
 
-def _add_file_handler(path: Path, level: int, formatter: logging.Formatter) -> bool:
+def _add_file_handler(path: Path, level: int, formatter: logging.Formatter, *, summary_only: bool = False) -> bool:
     try:
         handler = logging.FileHandler(path, encoding="utf-8")
     except (OSError, PermissionError) as exc:
@@ -124,6 +263,8 @@ def _add_file_handler(path: Path, level: int, formatter: logging.Formatter) -> b
     handler.setLevel(level)
     handler.setFormatter(formatter)
     handler.addFilter(_ContextFilter())
+    if summary_only:
+        handler.addFilter(_SummaryFilter())
     logger.addHandler(handler)
     return True
 

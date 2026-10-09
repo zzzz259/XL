@@ -13,14 +13,15 @@ from app.platform.runtime_config import parse_runtime_config
 def main(argv=None):
     runtime = parse_runtime_config(sys.argv[1:] if argv is None else argv)
     session = configure_logging(runtime)
+    crash_reporter = install_crash_reporter(session.directory)
     if runtime.self_check:
         # 自检只验证环境并输出报告，不创建 QApplication，退出码即结论。
         from app.platform.self_check import run_self_check
 
         sys.exit(run_self_check(session))
-    crash_reporter = install_crash_reporter(session.directory)
     debug_mode = runtime.debug
     logger.info("application.start mode=%s session=%s", runtime.name, session.session_id)
+    crash_reporter.report_previous_unclean_exit(session.directory)
     if debug_mode:
         try:
             write_environment_report(session.directory)
@@ -30,6 +31,7 @@ def main(argv=None):
     try:
         # 运行模式和日志在导入主窗口前就绪，避免业务模块导入时错过 Debug 配置。
         from PySide6.QtWidgets import QApplication
+        crash_reporter.install_qt_handler()
         from PySide6.QtGui import QFont, QFontDatabase
         from app.bootstrap import build_app_context, create_application_runtime
         from app.ui.main_window import MainWindow
@@ -50,7 +52,14 @@ def main(argv=None):
             logger.warning("font.load_failed error=%s", e, exc_info=True)
         window = MainWindow(debug_mode=debug_mode, runtime=app_runtime)
         window.show()
-        sys.exit(app.exec())
+        exit_code = app.exec()
+        logger.info(
+            "application.shutdown exit_code=%s session=%s",
+            exit_code,
+            session.session_id,
+            extra={"event": "application.shutdown", "outcome": "success", "details": {"exit_code": exit_code}},
+        )
+        sys.exit(exit_code)
     except Exception as e:
         crash_reporter.write(*sys.exc_info(), source="startup")
         logger.error("application.start_failed error=%s", e, exc_info=True)

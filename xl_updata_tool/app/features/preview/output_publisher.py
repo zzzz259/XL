@@ -11,6 +11,8 @@ from collections import OrderedDict
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from app.platform.diagnostics import logger
+
 from .resource_catalog import discover_preview_resources
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .spine_adapter import SpineQueryRunner
@@ -282,17 +284,23 @@ def publish_raw_spine_resources(
         if not source_skel.is_file():
             skipped += 1
             diagnostics.append(f"Spine source missing: {source_skel}")
+            logger.error("Spine 归档失败：源 skeleton 不存在 path=%s character_id=%s", source_skel, character_id, extra={"event": "spine.archive.failed", "error_code": "SPINE_SOURCE_MISSING", "details": {"source_skel": str(source_skel), "character_id": character_id}})
             continue
         resource_family = records[0].resource_family if records else "spine"
         atlas_path = Path(records[0].atlas_path) if records and records[0].atlas_path else None
         destination = spine_output / _safe_name(resource_family, "spine") / _source_key(
             source_skel, material, atlas_path
         )
+        logger.info("Spine 归档开始 character_id=%s family=%s skel=%s atlas=%s destination=%s skins=%s", character_id, resource_family, source_skel, atlas_path, destination, sorted({record.skin_name for record in records if record.skin_name}), extra={"event": "spine.archive.start", "details": {"character_id": character_id, "resource_family": resource_family, "source_skel": str(source_skel), "source_skel_bytes": source_skel.stat().st_size, "source_atlas": str(atlas_path) if atlas_path else None, "destination": str(destination), "skins": sorted({record.skin_name for record in records if record.skin_name})}})
         destination.mkdir(parents=True, exist_ok=True)
         target_skel = destination / _published_skel_name(source_skel)
         _remove_physical_suffix_aliases(destination, source_skel, "skel", target_skel.name)
         if _copy_if_present(source_skel, target_skel):
             copied_files += 1
+            logger.debug("Spine 文件已归档 source=%s output=%s bytes=%s", source_skel, target_skel, target_skel.stat().st_size, extra={"event": "spine.archive.file", "details": {"source": str(source_skel), "output": str(target_skel), "bytes": target_skel.stat().st_size, "kind": "skeleton"}})
+        else:
+            diagnostics.append(f"Spine skeleton copy failed: {source_skel}")
+            logger.error("Spine skeleton 复制失败 source=%s output=%s", source_skel, target_skel, extra={"event": "spine.archive.failed", "error_code": "SPINE_SKELETON_COPY_FAILED", "details": {"source": str(source_skel), "output": str(target_skel)}})
 
         target_atlas = destination / _published_atlas_name(atlas_path) if atlas_path else None
         if atlas_path and atlas_path.is_file():
@@ -300,17 +308,21 @@ def publish_raw_spine_resources(
             _remove_physical_suffix_aliases(destination, atlas_path, "atlas", target_atlas.name)
             if _copy_if_present(atlas_path, target_atlas):
                 copied_files += 1
+                logger.debug("Spine 文件已归档 source=%s output=%s bytes=%s", atlas_path, target_atlas, target_atlas.stat().st_size, extra={"event": "spine.archive.file", "details": {"source": str(atlas_path), "output": str(target_atlas), "bytes": target_atlas.stat().st_size, "kind": "atlas"}})
             for texture_name in _atlas_texture_names(atlas_path):
                 texture_source = atlas_path.parent / Path(texture_name)
                 texture_target = destination / Path(texture_name)
                 if _copy_if_present(texture_source, texture_target):
                     copied_files += 1
+                    logger.debug("Spine 贴图已归档 source=%s output=%s bytes=%s", texture_source, texture_target, texture_target.stat().st_size, extra={"event": "spine.archive.file", "details": {"source": str(texture_source), "output": str(texture_target), "bytes": texture_target.stat().st_size, "kind": "texture"}})
                 else:
                     diagnostics.append(
                         f"Spine atlas texture missing: {texture_source} (source: {source_skel})"
                     )
+                    logger.error("Spine atlas 引用的贴图缺失 source_skel=%s atlas=%s texture=%s", source_skel, atlas_path, texture_source, extra={"event": "spine.archive.failed", "error_code": "SPINE_TEXTURE_MISSING", "details": {"source_skel": str(source_skel), "atlas": str(atlas_path), "texture": str(texture_source)}})
         else:
             diagnostics.append(f"Spine atlas missing: {atlas_path or source_skel.with_suffix('.atlas')}")
+            logger.error("Spine atlas 缺失 source_skel=%s expected_atlas=%s", source_skel, atlas_path or source_skel.with_suffix(".atlas"), extra={"event": "spine.archive.failed", "error_code": "SPINE_ATLAS_MISSING", "details": {"source_skel": str(source_skel), "expected_atlas": str(atlas_path or source_skel.with_suffix(".atlas"))}})
 
         archived_records = [
             replace(
@@ -332,6 +344,7 @@ def publish_raw_spine_resources(
             }
         )
         published += 1
+        logger.info("Spine 资源组归档完成 character_id=%s family=%s source_key=%s files=%s skins=%s", character_id, resource_family, destination.name, len(new_index_entries[-1]["files"]), new_index_entries[-1]["skins"], extra={"event": "spine.archive.complete", "details": {"character_id": character_id, "resource_family": resource_family, "source_key": destination.name, "files": new_index_entries[-1]["files"], "skins": new_index_entries[-1]["skins"]}})
 
     output.mkdir(parents=True, exist_ok=True)
     index_path = output / _INDEX_NAME
@@ -380,15 +393,19 @@ def publish_raw_spine_resources(
     payload = {"version": 1, "spine": ordered_entries}
     temporary = index_path.with_name(f"{index_path.name}.tmp")
     try:
+        logger.info("Spine 索引写入开始 path=%s entries=%s recovered=%s", index_path, len(ordered_entries), len(recovered_entries), extra={"event": "spine.index.write.start", "details": {"path": str(index_path), "entries": len(ordered_entries), "recovered": len(recovered_entries)}})
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(temporary, index_path)
+        logger.info("Spine 索引写入完成 path=%s entries=%s bytes=%s", index_path, len(ordered_entries), index_path.stat().st_size, extra={"event": "spine.index.write.complete", "details": {"path": str(index_path), "entries": len(ordered_entries), "bytes": index_path.stat().st_size}})
     except OSError as error:
         diagnostics.append(f"preview index write failed: {error}")
+        logger.exception("Spine 索引写入失败 path=%s", index_path, extra={"event": "spine.index.write.failed", "error_code": "SPINE_INDEX_WRITE_FAILED", "details": {"path": str(index_path), "entries": len(ordered_entries)}})
         try:
             temporary.unlink()
         except OSError:
             pass
 
+    logger.info("Spine 资源归档汇总 published=%s copied_files=%s skipped=%s diagnostics=%s", published, copied_files, skipped, diagnostics, extra={"event": "spine.archive.summary", "details": {"published": published, "copied_files": copied_files, "skipped": skipped, "diagnostics": diagnostics[:100]}})
     return RawSpinePublishSummary(
         published=published,
         copied_files=copied_files,

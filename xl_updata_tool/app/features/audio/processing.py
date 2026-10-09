@@ -10,10 +10,17 @@ import re
 import shutil
 import sys
 
-from app.platform.diagnostics import logger, timed, stage_operation, task_operation
+from app.platform.diagnostics import logger, set_task_outcome, timed, stage_operation, task_operation
 from .album_map import audit_bgm_exports, build_album_map
 from app.platform.lua_repository import latest_lua_version, version_directory
 from app.platform.paths import get_base_dir
+
+
+def _audio_file_event(event, message, *, details, outcome, level="info", error_code=None):
+    extra = {"event": event, "details": details, "outcome": outcome}
+    if error_code:
+        extra["error_code"] = error_code
+    getattr(logger, level)(message, extra=extra)
 
 
 class AudioDecryptProcessor:
@@ -72,11 +79,20 @@ class AudioDecryptProcessor:
             self._convert_bytes_to_bank()
 
             if self.is_cancelled():
+                set_task_outcome("cancelled", error_code="AUDIO_POSTPROCESS_CANCELLED", message="音频处理已取消")
                 return {"cancelled": True}
 
             # 步骤 2：解密 .bank 文件
             result = self._decrypt_bank_files()
-            return result or {"cancelled": self.is_cancelled()}
+            if self.is_cancelled():
+                set_task_outcome("cancelled", error_code="AUDIO_POSTPROCESS_CANCELLED", message="音频处理已取消")
+                return result or {"cancelled": True}
+            set_task_outcome(
+                "success",
+                message="音频处理完成",
+                details={"result": result if isinstance(result, (str, int, float, bool, dict, list, type(None))) else type(result).__name__},
+            )
+            return result or {"cancelled": False}
         except Exception as e:
             logger.error(f"音频解密线程异常: {e}", exc_info=True)
             raise
@@ -111,6 +127,13 @@ class AudioDecryptProcessor:
                 # 筛选规则 1：路径必须包含 fmodassets
                 if "fmodassets" not in parts:
                     logger.debug(f"跳过非音频 .bytes 文件（不在 fmodassets 目录下）: {bytes_path}")
+                    _audio_file_event(
+                        "audio.bytes_file.classified",
+                        "bytes 文件被分类为非音频资源",
+                        details={"source": bytes_path, "reason": "outside_fmodassets"},
+                        outcome="skipped",
+                        level="debug",
+                    )
                     skipped += 1
                     continue
 
@@ -118,18 +141,49 @@ class AudioDecryptProcessor:
                 base = os.path.splitext(f)[0]
                 if not base.isdigit() and "bgm" not in parts:
                     logger.debug(f"跳过非音频 .bytes 文件（非语音/bgm）: {bytes_path}")
+                    _audio_file_event(
+                        "audio.bytes_file.classified",
+                        "bytes 文件被分类为非语音/BGM 资源",
+                        details={"source": bytes_path, "reason": "not_voice_or_bgm"},
+                        outcome="skipped",
+                        level="debug",
+                    )
                     skipped += 1
                     continue
 
                 bank_name = f[:-len(".bytes")] + ".bank"
                 bank_path = os.path.join(root, bank_name)
+                source_size = os.path.getsize(bytes_path)
 
                 try:
                     os.rename(bytes_path, bank_path)
                     count += 1
                     logger.info(f"转换 .bytes → .bank: {f} → {bank_name}")
+                    output_size = os.path.getsize(bank_path) if os.path.isfile(bank_path) else 0
+                    succeeded = output_size == source_size
+                    _audio_file_event(
+                        "audio.bytes_to_bank.file",
+                        "音频输入文件已转换为 bank" if succeeded else "bank 转换后校验失败",
+                        details={
+                            "source": bytes_path,
+                            "output": bank_path,
+                            "size_bytes": output_size,
+                            "source_size_bytes": source_size,
+                        },
+                        outcome="success" if succeeded else "failed",
+                        level="info" if succeeded else "error",
+                        error_code=None if succeeded else "AUDIO_BANK_RENAME_VALIDATION_FAILED",
+                    )
                 except (OSError, PermissionError) as e:
                     logger.error(f"重命名失败 {f}: {e}")
+                    _audio_file_event(
+                        "audio.bytes_to_bank.file",
+                        "音频 bytes 转换为 bank 失败",
+                        details={"source": bytes_path, "output": bank_path, "error": str(e)},
+                        outcome="failed",
+                        level="error",
+                        error_code="AUDIO_BANK_RENAME_FAILED",
+                    )
                     continue
 
         logger.info(f"扫描到音频 .bytes 文件: {count} 个（跳过 {skipped} 个非音频文件）")
