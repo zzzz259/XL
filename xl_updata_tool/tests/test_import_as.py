@@ -1,7 +1,49 @@
 import os
+import json
+import io
+import sys
 from pathlib import Path
 
 from app.features.importer.processing import ImportProcessor
+from app.platform.logger import configure_logging
+from app.platform.runtime_config import RuntimeConfig
+
+
+def test_import_as_preserves_parent_environment_when_overriding_dotnet(tmp_path, monkeypatch):
+    monkeypatch.setenv("XL_TEST_PARENT_ENV", "inherited-value")
+    as_cli = tmp_path / "AssetStudio.CLI.dll"
+    as_cli.write_bytes(b"placeholder")
+    captured = {}
+
+    class ExitedProcess:
+        stdout = io.BytesIO()
+        stderr = io.BytesIO()
+        returncode = 0
+
+        def wait(self):
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+    def fake_popen(command, **kwargs):
+        captured.update(kwargs)
+        return ExitedProcess()
+
+    monkeypatch.setattr(
+        "app.features.importer.processing.subprocess.Popen", fake_popen
+    )
+    worker = ImportProcessor(
+        [], str(tmp_path / "bundles"), str(tmp_path / "material"),
+        [str(tmp_path / "dotnet.exe"), str(as_cli)],
+        export_categories={"lua"},
+        as_env={"DOTNET_ROOT": "bundled-runtime"},
+    )
+
+    worker._stage_export(None)
+
+    assert captured["env"]["XL_TEST_PARENT_ENV"] == "inherited-value"
+    assert captured["env"]["DOTNET_ROOT"] == "bundled-runtime"
 
 
 def test_import_as_counts_unrepairable_bundle_as_failure(tmp_path):
@@ -42,6 +84,41 @@ def test_import_as_publishes_versioned_lua_and_cleans_material_staging(tmp_path)
     assert list(lua_dir.iterdir()) == []
 
 
+def test_import_as_forwards_lua_scan_and_batch_progress_to_ui(tmp_path, monkeypatch):
+    material_dir = tmp_path / "material"
+    lua_dir = material_dir / "assets" / "lua"
+    lua_dir.mkdir(parents=True)
+    jar = tmp_path / "unluac.jar"
+    jar.write_bytes(b"jar")
+    progress = []
+
+    class Locator:
+        def unluac_jar(self):
+            return str(jar)
+
+        def unluac_opmap(self):
+            return str(tmp_path / "opmap.json")
+
+    def fake_decompile(_lua_dir, _jar, _opmap, progress_cb, **_kwargs):
+        progress_cb("识别 Lua 文件: 50/100")
+        progress_cb("准备反编译 Lua: 50/100")
+        progress_cb("正在反编译 Lua: 50/100")
+        return 100, 0
+
+    monkeypatch.setattr("app.features.importer.processing.ToolLocator.create", lambda: Locator())
+    monkeypatch.setattr("app.features.importer.processing.decompile_lua_dir", fake_decompile)
+    worker = ImportProcessor(
+        [], str(tmp_path / "bundles"), str(material_dir), "AssetStudio.CLI.exe",
+        progress_stage_callback=lambda *values: progress.append(values),
+    )
+
+    worker._decompile_lua()
+
+    assert ("识别 Lua 文件", 50, 100) in progress
+    assert ("准备反编译 Lua", 50, 100) in progress
+    assert ("反编译 Lua", 50, 100) in progress
+
+
 def test_import_as_keeps_old_output_when_assetstudio_fails(tmp_path, monkeypatch):
     material_dir = tmp_path / "material"
     old_lua = material_dir / "assets" / "lua" / "old.lua"
@@ -51,10 +128,14 @@ def test_import_as_keeps_old_output_when_assetstudio_fails(tmp_path, monkeypatch
     as_cli.write_bytes(b"placeholder")
 
     class FailedProcess:
-        stdout = ()
+        stdout = io.BytesIO()
+        stderr = io.BytesIO()
         returncode = 1
 
         def wait(self):
+            return self.returncode
+
+        def poll(self):
             return self.returncode
 
     monkeypatch.setattr(
@@ -72,7 +153,29 @@ def test_import_as_keeps_old_output_when_assetstudio_fails(tmp_path, monkeypatch
     assert old_lua.read_text(encoding="utf-8") == "old"
 
 
+def test_import_as_records_assetstudio_output_and_zero_artifact_result(tmp_path):
+    cli_script = tmp_path / "fake_assetstudio.py"
+    cli_script.write_text("print('simulated AssetStudio scan')\n", encoding="utf-8")
+    session = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
+    worker = ImportProcessor(
+        [], str(tmp_path / "bundles"), str(tmp_path / "material"),
+        [sys.executable, str(cli_script)], export_categories={"lua"},
+    )
+
+    file_count, message = worker._stage_export(None)
+
+    assert file_count == 0
+    assert "文件数为 0" in message
+    command_log = next((session.directory / "external").rglob("stdout.log"))
+    assert "simulated AssetStudio scan" in command_log.read_text(encoding="utf-8")
+    manifest = json.loads(command_log.with_name("command.json").read_text(encoding="utf-8"))
+    assert manifest["return_code"] == 0
+    assert manifest["output_verified"] is False
+    assert manifest["output_files_added"] == 0
+
+
 def test_import_as_commits_partial_assetstudio_output(tmp_path, monkeypatch):
+    session = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
     material_dir = tmp_path / "material"
     old_lua = material_dir / "assets" / "lua" / "old.lua"
     old_lua.parent.mkdir(parents=True)
@@ -87,9 +190,13 @@ def test_import_as_commits_partial_assetstudio_output(tmp_path, monkeypatch):
             output = output_dir / "assets" / "lua" / "new.lua"
             output.parent.mkdir(parents=True)
             output.write_text("new", encoding="utf-8")
-            self.stdout = ()
+            self.stdout = io.BytesIO()
+            self.stderr = io.BytesIO()
 
         def wait(self):
+            return self.returncode
+
+        def poll(self):
             return self.returncode
 
     monkeypatch.setattr(
@@ -105,6 +212,8 @@ def test_import_as_commits_partial_assetstudio_output(tmp_path, monkeypatch):
     assert total == 1
     assert message == ""
     assert (material_dir / "assets" / "lua" / "new.lua").read_text(encoding="utf-8") == "new"
+    command_manifest = json.loads(next((session.directory / "external").rglob("command.json")).read_text(encoding="utf-8"))
+    assert command_manifest["output_files"] == [{"path": "assets/lua/new.lua", "size": 3}]
 
 
 def test_import_as_replaces_only_selected_category(tmp_path):

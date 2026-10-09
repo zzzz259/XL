@@ -10,6 +10,7 @@ from PySide6.QtCore import QPoint, QObject, Qt, QMimeData, QUrl, Signal
 from PySide6.QtWidgets import QApplication, QDialog, QListWidgetItem, QMenu, QMessageBox
 
 from app.platform.diagnostics import logger
+from app.platform.processes import run_external_process, update_process_manifest
 
 from .item import build_preview_item
 from .page import PreviewPage
@@ -606,12 +607,27 @@ class PreviewController(QObject):
                     ",".join(job.settings.skins),
                     subprocess.list2cmdline(command),
                 )
-                result = subprocess.run(
+                result = run_external_process(
                     command,
+                    tool="SpineViewerCLI-export",
                     check=False,
                     capture_output=True,
                     text=True,
                     timeout=300,
+                )
+                output_exists = job.output_path.is_file()
+                output_bytes = job.output_path.stat().st_size if output_exists else 0
+                update_process_manifest(
+                    result,
+                    input_resources=[
+                        {"skel": record.source_skel, "atlas": record.atlas_path, "skin": record.skin_name, "resource_family": record.resource_family}
+                        for record in getattr(job, "records", (job.record,))
+                    ],
+                    requested_output=str(job.output_path),
+                    output_verified=result.returncode == 0 and output_exists and output_bytes > 0,
+                    output_bytes=output_bytes,
+                    business_outcome="success" if result.returncode == 0 and output_exists and output_bytes > 0 else "failed",
+                    error_code=("SPINE_OUTPUT_NOT_CREATED" if result.returncode == 0 and not output_exists else "SPINE_OUTPUT_EMPTY" if result.returncode == 0 and output_exists and output_bytes <= 0 else "SPINE_CLI_NONZERO_EXIT" if result.returncode != 0 else None),
                 )
                 if result.returncode != 0:
                     logger.error(

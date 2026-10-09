@@ -82,7 +82,7 @@ def test_all_pass_report_exit_code_zero():
 def test_self_check_passes_on_complete_release_tree(tmp_path, monkeypatch, capsys):
     locator = _make_release_tree(tmp_path)
     _isolate_dirs(monkeypatch, tmp_path)
-    monkeypatch.setattr(self_check.subprocess, "run", _fake_process_run)
+    monkeypatch.setattr(self_check, "run_external_process", _fake_process_run)
     monkeypatch.setattr(self_check.importlib, "import_module", lambda name: object())
 
     exit_code = run_self_check(locator=locator, report_dir=tmp_path / "reports")
@@ -100,7 +100,7 @@ def test_self_check_fails_when_tool_missing(tmp_path, monkeypatch):
     locator = _make_release_tree(tmp_path)
     (tmp_path / "tools" / "lua" / "unluac.jar").unlink()
     _isolate_dirs(monkeypatch, tmp_path)
-    monkeypatch.setattr(self_check.subprocess, "run", _fake_process_run)
+    monkeypatch.setattr(self_check, "run_external_process", _fake_process_run)
     monkeypatch.setattr(self_check.importlib, "import_module", lambda name: object())
 
     exit_code = run_self_check(locator=locator, report_dir=tmp_path)
@@ -120,7 +120,7 @@ def test_self_check_fails_without_dotnet8_runtime(tmp_path, monkeypatch):
             return subprocess.CompletedProcess(args, 0, stdout="Microsoft.NETCore.App 6.0.32", stderr="")
         return _fake_process_run(args, **kwargs)
 
-    monkeypatch.setattr(self_check.subprocess, "run", run_without_dotnet8)
+    monkeypatch.setattr(self_check, "run_external_process", run_without_dotnet8)
     monkeypatch.setattr(self_check.importlib, "import_module", lambda name: object())
 
     exit_code = run_self_check(locator=locator, report_dir=tmp_path)
@@ -136,7 +136,7 @@ def test_self_check_fails_when_java_runtime_missing(tmp_path, monkeypatch):
     locator = _make_release_tree(tmp_path)
     (tmp_path / "runtimes" / "java" / "bin" / "java.exe").unlink()
     _isolate_dirs(monkeypatch, tmp_path)
-    monkeypatch.setattr(self_check.subprocess, "run", _fake_process_run)
+    monkeypatch.setattr(self_check, "run_external_process", _fake_process_run)
     monkeypatch.setattr(self_check.importlib, "import_module", lambda name: object())
 
     exit_code = run_self_check(locator=locator, report_dir=tmp_path)
@@ -145,3 +145,18 @@ def test_self_check_fails_when_java_runtime_missing(tmp_path, monkeypatch):
     report = SelfCheckReport(tuple(self_check._collect_checks(locator)))
     java = next(result for result in report.results if "Java" in result.name)
     assert not java.ok
+
+
+def test_self_check_fails_when_qtwidgets_dll_cannot_load(monkeypatch):
+    def import_module(name):
+        if name == "PySide6.QtWidgets":
+            raise ImportError("DLL load failed while importing QtWidgets")
+        return object()
+
+    monkeypatch.setattr(self_check.importlib, "import_module", import_module)
+
+    results = self_check._check_python_modules()
+
+    qtwidgets = next(result for result in results if "QtWidgets" in result.name)
+    assert not qtwidgets.ok
+    assert "DLL load failed" in qtwidgets.detail

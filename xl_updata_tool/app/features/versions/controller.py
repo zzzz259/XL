@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -51,6 +51,8 @@ class VersionController(QObject):
         self._download_label = None
         self._download_failed = False
         self._check_thread = None
+        self._check_result_handled = False
+        self._notify_check_errors = True
         self._closing = False
         self._connect_page()
 
@@ -265,16 +267,19 @@ class VersionController(QObject):
             old_hashes = [item[0] for item in (self.service.bundles(current[0]) or [])]
         self.page.set_checking(True)
         self.check_state_changed.emit(True)
+        self._check_result_handled = False
+        self._notify_check_errors = notify_errors
         self._check_thread = CheckUpdateThread(str(self.service.bundles_dir / "current"), old_hashes)
-        self._check_thread.finished.connect(self._on_update_checked)
-        self._check_thread.error.connect(
-            lambda error: self._on_check_error(error, notify_errors)
-        )
+        self._check_thread.result_ready.connect(self._on_update_checked, Qt.QueuedConnection)
+        self._check_thread.error.connect(self._on_check_error, Qt.QueuedConnection)
+        self._check_thread.finished.connect(self._on_check_thread_finished, Qt.QueuedConnection)
         self._check_thread.start()
 
+    @Slot(object, object, object, object)
     def _on_update_checked(self, info, versions, new_hashes, delta):
         if self._closing:
             return
+        self._check_result_handled = True
         self._finish_check()
         result = self.service.register_checked(info, versions, new_hashes, delta)
         if result:
@@ -285,20 +290,31 @@ class VersionController(QObject):
             QMessageBox.information(self.page, "已是最新", "当前已是最新版本，无需更新。")
         self.load()
 
-    def _on_check_error(self, error, notify_errors=True):
+    @Slot(str)
+    def _on_check_error(self, error):
         if self._closing:
             return
+        self._check_result_handled = True
         self._finish_check()
         self._set_status(f"更新检查失败，可点击‘检查更新’重试：{error}")
-        if notify_errors:
+        if self._notify_check_errors:
             QMessageBox.warning(self.page, "错误", f"检查更新失败:\n{error}")
 
     def _finish_check(self):
         if self._closing:
             return
-        self._check_thread = None
         self.page.set_checking(False)
         self.check_state_changed.emit(False)
+
+    @Slot()
+    def _on_check_thread_finished(self):
+        worker = self.sender()
+        if self._check_thread is not worker:
+            return
+        self._check_thread = None
+        if not self._closing and not self._check_result_handled:
+            self._finish_check()
+            self._set_status("更新检查未完成，可点击‘检查更新’重试。")
 
     def download_version(self, timestamp, delta_only=True):
         if self._closing or not timestamp:

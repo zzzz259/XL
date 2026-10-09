@@ -6,7 +6,7 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-from app.platform.diagnostics import logger
+from app.platform.diagnostics import logger, set_task_outcome, task_operation
 
 
 class PreviewPostprocessWorker(QThread):
@@ -42,6 +42,7 @@ class PreviewPostprocessWorker(QThread):
     def cancel(self):
         self._cancelled = True
 
+    @task_operation("IMAGE_POSTPROCESS", "preview", lambda self: {"service": type(self.service).__name__})
     def run(self):
         try:
             summary = self.service.preprocess_preview_resources(
@@ -50,11 +51,26 @@ class PreviewPostprocessWorker(QThread):
                 detail_progress_callback=self.detail_progress.emit,
             )
             if self._cancelled:
+                set_task_outcome("cancelled", error_code="IMAGE_POSTPROCESS_CANCELLED", message="图片资源预处理已取消")
                 self.cancelled_processing.emit()
             else:
+                materials = summary.materials
+                spine = summary.spine
+                set_task_outcome(
+                    "success",
+                    message="图片资源预处理完成",
+                    details={
+                        "spine_published": spine.published,
+                        "spine_copied_files": spine.copied_files,
+                        "spine_skipped": spine.skipped,
+                        "materials_exported": materials.exported,
+                        "materials_failed": materials.failed,
+                    },
+                )
                 self.finished_processing.emit(summary)
         except Exception as error:
             logger.error("图片资源预处理失败: %s", error, exc_info=True)
+            set_task_outcome("failed", error_code="IMAGE_POSTPROCESS_FAILED", message=str(error))
             self.error.emit(str(error))
         finally:
             with self._lock:

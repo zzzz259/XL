@@ -379,7 +379,11 @@ class UIPackageTool:
         base_name = os.path.splitext(os.path.basename(byte_file))[0]
         out_path = export_dir if explicit_package_dir else os.path.join(export_dir, base_name)
         os.makedirs(out_path, exist_ok=True)
-        logger.info(f"FGUI 图集切割: {byte_file} -> {out_path}")
+        logger.info(
+            "FGUI 图集切割开始 package=%s source=%s source_bytes=%s destination=%s overwrite=%s",
+            base_name, byte_file, os.path.getsize(byte_file), out_path, is_override_exists,
+            extra={"event": "atlas.split.start", "details": {"package": base_name, "source": byte_file, "source_bytes": os.path.getsize(byte_file), "destination": out_path, "overwrite": is_override_exists}},
+        )
         info_output_file = os.path.join(out_path, f"{base_name}_cut_info.json")
         cut_info = []
         with open(byte_file, 'rb') as f:
@@ -397,16 +401,27 @@ class UIPackageTool:
                 atlas_file = item.file.replace("_fui", "")
                 atlas_path = os.path.join(file_dir, atlas_file)
                 if os.path.exists(atlas_path):
-                    atlas_map[item.file] = Image.open(atlas_path).convert("RGBA")
+                    atlas_image = Image.open(atlas_path).convert("RGBA")
+                    atlas_map[item.file] = atlas_image
+                    logger.info("FGUI atlas 图像已载入 package=%s atlas=%s size=%s", pkg.name, atlas_path, atlas_image.size, extra={"event": "atlas.image.loaded", "details": {"package": pkg.name, "atlas": atlas_path, "width": atlas_image.width, "height": atlas_image.height}})
+                else:
+                    logger.error("FGUI atlas 图像缺失 package=%s atlas=%s referenced_by=%s", pkg.name, atlas_path, item.file, extra={"event": "atlas.image.missing", "error_code": "ATLAS_IMAGE_MISSING", "details": {"package": pkg.name, "atlas": atlas_path, "reference": item.file}})
+        logger.info("FGUI 包解析完成 package=%s sprite_count=%s atlas_count=%s", pkg.name, len(sprites), len(atlas_map), extra={"event": "atlas.package.parsed", "details": {"package": pkg.name, "sprite_count": len(sprites), "atlas_count": len(atlas_map)}})
+        exported_count = 0
+        skipped_count = 0
         for sprite_id, sprite in sprites.items():
             item = pkg.get_item(sprite_id)
             if not item and not is_chat_emoji:
+                skipped_count += 1
+                logger.warning("FGUI 精灵缺少资源条目 package=%s sprite_id=%s", pkg.name, sprite_id, extra={"event": "atlas.sprite.skipped", "error_code": "ATLAS_SPRITE_ITEM_MISSING", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "reason": "item_missing"}})
                 continue
             name = item.name if item else str(sprite_id)
             rect = sprite.rect
             rotated = sprite.rotated
             atlas_key = sprite.atlas.file if sprite.atlas else None
             if not atlas_key or atlas_key not in atlas_map:
+                skipped_count += 1
+                logger.error("FGUI 精灵引用的 atlas 未载入 package=%s sprite_id=%s sprite_name=%s atlas=%s", pkg.name, sprite_id, name, atlas_key, extra={"event": "atlas.sprite.failed", "error_code": "ATLAS_SPRITE_ATLAS_MISSING", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "atlas": atlas_key}})
                 continue
             atlas_img = atlas_map[atlas_key]
             x = int(rect.x)
@@ -416,17 +431,30 @@ class UIPackageTool:
             atlas_width, atlas_height = atlas_img.size
             if x < 0 or y < 0 or x + width > atlas_width or y + height > atlas_height:
                 logger.warning(f"FGUI 精灵越界: {name}")
+                skipped_count += 1
+                logger.error("FGUI 精灵矩形越界 package=%s sprite_id=%s atlas=%s rect=%s atlas_size=%s", pkg.name, sprite_id, atlas_key, (x, y, width, height), atlas_img.size, extra={"event": "atlas.sprite.failed", "error_code": "ATLAS_SPRITE_RECT_OUT_OF_BOUNDS", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "atlas": atlas_key, "rect": [x, y, width, height], "atlas_size": list(atlas_img.size)}})
                 continue
             safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(sprite_id if is_chat_emoji else name)).strip(" .") or "sprite"
             output_file_name = f"{safe_name}.png"
             output_path = os.path.join(out_path, output_file_name)
             if is_override_exists or not os.path.exists(output_path):
-                sub_image = atlas_img.crop((x, y, x + width, y + height))
-                if rotated:
-                    sub_image = sub_image.transpose(Image.ROTATE_90)
-                    sub_image = sub_image.transpose(Image.ROTATE_180)
-                sub_image = sub_image.convert("RGBA")
-                sub_image.save(output_path, "PNG")
+                try:
+                    logger.debug("FGUI 精灵裁切开始 package=%s sprite_id=%s name=%s atlas=%s rect=%s output=%s rotated=%s", pkg.name, sprite_id, name, atlas_key, (x, y, width, height), output_path, rotated, extra={"event": "atlas.sprite.start", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "atlas": atlas_key, "rect": [x, y, width, height], "output": output_path, "rotated": rotated}})
+                    sub_image = atlas_img.crop((x, y, x + width, y + height))
+                    if rotated:
+                        sub_image = sub_image.transpose(Image.ROTATE_90)
+                        sub_image = sub_image.transpose(Image.ROTATE_180)
+                    sub_image = sub_image.convert("RGBA")
+                    sub_image.save(output_path, "PNG")
+                    output_bytes = os.path.getsize(output_path)
+                    exported_count += 1
+                    logger.info("FGUI 精灵裁切完成 package=%s sprite_id=%s name=%s output=%s bytes=%s", pkg.name, sprite_id, name, output_path, output_bytes, extra={"event": "atlas.sprite.complete", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "atlas": atlas_key, "output": output_path, "output_bytes": output_bytes, "width": sub_image.width, "height": sub_image.height}})
+                except Exception:
+                    logger.exception("FGUI 精灵裁切异常 package=%s sprite_id=%s name=%s atlas=%s output=%s", pkg.name, sprite_id, name, atlas_key, output_path, extra={"event": "atlas.sprite.failed", "error_code": "ATLAS_SPRITE_EXPORT_FAILED", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "atlas": atlas_key, "output": output_path}})
+                    raise
+            else:
+                skipped_count += 1
+                logger.info("FGUI 精灵跳过（保留现有文件） package=%s sprite_id=%s name=%s output=%s", pkg.name, sprite_id, name, output_path, extra={"event": "atlas.sprite.skipped", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "output": output_path, "reason": "output_exists"}})
             cut_info.append({
                 "sprite_id": str(sprite_id),
                 "sprite_name": name,
@@ -438,4 +466,4 @@ class UIPackageTool:
             })
         with open(info_output_file, 'w', encoding='utf-8') as f:
             json.dump(cut_info, f, indent=4, ensure_ascii=False)
-        logger.info(f"FGUI 图集切割完成: {base_name}，{len(cut_info)} 个精灵")
+        logger.info("FGUI 图集切割完成 package=%s sprite_metadata=%s exported=%s skipped=%s destination=%s", base_name, len(cut_info), exported_count, skipped_count, out_path, extra={"event": "atlas.split.complete", "details": {"package": base_name, "sprite_metadata": len(cut_info), "exported": exported_count, "skipped": skipped_count, "destination": out_path, "metadata_path": info_output_file}})

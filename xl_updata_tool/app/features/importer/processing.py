@@ -12,9 +12,11 @@ import subprocess
 import shutil
 import sys
 import tempfile
+import threading
 import time
 
-from app.platform.diagnostics import logger, timed, stage_operation, task_operation
+from app.platform.diagnostics import logger, set_task_outcome, timed, stage_operation, task_operation
+from app.platform.processes import run_external_process, update_process_manifest
 from app.platform.paths import get_base_dir
 from app.platform.bundle_parser import fix_bundle_inplace
 from app.platform.files import replace_directory
@@ -60,8 +62,12 @@ class ImportProcessor:
         else:
             self.as_command = [str(as_cli)]
         self.as_cli = self.as_command[-1]
-        # bundled dotnet 的环境变量覆盖（DOTNET_ROOT 等）；None 表示直接继承父进程环境。
-        self.as_env = dict(as_env) if as_env else None
+        # 调用方传入的是 bundled runtime 的环境变量覆盖，不是完整环境。
+        # subprocess.Popen(env=...) 会替换而非合并父进程环境，因此在这里补齐。
+        self.as_env = None
+        if as_env:
+            self.as_env = os.environ.copy()
+            self.as_env.update(as_env)
         self.export_types = export_types
         self.export_categories = export_categories
         self.version_timestamp = version_timestamp
@@ -69,6 +75,7 @@ class ImportProcessor:
         self.lua_export_result = None
         self._cancelled = False
         self._last_progress_emit = 0.0
+        self._last_progress_label = None
         self._working_material_dir = material_dir
         self._staging_material_dir = None
         self._isolate_bundle_dir = bool(isolate_bundle_dir)
@@ -80,6 +87,8 @@ class ImportProcessor:
         self._category_progress_callback = category_progress_callback
         self._all_finished_callback = all_finished_callback
         self._cancel_check = cancel_check
+        self._categories_with_output = set()
+        self._categories_without_output = set()
 
     def cancel(self):
         self._cancelled = True
@@ -105,14 +114,42 @@ class ImportProcessor:
             self._category_finished_callback(label)
 
     def _emit_all_finished(self, success, message):
+        requested = sorted(self.export_categories or [])
+        produced = sorted(self._categories_with_output)
+        missing = sorted(set(requested) - self._categories_with_output) if requested else []
+        cancelled = str(message) == "已取消"
+        if cancelled:
+            outcome = "cancelled"
+        elif not success:
+            outcome = "failed"
+        elif missing:
+            outcome = "partial"
+        else:
+            outcome = "success"
+        set_task_outcome(
+            outcome,
+            error_code=("IMPORT_CANCELLED" if cancelled else "IMPORT_FAILED" if outcome == "failed" else "IMPORT_PARTIAL" if outcome == "partial" else None),
+            message=str(message),
+            details={
+                "requested_categories": requested,
+                "categories_with_output": produced,
+                "categories_without_output": missing,
+            },
+        )
         if self._all_finished_callback:
             self._all_finished_callback(success, message)
 
     def _emit_progress(self, label, current, total):
         """节流进度信号：阶段起点/终点必发，中间值 200ms 才发一次，避免 UI 闪烁"""
         now = time.time()
-        if current == 0 or current == total or now - self._last_progress_emit > 0.2:
+        if (
+            current == 0
+            or current == total
+            or label != self._last_progress_label
+            or now - self._last_progress_emit > 0.2
+        ):
             self._last_progress_emit = now
+            self._last_progress_label = label
             self._emit_progress_stage(label, current, total)
 
     @task_operation(
@@ -198,15 +235,23 @@ class ImportProcessor:
             if self.is_cancelled():
                 break
             h = os.path.basename(f).replace(".bundle", "")
+            size_before = os.path.getsize(f) if os.path.isfile(f) else 0
+            logger.info("Bundle 文件头处理开始 [%s/%s] path=%s size=%s", i + 1, total, f, size_before, extra={"event": "bundle.header_fix.start", "details": {"path": f, "size_before": size_before, "index": i + 1, "total": total}})
             try:
                 if fix_bundle_inplace(f):
                     success += 1
                     logger.debug(f"[导入AS] 修复完成: {h[:16]}...")
+                    size_after = os.path.getsize(f) if os.path.isfile(f) else 0
+                    with open(f, "rb") as bundle_file:
+                        header_after = bundle_file.read(7).decode("ascii", errors="replace")
+                    logger.info("Bundle 文件头处理通过 path=%s size_before=%s size_after=%s header=%s", f, size_before, size_after, header_after, extra={"event": "bundle.header_fix.complete", "details": {"path": f, "size_before": size_before, "size_after": size_after, "header_after": header_after}})
                 else:
                     fail += 1
                     logger.error(f"[导入AS] 修复未通过: {h[:16]}...")
+                    logger.error("Bundle 文件头校验失败 path=%s size=%s", f, size_before, extra={"event": "bundle.header_fix.failed", "error_code": "BUNDLE_HEADER_INVALID", "details": {"path": f, "size": size_before}})
             except Exception as e:
                 logger.error(f"[导入AS] 修复失败: {h[:16]}... - {e}")
+                logger.exception("Bundle 文件头处理异常 path=%s", f, extra={"event": "bundle.header_fix.failed", "error_code": "BUNDLE_HEADER_FIX_EXCEPTION", "details": {"path": f, "size_before": size_before}})
                 fail += 1
             self._emit_progress_stage("修复文件头", i + 1, total)
         logger.info(f"[导入AS] 阶段1完成: 成功 {success}, 失败 {fail}")
@@ -225,38 +270,64 @@ class ImportProcessor:
         logger.info(f"[导入AS] 阶段2: 解析资源，输出映射到 {map_dir}（{total_bundles} 个 bundle）")
         self._emit_progress("解析资源", 0, total_bundles)
         try:
-            proc = subprocess.Popen(
+            loaded = 0
+            progress_lock = threading.Lock()
+
+            def on_line(_stream, line):
+                nonlocal loaded
+                if "Loading" in line and ".bundle" in line:
+                    with progress_lock:
+                        loaded += 1
+                        current = loaded
+                    self._emit_progress("解析资源", current, total_bundles)
+
+            proc = run_external_process(
                 self.as_command + [self._cli_bundle_dir, map_dir, "--game", "UnityCN", "--key_index", "23",
                  "--map_op", "Both", "--map_type", "JSON"],
-                cwd=os.path.dirname(self.as_cli), env=self.as_env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, bufsize=1,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-            loaded = 0
-            for line in proc.stdout:
-                if self.is_cancelled():
-                    proc.terminate()
-                    break
-                line = line.strip()
-                if not line:
-                    continue
-                if "Loading" in line and ".bundle" in line:
-                    loaded += 1
-                    self._emit_progress("解析资源", loaded, total_bundles)
-                elif "Process Assets" in line or "Read assets" in line:
-                    logger.debug(f"[导入AS] CLI: {line}")
-                else:
-                    logger.debug(f"[导入AS] CLI: {line}")
-            proc.wait()
+                tool="AssetStudio-map",
+                cwd=os.path.dirname(self.as_cli),
+                env=self.as_env,
+                text=True,
+                on_line=on_line,
+                cancel_check=self.is_cancelled,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            if getattr(proc, "xl_cancelled", False) or self.is_cancelled():
+                update_process_manifest(proc, business_outcome="cancelled", input_bundles=[{"path": path, "size": os.path.getsize(path) if os.path.isfile(path) else 0} for path in self.bundle_paths])
+                return None, "已取消"
+            if proc.returncode != 0:
+                logger.error("AssetStudio 资源映射失败 exit_code=%s command_id=%s", proc.returncode, getattr(proc, "xl_command_id", "-"))
+                update_process_manifest(proc, input_bundles=[{"path": path, "size": os.path.getsize(path) if os.path.isfile(path) else 0} for path in self.bundle_paths], output_verified=False, business_outcome="failed", error_code="AS_MAP_PROCESS_FAILED")
+                return None, f"AssetStudio 资源映射失败（退出码 {proc.returncode}）"
             map_file = os.path.join(map_dir, "assets_map.json")
             if os.path.exists(map_file) and os.path.getsize(map_file) > 100:
                 with open(map_file, "r", encoding="utf-8") as f:
                     assets = json.load(f)
+                update_process_manifest(
+                    proc,
+                    input_bundles=[{"path": path, "size": os.path.getsize(path) if os.path.isfile(path) else 0} for path in self.bundle_paths],
+                    output_verified=True,
+                    output_path=map_file,
+                    output_bytes=os.path.getsize(map_file),
+                    mapped_asset_count=len(assets),
+                    business_outcome="success",
+                )
                 logger.info(f"[导入AS] 阶段2完成: 解析到 {len(assets)} 个资源")
+                logger.info("AssetStudio 资源映射验证通过 path=%s size=%s mapped_assets=%s", map_file, os.path.getsize(map_file), len(assets), extra={"event": "assetstudio.map.verified", "details": {"path": map_file, "size": os.path.getsize(map_file), "mapped_assets": len(assets)}})
                 return assets, ""
             else:
+                update_process_manifest(
+                    proc,
+                    input_bundles=[{"path": path, "size": os.path.getsize(path) if os.path.isfile(path) else 0} for path in self.bundle_paths],
+                    output_verified=False,
+                    output_path=map_file,
+                    output_bytes=os.path.getsize(map_file) if os.path.exists(map_file) else 0,
+                    business_outcome="failed",
+                    error_code="AS_MAP_OUTPUT_MISSING",
+                )
                 return None, "assets_map.json 为空或不存在"
         except Exception as e:
+            logger.exception("AssetStudio 资源映射阶段异常 map_dir=%s", map_dir, extra={"event": "assetstudio.map.failed", "error_code": "AS_MAP_EXCEPTION", "details": {"map_dir": map_dir}})
             return None, str(e)
 
     @timed("导入AS-导出分类")
@@ -273,6 +344,8 @@ class ImportProcessor:
         self._staging_material_dir = staging_root
         self._working_material_dir = os.path.join(staging_root, "material")
         os.makedirs(self._working_material_dir, exist_ok=True)
+        self._categories_with_output = set()
+        self._categories_without_output = set()
         logger.info(f"[导入AS] 阶段3: 先导出到临时目录 {self._working_material_dir}")
 
         try:
@@ -302,47 +375,77 @@ class ImportProcessor:
                       ["--group_assets", "ByContainer", "--export_type", "Convert"]
                 logger.info(f"[导入AS] {label} 开始（{i + 1}/{total}）: {' '.join(cmd)}")
                 self._emit_category_progress(label, 0, total_bundles)
-                t0 = time.time()
-                try:
-                    proc = subprocess.Popen(
-                        cmd, cwd=os.path.dirname(self.as_cli), env=self.as_env,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, bufsize=1,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-                    loaded = 0
-                    for line in proc.stdout:
-                        if self.is_cancelled():
-                            proc.terminate()
-                            break
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if "Loading" in line and ".bundle" in line:
+                before_files = self._snapshot_files(self._working_material_dir)
+                loaded = 0
+                progress_lock = threading.Lock()
+
+                def on_line(_stream, line):
+                    nonlocal loaded
+                    if "Loading" in line and ".bundle" in line:
+                        bundle_match = re.findall(
+                            r"([^\\/\s\"']+\.bundle)\b", line, flags=re.IGNORECASE
+                        )
+                        current_bundle = bundle_match[-1] if bundle_match else ""
+                        with progress_lock:
                             loaded += 1
-                            bundle_match = re.findall(
-                                r"([^\\/\s\"']+\.bundle)\b", line, flags=re.IGNORECASE
-                            )
-                            current_bundle = bundle_match[-1] if bundle_match else ""
-                            progress_label = (
-                                f"{label} · {current_bundle}" if current_bundle else label
-                            )
-                            self._emit_category_progress(progress_label, loaded, total_bundles)
-                        else:
-                            logger.debug(f"[导入AS] CLI: {line}")
-                    proc.wait()
-                    elapsed = time.time() - t0
+                            current = loaded
+                        progress_label = f"{label} · {current_bundle}" if current_bundle else label
+                        self._emit_category_progress(progress_label, current, total_bundles)
+
+                try:
+                    proc = run_external_process(
+                        cmd,
+                        tool=f"AssetStudio-{label.removeprefix('导出 ')}",
+                        cwd=os.path.dirname(self.as_cli),
+                        env=self.as_env,
+                        text=True,
+                        on_line=on_line,
+                        cancel_check=self.is_cancelled,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    )
+                    after_files = self._snapshot_files(self._working_material_dir)
+                    changed_files = sorted(
+                        path for path, state in after_files.items()
+                        if before_files.get(path) != state
+                    )
+                    output_verified = bool(changed_files)
+                    category = label.removeprefix("导出 ")
+                    output_records = [{"path": path, "size": after_files[path][0]} for path in changed_files]
+                    for output_record in output_records:
+                        logger.debug("AssetStudio 单文件产物验证 category=%s path=%s size=%s command_id=%s", category, output_record["path"], output_record["size"], getattr(proc, "xl_command_id", "-"), extra={"event": "assetstudio.output_file", "details": {"category": category, "command_id": getattr(proc, "xl_command_id", "-"), **output_record}})
+                    if output_verified and category in self.export_categories:
+                        self._categories_with_output.add(category)
+                    update_process_manifest(
+                        proc,
+                        category=category,
+                        output_verified=output_verified,
+                        output_files_added=len(changed_files),
+                        output_sample=changed_files[:20],
+                        output_files=output_records,
+                        business_outcome="success" if proc.returncode == 0 and output_verified else "unverified" if proc.returncode == 0 else "failed",
+                        error_code="AS_NO_EXPECTED_OUTPUT" if proc.returncode == 0 and not output_verified else None,
+                    )
+                    if getattr(proc, "xl_cancelled", False) or self.is_cancelled():
+                        return 0, "已取消"
                     if proc.returncode != 0:
                         failed_labels.append(label)
-                        logger.warning(f"[导入AS] {label} 导出失败 (退出码 {proc.returncode}, 耗时 {elapsed:.1f}s)")
+                        logger.warning("[导入AS] %s 导出失败 (退出码 %s)", label, proc.returncode)
+                        logger.error("AssetStudio 分类命令失败 category=%s command_id=%s exit_code=%s verified_files=%s", category, getattr(proc, "xl_command_id", "-"), proc.returncode, len(changed_files), extra={"event": "assetstudio.category.failed", "error_code": "AS_CATEGORY_NONZERO_EXIT", "details": {"category": category, "command_id": getattr(proc, "xl_command_id", "-"), "exit_code": proc.returncode, "output_files": output_records}})
                     else:
-                        logger.info(f"[导入AS] {label} 完成（耗时 {elapsed:.1f}s）")
-                        completed_labels.append(label)
+                        if output_verified:
+                            logger.info("[导入AS] %s 完成，新增或更新 %s 个文件", label, len(changed_files))
+                            logger.info("AssetStudio 分类产物验证通过 category=%s command_id=%s files=%s", category, getattr(proc, "xl_command_id", "-"), len(changed_files), extra={"event": "assetstudio.category.complete", "details": {"category": category, "command_id": getattr(proc, "xl_command_id", "-"), "output_files": output_records}})
+                            completed_labels.append(label)
+                        else:
+                            logger.warning("AssetStudio 进程成功退出但没有观察到新产物 category=%s command_id=%s", category, getattr(proc, "xl_command_id", "-"))
                 except subprocess.TimeoutExpired:
                     failed_labels.append(label)
                     logger.error(f"[导入AS] {label} 导出超时（>300s）")
+                    logger.exception("AssetStudio 分类命令超时 category=%s", label.removeprefix("导出 "), extra={"event": "assetstudio.category.failed", "error_code": "AS_CATEGORY_TIMEOUT", "details": {"category": label.removeprefix("导出 "), "command": cmd}})
                 except Exception as e:
                     failed_labels.append(label)
                     logger.error(f"[导入AS] {label} 导出异常: {e}")
+                    logger.exception("AssetStudio 分类命令异常 category=%s", label.removeprefix("导出 "), extra={"event": "assetstudio.category.failed", "error_code": "AS_CATEGORY_EXCEPTION", "details": {"category": label.removeprefix("导出 "), "command": cmd}})
 
             if self.is_cancelled():
                 return 0, "已取消"
@@ -369,21 +472,28 @@ class ImportProcessor:
                 )
 
             if self.export_categories and "lua" in self.export_categories:
-                self._decompile_lua()
+                if "lua" in self._categories_with_output:
+                    self._decompile_lua()
 
             self._cleanup_prefab_suffix(self._working_material_dir)
             total_files = self._count_files(self._working_material_dir)
             if total_files <= 0:
                 return 0, "导出完成但文件数为 0，请检查资源"
 
-            self._commit_staged_material()
-            if self.export_categories and "lua" in self.export_categories:
+            if self.export_categories:
+                self._categories_without_output = set(self.export_categories) - self._categories_with_output
+            self._commit_staged_material(
+                categories=self._categories_with_output if self.export_categories else None
+            )
+            if self.export_categories and "lua" in self._categories_with_output:
                 self.lua_export_result = self._sync_lua_output()
-            for category in sorted(self.export_categories or ()):
-                if category not in {label.removeprefix("导出 ") for label in completed_labels}:
-                    completed_labels.append(f"导出 {category}")
             for label in completed_labels:
                 self._emit_category_finished(label)
+            if self._categories_without_output:
+                logger.warning(
+                    "本次没有验证到产物，已保留这些分类的旧文件: %s",
+                    sorted(self._categories_without_output),
+                )
             logger.info(f"[导入AS] 阶段3完成: 共导出 {total_files} 个文件到 {self.material_dir}")
             return total_files, ""
         finally:
@@ -392,17 +502,25 @@ class ImportProcessor:
                 shutil.rmtree(self._staging_material_dir, ignore_errors=True)
                 self._staging_material_dir = None
 
-    def _commit_staged_material(self):
+    def _commit_staged_material(self, categories=None):
         """只在全部分类成功后替换最终产物，保留未选中的分类。"""
         if not self.export_categories:
-            replace_directory(self._working_material_dir, self.material_dir)
+            source_count = self._count_files(self._working_material_dir)
+            previous_count = self._count_files(self.material_dir)
+            logger.info("素材目录全量提交开始 source=%s destination=%s source_files=%s previous_files=%s", self._working_material_dir, self.material_dir, source_count, previous_count, extra={"event": "import.commit.start", "details": {"source": self._working_material_dir, "destination": self.material_dir, "source_files": source_count, "previous_files": previous_count}})
+            try:
+                replace_directory(self._working_material_dir, self.material_dir)
+            except Exception:
+                logger.exception("素材目录全量提交失败 source=%s destination=%s", self._working_material_dir, self.material_dir, extra={"event": "import.commit.failed", "error_code": "IMPORT_COMMIT_FAILED", "details": {"source": self._working_material_dir, "destination": self.material_dir}})
+                raise
+            logger.info("素材目录全量提交完成 destination=%s files=%s", self.material_dir, source_count, extra={"event": "import.commit.complete", "details": {"destination": self.material_dir, "files": source_count}})
             return
 
         material_root = os.path.abspath(self.material_dir)
         backup_root = tempfile.mkdtemp(prefix=".xl-import-backup-", dir=os.path.dirname(material_root))
         replacements = []
         try:
-            for category in sorted(self.export_categories):
+            for category in sorted(categories if categories is not None else self.export_categories):
                 relatives = CATEGORY_ROOTS.get(category, ())
                 if not relatives:
                     continue
@@ -412,18 +530,25 @@ class ImportProcessor:
                     os.makedirs(source, exist_ok=True)
                     replacements.append((source, destination, relative))
 
+            replacement_details = [{"relative": relative, "source": source, "destination": destination, "staged_files": self._count_files(source), "existing_files": self._count_files(destination)} for source, destination, relative in replacements]
+            logger.info("素材分类事务提交开始 categories=%s replacements=%s backup=%s", sorted(categories if categories is not None else self.export_categories), replacement_details, backup_root, extra={"event": "import.commit.start", "details": {"categories": sorted(categories if categories is not None else self.export_categories), "replacements": replacement_details, "backup": backup_root}})
+
             # 先把所有旧分类移入备份区，再开始放入新分类，避免跨分类提交留下半成品。
             for _source, destination, relative in replacements:
                 if os.path.exists(destination):
                     backup = os.path.join(backup_root, relative)
                     os.makedirs(os.path.dirname(backup), exist_ok=True)
                     os.replace(destination, backup)
+                    logger.info("旧分类已暂存备份 relative=%s backup=%s", relative, backup, extra={"event": "import.commit.backup", "details": {"relative": relative, "backup": backup}})
 
-            for source, destination, _relative in replacements:
+            for source, destination, relative in replacements:
                 os.makedirs(os.path.dirname(destination), exist_ok=True)
                 os.replace(source, destination)
+                logger.info("新分类已提交 relative=%s destination=%s files=%s", relative, destination, self._count_files(destination), extra={"event": "import.commit.category_complete", "details": {"relative": relative, "destination": destination, "files": self._count_files(destination)}})
+            logger.info("素材分类事务提交完成 categories=%s", sorted(categories if categories is not None else self.export_categories), extra={"event": "import.commit.complete", "details": {"categories": sorted(categories if categories is not None else self.export_categories)}})
         except Exception:
             logger.error("[导入AS] 分类提交失败，开始回滚", exc_info=True)
+            logger.exception("素材分类事务提交失败，开始回滚 backup=%s", backup_root, extra={"event": "import.commit.rollback_start", "error_code": "IMPORT_COMMIT_FAILED", "details": {"backup": backup_root, "replacements": [{"relative": relative, "source": source, "destination": destination} for source, destination, relative in replacements]}})
             for _source, destination, _relative in reversed(replacements):
                 if os.path.isdir(destination):
                     shutil.rmtree(destination, ignore_errors=True)
@@ -432,6 +557,7 @@ class ImportProcessor:
                 if os.path.exists(backup):
                     os.makedirs(os.path.dirname(destination), exist_ok=True)
                     os.replace(backup, destination)
+                    logger.info("旧分类已从备份恢复 relative=%s destination=%s", relative, destination, extra={"event": "import.commit.rollback_restore", "details": {"relative": relative, "destination": destination}})
             raise
         finally:
             shutil.rmtree(backup_root, ignore_errors=True)
@@ -517,10 +643,11 @@ class ImportProcessor:
             self._emit_progress("反编译 Lua", min(done[0], total), total if total else 1)
 
         def on_progress(msg):
-            m = re.search(r"正在反编译 Lua:\s*(\d+)/(\d+)", msg)
+            m = re.search(r"(识别 Lua 文件|准备反编译 Lua|正在反编译 Lua):\s*(\d+)/(\d+)", msg)
             if m:
-                d, t = int(m.group(1)), int(m.group(2))
-                self._emit_progress("反编译 Lua", d, t)
+                phase, done, count = m.groups()
+                label = "反编译 Lua" if phase == "正在反编译 Lua" else phase
+                self._emit_progress(label, int(done), int(count))
             else:
                 logger.info(f"[导入AS] {msg}")
 
@@ -529,8 +656,11 @@ class ImportProcessor:
             progress_cb=on_progress,
             file_done_cb=on_file_done,
             cancel_check=self.is_cancelled)
+        if self.is_cancelled():
+            logger.info("[导入AS] Lua 反编译阶段取消 success=%s failed=%s", success, fail, extra={"event": "import.lua.cancelled", "details": {"success": success, "failed": fail}})
+            return
         self._emit_progress_stage("反编译 Lua", total, total if total else 1)
-        logger.info(f"[导入AS] Lua 反编译完成: 成功 {success}, 失败 {fail}")
+        logger.info(f"[导入AS] Lua 反编译完成: 成功 {success}, 失败 {fail}", extra={"event": "import.lua.complete", "details": {"success": success, "failed": fail, "total": total}})
 
 
     @staticmethod
@@ -541,6 +671,24 @@ class ImportProcessor:
         for root, dirs, files in os.walk(directory):
             count += len(files)
         return count
+
+    @staticmethod
+    def _snapshot_files(directory):
+        """Return a cheap relative-path/size/mtime snapshot for command attribution."""
+        snapshot = {}
+        if not os.path.isdir(directory):
+            return snapshot
+        root_path = os.path.abspath(directory)
+        for current_root, _dirs, files in os.walk(root_path):
+            for filename in files:
+                path = os.path.join(current_root, filename)
+                try:
+                    stat = os.stat(path)
+                except OSError:
+                    continue
+                relative = os.path.relpath(path, root_path).replace(os.sep, "/")
+                snapshot[relative] = (stat.st_size, stat.st_mtime_ns)
+        return snapshot
 
     @staticmethod
     def _cleanup_prefab_suffix(out_dir):

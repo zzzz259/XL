@@ -13,11 +13,11 @@ from PySide6.QtCore import QThread, Signal
 from app.platform.bundle_parser import compute_delta, extract_manifest_hashes, fix_bundle_inplace
 from app.platform.files import atomic_write_bytes
 from app.platform.downloader import BUNDLES_URL, check_update, http_get
-from app.platform.diagnostics import logger
+from app.platform.diagnostics import logger, set_task_outcome, task_operation
 
 
 class CheckUpdateThread(QThread):
-    finished = Signal(object, object, object, object)
+    result_ready = Signal(object, object, object, object)
     error = Signal(str)
 
     def __init__(self, output_dir, old_hashes=None):
@@ -25,6 +25,7 @@ class CheckUpdateThread(QThread):
         self.output_dir = output_dir
         self.old_hashes = old_hashes
 
+    @task_operation("CHECK_UPDATE", "versions", lambda self: {"known_bundle_hashes": len(self.old_hashes or [])})
     def run(self):
         try:
             logger.info(
@@ -33,34 +34,41 @@ class CheckUpdateThread(QThread):
             )
             info, versions = check_update()
             if self.isInterruptionRequested():
+                set_task_outcome("cancelled", error_code="UPDATE_CHECK_CANCELLED", message="检查更新已取消")
                 return
             os.makedirs(self.output_dir, exist_ok=True)
 
             categories = {}
             for item in versions["data"]:
                 if self.isInterruptionRequested():
+                    set_task_outcome("cancelled", error_code="UPDATE_CHECK_CANCELLED", message="检查更新已取消")
                     return
                 name = item["name"].lower()
                 fname = f"{name}_{item['hash']}.json"
                 url = f"{BUNDLES_URL}/{fname}"
                 out = os.path.join(self.output_dir, fname)
                 if not os.path.exists(out):
+                    logger.info("分类索引下载开始 name=%s path=%s", name, out, extra={"event": "catalog.download.start"})
                     data = http_get(url)
                     if self.isInterruptionRequested():
+                        set_task_outcome("cancelled", error_code="UPDATE_CHECK_CANCELLED", message="检查更新已取消")
                         return
                     with open(out, "wb") as f:
                         f.write(data)
-                    logger.debug("下载分类包: %s (%s 字节)", fname, len(data))
+                    logger.info("分类索引下载完成 name=%s bytes=%s", name, len(data), extra={"event": "catalog.download.complete", "details": {"name": name, "bytes": len(data)}})
                 else:
-                    logger.debug("分类包已缓存: %s", fname)
+                    logger.info("分类索引命中缓存 name=%s path=%s", name, out, extra={"event": "catalog.cache_hit"})
                 categories[name] = out
 
             new_hashes = set()
             for cat_path in categories.values():
                 if self.isInterruptionRequested():
+                    set_task_outcome("cancelled", error_code="UPDATE_CHECK_CANCELLED", message="检查更新已取消")
                     return
+                logger.info("分类索引解析开始 name=%s path=%s", os.path.basename(cat_path), cat_path, extra={"event": "manifest.parse.start"})
                 new_hashes |= extract_manifest_hashes(cat_path)
             if self.isInterruptionRequested():
+                set_task_outcome("cancelled", error_code="UPDATE_CHECK_CANCELLED", message="检查更新已取消")
                 return
             logger.info("提取到 %s 个 bundle hash", len(new_hashes))
 
@@ -69,9 +77,21 @@ class CheckUpdateThread(QThread):
                 "检查更新完成：新增 %s，移除 %s，未变 %s",
                 len(delta["added"]), len(delta["removed"]), delta["common"],
             )
-            self.finished.emit(info, versions, sorted(new_hashes), delta)
+            set_task_outcome(
+                "success",
+                message="更新检查完成",
+                details={
+                    "catalog_count": len(categories),
+                    "bundle_hash_count": len(new_hashes),
+                    "added": len(delta["added"]),
+                    "removed": len(delta["removed"]),
+                    "common": delta["common"],
+                },
+            )
+            self.result_ready.emit(info, versions, sorted(new_hashes), delta)
         except Exception as e:
             logger.error("检查更新异常: %s", e, exc_info=True)
+            set_task_outcome("failed", error_code="UPDATE_CHECK_FAILED", message=str(e))
             self.error.emit(str(e))
 
 
@@ -93,6 +113,7 @@ class DownloadWorker(QThread):
     def stop(self):
         self._stop = True
 
+    @task_operation("BUNDLE_DOWNLOAD", "versions", lambda self: {"total": len(self.hashes), "output_dir": self.output_dir})
     def run(self):
         done = 0
         skipped = 0
@@ -109,6 +130,7 @@ class DownloadWorker(QThread):
                 self.progress.emit(h, done, len(self.hashes))
 
                 if os.path.exists(out) and os.path.getsize(out) > 100:
+                    logger.info("Bundle 下载跳过（已有有效文件） hash=%s size=%s", h, os.path.getsize(out), extra={"event": "bundle.download.skip", "details": {"hash": h, "path": out, "size": os.path.getsize(out)}})
                     done += 1
                     skipped += 1
                     self.progress.emit(h, done, len(self.hashes))
@@ -121,12 +143,14 @@ class DownloadWorker(QThread):
                     if self._stop:
                         break
                     try:
+                        logger.info("Bundle 下载尝试 hash=%s attempt=%s/3", h, attempt + 1, extra={"event": "bundle.download.attempt", "details": {"hash": h, "attempt": attempt + 1, "max_attempts": 3}})
                         data = http_get(url)
                         if self._stop:
                             break
                         actual_md5 = hashlib.md5(data).hexdigest()
                         if actual_md5.lower() != h.lower():
                             last_error = f"MD5 mismatch (actual {actual_md5})"
+                            logger.warning("Bundle 校验失败 hash=%s actual_md5=%s bytes=%s attempt=%s/3", h, actual_md5, len(data), attempt + 1, extra={"event": "bundle.validation.failed", "error_code": "BUNDLE_MD5_MISMATCH", "details": {"hash": h, "actual_md5": actual_md5, "bytes": len(data), "attempt": attempt + 1}})
                             if attempt < 2:
                                 time.sleep(1)
                                 self.error.emit(
@@ -145,10 +169,12 @@ class DownloadWorker(QThread):
                         if self._stop:
                             break
                         atomic_write_bytes(out, data, transform=transform)
+                        logger.info("Bundle 下载并校验完成 hash=%s bytes=%s path=%s header_repaired=%s", h, len(data), out, transform is not None, extra={"event": "bundle.download.complete", "details": {"hash": h, "bytes": len(data), "path": out, "md5": actual_md5, "header_repaired": transform is not None}})
                         ok = True
                         break
                     except Exception as e:
                         last_error = str(e)
+                        logger.warning("Bundle 下载失败 hash=%s attempt=%s/3 error=%s", h, attempt + 1, e, extra={"event": "bundle.download.attempt_failed", "error_code": "BUNDLE_DOWNLOAD_FAILED", "details": {"hash": h, "attempt": attempt + 1}})
                         if attempt < 2:
                             time.sleep(1)
                         else:
@@ -169,13 +195,17 @@ class DownloadWorker(QThread):
 
             if self._stop:
                 self.outcome = "cancelled"
+                set_task_outcome("cancelled", error_code="BUNDLE_DOWNLOAD_CANCELLED", message="下载已取消", details={"total": len(self.hashes), "downloaded": done - skipped, "skipped": skipped, "failed": failed})
             elif failed:
                 self.outcome = "failed"
+                set_task_outcome("partial" if done else "failed", error_code="BUNDLE_DOWNLOAD_PARTIAL" if done else "BUNDLE_DOWNLOAD_FAILED", message="部分 Bundle 下载失败" if done else "Bundle 下载失败", details={"total": len(self.hashes), "downloaded": done - skipped, "skipped": skipped, "failed": failed})
             else:
                 self.outcome = "success"
+                set_task_outcome("success", message="Bundle 下载完成", details={"total": len(self.hashes), "downloaded": done - skipped, "skipped": skipped, "failed": failed})
         except Exception as error:
             self.outcome = "aborted"
             logger.error("下载线程异常: %s", error, exc_info=True)
+            set_task_outcome("failed", error_code="BUNDLE_DOWNLOAD_ABORTED", message=str(error), details={"total": len(self.hashes), "downloaded": done - skipped, "skipped": skipped, "failed": failed})
             self.error.emit(str(error))
         finally:
             logger.info(
