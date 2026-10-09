@@ -38,6 +38,23 @@ def _append_explicit_skins(command, skin_names):
         _append_explicit_skin(command, skin_name)
 
 
+def _merge_layer_order(record):
+    """Return SpineViewerCLI draw order: foreground first, background last.
+
+    The CLI draws the first merged skeleton in front of later skeletons. Keep
+    this policy explicit instead of inheriting bundle/catalog iteration order.
+    """
+    stem = os.path.splitext(os.path.basename(os.fspath(record.source_skel)))[0].casefold()
+    suffix = stem.rsplit("_", 1)[-1]
+    if suffix in {"fg", "foreground", "front"}:
+        layer = 0
+    elif suffix in {"bg", "background"}:
+        layer = 2
+    else:
+        layer = 1
+    return layer, stem, os.fspath(record.atlas_path).casefold()
+
+
 def build_spine_export_command(job, spine_cli):
     """Build a SpineViewerCLI export command from a ``SkinExportJob``.
 
@@ -59,6 +76,11 @@ def build_spine_export_command(job, spine_cli):
     )
     if not records:
         records = (job.record,)
+    if len(records) > 1:
+        # SpineViewerCLI merge order is visual Z order, not an implementation
+        # detail: its first skeleton is rendered in front. Establish the
+        # intended order by component role, independent of discovery order.
+        records = tuple(sorted(records, key=_merge_layer_order))
     record = records[0]
     settings = job.settings
     normalized_format = str(settings.format).casefold()
