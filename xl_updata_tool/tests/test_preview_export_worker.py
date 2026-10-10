@@ -7,6 +7,8 @@ from app.features.preview.export_plan import ExportSettings, build_default_expor
 from app.features.preview.resource_model import SpineSkinRecord
 from app.features.preview.workers import preview_export
 from app.features.preview.workers.preview_export import PreviewExportWorker
+from app.platform.logger import configure_logging
+from app.platform.runtime_config import RuntimeConfig
 
 
 def ready_record(skin_name, *, character_id="10080", fingerprint=None):
@@ -41,6 +43,7 @@ def make_jobs(tmp_path, *skin_names):
 
 
 def test_worker_reports_progress_and_finished_summary_for_runner_results(tmp_path):
+    session = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
     runner = RecordingRunner([True, False])
     worker = PreviewExportWorker(make_jobs(tmp_path, "base", "holiday"), ExportSettings(), runner)
     progress = []
@@ -63,6 +66,18 @@ def test_worker_reports_progress_and_finished_summary_for_runner_results(tmp_pat
         ).read_text(encoding="utf-8")
     )
     assert metadata["record"]["skin_name"] == "base"
+    summary_events = [json.loads(line) for line in session.events_log.read_text(encoding="utf-8").splitlines()]
+    task_id = next(event["task_id"] for event in summary_events if event["event"] == "task.start")
+    task_events = [
+        json.loads(line)
+        for line in (session.directory / "tasks" / task_id / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    job_events = [event for event in task_events if event["event"].startswith("spine.export.")]
+    assert any(event["event"] == "spine.export.complete" and event["details"]["output"].endswith("Spine_base.png") for event in job_events)
+    assert any(event["event"] == "spine.export.failed" and event["details"]["record"]["skin_name"] == "holiday" for event in job_events)
+    summaries = list((session.directory / "tasks").glob("*/summary.json"))
+    assert len(summaries) == 1
+    assert json.loads(summaries[0].read_text(encoding="utf-8"))["outcome"] == "partial"
 
 
 def test_skin_jobs_use_labeled_signal_and_preserve_legacy_progress_signature(tmp_path):

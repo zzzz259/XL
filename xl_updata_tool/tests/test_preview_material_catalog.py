@@ -14,6 +14,8 @@ from app.features.preview.material_catalog import (
     is_burst_head_resource,
 )
 from app.features.preview.service import PreviewService
+from app.platform.logger import configure_logging
+from app.platform.runtime_config import RuntimeConfig
 
 
 def test_processed_material_catalog_reads_only_final_output_files(tmp_path):
@@ -145,6 +147,37 @@ def test_game_material_export_uses_stable_directories_and_reports_failures(tmp_p
     assert calls == [(str(atlas_path), str(tmp_path / "output" / "game_material" / "fgui" / "Card"), False)]
     assert summary.failed == 1
     assert "atlas parse failed" in summary.diagnostics[0]
+
+
+def test_game_material_export_logs_per_item_input_output_and_failure(tmp_path):
+    session = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
+    burst_path = tmp_path / "burst-head" / "10080.png"
+    atlas_path = tmp_path / "raw" / "Card_fui.bytes"
+    burst_path.parent.mkdir(parents=True)
+    atlas_path.parent.mkdir(parents=True)
+    burst_path.write_bytes(b"burst")
+    atlas_path.write_bytes(b"atlas")
+    catalog = GameMaterialCatalog(
+        burst_heads=(GameMaterialRecord("burst-head", str(burst_path), "10080", "fp1"),),
+        atlases=(AtlasResourceGroup("Card", str(atlas_path), ()),),
+        unmatched=(),
+    )
+
+    summary = export_game_materials(
+        catalog,
+        tmp_path / "output",
+        lambda *_args: (_ for _ in ()).throw(ValueError("bad atlas metadata")),
+    )
+
+    assert summary.exported == 1
+    assert summary.failed == 1
+    events = [json.loads(line) for line in session.events_log.read_text(encoding="utf-8").splitlines()]
+    completed = next(event for event in events if event["event"] == "material.export.complete")
+    failed = next(event for event in events if event["event"] == "atlas.export.failed")
+    assert completed["details"]["source"] == str(burst_path)
+    assert completed["details"]["output"].endswith("10080.png")
+    assert failed["details"]["source"] == str(atlas_path)
+    assert failed["error_code"] == "ATLAS_EXPORT_FAILED"
 
 
 def test_game_material_export_reports_current_item_progress(tmp_path):
