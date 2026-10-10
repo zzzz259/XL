@@ -15,6 +15,8 @@ current_root = "/home/admin/xl_deploy/current"
 # Existing backend config/data are external to releases and remain in place.
 backend_config = "/home/admin/xl_updata_server/config.toml"
 backend_data = "/home/admin/xl_updata_server/data"
+test_backend_config = "/home/admin/xl_updata_server-test/config.toml"
+test_backend_data = "/home/admin/xl_updata_server-test/data"
 
 [router]
 base_url = "http://127.0.0.1:8784"

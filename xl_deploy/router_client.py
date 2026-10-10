@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import time
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -42,36 +43,60 @@ class RouterControlClient:
         self.timeout_seconds = timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds
 
-    def announce(self, scope: Sequence[str], text: str) -> dict[str, bool]:
+    def announce(
+        self, scope: Sequence[str], text: str, *, notification_id: str
+    ) -> dict[str, bool]:
+        base_id = _notification_id(notification_id)
         if text == START_NOTICE:
             phase = "starting"
         elif text == COMPLETION_NOTICE:
             phase = "complete"
         else:
-            return self.announce_release_note(scope, text)
+            return self.announce_release_note(scope, text, notification_id=base_id)
         results: dict[str, bool] = {}
         for tier in scope:
-            payload = self._post("/deployment/announce", {"tier": _tier(tier), "phase": phase})
+            safe_tier = _tier(tier)
+            payload = self._post(
+                "/deployment/announce",
+                {
+                    "tier": safe_tier,
+                    "phase": phase,
+                    "notification_id": f"{base_id}:{safe_tier}",
+                },
+            )
             _merge_results(results, payload)
         return results
 
-    def announce_release_note(self, scope: Sequence[str], text: str) -> dict[str, bool]:
+    def announce_release_note(
+        self, scope: Sequence[str], text: str, *, notification_id: str
+    ) -> dict[str, bool]:
+        base_id = _notification_id(notification_id)
         results: dict[str, bool] = {}
         for tier in scope:
+            safe_tier = _tier(tier)
             payload = self._post(
                 "/deployment/announce",
-                {"tier": _tier(tier), "phase": "release_note", "text": text},
+                {
+                    "tier": safe_tier,
+                    "phase": "release_note",
+                    "notification_id": f"{base_id}:{safe_tier}",
+                    "text": text,
+                },
             )
             _merge_results(results, payload)
         return results
 
     def pause(self, tiers: Sequence[str]) -> None:
         for tier in tiers:
-            self._post("/deployment/maintenance", {"tier": _tier(tier), "enabled": True})
+            self._post(
+                "/deployment/maintenance", {"tier": _tier(tier), "enabled": True}
+            )
 
     def resume(self, tiers: Sequence[str]) -> None:
         for tier in tiers:
-            self._post("/deployment/maintenance", {"tier": _tier(tier), "enabled": False})
+            self._post(
+                "/deployment/maintenance", {"tier": _tier(tier), "enabled": False}
+            )
 
     def drain(self, tiers: Sequence[str], timeout_seconds: float) -> bool:
         deadline = time.monotonic() + max(0, timeout_seconds)
@@ -100,10 +125,15 @@ class RouterControlClient:
         return self._send(request)
 
     def _get(self, path: str) -> dict[str, Any]:
-        return self._send(Request(self.base_url + path, headers=self._headers(), method="GET"))
+        return self._send(
+            Request(self.base_url + path, headers=self._headers(), method="GET")
+        )
 
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
 
     def _send(self, request: Request) -> dict[str, Any]:
         try:
@@ -124,6 +154,15 @@ class RouterControlClient:
 def _tier(value: str) -> str:
     if value not in {"debug", "test", "production", "main"}:
         raise ValueError("router tier is not allowlisted")
+    return value
+
+
+def _notification_id(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[A-Za-z0-9._:-]{1,180}", value) is None
+    ):
+        raise ValueError("notification id is not a valid stable identifier")
     return value
 
 

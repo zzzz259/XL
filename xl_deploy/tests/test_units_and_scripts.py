@@ -1,6 +1,5 @@
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "xl_deploy" / "deploy"
@@ -71,7 +70,7 @@ def test_sample_configuration_has_no_live_secrets_or_assetbundle_key():
     assert set(config["github"]) == {"owner", "repo"}
     assert set(config["deployment"]) == {
         "root", "repository", "state_dir", "releases_root", "current_root",
-        "backend_config", "backend_data",
+        "backend_config", "backend_data", "test_backend_config", "test_backend_data",
     }
     assert set(config["router"]) == {"base_url", "token_file"}
 
@@ -195,6 +194,13 @@ def test_operator_docs_cover_gate_order_recovery_and_at_least_once_notice():
         "journalctl --user",
     ):
         assert required in docs
+
+
+def test_ci_installs_schedule_renderer_dependencies_before_server_tests():
+    workflow = read(".github/workflows/ci.yml")
+
+    assert "actions/setup-node@v4" in workflow
+    assert "npm ci --prefix renderer --omit=dev" in workflow
 
 
 def test_docs_index_links_deployment_operator_guide():

@@ -5,8 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Slice=xl-updata.slice
 WorkingDirectory=/home/admin/xl_updata_server
 Environment=PYTHONUNBUFFERED=1
+Environment=NODE_PATH=/home/admin/xl_updata_server/renderer/node_modules
+EnvironmentFile=/home/admin/.config/xl_updata_server/api.env
 ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-updata-server.service/bin/python /home/admin/xl_deploy/current/main/xl_updata_server/run_server.py --config /home/admin/xl_updata_server/config.toml
 Restart=on-failure
 RestartSec=30
@@ -15,6 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 Nice=10
 CPUQuota=100%
+TimeoutStopSec=300
 MemoryHigh=700M
 MemoryMax=1G
 

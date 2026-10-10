@@ -22,8 +22,8 @@ from bot_app.config import (
 )
 from bot_app.main import _EventClient  # noqa: F401  确认旧入口仍可导入
 from bot_app.matcher import CharacterMatcher
-from bot_app.query_handler import QueryHandler
 from bot_app.querier import CharacterQuerier
+from bot_app.query_handler import QueryHandler
 from bot_app.selection import SelectionStore
 from bot_app.tiers import GroupTier
 from bot_app.updater import ServiceMute
@@ -35,20 +35,24 @@ PROD_G = "AAAAF085818C52C0E850753B855B1111"
 
 
 def make_tiers(features=None, debug=None, test=None):
-    return GroupTier(GroupsConfig(
-        debug=debug or [],
-        test=test or [],
-        features=features or {},
-    ))
+    return GroupTier(
+        GroupsConfig(
+            debug=debug or [],
+            test=test or [],
+            features=features or {},
+        )
+    )
 
 
 # ---------- 配置解析 ----------
 
+
 def write_toml(content):
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False, encoding="utf-8")
-    f.write(content)
-    f.close()
-    return f.name
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".toml", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(content)
+        return f.name
 
 
 BASE_TOML = """
@@ -66,13 +70,15 @@ def test_config_groups_defaults():
     try:
         cfg = load_config(path)
         assert cfg.groups.debug == [] and cfg.groups.test == []
-        assert cfg.groups.features == {}
+        assert cfg.groups.features == {"rerun_schedule_query": "debug"}
     finally:
         os.unlink(path)
 
 
 def test_config_groups_and_features_parse():
-    path = write_toml(BASE_TOML + f"""
+    path = write_toml(
+        BASE_TOML
+        + f"""
 [groups]
 debug = ["{DEBUG_G}"]
 test = ["{TEST_G}"]
@@ -80,21 +86,29 @@ test = ["{TEST_G}"]
 [features]
 character_query = "debug"
 bilibili_watch = "test"
-""")
+"""
+    )
     try:
         cfg = load_config(path)
         assert cfg.groups.debug == [DEBUG_G]
         assert cfg.groups.test == [TEST_G]
-        assert cfg.groups.features == {"character_query": "debug", "bilibili_watch": "test"}
+        assert cfg.groups.features == {
+            "character_query": "debug",
+            "bilibili_watch": "test",
+            "rerun_schedule_query": "debug",
+        }
     finally:
         os.unlink(path)
 
 
 def test_config_invalid_feature_tier_raises():
-    path = write_toml(BASE_TOML + """
+    path = write_toml(
+        BASE_TOML
+        + """
 [features]
 character_query = "verbose"
-""")
+"""
+    )
     try:
         with pytest.raises(ValueError, match="级别非法"):
             load_config(path)
@@ -103,6 +117,7 @@ character_query = "verbose"
 
 
 # ---------- GroupTier 判定 ----------
+
 
 def test_tier_of_three_levels_and_default():
     tiers = make_tiers(debug=[DEBUG_G], test=[TEST_G])
@@ -119,8 +134,11 @@ def test_level_of_default_and_unknown_feature():
 
 
 def test_available_cumulative_matrix():
-    tiers = make_tiers(debug=[DEBUG_G], test=[TEST_G],
-                       features={"f_debug": "debug", "f_test": "test", "f_prod": "production"})
+    tiers = make_tiers(
+        debug=[DEBUG_G],
+        test=[TEST_G],
+        features={"f_debug": "debug", "f_test": "test", "f_prod": "production"},
+    )
     # debug 群全开
     assert tiers.available("f_debug", DEBUG_G)
     assert tiers.available("f_test", DEBUG_G)
@@ -156,29 +174,39 @@ def test_tier_change_takes_effect_immediately():
 
 # ---------- watcher 集成 ----------
 
+
 def make_watcher_env(tmp_path, features, manual_groups, events=None):
     outbox_dir = tmp_path / "outbox"
     data_dir = tmp_path / "data"
     vdir = outbox_dir / "v1"
     vdir.mkdir(parents=True)
-    (vdir / "manifest.json").write_text(json.dumps(
-        {"version": "v1", "characters": [{"id": "1", "name": "A", "file_name": "1_A.png"}]}
-    ), encoding="utf-8")
+    (vdir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "characters": [{"id": "1", "name": "A", "file_name": "1_A.png"}],
+            }
+        ),
+        encoding="utf-8",
+    )
     (vdir / "1_A.png").write_bytes(b"png")
     if events:
         events_file = outbox_dir.parent / "update_events.jsonl"
         with open(events_file, "w", encoding="utf-8") as f:
-            for event in events:
-                f.write(json.dumps(event) + "\n")
+            f.writelines(json.dumps(event) + "\n" for event in events)
 
     config = Config(
         bot=BotConfig(appid="1", secret="2"),
-        watch=WatchConfig(outbox_dir=str(outbox_dir), interval_seconds=30, data_dir=str(data_dir)),
+        watch=WatchConfig(
+            outbox_dir=str(outbox_dir), interval_seconds=30, data_dir=str(data_dir)
+        ),
         target=TargetConfig(group_openids=manual_groups, auto_learn_from_events=False),
         upload=UploadConfig(file_base_url=""),
         message=MessageConfig(template="T"),
         groups=GroupsConfig(
-            debug=[DEBUG_G], test=[TEST_G], features=features,
+            debug=[DEBUG_G],
+            test=[TEST_G],
+            features=features,
         ),
     )
     return config, str(vdir)
@@ -220,39 +248,50 @@ async def test_character_push_sends_only_to_debug_group(tmp_path):
     watcher = Watcher(config, sender, tiers=GroupTier(config.groups))
     await watcher._tick()
 
-    assert sender.calls == [("image", [DEBUG_G], sender.calls[0][2])]
-    assert not os.path.exists(vdir)  # debug 群收到即完成
+    assert sender.calls == []
+    assert [item.recipient for item in watcher.proactive_outbox.list_pending()] == [
+        DEBUG_G
+    ]
+    assert not os.path.exists(vdir)  # debug 群对应图片已持久入队
 
 
 @pytest.mark.asyncio
 async def test_update_notice_filtered_per_group(tmp_path):
     """开始/结束播报按 update_notice 门禁过滤；被滤群不播报但事件正常消费。"""
     config, _ = make_watcher_env(
-        tmp_path, {"update_notice": "debug"}, manual_groups=[PROD_G, DEBUG_G],
+        tmp_path,
+        {"update_notice": "debug"},
+        manual_groups=[PROD_G, DEBUG_G],
         events=[{"event": "start", "version": 1}],
     )
     sender = FakeSender()
     watcher = Watcher(config, sender, tiers=GroupTier(config.groups))
     await watcher._tick()
 
-    text_groups = [c[1] for c in sender.calls if c[0] == "text"]
-    assert text_groups == [DEBUG_G]
+    assert sender.calls == []
+    queued = watcher.proactive_outbox.list_pending()
+    notices = [item for item in queued if item.event_key.startswith("game-update:")]
+    assert [(item.recipient, item.kind) for item in notices] == [(DEBUG_G, "text")]
     assert watcher.notice.consumed_events == 1  # 事件已消费不重复播报
     assert watcher.mute.muted  # 播报后进入更新静音（与现有语义一致）
 
 
 # ---------- bilibili 集成 ----------
 
+
 def make_bili_watcher(tmp_path, features, manual_groups):
     data_dir = tmp_path / "data"
     config = Config(
         bot=BotConfig(appid="1", secret="2"),
-        watch=WatchConfig(outbox_dir="/tmp/outbox", interval_seconds=30, data_dir=str(data_dir)),
+        watch=WatchConfig(
+            outbox_dir="/tmp/outbox", interval_seconds=30, data_dir=str(data_dir)
+        ),
         target=TargetConfig(group_openids=manual_groups, auto_learn_from_events=False),
         upload=UploadConfig(file_base_url=""),
         message=MessageConfig(template=""),
         bilibili=BilibiliConfig(
-            enabled=True, sessdata="s",
+            enabled=True,
+            sessdata="s",
             targets=[BilibiliTarget(mid=DEFAULT_BILI_MID, name="X", mode="notice")],
         ),
         groups=GroupsConfig(debug=[DEBUG_G], test=[TEST_G], features=features),
@@ -262,8 +301,14 @@ def make_bili_watcher(tmp_path, features, manual_groups):
 
 class FakeBiliClient:
     def __init__(self):
-        self.feed = [{"opus_id": 101, "content": "公告", "cover": {"url": "c"},
-                      "jump_url": "//x"}]
+        self.feed = [
+            {
+                "opus_id": 101,
+                "content": "公告",
+                "cover": {"url": "c"},
+                "jump_url": "//x",
+            }
+        ]
 
     async def fetch_opus_feed(self, mid):
         return self.feed
@@ -287,23 +332,31 @@ async def test_bilibili_watch_filtered_empty_keeps_state(tmp_path):
     watcher = make_bili_watcher(tmp_path, {"bilibili_watch": "debug"}, [PROD_G])
     watcher._client = FakeBiliClient()
     await watcher._tick()  # 基线 101（基线轮不发）
-    watcher._client.feed = [{"opus_id": 102, "content": "新公告", "cover": {"url": "c"},
-                             "jump_url": "//x"}]
+    watcher._client.feed = [
+        {"opus_id": 102, "content": "新公告", "cover": {"url": "c"}, "jump_url": "//x"}
+    ]
     await watcher._tick()
     state = watcher.state.target(DEFAULT_BILI_MID)
     assert state.last_opus_id == 101  # 102 未推进
-    assert len(watcher.sender.calls) == 0
+    assert watcher.proactive_outbox.count() == 0
 
 
 @pytest.mark.asyncio
 async def test_bilibili_watch_sends_to_allowed_groups(tmp_path):
-    watcher = make_bili_watcher(tmp_path, {"bilibili_watch": "production"}, [PROD_G, DEBUG_G])
+    watcher = make_bili_watcher(
+        tmp_path, {"bilibili_watch": "production"}, [PROD_G, DEBUG_G]
+    )
     watcher._client = FakeBiliClient()
     await watcher._tick()  # 基线
-    watcher._client.feed = [{"opus_id": 102, "content": "新公告", "cover": {"url": "c"},
-                             "jump_url": "//x"}]
+    watcher._client.feed = [
+        {"opus_id": 102, "content": "新公告", "cover": {"url": "c"}, "jump_url": "//x"}
+    ]
     await watcher._tick()
-    text_groups = [c[1] for c in watcher.sender.calls if c[0] == "text"]
+    text_groups = [
+        item.recipient
+        for item in watcher.proactive_outbox.list_pending()
+        if item.kind == "text"
+    ]
     assert text_groups == [DEBUG_G, PROD_G]  # 两级群都开放（production 级）
     assert watcher.state.target(DEFAULT_BILI_MID).last_opus_id == 102
 
@@ -317,7 +370,9 @@ def make_event_client(tmp_path, features, debug=None, test=None):
     data_dir = tmp_path / "data"
     char_file = data_dir / "character_data" / "current.json"
     char_file.parent.mkdir(parents=True, exist_ok=True)
-    char_file.write_text(json.dumps({"characters": CHARACTERS}, ensure_ascii=False), encoding="utf-8")
+    char_file.write_text(
+        json.dumps({"characters": CHARACTERS}, ensure_ascii=False), encoding="utf-8"
+    )
     versions_dir = data_dir / "versions"
     cards = versions_dir / "123" / "character_cards"
     cards.mkdir(parents=True)

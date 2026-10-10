@@ -53,7 +53,9 @@ class NoticeStateStore:
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._path.with_suffix(".part")
-        temporary.write_text(json.dumps(self._state, ensure_ascii=False), encoding="utf-8")
+        temporary.write_text(
+            json.dumps(self._state, ensure_ascii=False), encoding="utf-8"
+        )
         temporary.replace(self._path)
 
     @property
@@ -71,6 +73,7 @@ class UpdateEvent:
     version: int
     new_characters: int = 0
     error: str | None = None
+    line_number: int = 0
 
 
 def read_new_events(path: str | Path, offset: int) -> tuple[list[UpdateEvent], int]:
@@ -80,17 +83,20 @@ def read_new_events(path: str | Path, offset: int) -> tuple[list[UpdateEvent], i
         lines = Path(path).read_text(encoding="utf-8").splitlines()
     except OSError:
         return events, offset
-    for line in lines[offset:]:
+    for line_number, line in enumerate(lines[offset:], start=offset + 1):
         try:
             payload = json.loads(line)
         except ValueError:
             continue
         if not isinstance(payload, dict) or "event" not in payload:
             continue
-        events.append(UpdateEvent(
-            event=str(payload["event"]),
-            version=int(payload.get("version", 0)),
-            new_characters=int(payload.get("new_characters", 0)),
-            error=payload.get("error"),
-        ))
+        events.append(
+            UpdateEvent(
+                event=str(payload["event"]),
+                version=int(payload.get("version", 0)),
+                new_characters=int(payload.get("new_characters", 0)),
+                error=payload.get("error"),
+                line_number=line_number,
+            )
+        )
     return events, len(lines)

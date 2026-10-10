@@ -2,11 +2,13 @@ from server_app.catalog import AssetRef, BundleRef, CatalogIndex
 from server_app.selector import LUA_NAMES, bundle_hashes_for_assets, select_lua_assets
 
 
-def test_lua_whitelist_has_nine_entries_and_no_handbook():
-    assert len(LUA_NAMES) == 9
+def test_lua_whitelist_has_gacha_tables_and_no_handbook():
+    assert len(LUA_NAMES) == 11
     assert "basecardhandbook.lua.bytes" not in LUA_NAMES
     assert "basecard.lua.bytes" in LUA_NAMES
     assert "baseword_cn.lua.bytes" in LUA_NAMES
+    assert "basegacha.lua.bytes" in LUA_NAMES
+    assert "basegachabottomup.lua.bytes" in LUA_NAMES
 
 
 def test_selector_recognizes_character_lua_names():
