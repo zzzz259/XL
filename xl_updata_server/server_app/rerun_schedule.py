@@ -309,6 +309,8 @@ def refresh_schedule_if_due(
     """Refresh cached dates/status at time boundaries, reusing parsed game history."""
     if refresh_seconds <= 0:
         raise ValueError("refresh_seconds must be positive")
+    if not (Path(schedule_dir) / "current.json").is_file():
+        return False
     existing, _image = read_current_schedule(schedule_dir)
     history = {
         "queue": existing.get("queue", []),
