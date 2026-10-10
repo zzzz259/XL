@@ -9,6 +9,7 @@ XL 是面向《星落》的多项目仓库，包含 Windows 桌面资源工具�
 | [`xl_updata_tool`](xl_updata_tool/README.md) | Windows 桌面端：检查版本、下载 bundle、解析 Lua/音频/图片与 Spine 资源，并导出到 `output/`。 | [快速开始与使用说明](xl_updata_tool/README.md) |
 | [`xl_updata_server`](xl_updata_server/README.md) | Linux 后台更新抓取、角色数据版本化、角色图鉴卡片渲染及 outbox 生成。 | [服务端文档](xl_updata_server/README.md) · [配置与运维](xl_updata_server/docs/配置与运维.md) |
 | [`xl_qqbot`](xl_qqbot/README.md) | QQ 群机器人：角色图鉴查询、更新图鉴分发、公告与 B 站动态监视。 | [Bot 文档](xl_qqbot/README.md) · [配置与运维](xl_qqbot/docs/配置与运维.md) |
+| [`xl_deploy`](xl_deploy/README.md) | Linux 服务器上的分支部署控制器：CI 通过后按分支和改动路径部署对应 Bot 或更新服务端。 | [部署运维指南](xl_deploy/README.md) |
 
 三个子项目有各自的 Python 依赖、虚拟环境和测试；服务器与 bot 通过文件目录和配置约定集成，不是桌面工具的运行依赖。
 
@@ -34,6 +35,7 @@ XL 是面向《星落》的多项目仓库，包含 Windows 桌面资源工具�
 XL/
 ├── .github/workflows/       # CI 与桌面工具 Release 自动化
 ├── docs/                    # 仓库级文档索引
+├── xl_deploy/               # Linux 服务器分支部署控制器
 ├── xl_updata_tool/          # Windows 桌面应用
 ├── xl_updata_server/        # Linux 更新服务
 └── xl_qqbot/                # QQ 机器人
