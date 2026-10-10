@@ -24,7 +24,7 @@ from aiohttp import web
 from botpy.connection import ConnectionState
 
 from .bilibili import BilibiliWatcher
-from .config import Config, load_config
+from .config import Config, UpdateSourceConfig, load_config
 from .deploy_control import DeploymentControl, build_deployment_app
 from .groups import GroupStore, learn_group_from_event
 from .proactive_dispatcher import ProactiveDispatcher
@@ -231,7 +231,21 @@ async def _amain_router(config: Config) -> None:
     proactive_dispatcher = ProactiveDispatcher(proactive_outbox, sender)
     mute = ServiceMute()
     tiers = GroupTier(config.groups)
-    watcher = Watcher(config, sender, mute, tiers, proactive_outbox=proactive_outbox)
+    sources = config.watch.update_sources or (
+        UpdateSourceConfig(name="main", outbox_dir=config.watch.outbox_dir),
+    )
+    watchers = [
+        Watcher(
+            config,
+            sender,
+            mute,
+            tiers,
+            proactive_outbox=proactive_outbox,
+            source=source,
+        )
+        for source in sources
+    ]
+    main_watcher = next(w for w in watchers if w.source.name == "main")
     bili_watcher = BilibiliWatcher(
         config, sender, tiers, proactive_outbox=proactive_outbox
     )
@@ -251,7 +265,7 @@ async def _amain_router(config: Config) -> None:
         bearer_token=config.router.deployment_token,
         proactive_outbox=proactive_outbox,
         tiers=tiers,
-        target_groups=watcher._target_groups,
+        target_groups=main_watcher._target_groups,
     )
     deployment_runner = web.AppRunner(deployment_app)
     await deployment_runner.setup()
@@ -268,7 +282,8 @@ async def _amain_router(config: Config) -> None:
         _logger.info("收到退出信号，准备关闭...")
         deployment_control.ready = False
         stop_event.set()
-        watcher.stop()
+        for watcher in watchers:
+            watcher.stop()
         bili_watcher.stop()
         for task in asyncio.all_tasks():
             if task is not asyncio.current_task():
@@ -280,7 +295,7 @@ async def _amain_router(config: Config) -> None:
 
     try:
         await asyncio.gather(
-            watcher.run(),
+            *(watcher.run() for watcher in watchers),
             bili_watcher.run(),
             proactive_dispatcher.run(stop_event),
             run_gateway_client(

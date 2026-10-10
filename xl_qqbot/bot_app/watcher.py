@@ -5,7 +5,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .config import Config
+from .config import Config, UpdateSourceConfig
 from .groups import GroupStore
 from .outbox import (
     SentRecordStore,
@@ -14,7 +14,7 @@ from .outbox import (
 )
 from .proactive_outbox import ProactiveOutbox
 from .sender import QQSender
-from .tiers import GroupTier
+from .tiers import GroupTier, TIER_RANK
 from .updater import NoticeStateStore, ServiceMute, read_new_events
 
 _logger = logging.getLogger(__name__)
@@ -30,16 +30,25 @@ class Watcher:
         mute: ServiceMute | None = None,
         tiers: GroupTier | None = None,
         proactive_outbox: ProactiveOutbox | None = None,
+        source: UpdateSourceConfig | None = None,
     ):
         self.config = config
+        self.source = source or UpdateSourceConfig(
+            name="main", outbox_dir=config.watch.outbox_dir
+        )
         self.sender = sender
         self.proactive_outbox = proactive_outbox or ProactiveOutbox(
             config.watch.data_dir
         )
-        self.store = SentRecordStore(config.watch.data_dir)
+        self.state_dir = (
+            config.watch.data_dir
+            if self.source.name == "main"
+            else str(Path(config.watch.data_dir) / "update_sources" / self.source.name)
+        )
+        self.store = SentRecordStore(self.state_dir)
         self.group_store = GroupStore(config.watch.data_dir)
         self.mute = mute or ServiceMute()
-        self.notice = NoticeStateStore(config.watch.data_dir)
+        self.notice = NoticeStateStore(self.state_dir)
         self.tiers = tiers or GroupTier()
         self._stop_event = asyncio.Event()
 
@@ -62,12 +71,12 @@ class Watcher:
 
     async def _tick(self) -> None:
         """将更新事件按日志顺序展开为 start -> 对应图片 -> finish。"""
-        events_path = Path(self.config.watch.outbox_dir).parent / "update_events.jsonl"
+        events_path = Path(self.source.outbox_dir).parent / "update_events.jsonl"
         offset = self.notice.consumed_events
         events, new_offset = read_new_events(events_path, offset)
         batches = {
             batch.version: batch
-            for batch in list_version_batches(self.config.watch.outbox_dir)
+            for batch in list_version_batches(self.source.outbox_dir)
         }
         consumed = offset
         for event in events:
@@ -107,7 +116,7 @@ class Watcher:
 
     def _enqueue_update_event(self, event) -> None:
         """Durably enqueue the event for every update-notice-enabled group."""
-        group_openids = self.tiers.filter_groups("update_notice", self._target_groups())
+        group_openids = self._eligible_groups("update_notice")
         if not group_openids:
             return
         if event.event == "start":
@@ -125,7 +134,7 @@ class Watcher:
         manifest = self._read_manifest(batch.version_dir)
         self.store.save_manifest(batch.version, manifest)
 
-        group_openids = self._target_groups()
+        group_openids = self._eligible_groups(None)
         if not group_openids:
             _logger.warning("没有配置目标群 openid，跳过版本 %s", batch.version)
             return
@@ -146,7 +155,7 @@ class Watcher:
                 file_name=image.file_name,
             )
             event_key = (
-                f"game-card:{batch.version}:{image.id or 'unknown'}:{image.file_name}"
+                f"{self._source_prefix}game-card:{batch.version}:{image.id or 'unknown'}:{image.file_name}"
             )
             pending_groups = [
                 group_openid
@@ -182,9 +191,24 @@ class Watcher:
         except (json.JSONDecodeError, OSError):
             return {}
 
-    @staticmethod
-    def _update_event_key(event) -> str:
-        return f"game-update:{event.line_number}:{event.event}:{event.version}"
+    @property
+    def _source_prefix(self) -> str:
+        return "" if self.source.name == "main" else f"{self.source.name}:"
+
+    def _update_event_key(self, event) -> str:
+        return f"{self._source_prefix}game-update:{event.line_number}:{event.event}:{event.version}"
+
+    def _eligible_groups(self, feature: str | None) -> list[str]:
+        groups = self._target_groups()
+        if feature:
+            groups = self.tiers.filter_groups(feature, groups)
+        minimum_rank = TIER_RANK[self.source.minimum_tier]
+        if minimum_rank == TIER_RANK["production"]:
+            return groups
+        return [
+            group for group in groups
+            if TIER_RANK[self.tiers.tier_of(group)] >= minimum_rank
+        ]
 
     def _target_groups(self) -> list[str]:
         manual = self.config.target.group_openids

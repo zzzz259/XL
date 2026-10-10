@@ -27,6 +27,20 @@ from .versioning import read_current_pointer
 LOGGER = logging.getLogger(__name__)
 
 
+def _resolve_lua_file(decoded_lua: Path, expected_name: str) -> Path | None:
+    if not decoded_lua.is_dir():
+        return None
+    expected = expected_name.casefold()
+    return next(
+        (
+            path
+            for path in decoded_lua.iterdir()
+            if path.is_file() and path.name.casefold() == expected
+        ),
+        None,
+    )
+
+
 def process_rerun_schedule(
     decoded_lua: Path,
     staging: Path,
@@ -38,15 +52,22 @@ def process_rerun_schedule(
     if not getattr(config, "rerun_schedule_enabled", True):
         LOGGER.info("stage=gacha_parse status=skipped reason=feature_disabled")
         return None
-    if not (decoded_lua / "basegacha.lua").is_file() or not (decoded_lua / "basegachabottomup.lua").is_file():
+    gacha_file = _resolve_lua_file(decoded_lua, "basegacha.lua")
+    bottomup_file = _resolve_lua_file(decoded_lua, "basegachabottomup.lua")
+    if gacha_file is None or bottomup_file is None:
         LOGGER.warning("stage=gacha_parse status=skipped reason=required_lua_missing")
         return None
 
     started = time.perf_counter()
     pools, bottomups = load_gacha_tables(str(decoded_lua))
     LOGGER.info(
-        "stage=gacha_parse game_version=%s pools=%d bottomups=%d status=success elapsed_ms=%d",
-        version, len(pools), len(bottomups), int((time.perf_counter() - started) * 1000),
+        "stage=gacha_parse game_version=%s pools=%d bottomups=%d files=%s,%s status=success elapsed_ms=%d",
+        version,
+        len(pools),
+        len(bottomups),
+        gacha_file.name,
+        bottomup_file.name,
+        int((time.perf_counter() - started) * 1000),
     )
     names = load_character_names(decoded_lua)
     names.update({
