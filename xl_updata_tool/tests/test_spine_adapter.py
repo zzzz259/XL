@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import os
+import logging
 
 import pytest
 
@@ -9,6 +10,7 @@ from app.features.preview.spine_adapter import (
     get_animation_names,
     get_animation_metadata,
     parse_skin_query_output,
+    run_spine_export,
 )
 
 
@@ -74,7 +76,7 @@ def test_query_skins_uses_authoritative_skin_command(monkeypatch, tmp_path):
         calls.append((command, kwargs))
         return SimpleNamespace(returncode=0, stdout="Skin:\nbase\nfestival\n", stderr="")
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
     cli = tmp_path / "SpineViewerCLI.exe"
     runner = SpineQueryRunner(str(cli))
 
@@ -98,7 +100,7 @@ def test_query_skins_absolutizes_resources_before_cli_call(monkeypatch, tmp_path
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="Skin: base\n", stderr="")
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
     runner = SpineQueryRunner(str(tmp_path / "SpineViewerCLI.exe"))
     runner.query_skins("relative/hero.skel", "relative/hero.atlas")
 
@@ -110,7 +112,7 @@ def test_query_skins_preserves_cli_failure_details(monkeypatch, tmp_path):
     def fake_run(_command, **_kwargs):
         return SimpleNamespace(returncode=17, stdout="", stderr="atlas parse failed")
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
     result = SpineQueryRunner("SpineViewerCLI.exe").query_skins(
         str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas")
     )
@@ -139,7 +141,7 @@ def test_query_skins_hashes_normalized_attachment_sets(monkeypatch, tmp_path):
     def fake_run(_command, **_kwargs):
         return SimpleNamespace(returncode=0, stdout=next(outputs), stderr="")
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
     runner = SpineQueryRunner(str(tmp_path / "SpineViewerCLI.exe"))
     first = runner.query_skins(str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas"))
     reordered = runner.query_skins(str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas"))
@@ -154,7 +156,7 @@ def test_query_skins_labels_source_skin_fallback_when_attachments_are_unavailabl
     def fake_run(_command, **_kwargs):
         return SimpleNamespace(returncode=0, stdout="Skin:\nbase\n", stderr="")
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
     runner = SpineQueryRunner(str(tmp_path / "SpineViewerCLI.exe"))
 
     result = runner.query_skins(str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas"))
@@ -169,13 +171,48 @@ def test_query_skins_preserves_timeout_as_failure(monkeypatch, tmp_path):
     def fake_run(_command, **_kwargs):
         raise pytest.importorskip("subprocess").TimeoutExpired("query", 15)
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
     result = SpineQueryRunner("SpineViewerCLI.exe").query_skins(
         str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas")
     )
 
     assert result.timed_out
     assert "timed out" in result.error
+
+
+def test_spine_static_export_emits_output_validation_event(monkeypatch, tmp_path, caplog):
+    from app.features.preview import spine_adapter
+
+    test_logger = logging.getLogger("spine-export-test")
+    monkeypatch.setattr(spine_adapter, "logger", test_logger)
+    output_path = tmp_path / "portrait.png"
+
+    def fake_run(_command, **_kwargs):
+        output_path.write_bytes(b"png-data")
+        return SimpleNamespace(returncode=0, stdout="exported", stderr="")
+
+    monkeypatch.setattr(spine_adapter, "_run_spine_cli", fake_run)
+    with caplog.at_level(logging.DEBUG, logger="spine-export-test"):
+        succeeded = run_spine_export(
+            str(tmp_path / "SpineViewerCLI.exe"),
+            str(tmp_path / "hero.skel"),
+            str(tmp_path / "hero.atlas"),
+            str(output_path),
+            4,
+            16000,
+            "idle",
+            "skin-a",
+        )
+
+    event = next(
+        record for record in caplog.records
+        if getattr(record, "event", None) == "spine.export.file"
+    )
+    assert succeeded
+    assert event.outcome == "success"
+    assert event.details["output"] == str(output_path)
+    assert event.details["size_bytes"] == len(b"png-data")
+    assert event.details["skin"] == "skin-a"
 
 
 def test_get_animation_names_uses_real_cli_flag_and_parses_duration_table(monkeypatch, tmp_path):
@@ -189,7 +226,7 @@ def test_get_animation_names_uses_real_cli_flag_and_parses_duration_table(monkey
             stderr="",
         )
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
 
     names = get_animation_names(
         str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas"), str(tmp_path / "SpineViewerCLI.exe")
@@ -207,7 +244,7 @@ def test_get_animation_metadata_returns_cli_durations(monkeypatch, tmp_path):
             stderr="",
         )
 
-    monkeypatch.setattr("app.features.preview.spine_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("app.features.preview.spine_adapter.run_external_process", fake_run)
 
     metadata = get_animation_metadata(
         str(tmp_path / "hero.skel"), str(tmp_path / "hero.atlas"), str(tmp_path / "SpineViewerCLI.exe")

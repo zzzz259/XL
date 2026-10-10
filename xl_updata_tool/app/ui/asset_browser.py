@@ -19,6 +19,7 @@ from .theme import (
 )
 from app.platform.bundle_parser import fix_bundle_inplace
 from app.platform.diagnostics import logger
+from app.platform.processes import run_external_process, update_process_manifest
 from app.platform.paths import get_base_dir
 from app.platform.tool_locator import ToolLocator, ToolNotFoundError
 
@@ -227,30 +228,32 @@ class _MapWorker(QThread):
             os.makedirs(md, exist_ok=True)
             total_bundles = sum(1 for f in os.listdir(self._bd) if f.lower().endswith(".bundle")) if os.path.isdir(self._bd) else 0
             logger.info(f"[资源浏览器] 解析资源，{total_bundles} 个 bundle")
-            proc = subprocess.Popen(
-                as_command + [self._bd, md, "--game", "UnityCN", "--key_index", "23",
-                 "--map_op", "Both", "--map_type", "JSON"],
-                cwd=os.path.dirname(as_target), env=locator.subprocess_env(),
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, bufsize=1,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             loaded = 0
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
+            def on_line(_stream, line):
+                nonlocal loaded
                 if "Loading" in line and ".bundle" in line:
                     loaded += 1
                     self.progress.emit(loaded, total_bundles)
-                else:
-                    logger.debug(f"[资源浏览器] CLI: {line}")
-            proc.wait()
+
+            proc = run_external_process(
+                as_command + [self._bd, md, "--game", "UnityCN", "--key_index", "23",
+                 "--map_op", "Both", "--map_type", "JSON"],
+                tool="AssetStudio-browser-map",
+                cwd=os.path.dirname(as_target),
+                env=locator.subprocess_env(),
+                text=True,
+                on_line=on_line,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
             mf = os.path.join(md, "assets_map.json")
-            if os.path.exists(mf) and os.path.getsize(mf) > 100:
+            if proc.returncode == 0 and os.path.exists(mf) and os.path.getsize(mf) > 100:
                 with open(mf, "r", encoding="utf-8") as f:
-                    self.done.emit(json.load(f))
+                    data = json.load(f)
+                update_process_manifest(proc, output_verified=True, output_path=mf, output_bytes=os.path.getsize(mf))
+                self.done.emit(data)
             else:
-                self.error.emit("Map generation failed")
+                update_process_manifest(proc, output_verified=False, output_path=mf, error_code="AS_MAP_OUTPUT_MISSING")
+                self.error.emit(f"Map generation failed (exit_code={proc.returncode})")
         except Exception as e:
             self.error.emit(str(e))
 
@@ -292,16 +295,20 @@ class _ExtractWorker(QThread):
                    "--export_type", "Convert"]
             logger.debug(f"CLI 命令: {' '.join(cmd)}")
             logger.info(f"开始导出资源，类型: {self._tp}")
-            proc = subprocess.run(
+            proc = run_external_process(
                 cmd, cwd=os.path.dirname(as_target), env=locator.subprocess_env(),
+                tool="AssetStudio-browser-export",
                 capture_output=True, text=True, timeout=300,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             logger.info(f"CLI 退出码: {proc.returncode}")
-            if proc.stdout:
-                logger.debug(f"CLI stdout: {proc.stdout[:500]}")
-            if proc.stderr:
-                logger.warning(f"CLI stderr: {proc.stderr[:500]}")
             file_count = self._count_files(self._od)
+            update_process_manifest(
+                proc,
+                output_verified=proc.returncode == 0 and file_count > 0,
+                output_path=self._od,
+                output_file_count=file_count,
+                error_code="AS_NO_EXPECTED_OUTPUT" if proc.returncode == 0 and file_count == 0 else None,
+            )
             logger.info(f"导出完成，输出目录: {self._od}, 文件数: {file_count}")
             if file_count > 0:
                 logger.info(f"导出成功: {self._od}, 共 {file_count} 个文件")

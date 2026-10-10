@@ -48,6 +48,18 @@ def vgmstream_path(folder_root):
     return None
 
 
+def _creationflags():
+    """子进程创建标志：必须带 CREATE_NO_WINDOW。
+
+    XL.exe 是 PyInstaller 无控制台（windowed）构建；若不给 CREATE_NO_WINDOW，
+    Windows 会为每个控制台子程序（vgmstream-cli / fsb_aud_extr）新分配一个
+    控制台窗口，也就是批量解密 .bank 时出现的"无数不会自行关闭的弹窗"。
+    """
+    if os.name != "nt":
+        return 0
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def extract_fsb_with_fallback(file_fsb, folder_cur, folder_root, folder4result):
     """优先直解 FSB，失败后回退旧提取器。
 
@@ -70,6 +82,7 @@ def extract_fsb_with_fallback(file_fsb, folder_cur, folder_root, folder4result):
                 [cli, "-i", "-S", "0", "-o", output_pattern, fsb_path],
                 cwd=os.path.dirname(cli),
                 check=False,
+                creationflags=_creationflags(),
                 timeout=timeout,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -94,6 +107,7 @@ def extract_fsb_with_fallback(file_fsb, folder_cur, folder_root, folder4result):
             [legacy_path, file_fsb],
             cwd=folder_cur,
             check=False,
+            creationflags=_creationflags(),
             timeout=timeout,
         )
         legacy_code = legacy.returncode
