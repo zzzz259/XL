@@ -22,12 +22,20 @@ class BotConfig:
 
 
 @dataclass(frozen=True)
+class UpdateSourceConfig:
+    name: str
+    outbox_dir: str
+    minimum_tier: str = "production"
+
+
+@dataclass(frozen=True)
 class WatchConfig:
     outbox_dir: str
     interval_seconds: int
     data_dir: str
     character_data: str = "/home/admin/xl_updata_server/data/character_data/current.json"
     versions_dir: str = "/home/admin/xl_updata_server/data/versions"
+    update_sources: tuple[UpdateSourceConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -164,6 +172,44 @@ def load_config(path: str = "config.toml") -> Config:
     if interval_seconds < 1:
         raise ValueError("[watch] interval_seconds 必须 >= 1")
     data_dir = str(watch.get("data_dir", "./data")).strip()
+    raw_sources = watch.get("update_sources")
+    if raw_sources is None:
+        update_sources = (
+            UpdateSourceConfig(name="main", outbox_dir=outbox_dir),
+        )
+    else:
+        if not isinstance(raw_sources, list) or not raw_sources:
+            raise ValueError("[watch.update_sources] 至少需要一个来源条目")
+        parsed_sources = []
+        seen_source_names = set()
+        for item in raw_sources:
+            if not isinstance(item, dict):
+                raise ValueError("[[watch.update_sources]] 条目必须是表")
+            name = str(item.get("name", "")).strip()
+            source_outbox = str(item.get("outbox_dir", "")).strip()
+            minimum_tier = str(item.get("minimum_tier", "production")).strip()
+            if not name or not re.fullmatch(r"[a-z0-9_-]+", name):
+                raise ValueError(f"[watch.update_sources] name 非法: {name!r}")
+            if name in seen_source_names:
+                raise ValueError(f"[watch.update_sources] name 重复: {name!r}")
+            if not source_outbox:
+                raise ValueError(f"[watch.update_sources.{name}] outbox_dir 不能为空")
+            if minimum_tier not in ("production", "test", "debug"):
+                raise ValueError(
+                    f"[watch.update_sources.{name}] minimum_tier 非法: {minimum_tier!r}"
+                )
+            seen_source_names.add(name)
+            parsed_sources.append(
+                UpdateSourceConfig(name, source_outbox, minimum_tier)
+            )
+        if "main" not in seen_source_names:
+            raise ValueError("[watch.update_sources] 必须包含 main 来源")
+        update_sources = tuple(parsed_sources)
+        main_source = next(source for source in update_sources if source.name == "main")
+        if main_source.outbox_dir != outbox_dir:
+            raise ValueError(
+                "[watch.update_sources.main] outbox_dir 必须与 [watch] outbox_dir 一致"
+            )
 
     target = raw.get("target", {})
     group_openids = list(target.get("group_openids", []))
@@ -253,6 +299,7 @@ def load_config(path: str = "config.toml") -> Config:
             data_dir=data_dir,
             character_data=str(watch.get("character_data", WatchConfig.character_data)).strip(),
             versions_dir=str(watch.get("versions_dir", WatchConfig.versions_dir)).strip(),
+            update_sources=update_sources,
         ),
         target=TargetConfig(
             group_openids=group_openids,

@@ -13,6 +13,16 @@ data_dir = "/home/admin/xl_qqbot/data"
 # @机器人+角色名 查询用的角色数据与图鉴图片目录
 character_data = "/home/admin/xl_updata_server/data/character_data/current.json"
 versions_dir = "/home/admin/xl_updata_server/data/versions"
+# 若同时监视 test 更新服务，取消下面 4 行注释并填入 test 服务的 outbox 路径。
+# main 的路径必须与上面的 outbox_dir 一致；test 更新只会发送到 test/debug 群。
+# [[watch.update_sources]]
+# name = "main"
+# outbox_dir = "/home/admin/xl_updata_server/data/outbox"
+# minimum_tier = "production"
+# [[watch.update_sources]]
+# name = "test"
+# outbox_dir = "/home/admin/xl_updata_server-test/data/outbox"
+# minimum_tier = "test"
 
 [target]
 # 目标群 openid 列表（可选覆盖）。
