@@ -1,3 +1,4 @@
+import http.client
 import json
 import os
 import threading
@@ -127,13 +128,16 @@ class TestControlAPI(unittest.TestCase):
         self.assertEqual(body["active_job_id"], "job-123")
 
     def test_manual_run_rejects_oversized_body(self):
-        status, _ = self.request(
-            "/api/v1/updates/run-once",
-            method="POST",
-            token=TOKEN,
-            data=b"x" * (MAX_REQUEST_BYTES + 1),
-        )
-        self.assertEqual(status, 413)
+        connection = http.client.HTTPConnection(*self.server.server_address, timeout=2)
+        try:
+            connection.putrequest("POST", "/api/v1/updates/run-once")
+            connection.putheader("Authorization", f"Bearer {TOKEN}")
+            connection.putheader("Content-Length", str(MAX_REQUEST_BYTES + 1))
+            connection.endheaders()
+            response = connection.getresponse()
+            self.assertEqual(response.status, 413)
+        finally:
+            connection.close()
 
     def test_manual_run_is_rejected_after_shutdown_begins(self):
         self.coordinator.stop_accepting()
