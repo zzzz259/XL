@@ -17,6 +17,7 @@ from .config import Config, load_config
 from .matcher import CharacterMatcher
 from .query_handler import QueryHandler
 from .querier import CharacterQuerier
+from .rerun_schedule_querier import RerunScheduleQuerier
 from .selection import SelectionStore
 from .sender import QQSender
 from .tiers import GroupTier
@@ -38,6 +39,7 @@ def build_app(config: Config) -> web.Application:
         sender,
         tiers=GroupTier(config.groups),
         bot_openid=config.bot.openid,
+        rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
     )
 
     async def on_startup(app: web.Application) -> None:

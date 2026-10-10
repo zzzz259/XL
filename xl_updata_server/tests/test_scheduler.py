@@ -1,8 +1,21 @@
 from datetime import datetime, timedelta, timezone
+import unittest
 
 from server_app.scheduler import PollScheduler, ScheduleState
 
 TZ = timezone(timedelta(hours=8))
+
+
+class FixedBurstAnchorScheduleTests(unittest.TestCase):
+    def test_fixed_anchor_repeats_every_21_days_without_restart_drift(self):
+        anchor = datetime(2026, 10, 9, 10, tzinfo=TZ)
+        scheduler = PollScheduler(3600, 60, 1200, anchor)
+
+        self.assertFalse(scheduler.is_burst_time(anchor.replace(minute=59)))
+        self.assertTrue(scheduler.is_burst_time(anchor))
+        self.assertTrue(scheduler.is_burst_time(anchor + timedelta(minutes=19)))
+        self.assertFalse(scheduler.is_burst_time(anchor + timedelta(minutes=20)))
+        self.assertTrue(scheduler.is_burst_time(anchor + timedelta(days=21)))
 
 
 def test_normal_mode_is_due_hourly():

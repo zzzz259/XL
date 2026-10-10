@@ -90,7 +90,13 @@ def render_character_cards_batch(
         except FileNotFoundError as error:
             raise FileNotFoundError(f"找不到 node 可执行文件: {node_bin}") from error
 
-        stdout = completed.stdout or "{}"
+        stdout = (completed.stdout or "").strip()
+        if not stdout:
+            stderr = (completed.stderr or "").strip()
+            raise RuntimeError(
+                f"渲染器未输出 JSON (exit={completed.returncode}):\n"
+                f"stderr={stderr[:1000]}"
+            )
         try:
             report = json.loads(stdout)
         except json.JSONDecodeError as error:
@@ -104,7 +110,23 @@ def render_character_cards_batch(
 
         render_results: list[CharacterCardRenderResult] = []
         for record in records:
-            item = by_id.get(record.character_id, {})
+            item = by_id.get(record.character_id)
+            if item is None:
+                error = (
+                    f"渲染器未返回角色 ID {record.character_id} 的结果 "
+                    f"(exit={completed.returncode}); stderr={(completed.stderr or '').strip()[:500]}"
+                )
+                render_results.append(
+                    CharacterCardRenderResult(
+                        character_id=record.character_id,
+                        output_path=output_dir / name_template.replace("{id}", record.character_id).replace("{name}", "未知"),
+                        height=None,
+                        warnings=(),
+                        error=error,
+                    )
+                )
+                LOGGER.warning("角色 %s 长图渲染失败: %s", record.character_id, error)
+                continue
             if item.get("ok"):
                 render_results.append(
                     CharacterCardRenderResult(

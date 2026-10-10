@@ -5,8 +5,10 @@ import json
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+
 from bot_app.config import GroupsConfig
 from bot_app.deploy_control import DeploymentControl, build_deployment_app
+from bot_app.proactive_outbox import ProactiveOutbox
 from bot_app.tiers import GroupTier
 
 DEBUG_GROUP = "debug-group"
@@ -29,8 +31,7 @@ def test_missing_maintenance_file_defaults_all_tiers_to_unmaintained(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
 
     assert all(
-        not control.is_maintained(tier)
-        for tier in ("debug", "test", "production")
+        not control.is_maintained(tier) for tier in ("debug", "test", "production")
     )
 
 
@@ -56,7 +57,10 @@ def test_invalid_persisted_maintenance_state_fails_startup(tmp_path, payload):
 
 def test_unreadable_persisted_maintenance_state_fails_startup(tmp_path, monkeypatch):
     path = tmp_path / "maintenance.json"
-    path.write_text('{"tiers": {"debug": true, "test": false, "production": false}}', encoding="utf-8")
+    path.write_text(
+        '{"tiers": {"debug": true, "test": false, "production": false}}',
+        encoding="utf-8",
+    )
     original_read_text = type(path).read_text
 
     def deny_state_read(candidate, *args, **kwargs):
@@ -70,16 +74,23 @@ def test_unreadable_persisted_maintenance_state_fails_startup(tmp_path, monkeypa
         DeploymentControl(path)
 
 
-def make_app(control, sender, groups=None, features=None):
-    return build_deployment_app(
+def make_app(control, sender=None, groups=None, features=None, outbox=None):
+    outbox = outbox or ProactiveOutbox(control.path.parent / "proactive-data")
+    app = build_deployment_app(
         control=control,
         bearer_token=TOKEN,
-        sender=sender,
-        tiers=GroupTier(GroupsConfig(
-            debug=[DEBUG_GROUP], test=[TEST_GROUP], features=features or {},
-        )),
+        proactive_outbox=outbox,
+        tiers=GroupTier(
+            GroupsConfig(
+                debug=[DEBUG_GROUP],
+                test=[TEST_GROUP],
+                features=features or {},
+            )
+        ),
         target_groups=groups or [DEBUG_GROUP, TEST_GROUP, PROD_GROUP],
     )
+    app["test_outbox"] = outbox
+    return app
 
 
 @pytest.mark.asyncio
@@ -101,7 +112,9 @@ async def test_maintenance_state_is_atomic_and_persists_per_tier(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_active_forward_prevents_maintenance_and_drain_waits_for_completion(tmp_path):
+async def test_active_forward_prevents_maintenance_and_drain_waits_for_completion(
+    tmp_path,
+):
     control = DeploymentControl(tmp_path / "maintenance.json")
     assert await control.begin_forward("test")
     assert not await control.wait_drained("test", timeout=0.01)
@@ -128,26 +141,42 @@ async def test_maintenance_blocks_new_forwards_without_blocking_other_tiers(tmp_
 async def test_announcement_uses_exact_text_and_only_target_tier_groups(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
-    client = TestClient(TestServer(make_app(control, sender)))
+    app = make_app(control, sender)
+    queue = app["test_outbox"]
+    client = TestClient(TestServer(app))
     await client.start_server()
     try:
         response = await client.post(
             "/deployment/announce",
-            json={"tier": "debug", "phase": "starting"},
+            json={
+                "tier": "debug",
+                "phase": "starting",
+                "notification_id": "tx-1:starting:debug",
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
 
         assert response.status == 200
         assert await response.json() == {"ok": True, "results": {DEBUG_GROUP: True}}
-        assert sender.messages == [(DEBUG_GROUP, "检测到更新，正在更新bot，期间将暂停服务")]
+        assert sender.messages == []
+        assert [(item.recipient, item.text) for item in queue.list_pending()] == [
+            (DEBUG_GROUP, "检测到更新，正在更新bot，期间将暂停服务")
+        ]
 
         response = await client.post(
             "/deployment/announce",
-            json={"tier": "test", "phase": "complete"},
+            json={
+                "tier": "test",
+                "phase": "complete",
+                "notification_id": "tx-1:complete:test",
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert await response.json() == {"ok": True, "results": {TEST_GROUP: True}}
-        assert sender.messages[-1] == (TEST_GROUP, "更新完毕")
+        assert [(item.recipient, item.text) for item in queue.list_pending()] == [
+            (DEBUG_GROUP, "检测到更新，正在更新bot，期间将暂停服务"),
+            (TEST_GROUP, "更新完毕"),
+        ]
     finally:
         await client.close()
 
@@ -156,23 +185,33 @@ async def test_announcement_uses_exact_text_and_only_target_tier_groups(tmp_path
 async def test_main_router_announcement_targets_every_notice_enabled_group(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
-    client = TestClient(TestServer(make_app(
+    app = make_app(
         control,
         sender,
         features={"update_notice": "test"},
-    )))
+    )
+    queue = app["test_outbox"]
+    client = TestClient(TestServer(app))
     await client.start_server()
     try:
         response = await client.post(
             "/deployment/announce",
-            json={"tier": "main", "phase": "starting"},
+            json={
+                "tier": "main",
+                "phase": "starting",
+                "notification_id": "tx-2:starting:main",
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert await response.json() == {
             "ok": True,
             "results": {DEBUG_GROUP: True, TEST_GROUP: True},
         }
-        assert {group for group, _ in sender.messages} == {DEBUG_GROUP, TEST_GROUP}
+        assert {item.recipient for item in queue.list_pending()} == {
+            DEBUG_GROUP,
+            TEST_GROUP,
+        }
+        assert sender.messages == []
     finally:
         await client.close()
 
@@ -181,22 +220,29 @@ async def test_main_router_announcement_targets_every_notice_enabled_group(tmp_p
 async def test_announcement_with_no_notice_enabled_groups_is_not_success(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
-    client = TestClient(TestServer(make_app(
+    app = make_app(
         control,
         sender,
         groups=[TEST_GROUP, PROD_GROUP],
         features={"update_notice": "debug"},
-    )))
+    )
+    queue = app["test_outbox"]
+    client = TestClient(TestServer(app))
     await client.start_server()
     try:
         response = await client.post(
             "/deployment/announce",
-            json={"tier": "main", "phase": "starting"},
+            json={
+                "tier": "main",
+                "phase": "starting",
+                "notification_id": "tx-3:starting:main",
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
 
         assert await response.json() == {"ok": False, "results": {}}
         assert sender.messages == []
+        assert queue.count() == 0
     finally:
         await client.close()
 
@@ -204,16 +250,28 @@ async def test_announcement_with_no_notice_enabled_groups_is_not_success(tmp_pat
 @pytest.mark.asyncio
 async def test_announcement_reports_each_group_send_failure(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
-    sender = RecordingSender(failures={DEBUG_GROUP})
-    client = TestClient(TestServer(make_app(control, sender)))
+    sender = RecordingSender()
+
+    class FailingOutbox:
+        def enqueue_text(self, *_args):
+            raise OSError("simulated SQLite failure")
+
+    app = make_app(control, sender, outbox=FailingOutbox())
+    client = TestClient(TestServer(app))
     await client.start_server()
     try:
         response = await client.post(
             "/deployment/announce",
-            json={"tier": "debug", "phase": "starting"},
+            json={
+                "tier": "debug",
+                "phase": "starting",
+                "notification_id": "tx-4:starting:debug",
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
+        assert response.status == 503
         assert await response.json() == {"ok": False, "results": {DEBUG_GROUP: False}}
+        assert sender.messages == []
     finally:
         await client.close()
 
@@ -222,12 +280,19 @@ async def test_announcement_reports_each_group_send_failure(tmp_path):
 async def test_authenticated_release_note_announcement_uses_supplied_content(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
-    client = TestClient(TestServer(make_app(control, sender)))
+    app = make_app(control, sender)
+    queue = app["test_outbox"]
+    client = TestClient(TestServer(app))
     await client.start_server()
     try:
         response = await client.post(
             "/deployment/announce",
-            json={"tier": "main", "phase": "release_note", "text": "版本更新内容"},
+            json={
+                "tier": "main",
+                "phase": "release_note",
+                "notification_id": "tx-5:release-note:main",
+                "text": "版本更新内容",
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
 
@@ -235,11 +300,12 @@ async def test_authenticated_release_note_announcement_uses_supplied_content(tmp
             "ok": True,
             "results": {DEBUG_GROUP: True, TEST_GROUP: True, PROD_GROUP: True},
         }
-        assert set(sender.messages) == {
+        assert {(item.recipient, item.text) for item in queue.list_pending()} == {
             (DEBUG_GROUP, "版本更新内容"),
             (TEST_GROUP, "版本更新内容"),
             (PROD_GROUP, "版本更新内容"),
         }
+        assert sender.messages == []
     finally:
         await client.close()
 
@@ -253,7 +319,12 @@ async def test_release_note_announcement_is_restricted_to_main_tier(tmp_path):
     try:
         response = await client.post(
             "/deployment/announce",
-            json={"tier": "debug", "phase": "release_note", "text": "Not a main release"},
+            json={
+                "tier": "debug",
+                "phase": "release_note",
+                "notification_id": "tx-6:release-note:debug",
+                "text": "Not a main release",
+            },
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
 
@@ -265,9 +336,14 @@ async def test_release_note_announcement_is_restricted_to_main_tier(tmp_path):
 
 @pytest.mark.asyncio
 async def test_control_api_rejects_missing_or_invalid_bearer_token(tmp_path):
-    client = TestClient(TestServer(make_app(
-        DeploymentControl(tmp_path / "maintenance.json"), RecordingSender(),
-    )))
+    client = TestClient(
+        TestServer(
+            make_app(
+                DeploymentControl(tmp_path / "maintenance.json"),
+                RecordingSender(),
+            )
+        )
+    )
     await client.start_server()
     try:
         for headers in ({}, {"Authorization": "Bearer wrong-token"}):
@@ -278,7 +354,9 @@ async def test_control_api_rejects_missing_or_invalid_bearer_token(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_maintenance_api_only_changes_forwarding_state_and_reports_drain(tmp_path):
+async def test_maintenance_api_only_changes_forwarding_state_and_reports_drain(
+    tmp_path,
+):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
     client = TestClient(TestServer(make_app(control, sender)))
@@ -298,14 +376,19 @@ async def test_maintenance_api_only_changes_forwarding_state_and_reports_drain(t
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert await response.json() == {
-            "ok": True, "tier": "main", "drained": True, "active": 0,
+            "ok": True,
+            "tier": "main",
+            "drained": True,
+            "active": 0,
         }
     finally:
         await client.close()
 
 
 @pytest.mark.asyncio
-async def test_main_maintenance_updates_all_tiers_as_one_persisted_change(tmp_path, monkeypatch):
+async def test_main_maintenance_updates_all_tiers_as_one_persisted_change(
+    tmp_path, monkeypatch
+):
     control = DeploymentControl(tmp_path / "maintenance.json")
     original_save = control._save
     save_calls = 0
@@ -335,7 +418,9 @@ async def test_main_maintenance_updates_all_tiers_as_one_persisted_change(tmp_pa
             "tiers": {"debug": True, "test": True, "production": True},
         }
         assert save_calls == 1
-        assert all(control.is_maintained(tier) for tier in ("debug", "test", "production"))
+        assert all(
+            control.is_maintained(tier) for tier in ("debug", "test", "production")
+        )
     finally:
         await client.close()
 
@@ -347,12 +432,14 @@ async def test_health_reflects_router_readiness(tmp_path):
     await client.start_server()
     try:
         response = await client.get(
-            "/health", headers={"Authorization": f"Bearer {TOKEN}"},
+            "/health",
+            headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert response.status == 503
         control.ready = True
         response = await client.get(
-            "/health", headers={"Authorization": f"Bearer {TOKEN}"},
+            "/health",
+            headers={"Authorization": f"Bearer {TOKEN}"},
         )
         assert response.status == 200
         assert await response.json() == {"ok": True, "ready": True}

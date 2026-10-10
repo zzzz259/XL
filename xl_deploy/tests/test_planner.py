@@ -3,22 +3,23 @@ import pytest
 from xl_deploy.planner import DeploymentPlan, DeploymentTarget, plan_deployment
 
 
-def test_debug_and_test_branches_target_only_their_own_tier():
+def test_debug_branch_is_noop_while_test_bot_targets_both_lower_tiers():
     debug = plan_deployment("debug", "d1", ["xl_qqbot/bot_app/service.py"])
     test = plan_deployment("test", "t1", ["xl_qqbot/bot_app/service.py"])
 
-    assert debug.impacted_tiers == ("debug",)
-    assert debug.impacted_units == ("xl-qqbot-debug.service",)
-    assert debug.announcement_scope == ("debug",)
-    assert test.impacted_tiers == ("test",)
+    assert debug.impacted_tiers == ()
+    assert debug.impacted_units == ()
+    assert debug.announcement_scope == ()
+    assert test.impacted_tiers == ("debug", "test")
     assert test.impacted_units == ("xl-qqbot-test.service",)
+    assert test.announcement_scope == ("debug", "test")
 
 
 @pytest.mark.parametrize(
     ("paths", "units", "tiers", "notice"),
     [
         (["xl_qqbot/bot_app/router.py"], ("xl-qqbot-prod.service", "xl-qqbot-router.service"), ("debug", "test", "production"), ("main",)),
-        (["xl_updata_server/server_app/processor.py"], ("xl-updata-server.service",), (), ()),
+        (["xl_updata_server/server_app/processor.py"], ("xl-updata-server.service",), ("production",), ("main",)),
         (["xl_qqbot/bot_app/service.py", "xl_updata_server/run_server.py"],
          ("xl-qqbot-prod.service", "xl-qqbot-router.service", "xl-updata-server.service"),
          ("debug", "test", "production"), ("main",)),
@@ -65,7 +66,7 @@ def test_unknown_branch_is_rejected():
 def test_deployment_target_is_an_explicit_immutable_mapping():
     target = DeploymentTarget.for_changes("debug", ["xl_qqbot/bot_app/service.py"])
 
-    assert target.impacted_tiers == ("debug",)
-    assert target.impacted_units == ("xl-qqbot-debug.service",)
+    assert target.impacted_tiers == ()
+    assert target.impacted_units == ()
     with pytest.raises((AttributeError, TypeError)):
         target.impacted_units = ()
