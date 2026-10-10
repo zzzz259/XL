@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=/home/admin/xl_qqbot
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/admin/xl_deploy/current/main/xl_qqbot
-ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-qqbot-prod.service/bin/python -m bot_app.service --tier production --port 8783
+ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-qqbot-prod.service/bin/python -P -m bot_app.service --tier production --port 8783
 Restart=on-failure
 RestartSec=10
 CPUQuota=30%
