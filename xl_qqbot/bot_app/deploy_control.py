@@ -211,10 +211,6 @@ def build_deployment_app(
                 {"ok": False, "error": "invalid notification_id"}, status=400
             )
         if phase == "release_note":
-            if tier != "main":
-                return web.json_response(
-                    {"ok": False, "error": "release notes are main-only"}, status=400
-                )
             text = payload.get("text")
             if not isinstance(text, str) or not text.strip() or len(text) > 4000:
                 return web.json_response(
