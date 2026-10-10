@@ -311,10 +311,12 @@ async def test_authenticated_release_note_announcement_uses_supplied_content(tmp
 
 
 @pytest.mark.asyncio
-async def test_release_note_announcement_is_restricted_to_main_tier(tmp_path):
+async def test_release_note_announcement_is_routed_only_to_requested_tier(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
-    client = TestClient(TestServer(make_app(control, sender)))
+    app = make_app(control, sender)
+    queue = app["test_outbox"]
+    client = TestClient(TestServer(app))
     await client.start_server()
     try:
         response = await client.post(
@@ -328,7 +330,13 @@ async def test_release_note_announcement_is_restricted_to_main_tier(tmp_path):
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
 
-        assert response.status == 400
+        assert await response.json() == {
+            "ok": True,
+            "results": {DEBUG_GROUP: True},
+        }
+        assert {(item.recipient, item.text) for item in queue.list_pending()} == {
+            (DEBUG_GROUP, "Not a main release"),
+        }
         assert sender.messages == []
     finally:
         await client.close()

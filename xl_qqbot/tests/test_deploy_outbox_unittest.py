@@ -89,6 +89,53 @@ class DeploymentOutboxTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await client.close()
 
+    async def test_release_note_is_routed_to_debug_and_test_tiers(self):
+        debug_group = "release-debug-group"
+        test_group = "release-test-group"
+        production_group = "release-production-group"
+        outbox = ProactiveOutbox(self.root / "release-note-data")
+        app = build_deployment_app(
+            control=DeploymentControl(self.root / "release-note-maintenance.json"),
+            bearer_token=TOKEN,
+            proactive_outbox=outbox,
+            tiers=GroupTier(
+                GroupsConfig(
+                    debug=[debug_group],
+                    test=[test_group],
+                )
+            ),
+            target_groups=[debug_group, test_group, production_group],
+        )
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            for tier, group in (("debug", debug_group), ("test", test_group)):
+                response = await client.post(
+                    "/deployment/announce",
+                    json={
+                        "tier": tier,
+                        "phase": "release_note",
+                        "notification_id": f"tx-release:{tier}",
+                        "text": "该环境版本更新说明",
+                    },
+                    headers={"Authorization": f"Bearer {TOKEN}"},
+                )
+                self.assertEqual(response.status, 200)
+                self.assertEqual(
+                    await response.json(), {"ok": True, "results": {group: True}}
+                )
+
+            queued = outbox.list_pending()
+            self.assertEqual(
+                {(row.recipient, row.text) for row in queued},
+                {
+                    (debug_group, "该环境版本更新说明"),
+                    (test_group, "该环境版本更新说明"),
+                },
+            )
+        finally:
+            await client.close()
+
 
 if __name__ == "__main__":
     unittest.main()
