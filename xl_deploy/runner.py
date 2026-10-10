@@ -19,6 +19,7 @@ ALLOWED_UNITS = frozenset(
         "xl-qqbot-prod.service",
         "xl-qqbot-router.service",
         "xl-updata-server.service",
+        "xl-updata-server-test.service",
         "xl-deploy-poll.service",
     }
 )
@@ -30,10 +31,10 @@ BOT_UNITS = frozenset(
         "xl-qqbot-router.service",
     }
 )
-BACKEND_UNITS = frozenset({"xl-updata-server.service"})
+BACKEND_UNITS = frozenset({"xl-updata-server.service", "xl-updata-server-test.service"})
 BRANCH_UNITS = {
-    "debug": ("xl-qqbot-debug.service",),
-    "test": ("xl-qqbot-test.service",),
+    "debug": (),
+    "test": ("xl-qqbot-test.service", "xl-updata-server-test.service"),
     "main": (
         "xl-qqbot-prod.service",
         "xl-qqbot-router.service",
@@ -58,6 +59,7 @@ class CommandRunner:
         executor: Callable[..., Any] | None = None,
         health_token: str | None = None,
         backend_config_path: Path | str | None = None,
+        test_backend_config_path: Path | str | None = None,
         deployment_root: Path | str = "/home/admin/xl_deploy",
         health_timeout_seconds: float = 30,
         health_poll_interval_seconds: float = 1,
@@ -68,6 +70,9 @@ class CommandRunner:
         self._executor = executor or _subprocess_executor
         self.health_token = health_token
         self.backend_config_path = Path(backend_config_path) if backend_config_path else None
+        self.test_backend_config_path = (
+            Path(test_backend_config_path) if test_backend_config_path else None
+        )
         self.deployment_root = Path(deployment_root)
         self.health_timeout_seconds = health_timeout_seconds
         self.health_poll_interval_seconds = health_poll_interval_seconds
@@ -109,6 +114,27 @@ class CommandRunner:
         if not isinstance(output, str):
             raise TypeError("git diff returned invalid output")
         return tuple(path for path in output.split("\0") if path)
+
+    def read_text_at_commit(self, commit_sha: str, path: str) -> str:
+        sha = _validated_sha(commit_sha)
+        if (
+            not isinstance(path, str)
+            or "\\" in path
+            or "\0" in path
+            or path.startswith("/")
+            or len(path.split("/")) != 3
+            or path.split("/")[:2] != ["xl_deploy", "announcements"]
+            or not path.endswith(".md")
+            or path.split("/")[-1] in {"", ".", ".."}
+        ):
+            raise ValueError("announcement blob path is not allowlisted")
+        if self.repository is None or not self.repository.is_dir():
+            raise RuntimeError("deployment source repository is not configured")
+        result = self._executor(["git", "show", f"{sha}:{path}"], cwd=self.repository)
+        output = getattr(result, "stdout", None)
+        if not isinstance(output, str):
+            raise TypeError("git show returned invalid announcement text")
+        return output
 
     def preflight(
         self,
@@ -157,6 +183,32 @@ class CommandRunner:
                     [str(python), "-m", "pip", "install", "--requirement", str(requirements)],
                     cwd=release_path,
                 )
+            if unit in BACKEND_UNITS:
+                renderer_directory = release_path / "xl_updata_server" / "renderer"
+                if not (renderer_directory / "package.json").is_file():
+                    raise RuntimeError("candidate backend is missing the renderer package manifest")
+                self._executor(
+                    ["npm", "install", "--omit=dev", "--no-audit", "--no-fund"],
+                    cwd=renderer_directory,
+                )
+                self._executor(
+                    ["node", "-e", "require('canvas')"],
+                    cwd=renderer_directory,
+                )
+                if self.backend_config_path is not None:
+                    config_path = self._backend_config_for_unit(unit)
+                    environment = "test" if unit == "xl-updata-server-test.service" else "main"
+                    python = service_venv_path(release_path, unit) / (
+                        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+                    )
+                    self._executor(
+                        [
+                            str(python), str(release_path / "xl_updata_server" / "run_server.py"),
+                            "--healthcheck", "--config", str(config_path),
+                            "--expect-environment", environment,
+                        ],
+                        cwd=release_path / "xl_updata_server",
+                    )
         source_roots = (
             release_path / "xl_deploy",
             release_path / "xl_qqbot" / "bot_app",
@@ -201,13 +253,18 @@ class CommandRunner:
                     f"http://127.0.0.1:{port}/health", headers=headers
                 )
                 self._wait_for_http_health(request, unit)
-            elif unit == "xl-updata-server.service":
+            elif unit in BACKEND_UNITS:
                 self._backend_health_check(unit)
 
     def _backend_health_check(self, unit: str) -> None:
-        if self.backend_config_path is None:
+        is_test = unit == "xl-updata-server-test.service"
+        config_path = self._backend_config_for_unit(unit)
+        if config_path is None:
             raise RuntimeError("backend health-check config path is not configured")
-        release = self.deployment_root / "current" / "main"
+        branch = "test" if is_test else "main"
+        environment = "test" if is_test else "main"
+        port = 8791 if is_test else 8790
+        release = self.deployment_root / "current" / branch
         service_python = service_venv_path(release, unit) / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
         )
@@ -215,10 +272,22 @@ class CommandRunner:
         self._executor(
             [
                 str(service_python), str(entrypoint), "--healthcheck", "--config",
-                str(self.backend_config_path),
+                str(config_path), "--expect-environment", environment,
             ],
             cwd=entrypoint.parent,
         )
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/healthz")
+        self._wait_for_http_health(request, unit)
+
+    def _backend_config_for_unit(self, unit: str) -> Path:
+        path = (
+            self.test_backend_config_path
+            if unit == "xl-updata-server-test.service"
+            else self.backend_config_path
+        )
+        if path is None:
+            raise RuntimeError("backend health-check config path is not configured")
+        return path
 
     def _wait_for_http_health(self, request: urllib.request.Request, unit: str) -> None:
         deadline = time.monotonic() + self.health_timeout_seconds

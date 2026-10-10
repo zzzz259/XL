@@ -62,6 +62,22 @@ def _extract_message_id(message) -> str:
     return str(getattr(message, "id", "") or "")
 
 
+_RERUN_EXACT_QUERIES = frozenset({
+    "复刻", "复刻表", "复刻排期", "下次复刻", "卡池复刻", "复刻时间", "下一期谁复刻",
+})
+_RERUN_QUESTION_SUFFIXES = ("什么时候复刻", "何时复刻", "啥时候复刻", "什么时候会复刻")
+
+
+def is_rerun_schedule_query(query: str) -> bool:
+    """Match explicit commands or tightly-scoped character rerun questions."""
+    normalized = str(query).strip().lower().strip(" \u3000\r\n\t?？!！。,.，")
+    if normalized in _RERUN_EXACT_QUERIES:
+        return True
+    if len(normalized) > 48:
+        return False
+    return any(normalized.endswith(suffix) and len(normalized) > len(suffix) for suffix in _RERUN_QUESTION_SUFFIXES)
+
+
 def event_to_dict(message) -> dict:
     """botpy 消息对象 → 原始 dict 形态（best effort，供旧一体化入口复用）。"""
     if isinstance(message, dict):
@@ -80,13 +96,14 @@ class QueryHandler:
     def __init__(self, querier: CharacterQuerier, matcher: CharacterMatcher,
                  selection: SelectionStore, sender: QQSender,
                  tiers: GroupTier | None = None, bot_openid: str = "",
-                 mute: ServiceMute | None = None):
+                 mute: ServiceMute | None = None, rerun_querier=None):
         self._querier = querier
         self._matcher = matcher
         self._selection = selection
         self._sender = sender
         self._tiers = tiers or GroupTier()
         self._bot_openid = bot_openid
+        self._rerun_querier = rerun_querier
         # 不传 mute 时自持（路由器转发模式按事件 muted 标志驱动）；
         # 旧一体化入口传入与 watcher 共享的实例（更新静音）
         self._mute = mute or ServiceMute()
@@ -165,6 +182,18 @@ class QueryHandler:
     # ---------- 查询与选择 ----------
 
     async def _answer_query(self, group_openid: str, query: str, member_openid: str = "", reply_to: str = "") -> None:
+        # Explicit schedule intent precedes character fuzzy matching.
+        if is_rerun_schedule_query(query):
+            if not self._tiers.available("rerun_schedule_query", group_openid):
+                _logger.debug("功能 rerun_schedule_query 在群 %s 未开放，忽略查询", group_openid)
+                return
+            if self._mute.muted:
+                _logger.info("更新期间静音，忽略复刻表查询 group=%s", group_openid)
+                return
+            if member_openid:
+                self._selection.clear(group_openid, member_openid)
+            await self._answer_rerun_schedule(group_openid, reply_to)
+            return
         # 功能门禁：character_query 在该群未开放则静默忽略
         if not self._tiers.available("character_query", group_openid):
             _logger.debug("功能 character_query 在群 %s 未开放，忽略查询", group_openid)
@@ -195,6 +224,33 @@ class QueryHandler:
             )
         else:
             await self._sender.send_text(group_openid, f"未找到角色：{query}", reply_to)
+
+    async def _answer_rerun_schedule(self, group_openid: str, reply_to: str) -> None:
+        if self._rerun_querier is None:
+            await self._sender.send_text(group_openid, "复刻排期暂不可用，请稍后再试", reply_to)
+            return
+        result = self._rerun_querier.find()
+        if result.status != "found" or result.image_path is None:
+            _logger.warning("stage=rerun_query status=unavailable reason=%s", result.reason)
+            await self._sender.send_text(group_openid, "复刻排期图暂不可用，请稍后再试", reply_to)
+            return
+        content = (
+            f"复刻表数据截至游戏版本 {result.source_version}（缓存版本，尚未随当前版本更新）。"
+            if result.stale else ""
+        )
+        send_schedule = getattr(self._sender, "send_schedule_image", None)
+        if send_schedule is None:
+            _logger.error("stage=rerun_send status=failed reason=safe_local_upload_unavailable")
+            await self._sender.send_text(group_openid, "复刻表图片发送暂不可用", reply_to)
+            return
+        sent = await send_schedule(str(result.image_path), content, [group_openid], reply_to)
+        succeeded = sent.get(group_openid, False) if isinstance(sent, dict) else bool(sent)
+        _logger.info(
+            "stage=rerun_send source_version=%s stale=%s status=%s",
+            result.source_version, result.stale, "success" if succeeded else "failed",
+        )
+        if not succeeded:
+            await self._sender.send_text(group_openid, "复刻表图片上传失败，请稍后再试", reply_to)
 
     async def _send_character(self, group_openid: str, match, query: str, reply_to: str = "") -> None:
         """按匹配结果发图鉴（图片定位仍归 querier）。"""

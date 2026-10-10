@@ -1,0 +1,26 @@
+[Unit]
+Description=XL character update backend (test, manual-only CDN processing)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=xl-updata.slice
+WorkingDirectory=/home/admin/xl_updata_server-test
+Environment=PYTHONUNBUFFERED=1
+Environment=NODE_PATH=/home/admin/xl_updata_server-test/renderer/node_modules
+EnvironmentFile=/home/admin/.config/xl_updata_server-test/api.env
+ExecStart=/home/admin/xl_deploy/current/test/.venvs/xl-updata-server-test.service/bin/python /home/admin/xl_deploy/current/test/xl_updata_server/run_server.py --config /home/admin/xl_updata_server-test/config.toml
+Restart=on-failure
+RestartSec=30
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+Nice=10
+CPUQuota=100%
+TimeoutStopSec=300
+MemoryHigh=700M
+MemoryMax=1G
+
+[Install]
+WantedBy=default.target

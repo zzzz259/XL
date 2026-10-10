@@ -1,0 +1,5 @@
+[Unit]
+Description=Aggregate CPU budget for XL update backends
+
+[Slice]
+CPUQuota=100%

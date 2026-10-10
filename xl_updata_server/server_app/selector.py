@@ -15,6 +15,8 @@ LUA_NAMES = frozenset(
         "baseskill.lua.bytes",
         "baseskilllevelup.lua.bytes",
         "baseword_cn.lua.bytes",
+        "basegacha.lua.bytes",
+        "basegachabottomup.lua.bytes",
     }
 )
 

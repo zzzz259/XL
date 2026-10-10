@@ -56,6 +56,16 @@ jobs:
           cache: pip
           cache-dependency-path: xl_updata_server/requirements.txt
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: xl_updata_server/renderer/package-lock.json
+
+      - name: Install renderer dependencies
+        run: npm ci --prefix renderer --omit=dev --no-audit --no-fund
+
       - name: Create project virtual environment
         run: python -m venv .venv
 
