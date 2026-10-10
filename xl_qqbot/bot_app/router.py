@@ -149,6 +149,15 @@ class TierForwarder:
             await self._session.close()
 
 
+def worker_ports(config: Config) -> dict[str, int]:
+    """Debug and test groups share the isolated test worker; production stays separate."""
+    return {
+        "debug": config.router.test_port,
+        "test": config.router.test_port,
+        "production": config.router.production_port,
+    }
+
+
 class _RouterClient(botpy.Client):
     """网关薄壳：群学习 → 分级 → 注入 muted → HTTP 转发。"""
 
@@ -230,11 +239,7 @@ async def _amain_router(config: Config) -> None:
         Path(config.watch.data_dir) / "maintenance.json"
     )
     forwarder = TierForwarder(
-        ports={
-            "debug": config.router.debug_port,
-            "test": config.router.test_port,
-            "production": config.router.production_port,
-        },
+        ports=worker_ports(config),
         timeout=config.router.forward_timeout,
         deployment_control=deployment_control,
     )

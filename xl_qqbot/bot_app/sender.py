@@ -64,16 +64,32 @@ class QQSender:
             results[group_openid] = await self._send_to_group(file_path, content, group_openid, reply_to)
         return results
 
+    async def send_schedule_image(
+        self,
+        file_path: str,
+        content: str,
+        group_openids: List[str],
+        reply_to: str = "",
+    ) -> Dict[str, bool]:
+        """Send a schedule image through local multipart upload, never outbox URL mapping."""
+        results: Dict[str, bool] = {}
+        for group_openid in group_openids:
+            results[group_openid] = await self._send_to_group(
+                file_path, content, group_openid, reply_to, force_multipart=True
+            )
+        return results
+
     async def _send_to_group(
         self,
         file_path: str,
         content: str,
         group_openid: str,
         reply_to: str = "",
+        force_multipart: bool = False,
     ) -> bool:
         for attempt in range(2):
             try:
-                media = await self._upload_group_file(group_openid, file_path)
+                media = await self._upload_group_file(group_openid, file_path, force_multipart=force_multipart)
                 await self._send_group_media(group_openid, content, media, reply_to)
                 logger.info("发送图片成功 group=%s file=%s", group_openid, os.path.basename(file_path))
                 return True
@@ -87,8 +103,10 @@ class QQSender:
                 await asyncio.sleep(1)
         return False
 
-    async def _upload_group_file(self, group_openid: str, file_path: str) -> Dict[str, str]:
-        if self.config.upload.file_base_url:
+    async def _upload_group_file(
+        self, group_openid: str, file_path: str, force_multipart: bool = False
+    ) -> Dict[str, str]:
+        if self.config.upload.file_base_url and not force_multipart:
             url = self._to_public_url(file_path)
             route = Route(
                 "POST",

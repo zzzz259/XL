@@ -129,7 +129,7 @@ def make_transaction(tmp_path, *, runner=None, router=None, drain_timeout=3):
 
 def make_plan(*, sha=NEW_SHA, release_note=None):
     return plan_deployment(
-        "debug", sha, ["xl_qqbot/bot_app/router.py"], release_note=release_note
+        "test", sha, ["xl_qqbot/bot_app/router.py"], release_note=release_note
     )
 
 
@@ -166,12 +166,14 @@ def test_happy_path_obeys_notice_pause_drain_stop_switch_start_health_resume_ord
         "announce",
         "release_note",
     ]
-    assert transaction.events[2] == ("announce", START_NOTICE, "debug")
-    assert transaction.events[9] == ("resume", "debug")
-    assert transaction.events[10] == ("announce", DONE_NOTICE, "debug")
-    assert transaction.events[11] == ("release_note", "New version details", "debug")
-    assert branch_current(transaction, "debug").name.startswith(f"{NEW_SHA}-")
-    assert branch_current(transaction, "test").name == "3" * 40
+    assert transaction.events[2] == ("announce", START_NOTICE, "debug", "test")
+    assert transaction.events[9] == ("resume", "debug", "test")
+    assert transaction.events[10] == ("announce", DONE_NOTICE, "debug", "test")
+    assert transaction.events[11] == (
+        "release_note", "New version details", "debug", "test"
+    )
+    assert branch_current(transaction, "test").name.startswith(f"{NEW_SHA}-")
+    assert branch_current(transaction, "debug").name == OLD_SHA
     assert branch_current(transaction, "main").name == "4" * 40
 
 
@@ -186,7 +188,7 @@ def test_notice_failure_never_pauses_or_stops_live_services(tmp_path):
     assert not any(
         event[0] in {"pause", "drain", "stop", "switch"} for event in transaction.events
     )
-    assert branch_current(transaction, "debug").name == OLD_SHA
+    assert branch_current(transaction, "test").name == "3" * 40
 
 
 def test_drain_timeout_aborts_before_stopping_units(tmp_path):
@@ -200,7 +202,7 @@ def test_drain_timeout_aborts_before_stopping_units(tmp_path):
     assert not any(
         event[0] in {"stop", "switch", "start"} for event in transaction.events
     )
-    assert branch_current(transaction, "debug").name == OLD_SHA
+    assert branch_current(transaction, "test").name == "3" * 40
     assert router.maintenance == set()
 
 
@@ -256,7 +258,7 @@ def test_deployment_paths_do_not_follow_current_pointer_leaf(tmp_path, monkeypat
     assert paths.current_path == current.absolute()
 
 
-def test_backend_only_deployment_does_not_pause_or_announce_to_bot(tmp_path):
+def test_backend_only_deployment_pauses_and_announces_for_its_tier(tmp_path):
     runner, router = FakeRunner(), FakeRouter()
     transaction = make_transaction(tmp_path, runner=runner, router=router)
     plan = plan_deployment(
@@ -267,10 +269,10 @@ def test_backend_only_deployment_does_not_pause_or_announce_to_bot(tmp_path):
 
     assert result.status == "success"
     assert plan.impacted_units == ("xl-updata-server.service",)
-    assert not any(
-        event[0] in {"announce", "pause", "drain", "resume"}
-        for event in transaction.events
-    )
+    assert ("announce", START_NOTICE, "main") in transaction.events
+    assert ("pause", "production") in transaction.events
+    assert ("drain", "production") in transaction.events
+    assert ("resume", "production") in transaction.events
     assert transaction.events.index(
         ("stop", "xl-updata-server.service")
     ) < transaction.events.index(("switch", NEW_SHA))
@@ -279,47 +281,67 @@ def test_backend_only_deployment_does_not_pause_or_announce_to_bot(tmp_path):
     assert branch_current(transaction, "test").name == "3" * 40
 
 
-def test_debug_update_leaves_test_and_main_current_pointers_untouched(tmp_path):
+def test_test_backend_only_deployment_notifies_both_lower_tiers(tmp_path):
+    runner, router = FakeRunner(), FakeRouter()
+    transaction = make_transaction(tmp_path, runner=runner, router=router)
+    plan = plan_deployment(
+        "test", NEW_SHA, ["xl_updata_server/server_app/processor.py"]
+    )
+
+    result = transaction.execute(plan)
+
+    assert result.status == "success"
+    assert plan.impacted_units == ("xl-updata-server-test.service",)
+    assert ("announce", START_NOTICE, "debug", "test") in transaction.events
+    assert ("pause", "debug", "test") in transaction.events
+    assert ("drain", "debug", "test") in transaction.events
+    assert ("resume", "debug", "test") in transaction.events
+    assert branch_current(transaction, "test").name.startswith(f"{NEW_SHA}-")
+    assert branch_current(transaction, "debug").name == OLD_SHA
+
+
+def test_test_update_leaves_debug_and_main_current_pointers_untouched(tmp_path):
     transaction = make_transaction(tmp_path)
-    previous_test = branch_current(transaction, "test")
+    previous_debug = branch_current(transaction, "debug")
     previous_main = branch_current(transaction, "main")
 
     result = transaction.execute(make_plan())
 
     assert result.status == "success"
-    assert branch_current(transaction, "debug").name.startswith(f"{NEW_SHA}-")
-    assert branch_current(transaction, "test") == previous_test
+    assert branch_current(transaction, "test").name.startswith(f"{NEW_SHA}-")
+    assert branch_current(transaction, "debug") == previous_debug
     assert branch_current(transaction, "main") == previous_main
 
 
 def test_health_failure_rolls_back_and_retains_both_releases(tmp_path):
     runner, router = FakeRunner(), FakeRouter()
-    runner.fail_health_for.add("xl-qqbot-debug.service")
+    runner.fail_health_for.add("xl-qqbot-test.service")
     transaction = make_transaction(tmp_path, runner=runner, router=router)
 
     result = transaction.execute(make_plan())
 
     assert result.status == "rolled_back"
-    assert branch_current(transaction, "debug").name == OLD_SHA
+    assert branch_current(transaction, "test").name == "3" * 40
     assert Path(transaction.state.load().candidate_release).exists()
     assert transaction.state.load().phase == "rolled_back"
     assert transaction.events[-1] == (
         "announce",
         "部署失败，已回滚到上一版本。",
         "debug",
+        "test",
     )
 
 
 def test_rollback_failure_keeps_maintenance_and_journal_evidence(tmp_path):
     runner, router = FakeRunner(), FakeRouter()
-    runner.fail_health_for.add("xl-qqbot-debug.service")
-    runner.fail_start_for.add("xl-qqbot-debug.service")
+    runner.fail_health_for.add("xl-qqbot-test.service")
+    runner.fail_start_for.add("xl-qqbot-test.service")
     transaction = make_transaction(tmp_path, runner=runner, router=router)
 
     result = transaction.execute(make_plan())
 
     assert result.status == "rollback_failed"
-    assert router.maintenance == {"debug"}
+    assert router.maintenance == {"debug", "test"}
     journal = transaction.state.load()
     assert journal.phase == "rollback_failed"
     assert journal.maintenance_enabled is True
@@ -359,7 +381,7 @@ def test_recovery_after_interruption_is_idempotent(tmp_path):
     assert first.status == "rolled_back"
     assert second.status == "already_recovered"
     assert len(transaction.events) == event_count
-    assert branch_current(transaction, "debug").name == OLD_SHA
+    assert branch_current(transaction, "test").name == "3" * 40
     assert transaction.state.load().phase == "rolled_back"
 
 
@@ -406,13 +428,13 @@ def test_failed_release_note_is_persisted_and_retried_without_rollback(tmp_path)
 
     assert result.status == "announcement_pending"
     assert transaction.state.load().phase == "release_note_pending"
-    assert branch_current(transaction, "debug").name.startswith(f"{NEW_SHA}-")
+    assert branch_current(transaction, "test").name.startswith(f"{NEW_SHA}-")
     recovered = transaction.recover()
 
     assert recovered.status == "success"
     assert transaction.state.load().phase == "completed"
     assert transaction.state.load().release_note_sent is True
-    assert branch_current(transaction, "debug").name.startswith(f"{NEW_SHA}-")
+    assert branch_current(transaction, "test").name.startswith(f"{NEW_SHA}-")
 
 
 def test_recovery_after_router_resume_retries_completion_instead_of_rolling_back(
@@ -439,14 +461,14 @@ def test_recovery_after_router_resume_retries_completion_instead_of_rolling_back
     recovered = transaction.recover()
 
     assert recovered.status == "success"
-    assert branch_current(transaction, "debug").name.startswith(f"{NEW_SHA}-")
+    assert branch_current(transaction, "test").name.startswith(f"{NEW_SHA}-")
     assert transaction.state.load().phase == "completed"
     assert router.maintenance == set()
 
 
 def test_failed_recovery_notice_is_persisted_and_retried(tmp_path):
     runner, router = FakeRunner(), FakeRouter()
-    runner.fail_health_for.add("xl-qqbot-debug.service")
+    runner.fail_health_for.add("xl-qqbot-test.service")
     router.announce_results = [True, False, True]
     transaction = make_transaction(tmp_path, runner=runner, router=router)
 
@@ -454,7 +476,7 @@ def test_failed_recovery_notice_is_persisted_and_retried(tmp_path):
 
     assert result.status == "announcement_pending"
     assert transaction.state.load().phase == "recovery_notice_pending"
-    assert branch_current(transaction, "debug").name == OLD_SHA
+    assert branch_current(transaction, "test").name == "3" * 40
     recovered = transaction.recover()
 
     assert recovered.status == "rolled_back"
@@ -525,7 +547,7 @@ def test_failed_preflight_keeps_unique_artifact_and_same_sha_can_retry(tmp_path)
     assert len(runner.candidates) == 2
     assert runner.candidates[0] != runner.candidates[1]
     assert all(path.exists() for path in runner.candidates)
-    assert branch_current(transaction, "debug") == runner.candidates[1].resolve()
+    assert branch_current(transaction, "test") == runner.candidates[1].resolve()
 
 
 def test_preflight_creates_one_release_local_venv_per_impacted_unit(tmp_path):
@@ -535,6 +557,9 @@ def test_preflight_creates_one_release_local_venv_per_impacted_unit(tmp_path):
     release = tmp_path / "release"
     (release / "xl_qqbot").mkdir(parents=True)
     (release / "xl_updata_server").mkdir()
+    renderer_directory = release / "xl_updata_server" / "renderer"
+    renderer_directory.mkdir()
+    (renderer_directory / "package.json").write_text('{"dependencies":{"canvas":"^3.2.3"}}', encoding="utf-8")
     bot_requirements = release / "xl_qqbot" / "requirements.txt"
     backend_requirements = release / "xl_updata_server" / "requirements.txt"
     bot_requirements.write_text("bot-only==1\n", encoding="utf-8")
@@ -571,6 +596,14 @@ def test_preflight_creates_one_release_local_venv_per_impacted_unit(tmp_path):
             "xl-updata-server.service",
         )
     }
+    npm_commands = [(args, kwargs) for args, kwargs in commands if args[0] == "npm"]
+    canvas_checks = [(args, kwargs) for args, kwargs in commands if args[0] == "node"]
+    assert npm_commands == [
+        (["npm", "install", "--omit=dev", "--no-audit", "--no-fund"], {"cwd": renderer_directory})
+    ]
+    assert canvas_checks == [
+        (["node", "-e", "require('canvas')"], {"cwd": renderer_directory})
+    ]
 
 
 def test_preflight_compiles_backend_sources_before_any_service_stop(tmp_path):
@@ -580,6 +613,9 @@ def test_preflight_compiles_backend_sources_before_any_service_stop(tmp_path):
     backend = release / "xl_updata_server" / "server_app"
     backend.mkdir(parents=True)
     (release / "xl_updata_server" / "requirements.txt").write_text("", encoding="utf-8")
+    renderer = release / "xl_updata_server" / "renderer"
+    renderer.mkdir()
+    (renderer / "package.json").write_text('{"dependencies":{"canvas":"^3.2.3"}}', encoding="utf-8")
     (release / "xl_qqbot").mkdir(parents=True)
     (release / "xl_qqbot" / "requirements.txt").write_text("", encoding="utf-8")
     (backend / "broken.py").write_text("def invalid(:\n", encoding="utf-8")
@@ -609,10 +645,16 @@ def test_backend_health_check_runs_read_only_application_self_check(
         deployment_root=tmp_path / "deploy",
     )
 
-    def forbidden_http(*args, **kwargs):
-        raise AssertionError("backend does not expose an HTTP health endpoint")
+    class Response:
+        status = 200
 
-    monkeypatch.setattr("urllib.request.urlopen", forbidden_http)
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
     runner.health_check(("xl-updata-server.service",))
 
     assert commands[0] == [
@@ -627,6 +669,8 @@ def test_backend_health_check_runs_read_only_application_self_check(
         "--healthcheck",
         "--config",
         str(tmp_path / "backend.toml"),
+        "--expect-environment",
+        "main",
     ]
 
 

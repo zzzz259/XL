@@ -47,10 +47,12 @@ character_query = "production"   # @查图鉴（含候选选择）
 character_push = "production"    # 版本更新时新角色图鉴推送（watcher outbox）
 update_notice = "production"     # 版本开始/结束播报
 bilibili_watch = "production"    # B站动态/UP主监视推送
+rerun_schedule_query = "debug"   # @机器人复刻排期图片查询（默认仅调试群）
 
 [router]
 # 事件路由器（python -m bot_app.router）转发各级别服务的端口与超时（秒）。
 # 级别服务用 python -m bot_app.service --tier <级> --port <端口> 启动。
+# Legacy compatibility only; current router forwards debug groups to test_port.
 debug_port = 8781
 test_port = 8782
 production_port = 8783

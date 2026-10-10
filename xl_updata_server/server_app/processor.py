@@ -16,12 +16,69 @@ from .character_adapter import parse_character_snapshot
 from .character_card_exporter import CardExportReport, export_character_cards
 from .config import ServerConfig
 from .extractor import extract_lua_files
+from .gacha_adapter import load_character_names, load_gacha_tables
+from .gacha_history import rebuild_gacha_history
 from .lua_decoder import decode_lua_directory
 from .pipeline import ProcessResult
+from .rerun_schedule import project_schedule, publish_schedule_snapshot, render_schedule_png
 from .selector import bundle_hashes_for_assets, select_lua_assets
 from .versioning import read_current_pointer
 
 LOGGER = logging.getLogger(__name__)
+
+
+def process_rerun_schedule(
+    decoded_lua: Path,
+    staging: Path,
+    version: str | int,
+    characters: dict,
+    config: ServerConfig,
+) -> dict | None:
+    """Parse, rebuild, render, and stage the schedule without blocking game updates."""
+    if not getattr(config, "rerun_schedule_enabled", True):
+        LOGGER.info("stage=gacha_parse status=skipped reason=feature_disabled")
+        return None
+    if not (decoded_lua / "basegacha.lua").is_file() or not (decoded_lua / "basegachabottomup.lua").is_file():
+        LOGGER.warning("stage=gacha_parse status=skipped reason=required_lua_missing")
+        return None
+
+    started = time.perf_counter()
+    pools, bottomups = load_gacha_tables(str(decoded_lua))
+    LOGGER.info(
+        "stage=gacha_parse game_version=%s pools=%d bottomups=%d status=success elapsed_ms=%d",
+        version, len(pools), len(bottomups), int((time.perf_counter() - started) * 1000),
+    )
+    names = load_character_names(decoded_lua)
+    names.update({
+        str(character_id): str(value.get("name", ""))
+        for character_id, value in characters.items()
+        if isinstance(value, dict)
+    })
+    history = rebuild_gacha_history(
+        pools,
+        bottomups,
+        names,
+        overrides=getattr(config, "rerun_schedule_overrides", ()),
+    )
+    LOGGER.info(
+        "stage=gacha_audit game_version=%s events=%d queue_length=%d anomaly_count=%d status=success",
+        version, len(history["events"]), len(history["queue"]), len(history["anomalies"]),
+    )
+    payload = project_schedule(
+        history,
+        source_version=version,
+        anchor=getattr(config, "rerun_schedule_anchor", None),
+        names=names,
+        forecast_limit=getattr(config, "rerun_schedule_forecast_limit", 20),
+    )
+
+    png_bytes = render_schedule_png(payload, node_bin=config.node_bin)
+    published = publish_schedule_snapshot(staging / "rerun_schedule", payload, png_bytes)
+    LOGGER.info(
+        "stage=rerun_render game_version=%s queue_length=%d anomaly_count=%d status=success elapsed_ms=%d",
+        version, len(history["queue"]), len(history["anomalies"]), int((time.perf_counter() - started) * 1000),
+    )
+    return published
 
 
 def bundle_output_dir(version_root: Path, category: str) -> Path:
@@ -259,6 +316,22 @@ class ProductionUpdateProcessor:
         character_ids = {str(key) for key in characters}
         if not character_ids:
             raise ValueError("角色 Lua 未解析出角色 ID")
+
+        try:
+            process_rerun_schedule(
+                decoded_lua,
+                staging,
+                update_info.timestamp,
+                characters,
+                self.config,
+            )
+        except Exception:
+            # A schedule parser/render failure must not discard otherwise-valid
+            # game character data; the last published immutable schedule remains.
+            LOGGER.exception(
+                "stage=rerun_render game_version=%s status=failed fallback=last_known_good",
+                update_info.timestamp,
+            )
 
         is_baseline = current is None
         current_ids = set(current.get("characters", {}).keys()) if current else set()

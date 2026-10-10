@@ -13,18 +13,85 @@ cursor. Changes outside a branch's service mapping are recorded as no-ops.
 
 | Branch | Immutable pointer | Services affected |
 |---|---|---|
-| `debug` | `/home/admin/xl_deploy/current/debug` | `xl-qqbot-debug.service` |
-| `test` | `/home/admin/xl_deploy/current/test` | `xl-qqbot-test.service` |
-| `main` | `/home/admin/xl_deploy/current/main` | `xl-qqbot-prod.service`, `xl-qqbot-router.service`, `xl-updata-server.service` as selected by changed paths |
+| `debug` | `/home/admin/xl_deploy/current/debug` | CI/integration only; no runtime units |
+| `test` | `/home/admin/xl_deploy/current/test` | `xl-qqbot-test.service` and/or `xl-updata-server-test.service` |
+| `main` | `/home/admin/xl_deploy/current/main` | `xl-qqbot-prod.service`, shared `xl-qqbot-router.service`, and/or `xl-updata-server.service` as selected by changed paths |
+
+The one shared router retains each group's original `debug`/`test`/`production`
+tier classification; both debug and test traffic are forwarded to the test Bot
+worker at `127.0.0.1:8782`, while production uses `8783`. Test Bot changes
+pause/drain both lower tiers but do not restart the router. The debug-to-test
+forwarding rule is shipped by `main`, because the router owns the shared QQ
+gateway. Debug runtime changes are therefore CI-verified no-ops. Test and main
+backend configurations, bearer secrets, state databases, downloads, versions,
+character output and Bot outboxes must remain separate. The test server is
+always available for local control but its `environment = "test"` policy
+forcibly disables scheduled CDN polling; GitHub deployment itself never starts
+a game update. Both backend services are placed in `xl-updata.slice`, capped at
+one CPU core in aggregate.
+
+The test Bot's external `config.toml` must retain the same `[groups].debug` and
+`[groups].test` IDs and feature-level settings as the router's classification.
+The worker recomputes `GroupTier` from that configuration for every request;
+the router preserves the group ID and routes by the original tier. Copying
+only the test group list would accidentally evaluate debug groups as the
+default tier.
+
+Point the test Bot's `[watch]` data root, `character_data`, `versions_dir`, and
+`outbox_dir` at the test backend's data tree; keep the production Bot and
+router watcher paths on the main backend tree. The test worker handles
+passive queries only. A manual test-server run does not enqueue public QQ
+announcements or send its output to the production outbox.
 
 Code is stored in `/home/admin/xl_deploy/releases/<sha>-<transaction-id>`;
-each branch has an independent atomic `current` symlink. Journal/cursors,
+each runtime branch (`test` and `main`) has an independent atomic `current`
+symlink. Debug requires only a persisted CI cursor. Journal/cursors,
 config, QQ bot persistent state, backend data, databases, downloads and outbox
 remain outside immutable releases. Missing current pointers fail closed; old
 checkouts are never silently adopted as releases.
 
+Backend release preflight installs `xl_updata_server/renderer` runtime packages
+from its `package.json` and verifies `node -e "require('canvas')"` before any
+service cutover. It also runs that environment's read-only `--healthcheck`
+against its external config and checks the corresponding loopback `/healthz`
+after startup. A missing or unloadable native renderer dependency therefore
+fails staging while the active release remains untouched.
+
 The router process itself owns the deployment-control API on
 `127.0.0.1:8784`. There is no separate externally exposed control service.
+
+## Update server control API
+
+Each backend exposes its own loopback-only control API: production on
+`127.0.0.1:8790`, test on `127.0.0.1:8791`. `/healthz` is read-only and
+unauthenticated; the other routes require `Authorization: Bearer ...`. API
+tokens come from different mode-600 systemd EnvironmentFiles:
+`/home/admin/.config/xl_updata_server/api.env` and
+`/home/admin/.config/xl_updata_server-test/api.env`, each defining
+`XL_UPDATE_API_TOKEN` with a distinct random value of at least 32 characters.
+Do not expose these ports through a firewall or reverse proxy.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /healthz` | Read-only environment and polling health; no CDN call |
+| `GET /api/v1/status` | Authenticated environment, scheduled-poll policy and active run |
+| `POST /api/v1/updates/run-once` | Authenticated empty-body one-shot check+process; returns `202` and a job ID |
+| `GET /api/v1/jobs/{job_id}` | Authenticated persisted job status/result |
+
+Only one scheduled/manual game-update run can execute at a time. A competing
+manual request returns `409`; shutdown rejects new triggers with `503` and
+waits for an active pipeline. Test mode never polls the CDN on a schedule, even
+if `[polling].enabled = true`; the manual request uses the same ordinary update
+pipeline and writes only to test data.
+
+PowerShell example (put the secret in the process environment without printing
+it; do not paste it into command history):
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:XL_UPDATE_API_TOKEN" }
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8791/api/v1/updates/run-once -Headers $headers
+Invoke-RestMethod -Uri http://127.0.0.1:8791/api/v1/status -Headers $headers
+```
 
 ## Manual setup and cutover
 
@@ -43,7 +110,27 @@ QQ Gateway ownership, credentials, bot persistent state and server `data/` in
 place. Back them up with a consistent snapshot and never copy them into a
 release directory.
 
-Prepare the external secrets file without putting values in shell history or
+This layout change requires an operator-controlled one-time cutover before the
+new branch mapping can manage both backends: install/activate the reviewed
+controller and unit templates, provision the distinct test config/data/API
+token, and make verified `current/test` and `current/main` release pointers.
+When upgrading an existing poller whose code is loaded from `current/main`,
+the shared control-plane package may instead be installed in the stable
+`/home/admin/xl_deploy/control-plane` directory and the poller unit pointed at
+that path. This one-time controller upgrade is separate from both runtime
+release pointers; it must not move `current/main` or alter main application
+data.
+The deployment poller never creates units, runtime configs, secrets, data
+directories or initial release pointers. Test's initial `--healthcheck` may
+accept an absent data directory/state database; the service creates these
+under the configured test data root on startup, before `/healthz` is checked.
+Existing legacy
+`xl-qqbot-debug.service` definitions are preserved and are not installed by a
+new bootstrap; this change does not stop or disable a pre-existing live debug
+unit. Do not expect test-backend branch automation until the new poller mapping
+is active.
+
+Prepare the external secrets files without putting values in shell history or
 terminal logs:
 
 ```bash
@@ -53,6 +140,9 @@ touch ~/.config/xl_deploy/secrets.env
 touch ~/.config/xl_deploy/router.token
 chmod 600 ~/.config/xl_deploy/secrets.env
 chmod 600 ~/.config/xl_deploy/router.token
+install -d -m 700 ~/.config/xl_updata_server ~/.config/xl_updata_server-test
+touch ~/.config/xl_updata_server/api.env ~/.config/xl_updata_server-test/api.env
+chmod 600 ~/.config/xl_updata_server/api.env ~/.config/xl_updata_server-test/api.env
 ```
 
 It must contain `GITHUB_TOKEN=...` for a token limited to read-only repository
@@ -61,6 +151,16 @@ and Actions metadata. Separately create
 match the deployment token in the existing bot config and be at least 32 random
 characters. Both files must be mode `600`; config directories should be `700`.
 Never place credentials or the production assetbundle key in Git.
+
+Provision distinct backend tokens in the two `api.env` files above. Keep
+`/home/admin/xl_updata_server/config.toml` and `/home/admin/xl_updata_server/data`
+for production. Provision separate `/home/admin/xl_updata_server-test/config.toml`
+and `/home/admin/xl_updata_server-test/data`; set `[server].environment = "test"`,
+`[api].enabled = true`, port `8791`, and a distinct `[paths].data_dir` there.
+Production must declare `environment = "main"`, API port `8790`, and its own
+data path. The deploy config also requires distinct `test_backend_config` and
+`test_backend_data` values; never alias either to production or to
+`releases_root`.
 
 The sample uses the CLI's `[github]`, `[deployment]`, and `[router]` schema.
 `deployment.repository` is the local clone/worktree root used to fetch and diff
@@ -106,10 +206,12 @@ The command does not stop/start bots, enable the timer, move old service/data
 directories, or delete anything. It refuses invalid release pointers, unmapped
 legacy configs, or secrets not at mode 600. Missing baseline pointers remain
 missing; the installer never invents/adopts one.
-Before enabling, explicitly seed each missing branch pointer from its verified
-branch/SHA into a new immutable release and preflight its per-unit virtualenvs;
-never point `current/` at an old mutable service checkout. Then ensure each
-pointer targets a verified/preflighted release and
+Before enabling, explicitly seed the `test` and `main` pointers from their
+verified branch/SHA into new immutable releases and preflight their per-unit
+virtualenvs; never point `current/` at an old mutable service checkout. The
+debug branch is CI-only and does not require a current release pointer; its
+first exact-SHA CI success is recorded as a no-op cursor. Then ensure each
+runtime pointer targets a verified/preflighted release and
 the old service/config/data mapping is confirmed. For the initial bot cutover,
 send `检测到更新，正在更新bot，期间将暂停服务` before placing the old router/tiers
 into maintenance and stopping them; keep all existing state/data directories
@@ -121,8 +223,8 @@ open it in a firewall. Only after those checks should you run:
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now xl-qqbot-router.service xl-qqbot-prod.service
-systemctl --user enable --now xl-qqbot-debug.service xl-qqbot-test.service
-systemctl --user enable --now xl-updata-server.service
+systemctl --user enable --now xl-qqbot-test.service
+systemctl --user enable --now xl-updata-server.service xl-updata-server-test.service
 systemctl --user enable --now xl-deploy-poll.timer
 ```
 
@@ -135,10 +237,20 @@ accepted the message; it does not mean QQ has already delivered it. Deployment
 continues during the 02:00–08:00 Asia/Shanghai send curfew, while the queued
 start/completion/release/rollback messages wait for 08:00. It stages and
 preflights the immutable release first, switches only that branch pointer,
-starts services and checks readiness, then resumes routing. Only after health
-checks pass does it durably enqueue `更新完毕`; any new non-empty release
-announcement follows in FIFO order. Backend-only updates do not announce to QQ
-unless the plan includes bot tiers.
+starts services and checks readiness, then resumes routing. Backend-only
+updates also notify and pause/drain their corresponding service tiers:
+test-backend updates affect `debug` and `test`; main-backend updates affect
+`production`. Only after health checks pass does it durably enqueue
+`更新完毕`; any new non-empty project announcement follows in FIFO order.
+
+Optional version announcements are maintained in
+`xl_deploy/announcements/<change-id>.md` in the same candidate commit as the
+runtime change. The poller reads only changed announcement files from that
+exact candidate SHA, sorts multiple files by path and combines them within the
+4000-character message limit. Test and main promotions each announce their own
+changed note. Missing, empty, unreadable, or oversized notes never block an
+otherwise healthy deployment; only the lifecycle messages are sent. GitHub
+Release notes are not used as deployment announcements.
 
 Each notification request carries an idempotency key derived from the durable
 deployment transaction ID and phase (plus tier). Replaying a transaction journal

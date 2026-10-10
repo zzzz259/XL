@@ -24,13 +24,19 @@ class FakeGitHub:
 
 
 class FakeRunner:
-    def __init__(self, paths):
+    def __init__(self, paths, announcement_text=None):
         self.paths = paths
         self.diff_calls = []
+        self.announcement_text = announcement_text or {}
+        self.text_calls = []
 
     def changed_paths(self, base, head):
         self.diff_calls.append((base, head))
         return self.paths
+
+    def read_text_at_commit(self, commit_sha, path):
+        self.text_calls.append((commit_sha, path))
+        return self.announcement_text[path]
 
 
 class FakeState:
@@ -73,13 +79,16 @@ class FakeReleaseGitHub(FakeGitHub):
         }]
 
 
-def make_poller(tmp_path, *, paths, ci="success", status="completed", cursor=OLD_SHA, current=None):
+def make_poller(
+    tmp_path, *, paths, ci="success", status="completed", cursor=OLD_SHA,
+    current=None, branch="debug",
+):
     current = current or tmp_path / f"{OLD_SHA}-previous"
     current.mkdir(exist_ok=True)
     transaction = FakeTransaction(current, status)
     store = PollCursorStore(tmp_path / "poll-state.json")
     if cursor is not None:
-        store.set_cursor("debug", cursor)
+        store.set_cursor(branch, cursor)
     github = FakeGitHub(ci=ci)
     runner = FakeRunner(paths)
     poller = BranchPoller(
@@ -140,40 +149,42 @@ def test_noop_commit_advances_cursor_after_successful_ci(tmp_path):
 
 def test_deployment_failure_keeps_previous_cursor(tmp_path):
     poller, _, _, _, store = make_poller(
-        tmp_path, paths=["xl_qqbot/bot_app/router.py"], status="rolled_back"
+        tmp_path, paths=["xl_qqbot/bot_app/router.py"], status="rolled_back",
+        branch="test",
     )
 
-    result = poller.poll_branch("debug")
+    result = poller.poll_branch("test")
 
     assert result.status == "deployment_rolled_back"
-    assert store.get_cursor("debug") == OLD_SHA
+    assert store.get_cursor("test") == OLD_SHA
 
 
 def test_successful_deployment_advances_only_that_branch_cursor(tmp_path):
     poller, _, _, transaction, store = make_poller(
-        tmp_path, paths=["xl_qqbot/bot_app/router.py"]
+        tmp_path, paths=["xl_qqbot/bot_app/router.py"], branch="test"
     )
 
-    result = poller.poll_branch("debug")
+    result = poller.poll_branch("test")
 
     assert result.status == "deployed"
     assert transaction.calls[1][0] == "execute"
-    assert store.get_cursor("debug") == NEW_SHA
-    assert store.get_cursor("test") is None
+    assert store.get_cursor("test") == NEW_SHA
+    assert store.get_cursor("debug") is None
 
 
 def test_missing_current_release_fails_closed_and_does_not_advance_cursor(tmp_path):
     poller, _, runner, _, store = make_poller(
-        tmp_path, paths=["xl_qqbot/bot_app/router.py"], cursor=None, current=None
+        tmp_path, paths=["xl_qqbot/bot_app/router.py"], cursor=None, current=None,
+        branch="test",
     )
     transaction = FakeTransaction(None)
     poller.transaction_for_branch = lambda _branch: transaction
 
     with pytest.raises(RuntimeError, match="bootstrap"):
-        poller.poll_branch("debug")
+        poller.poll_branch("test")
 
     assert runner.diff_calls == []
-    assert store.get_cursor("debug") is None
+    assert store.get_cursor("test") is None
 
 
 def test_command_runner_fetches_and_diffs_exact_validated_sha_range(tmp_path):
@@ -206,43 +217,48 @@ def test_command_runner_preserves_newlines_inside_git_path_names(tmp_path):
     assert runner.changed_paths(OLD_SHA, NEW_SHA) == ("xl_qqbot/strange\nname.py",)
 
 
-def test_main_release_note_is_attached_and_recorded_only_after_completion(tmp_path):
+@pytest.mark.parametrize("branch", ["test", "main"])
+def test_project_announcement_is_attached_for_each_branch(tmp_path, branch):
     current = tmp_path / f"{OLD_SHA}-previous"
     current.mkdir()
     transaction = FakeTransaction(current)
     store = PollCursorStore(tmp_path / "poll-state.json")
-    store.set_cursor("main", OLD_SHA)
+    store.set_cursor(branch, OLD_SHA)
+    note_path = "xl_deploy/announcements/test-main-isolated-update.md"
     poller = BranchPoller(
-        FakeReleaseGitHub(),
-        FakeRunner(["xl_qqbot/bot_app/router.py"]),
+        FakeGitHub(),
+        FakeRunner(
+            ["xl_qqbot/bot_app/router.py", note_path],
+            {note_path: "Isolated test update"},
+        ),
         lambda _branch: transaction,
         store,
     )
 
-    result = poller.poll_branch("main")
+    result = poller.poll_branch(branch)
 
     assert result.status == "deployed"
-    assert transaction.calls[1][1].release_note == "Release highlights"
-    assert store.recorded_releases() == ({"v2.0.0"}, {NEW_SHA})
+    assert transaction.calls[1][1].release_note == "Isolated test update"
+    assert store.recorded_releases() == (set(), set())
 
 
-def test_failed_release_announcement_delivery_is_not_marked_as_seen(tmp_path):
+def test_missing_project_announcement_does_not_block_lifecycle_deployment(tmp_path):
     current = tmp_path / f"{OLD_SHA}-previous"
     current.mkdir()
     transaction = FakeTransaction(current, status="announcement_pending")
     store = PollCursorStore(tmp_path / "poll-state.json")
-    store.set_cursor("main", OLD_SHA)
+    store.set_cursor("test", OLD_SHA)
     poller = BranchPoller(
-        FakeReleaseGitHub(),
+        FakeGitHub(),
         FakeRunner(["xl_qqbot/bot_app/router.py"]),
         lambda _branch: transaction,
         store,
     )
 
-    result = poller.poll_branch("main")
+    result = poller.poll_branch("test")
 
     assert result.status == "deployment_announcement_pending"
-    assert store.get_cursor("main") == OLD_SHA
+    assert store.get_cursor("test") == OLD_SHA
     assert store.recorded_releases() == (set(), set())
 
 
@@ -265,7 +281,7 @@ def test_reconciles_committed_pointer_after_crash_before_cursor_write(tmp_path):
     assert store.get_cursor("debug") == NEW_SHA
 
 
-def test_recovery_reconciles_release_note_identity_before_advancing_main_cursor(tmp_path):
+def test_recovery_keeps_legacy_journal_compatible_without_release_lookup(tmp_path):
     current = tmp_path / f"{NEW_SHA}-already-committed"
     current.mkdir()
     journal = type("Journal", (), {
@@ -277,7 +293,7 @@ def test_recovery_reconciles_release_note_identity_before_advancing_main_cursor(
     store.set_cursor("main", OLD_SHA)
     runner = FakeRunner(["xl_qqbot/bot_app/router.py"])
     poller = BranchPoller(
-        FakeReleaseGitHub(), runner, lambda _branch: transaction, store
+        FakeGitHub(), runner, lambda _branch: transaction, store
     )
 
     result = poller.poll_branch("main")
@@ -285,7 +301,7 @@ def test_recovery_reconciles_release_note_identity_before_advancing_main_cursor(
     assert result.status == "up_to_date"
     assert runner.diff_calls == []
     assert store.get_cursor("main") == NEW_SHA
-    assert store.recorded_releases() == ({"v2.0.0"}, {NEW_SHA})
+    assert store.recorded_releases() == (set(), set())
 
 
 def test_active_remote_tip_does_not_advance_cursor_until_exact_sha_ci_succeeds(tmp_path):

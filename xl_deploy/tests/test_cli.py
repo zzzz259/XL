@@ -13,7 +13,8 @@ def write_config(root: Path) -> Path:
         '[deployment]\nroot="deploy"\nrepository="deploy/repository"\n'
         'state_dir="deploy/state"\nreleases_root="deploy/releases"\n'
         'current_root="deploy/current"\nbackend_config="backend/config.toml"\n'
-        'backend_data="backend/data"\n'
+        'backend_data="backend/data"\ntest_backend_config="test/backend.toml"\n'
+        'test_backend_data="test/data"\n'
         '[router]\nbase_url="http://127.0.0.1:8784"\ntoken_file="secrets/router.token"\n',
         encoding="utf-8",
     )
@@ -29,6 +30,8 @@ def test_runtime_config_resolves_all_paths_relative_to_config_file(tmp_path):
     assert config.repository == (tmp_path / "deploy" / "repository").resolve()
     assert config.current_root == (tmp_path / "deploy" / "current").resolve()
     assert config.backend_config == (tmp_path / "backend" / "config.toml").resolve()
+    assert config.test_backend_config == (tmp_path / "test" / "backend.toml").resolve()
+    assert config.test_backend_data == (tmp_path / "test" / "data").resolve()
     assert config.router_base_url == "http://127.0.0.1:8784"
 
 
