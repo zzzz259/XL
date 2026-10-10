@@ -37,11 +37,17 @@ the router preserves the group ID and routes by the original tier. Copying
 only the test group list would accidentally evaluate debug groups as the
 default tier.
 
-Point the test Bot's `[watch]` data root, `character_data`, `versions_dir`, and
-`outbox_dir` at the test backend's data tree; keep the production Bot and
-router watcher paths on the main backend tree. The test worker handles
-passive queries only. A manual test-server run does not enqueue public QQ
-announcements or send its output to the production outbox.
+Point the test Bot worker's `[watch]` data root, `character_data`,
+`versions_dir`, and `outbox_dir` at the test backend's data tree. The shared
+router keeps its main paths and can additionally watch both update sources via
+`[[watch.update_sources]]`: `main` must match `[watch].outbox_dir`; `test` points
+to the test backend outbox and uses `minimum_tier = "test"`. The main source
+keeps its existing delivery reach, while test lifecycle notices and character
+cards are enqueued only for test/debug groups. Both sources feed the same
+persistent FIFO, but use separate event cursors, sent records, and idempotency
+keys so equal game versions do not collide. A manual test-server run uses the
+ordinary update pipeline and writes events and artifacts only to test data;
+the router then queues its notices/cards without direct sending.
 
 Code is stored in `/home/admin/xl_deploy/releases/<sha>-<transaction-id>`;
 each runtime branch (`test` and `main`) has an independent atomic `current`
