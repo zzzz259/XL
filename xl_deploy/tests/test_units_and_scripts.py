@@ -48,6 +48,16 @@ def test_poller_timer_runs_every_minute_as_a_user_unit():
     assert "Unit=xl-deploy-poll.service" in timer
 
 
+def test_runtime_bot_units_exclude_checkout_cwd_from_import_resolution():
+    for filename in (
+        "xl-qqbot-router.service",
+        "xl-qqbot-prod.service",
+        "xl-qqbot-test.service",
+    ):
+        content = read(f"xl_deploy/deploy/{filename}")
+        assert "-P -m bot_app." in content
+
+
 def test_sample_configuration_has_no_live_secrets_or_assetbundle_key():
     raw_sample = read("xl_deploy/config.toml.example")
     sample = raw_sample.lower()
