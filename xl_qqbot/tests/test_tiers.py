@@ -70,7 +70,7 @@ def test_config_groups_defaults():
     try:
         cfg = load_config(path)
         assert cfg.groups.debug == [] and cfg.groups.test == []
-        assert cfg.groups.features == {}
+        assert cfg.groups.features == {"rerun_schedule_query": "debug"}
     finally:
         os.unlink(path)
 
@@ -95,6 +95,7 @@ bilibili_watch = "test"
         assert cfg.groups.features == {
             "character_query": "debug",
             "bilibili_watch": "test",
+            "rerun_schedule_query": "debug",
         }
     finally:
         os.unlink(path)

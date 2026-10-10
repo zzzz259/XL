@@ -20,6 +20,7 @@ from .matcher import CharacterMatcher
 from .proactive_dispatcher import ProactiveDispatcher
 from .proactive_outbox import ProactiveOutbox
 from .querier import CharacterQuerier
+from .rerun_schedule_querier import RerunScheduleQuerier
 from .query_handler import (
     BOT_DISPLAY_NAME,  # noqa: F401  旧入口兼容
     QueryHandler,
@@ -103,6 +104,7 @@ async def _run_event_client(
         tiers=GroupTier(config.groups),
         bot_openid=config.bot.openid,
         mute=mute,
+        rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
     )
 
     def _make_client() -> _EventClient:

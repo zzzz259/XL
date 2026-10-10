@@ -19,10 +19,19 @@ class DeploymentTarget:
         qqbot_changed = any(_is_runtime_path(path, "xl_qqbot") for path in normalized_paths)
         backend_changed = any(_is_runtime_path(path, "xl_updata_server") for path in normalized_paths)
 
-        if branch == "debug" and qqbot_changed:
-            return cls(("xl-qqbot-debug.service",), ("debug",), ("debug",))
-        if branch == "test" and qqbot_changed:
-            return cls(("xl-qqbot-test.service",), ("test",), ("test",))
+        if branch == "test":
+            units: list[str] = []
+            tiers: tuple[str, ...] = ()
+            notice: tuple[str, ...] = ()
+            if qqbot_changed:
+                units.append("xl-qqbot-test.service")
+                tiers = ("debug", "test")
+                notice = ("debug", "test")
+            if backend_changed:
+                units.append("xl-updata-server-test.service")
+                tiers = tuple(dict.fromkeys((*tiers, "debug", "test")))
+                notice = tuple(dict.fromkeys((*notice, "debug", "test")))
+            return cls(tuple(units), tiers, notice)
         if branch == "main":
             units: list[str] = []
             tiers: tuple[str, ...] = ()
@@ -34,6 +43,8 @@ class DeploymentTarget:
                 notice = ("main",)
             if backend_changed:
                 units.append("xl-updata-server.service")
+                tiers = tuple(dict.fromkeys((*tiers, "production")))
+                notice = tuple(dict.fromkeys((*notice, "main")))
             return cls(tuple(units), tiers, notice)
         return cls((), (), ())
 

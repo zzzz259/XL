@@ -9,6 +9,8 @@ readonly SECRET_DIR="$HOME_DIR/.config/xl_deploy"
 readonly CONFIG_FILE="$DEPLOY_ROOT/config.toml"
 readonly SECRETS_FILE="$SECRET_DIR/secrets.env"
 readonly ROUTER_TOKEN_FILE="$SECRET_DIR/router.token"
+readonly MAIN_API_ENV_FILE="$HOME_DIR/.config/xl_updata_server/api.env"
+readonly TEST_API_ENV_FILE="$HOME_DIR/.config/xl_updata_server-test/api.env"
 readonly UNIT_DIR="$HOME_DIR/.config/systemd/user"
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly TEMPLATE_DIR="$REPO_ROOT/xl_deploy/deploy"
@@ -80,7 +82,7 @@ path_keys = {
     "watch": ("data_dir", "outbox_dir", "character_data", "versions_dir"),
     "paths": ("data_dir", "unluac_jar", "unluac_opmap", "character_card_font"),
     "deployment": ("root", "repository", "state_dir", "releases_root", "current_root",
-                   "backend_config", "backend_data"),
+                   "backend_config", "backend_data", "test_backend_config", "test_backend_data"),
     "router": ("token_file",),
 }
 for section, keys in path_keys.items():
@@ -241,7 +243,8 @@ inventory() {
   for path in \
     "$HOME_DIR/xl_qqbot" "$HOME_DIR/xl_qqbot-debug" "$HOME_DIR/xl_qqbot-test" \
     "$HOME_DIR/xl_updata_server" "$CONFIG_FILE" \
-    "$SECRETS_FILE" "$ROUTER_TOKEN_FILE" "$UNIT_DIR"; do
+    "$HOME_DIR/xl_updata_server-test" "$SECRETS_FILE" "$ROUTER_TOKEN_FILE" \
+    "$MAIN_API_ENV_FILE" "$TEST_API_ENV_FILE" "$UNIT_DIR"; do
     if [[ -e "$path" ]]; then printf 'Existing operator path (preserved): %s\n' "$path"
     else printf 'Not present: %s\n' "$path"; fi
   done
@@ -298,7 +301,7 @@ require_private_config() {
   fi
 }
 
-for unit in xl-qqbot-router.service xl-qqbot-prod.service xl-qqbot-debug.service xl-qqbot-test.service; do
+for unit in xl-qqbot-router.service xl-qqbot-prod.service xl-qqbot-test.service; do
   working_directory="$(sed -n 's/^WorkingDirectory=//p' "$TEMPLATE_DIR/$unit")"
   if [[ -z "$working_directory" ]]; then
     printf 'Refusing activation: no explicit WorkingDirectory mapping in %s\n' "$unit" >&2
@@ -312,6 +315,12 @@ if [[ -z "$backend_config" ]]; then
   exit 1
 fi
 require_private_config "$backend_config"
+test_backend_config="$(sed -n 's/^ExecStart=.* --config //p' "$TEMPLATE_DIR/xl-updata-server-test.service")"
+if [[ -z "$test_backend_config" ]]; then
+  printf 'Refusing activation: test backend unit has no explicit --config mapping.\n' >&2
+  exit 1
+fi
+require_private_config "$test_backend_config"
 if [[ ! -f "$SECRETS_FILE" || -L "$SECRETS_FILE" ]]; then
   printf 'Refusing activation: create %s with required secrets, then chmod 600 it.\n' "$SECRETS_FILE" >&2
   exit 1
@@ -330,10 +339,40 @@ if [[ "$router_token_mode" != 600 ]]; then
   printf 'Refusing activation: router token file mode is %s; set it to 600 first.\n' "$router_token_mode" >&2
   exit 1
 fi
+for api_env_file in "$MAIN_API_ENV_FILE" "$TEST_API_ENV_FILE"; do
+  if [[ ! -f "$api_env_file" || -L "$api_env_file" ]]; then
+    printf 'Refusing activation: create %s with XL_UPDATE_API_TOKEN, then chmod 600 it.\n' "$api_env_file" >&2
+    exit 1
+  fi
+  api_env_mode="$(stat -c '%a' -- "$api_env_file")"
+  if [[ "$api_env_mode" != 600 ]]; then
+    printf 'Refusing activation: %s mode is %s; set it to 600 first.\n' "$api_env_file" "$api_env_mode" >&2
+    exit 1
+  fi
+done
+python3 - "$MAIN_API_ENV_FILE" "$TEST_API_ENV_FILE" <<'PY'
+import sys
+from pathlib import Path
+
+tokens = []
+for filename in sys.argv[1:]:
+    matches = [
+        line.partition("=")[2].strip()
+        for line in Path(filename).read_text(encoding="utf-8").splitlines()
+        if line.startswith("XL_UPDATE_API_TOKEN=")
+    ]
+    if len(matches) != 1 or len(matches[0]) < 32 or any(char.isspace() for char in matches[0]):
+        print(f"Refusing activation: {filename} must contain one valid XL_UPDATE_API_TOKEN (at least 32 non-whitespace characters).", file=sys.stderr)
+        raise SystemExit(1)
+    tokens.append(matches[0])
+if tokens[0] == tokens[1]:
+    print("Refusing activation: test and production API tokens must be different.", file=sys.stderr)
+    raise SystemExit(1)
+PY
 
 unit_names=(xl-deploy-poll.service xl-deploy-poll.timer xl-qqbot-router.service
-            xl-qqbot-debug.service xl-qqbot-test.service xl-qqbot-prod.service
-            xl-updata-server.service)
+            xl-qqbot-test.service xl-qqbot-prod.service
+            xl-updata-server.service xl-updata-server-test.service xl-updata.slice)
 existing_units=()
 existing_dropins=()
 for name in "${unit_names[@]}"; do
