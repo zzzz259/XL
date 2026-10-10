@@ -2,9 +2,11 @@
 
 import hashlib
 import json
+import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from server_app.rerun_schedule import (
     DEFAULT_ANCHOR,
@@ -13,7 +15,6 @@ from server_app.rerun_schedule import (
     read_current_schedule,
     refresh_schedule_if_due,
 )
-
 
 QUEUE = [
     {"character_id": 10000214, "name": "朝雾", "debut_gacha_id": 24000060},
@@ -136,9 +137,6 @@ class RerunScheduleProjectionTests(unittest.TestCase):
             self.assertEqual(json.loads((root / "current.json").read_text(encoding="utf-8"))["source_version"], "v1")
 
     def test_refresh_reprojects_at_period_boundary_without_new_lua_data(self):
-        from unittest.mock import patch
-        import tempfile
-
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "rerun_schedule"
             initial = project_schedule(
@@ -159,6 +157,19 @@ class RerunScheduleProjectionTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(payload["period_state"], "between_periods")
         renderer.assert_called_once()
+
+    def test_refresh_skips_when_no_schedule_has_been_published(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "rerun_schedule"
+            with patch("server_app.rerun_schedule.render_schedule_png") as renderer:
+                changed = refresh_schedule_if_due(
+                    root,
+                    as_of=datetime.fromisoformat("2026-10-10T10:00:00+08:00"),
+                    refresh_seconds=3600,
+                )
+
+        self.assertFalse(changed)
+        renderer.assert_not_called()
 
 
 if __name__ == "__main__":
