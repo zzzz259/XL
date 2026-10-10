@@ -1,6 +1,5 @@
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "xl_deploy" / "deploy"
@@ -195,6 +194,13 @@ def test_operator_docs_cover_gate_order_recovery_and_at_least_once_notice():
         "journalctl --user",
     ):
         assert required in docs
+
+
+def test_ci_installs_schedule_renderer_dependencies_before_server_tests():
+    workflow = read(".github/workflows/ci.yml")
+
+    assert "actions/setup-node@v4" in workflow
+    assert "npm ci --prefix renderer --omit=dev" in workflow
 
 
 def test_docs_index_links_deployment_operator_guide():
