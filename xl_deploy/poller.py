@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from xl_deploy.announcements import ReleaseNoteSelector
+from xl_deploy.announcements import AnnouncementSelector
 from xl_deploy.planner import plan_deployment
 
 _BRANCHES = ("debug", "test", "main")
@@ -119,13 +119,13 @@ class BranchPoller:
         transaction_for_branch: Callable[[str], Any],
         cursors: PollCursorStore,
         *,
-        release_selector: ReleaseNoteSelector | None = None,
+        announcement_selector: AnnouncementSelector | None = None,
     ):
         self.github = github
         self.runner = runner
         self.transaction_for_branch = transaction_for_branch
         self.cursors = cursors
-        self.release_selector = release_selector or ReleaseNoteSelector()
+        self.announcement_selector = announcement_selector or AnnouncementSelector()
 
     def poll_all(self) -> tuple[PollResult, ...]:
         results = []
@@ -148,6 +148,20 @@ class BranchPoller:
         pointer = transaction.paths.current_path / branch
         current_release = transaction.state.get_current(current_path=pointer)
         if current_release is None:
+            if branch == "debug":
+                latest_sha = self.github.latest_sha(branch)
+                if not _valid_sha(latest_sha):
+                    raise RuntimeError("GitHub returned an invalid branch SHA")
+                latest_sha = latest_sha.lower()
+                if self.cursors.get_cursor(branch) == latest_sha:
+                    return PollResult(branch, "up_to_date", latest_sha)
+                ci_result = self.github.ci_result(branch, latest_sha)
+                if ci_result == "pending":
+                    return PollResult(branch, "ci_pending", latest_sha)
+                if ci_result != "success":
+                    return PollResult(branch, "ci_failed", latest_sha, ci_result)
+                self.cursors.set_cursor(branch, latest_sha)
+                return PollResult(branch, "no_op", latest_sha)
             raise RuntimeError(f"{branch} current release is missing; explicit bootstrap is required")
         persisted_cursor = self.cursors.get_cursor(branch)
         cursor = persisted_cursor or _release_sha(current_release)
@@ -157,10 +171,6 @@ class BranchPoller:
             raise RuntimeError("GitHub returned an invalid branch SHA")
         latest_sha = latest_sha.lower()
         active_sha = _release_sha(current_release)
-        if cursor != active_sha:
-            self._reconcile_completed_release_note(
-                transaction, branch, active_sha
-            )
         if latest_sha == active_sha:
             if persisted_cursor != latest_sha:
                 ci_result = self.github.ci_result(branch, latest_sha)
@@ -187,52 +197,19 @@ class BranchPoller:
             self.cursors.set_cursor(branch, latest_sha)
             return PollResult(branch, "no_op", latest_sha)
 
-        release_note = None
-        selected_note = None
-        if branch == "main" and plan.announcement_scope:
-            entries = self.github.release_notes()
-            recorded_tags, recorded_shas = self.cursors.recorded_releases()
-            selected_note = self.release_selector.select(
-                entries, recorded_tags=recorded_tags, recorded_shas=recorded_shas
+        if plan.announcement_scope:
+            release_note = self.announcement_selector.select(
+                changed_paths,
+                read_text=self.runner.read_text_at_commit,
+                commit_sha=latest_sha,
             )
-            release_note = selected_note.content[:4000] if selected_note else None
             plan = plan_deployment(branch, latest_sha, changed_paths, release_note=release_note)
 
         result = transaction.execute(plan)
         if result.status != "completed":
             return PollResult(branch, f"deployment_{result.status}", latest_sha, result.message)
-        if selected_note is not None:
-            self.cursors.record_release(selected_note.tag, selected_note.sha)
         self.cursors.set_cursor(branch, latest_sha)
         return PollResult(branch, "deployed", latest_sha)
-
-    def _reconcile_completed_release_note(
-        self, transaction: Any, branch: str, active_sha: str
-    ) -> None:
-        if branch != "main":
-            return
-        journal = transaction.state.load()
-        if (
-            journal is None
-            or journal.branch != branch
-            or journal.sha.lower() != active_sha
-            or journal.phase != "completed"
-            or not journal.release_note
-        ):
-            return
-        for entry in self.github.release_notes():
-            body = entry.get("body")
-            tag = entry.get("tag_name")
-            if (
-                isinstance(body, str)
-                and body.strip()[:4000] == journal.release_note
-                and isinstance(tag, str)
-                and tag.strip()
-            ):
-                note_sha = entry.get("target_sha", entry.get("sha", ""))
-                self.cursors.record_release(
-                    tag.strip(), note_sha if _valid_sha(note_sha) else ""
-                )
 
 
 def _branch(value: str) -> str:

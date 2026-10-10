@@ -34,6 +34,8 @@ class PollerRuntimeConfig:
     current_root: Path
     backend_config: Path
     backend_data: Path
+    test_backend_config: Path
+    test_backend_data: Path
     router_base_url: str
     router_token_file: Path
 
@@ -58,6 +60,8 @@ def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
             current_root=_path(config_file, deployment["current_root"]),
             backend_config=_path(config_file, deployment["backend_config"]),
             backend_data=_path(config_file, deployment["backend_data"]),
+            test_backend_config=_path(config_file, deployment["test_backend_config"]),
+            test_backend_data=_path(config_file, deployment["test_backend_data"]),
             router_base_url=str(router["base_url"]),
             router_token_file=_path(config_file, router["token_file"]),
         )
@@ -65,6 +69,17 @@ def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
         raise RuntimeError("deployment configuration is incomplete or invalid") from exc
     if not result.github_owner.strip() or not result.github_repo.strip():
         raise ValueError("GitHub owner and repository must be non-empty")
+    if result.backend_config == result.test_backend_config:
+        raise ValueError("test and production backend config paths must be distinct")
+    if result.backend_data == result.test_backend_data:
+        raise ValueError("test and production backend data paths must be distinct")
+    for path in (result.backend_config, result.backend_data,
+                 result.test_backend_config, result.test_backend_data):
+        try:
+            path.relative_to(result.releases_root.resolve())
+        except ValueError:
+            continue
+        raise ValueError("backend config and data paths must remain outside immutable releases")
     validate_loopback_url(result.router_base_url)
     return result
 
@@ -84,6 +99,7 @@ def read_secret(path: str | Path) -> str:
 
 def build_poller(config_path: str | Path) -> BranchPoller:
     runtime = load_runtime_config(config_path)
+    _validate_backend_runtime_configs(runtime)
     try:
         github_token = os.environ["GITHUB_TOKEN"].strip()
     except KeyError as exc:
@@ -97,6 +113,7 @@ def build_poller(config_path: str | Path) -> BranchPoller:
         repository=runtime.repository,
         health_token=router_token,
         backend_config_path=runtime.backend_config,
+        test_backend_config_path=runtime.test_backend_config,
         deployment_root=runtime.deployment_root,
     )
     state = DeploymentState(
@@ -104,20 +121,24 @@ def build_poller(config_path: str | Path) -> BranchPoller:
         releases_root=runtime.releases_root,
         current_path=runtime.current_root,
     )
-    paths = DeploymentPaths(
-        releases_root=runtime.releases_root,
-        current_path=runtime.current_root,
-        config_path=runtime.backend_config,
-        data_path=runtime.backend_data,
-    )
-    transactions = {
-        branch: DeploymentTransaction(state, runner, router, paths)
-        for branch in ("debug", "test", "main")
-    }
+    def transaction_for(branch: str) -> DeploymentTransaction:
+        config_path, data_path = (
+            (runtime.test_backend_config, runtime.test_backend_data)
+            if branch == "test"
+            else (runtime.backend_config, runtime.backend_data)
+        )
+        paths = DeploymentPaths(
+            releases_root=runtime.releases_root,
+            current_path=runtime.current_root,
+            config_path=config_path,
+            data_path=data_path,
+        )
+        return DeploymentTransaction(state, runner, router, paths)
+
     return BranchPoller(
         github,
         runner,
-        transactions.__getitem__,
+        transaction_for,
         PollCursorStore(runtime.state_dir / "poll-cursors.json"),
     )
 
@@ -150,6 +171,33 @@ def _section(config: dict, name: str) -> dict:
 def _path(config_file: Path, value: object) -> Path:
     path = Path(str(value)).expanduser()
     return path.resolve() if path.is_absolute() else (config_file.parent / path).resolve()
+
+
+def _validate_backend_runtime_configs(runtime: PollerRuntimeConfig) -> None:
+    expected = (
+        (runtime.backend_config, runtime.backend_data, "main", 8790),
+        (runtime.test_backend_config, runtime.test_backend_data, "test", 8791),
+    )
+    for config_path, expected_data, environment, port in expected:
+        try:
+            values = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            paths = _section(values, "paths")
+            server = _section(values, "server")
+            api = _section(values, "api")
+            actual_data = _path(config_path, paths["data_dir"])
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"{environment} backend config is missing or invalid") from exc
+        if actual_data != expected_data:
+            raise ValueError(f"{environment} backend config data_dir does not match deployment mapping")
+        if server.get("environment") != environment:
+            raise ValueError(f"{environment} backend config has the wrong environment")
+        if (
+            api.get("enabled") is not True
+            or api.get("host") != "127.0.0.1"
+            or api.get("port") != port
+            or api.get("token_env") != "XL_UPDATE_API_TOKEN"
+        ):
+            raise ValueError(f"{environment} backend API must use its assigned loopback port and token variable")
 
 
 if __name__ == "__main__":

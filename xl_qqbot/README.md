@@ -1,13 +1,14 @@
 # XL QQ Bot
 
-Linux 常驻 QQ 群机器人，基于腾讯官方 QQ 机器人平台和 `qq-botpy`。提供角色图鉴查询、服务端新角色图鉴分发、更新播报和 B 站动态/投稿通知；不发送私聊消息。
+Linux 常驻 QQ 群机器人，基于腾讯官方 QQ 机器人平台和 `qq-botpy`。提供角色图鉴查询、普通角色复刻排期图片查询、服务端新角色图鉴分发、更新播报和 B 站动态/投稿通知；不发送私聊消息。
 
 ## 功能与架构
 
 - 群内 `@机器人 + 角色名` 查询角色资料，支持中文名、别名、英文名和拼音匹配；歧义时让提问者选择候选。
+- 群内 `@机器人 复刻` / `复刻表` 等查询服务端已发布的普通首次复刻排期图；默认只开放给 debug 群。
 - Watcher 轮询 `xl_updata_server` 的 outbox，逐群分发新增图鉴，整批成功后清理该版本 outbox；失败项保留重试状态。
 - BilibiliWatcher 监视配置的多个 UP 主。`full` 模式发布图文详情/原图和视频通知；`notice` 只发布通知。接口、SESSDATA 和状态文件说明见[配置与运维](docs/配置与运维.md)。
-- 部署使用一个网关路由器加 `debug`、`test`、`production` 三个独立本地 HTTP 服务进程。路由器独占 QQ Gateway，按群级别转发事件；三个服务监听回环地址，默认端口分别为 8781、8782、8783。
+- 部署使用一个网关路由器、test 与 production 两个独立本地 HTTP worker。路由器独占 QQ Gateway，保留 debug/test/production 群分级；debug 和 test 群都转发至 test worker（8782），production 转发至 production worker（8783）。`debug_port=8781` 仅为旧配置兼容保留，新拓扑不部署 debug worker。
 - `bot_app.main` 保留旧的一体化兼容入口；新部署和分级隔离以 router + service units 为准。
 
 ## 本地环境、配置和测试
@@ -26,7 +27,7 @@ cp config.toml.example config.toml
 自动化测试：
 
 ```bash
-.venv/bin/python -m pytest -q
+.venv/bin/python -m unittest discover -s tests -p '*_unittest.py' -v
 ```
 
 测试对 sender/外部请求使用 mock，不验证真实 QQ 凭据、群授权、媒体上传、B 站风控或生产网络。配置和实际部署步骤见[配置与运维](docs/配置与运维.md)。

@@ -212,6 +212,8 @@ def load_config(path: str = "config.toml") -> Config:
                 f"[features] {name} 级别非法: {tier_value!r}（只允许 production/test/debug）"
             )
         features[str(name).strip()] = tier_value
+    # The new schedule command remains debug-only until an operator opts in.
+    features.setdefault("rerun_schedule_query", "debug")
     groups_config = GroupsConfig(
         debug=[str(g).strip() for g in groups.get("debug", []) if str(g).strip()],
         test=[str(g).strip() for g in groups.get("test", []) if str(g).strip()],

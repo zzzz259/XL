@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .versioning import VersionWorkspace, publish_version, write_current_pointer
+from .versioning import VersionWorkspace, publish_version, read_current_pointer, write_current_pointer
+from .rerun_schedule import read_current_schedule
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,9 +50,11 @@ class UpdatePipeline:
                 raise TypeError("update processor must return ProcessResult")
             if result.processed:
                 publish_version(workspace, self.versions_dir, result.version_timestamp)
+                self._carry_forward_schedule(result.version_timestamp)
                 write_current_pointer(self.data_dir, result.version_timestamp)
                 self._sync_current_character_data(result.version_timestamp)
                 self._carry_forward_cards(result.version_timestamp)
+                self._sync_current_schedule(result.version_timestamp)
             return result
         except Exception as error:
             LOGGER.exception("update processing failed")
@@ -97,3 +102,66 @@ class UpdatePipeline:
         temporary = mirror.with_name("current.json.part")
         shutil.copy2(published, temporary)
         temporary.replace(mirror)
+
+    def _carry_forward_schedule(self, version_timestamp: int) -> None:
+        """Keep the last valid immutable schedule available when parsing/rendering skips."""
+        current_schedule = self.versions_dir / str(version_timestamp) / "rerun_schedule"
+        if (current_schedule / "current.json").is_file():
+            return
+        previous_version = read_current_pointer(self.data_dir)
+        if previous_version is None or previous_version == version_timestamp:
+            return
+        previous_schedule = self.versions_dir / str(previous_version) / "rerun_schedule"
+        if not (previous_schedule / "current.json").is_file():
+            return
+        try:
+            read_current_schedule(previous_schedule)
+            shutil.copytree(previous_schedule, current_schedule)
+        except (FileExistsError, OSError, ValueError, KeyError, TypeError) as error:
+            LOGGER.warning(
+                "stage=rerun_publish status=skipped reason=invalid_last_known_good version=%s error=%s",
+                version_timestamp,
+                error,
+            )
+            return
+        LOGGER.info(
+            "stage=rerun_publish game_version=%s status=stale_fallback source_version=%s",
+            version_timestamp,
+            previous_version,
+        )
+
+    def _sync_current_schedule(self, version_timestamp: int) -> None:
+        """Mirror the immutable snapshot to data/rerun_schedule for operators."""
+        source = self.versions_dir / str(version_timestamp) / "rerun_schedule"
+        try:
+            manifest = source / "current.json"
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            relative = Path(str(payload["artifact_path"]))
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError("unsafe schedule artifact path")
+            snapshot = (source / relative).resolve()
+            if not snapshot.is_relative_to(source.resolve()) or not snapshot.is_file():
+                raise ValueError("schedule artifact is missing")
+            digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+            if digest != payload.get("render_sha256"):
+                raise ValueError("schedule artifact digest mismatch")
+            target = self.data_dir / "rerun_schedule"
+            target_snapshot = target / relative
+            target_snapshot.parent.mkdir(parents=True, exist_ok=True)
+            if not target_snapshot.exists():
+                shutil.copy2(snapshot, target_snapshot)
+            self._atomic_copy(snapshot, target / "current.png")
+            self._atomic_copy(manifest, target / "current.json")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            LOGGER.exception(
+                "stage=rerun_publish game_version=%s status=failed mirror_error=%s",
+                version_timestamp,
+                error,
+            )
+
+    @staticmethod
+    def _atomic_copy(source: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".part")
+        shutil.copy2(source, temporary)
+        temporary.replace(destination)

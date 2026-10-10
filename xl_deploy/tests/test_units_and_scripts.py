@@ -71,7 +71,7 @@ def test_sample_configuration_has_no_live_secrets_or_assetbundle_key():
     assert set(config["github"]) == {"owner", "repo"}
     assert set(config["deployment"]) == {
         "root", "repository", "state_dir", "releases_root", "current_root",
-        "backend_config", "backend_data",
+        "backend_config", "backend_data", "test_backend_config", "test_backend_data",
     }
     assert set(config["router"]) == {"base_url", "token_file"}
 

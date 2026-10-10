@@ -1,10 +1,20 @@
 [server]
+environment = "main" # test 或 main；test 会强制关闭 CDN 定时轮询
 timezone = "Asia/Shanghai"
 normal_interval_seconds = 3600
 burst_interval_seconds = 60
 burst_duration_seconds = 1200
-# last_friday = 以最近一个周五 10:00 为锚每 21 天密集检查；也可写死 ISO 时间如 "2026-09-18T10:00:00+08:00"
-burst_anchor = "last_friday"
+# 固定周期起点；服务重启不会重新计算锚点。每 21 天周五 10:00 进入密集检查。
+burst_anchor = "2026-10-09T10:00:00+08:00"
+
+[polling]
+enabled = true # main 可配置关闭；environment=test 时无论此值如何都不做 CDN 定时轮询
+
+[api]
+enabled = true # 本机控制接口；启动前需由 systemd EnvironmentFile 提供 token
+host = "127.0.0.1"
+port = 8790 # test 使用 8791
+token_env = "XL_UPDATE_API_TOKEN"
 
 [paths]
 data_dir = "data"
@@ -23,6 +33,31 @@ categories = ["Arts", "Data"]
 # false 时只建角色数据库，完全不渲染图鉴长图（弱机省 CPU/磁盘）
 [cards]
 enabled = true
+
+# 普通角色首次复刻排期（固定周期预测；池配置不等于官方已确认）
+[rerun_schedule]
+enabled = true
+refresh_seconds = 3600
+forecast_limit = 20
+
+[rerun_schedule.anchor]
+new_character_id = 10000223
+new_character_name = "罗蕾娜"
+new_gacha_id = 24000086
+rerun_character_id = 10000212
+rerun_character_name = "雪莉"
+rerun_gacha_id = 24000087
+start_at = "2026-09-22T10:00:00+08:00"
+end_at = "2026-10-13T05:00:00+08:00"
+source = "user_confirmed"
+
+# 可选：以 Gacha ID 精确纠偏；每项必须提供可审计来源。
+# [[rerun_schedule.overrides]]
+# gacha_id = 24000041
+# pool_kind = "normal"
+# character_id = 10000197
+# source = "已核对的游戏公告/运营记录"
+# exclude_from_prediction = false
 
 [security]
 assetbundle_key = "yunguihaowan1234"

@@ -53,3 +53,46 @@ class ReleaseNoteSelector:
                 seen_shas.add(note.sha)
             return note
         return None
+
+
+class AnnouncementSelector:
+    """Collect optional project notes changed in a candidate commit."""
+
+    _PREFIX = "xl_deploy/announcements/"
+    _MAX_LENGTH = 4000
+
+    def select(self, paths, *, read_text, commit_sha: str) -> str | None:
+        selected_paths: list[str] = []
+        for path in paths:
+            if not isinstance(path, str):
+                continue
+            if path.startswith((self._PREFIX, "/xl_deploy/announcements/")):
+                if not self._valid_path(path):
+                    raise ValueError("announcement path is not allowlisted")
+                selected_paths.append(path)
+
+        bodies: list[str] = []
+        for path in sorted(set(selected_paths)):
+            try:
+                body = read_text(commit_sha, path)
+            except Exception:  # noqa: BLE001 - a missing note must never block deployment.
+                return None
+            if isinstance(body, str) and body.strip():
+                bodies.append(body.strip())
+        if not bodies:
+            return None
+        content = "\n\n".join(bodies)
+        return content if len(content) <= self._MAX_LENGTH else None
+
+    @classmethod
+    def _valid_path(cls, path: str) -> bool:
+        if "\\" in path or "\0" in path or path.startswith("/"):
+            return False
+        parts = path.split("/")
+        return (
+            len(parts) == 3
+            and parts[0] == "xl_deploy"
+            and parts[1] == "announcements"
+            and parts[2].endswith(".md")
+            and parts[2] not in {"", ".", ".."}
+        )
