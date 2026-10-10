@@ -11,6 +11,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.platform.diagnostics import logger
+
 
 _BURST_HEAD_TOKEN = re.compile(
     r"(?<![a-z0-9_-])(?:burst-head|burst_head|bursthead)(?![a-z0-9_-])",
@@ -652,9 +654,16 @@ def export_game_materials(
             label = f"burst-head/{record.display_name}"
             announce(label)
             source_path = Path(record.source_path)
+            logger.info(
+                "素材导出开始 type=%s name=%s source=%s fingerprint=%s",
+                record.kind, record.display_name, source_path, record.fingerprint,
+                extra={"event": "material.export.start", "details": {"kind": record.kind, "name": record.display_name, "source": str(source_path), "fingerprint": record.fingerprint}},
+            )
             if not source_path.is_file():
                 failed += 1
                 diagnostics.append(f"burst-head source missing: {record.source_path}")
+                logger.error("素材导出失败：源文件不存在 source=%s", source_path, extra={"event": "material.export.failed", "error_code": "MATERIAL_SOURCE_MISSING", "details": {"kind": record.kind, "name": record.display_name, "source": str(source_path)}})
+                completed(label)
                 continue
             try:
                 burst_output.mkdir(parents=True, exist_ok=True)
@@ -683,9 +692,15 @@ def export_game_materials(
                     burst_manifest[source_key] = current_entry
                     burst_manifest_changed = True
                 exported += 1
+                logger.info(
+                    "素材导出完成 type=%s name=%s source=%s output=%s size=%s reused=%s",
+                    record.kind, record.display_name, source_path, target, target.stat().st_size, existing_target is not None,
+                    extra={"event": "material.export.complete", "details": {"kind": record.kind, "name": record.display_name, "source": str(source_path), "output": str(target), "size": target.stat().st_size, "fingerprint": record.fingerprint, "reused": existing_target is not None}},
+                )
             except Exception as error:
                 failed += 1
                 diagnostics.append(f"burst-head export failed for {record.source_path}: {error}")
+                logger.exception("素材导出异常 type=%s name=%s source=%s", record.kind, record.display_name, source_path, extra={"event": "material.export.failed", "error_code": "MATERIAL_EXPORT_FAILED", "details": {"kind": record.kind, "name": record.display_name, "source": str(source_path)}})
             finally:
                 completed(label)
 
@@ -694,12 +709,17 @@ def export_game_materials(
             continue
         label = f"{record.kind}/{record.display_name}"
         announce(label)
+        source_path = Path(record.source_path)
+        output_dir_for_kind = root / "game_material" / record.kind
+        logger.info("素材导出开始 type=%s name=%s source=%s", record.kind, record.display_name, source_path, extra={"event": "material.export.start", "details": {"kind": record.kind, "name": record.display_name, "source": str(source_path), "fingerprint": record.fingerprint}})
         try:
-            _copy_standalone_material(record, root / "game_material" / record.kind)
+            target = _copy_standalone_material(record, output_dir_for_kind)
             exported += 1
+            logger.info("素材导出完成 type=%s name=%s source=%s output=%s size=%s", record.kind, record.display_name, source_path, target, target.stat().st_size, extra={"event": "material.export.complete", "details": {"kind": record.kind, "name": record.display_name, "source": str(source_path), "output": str(target), "size": target.stat().st_size, "fingerprint": record.fingerprint}})
         except Exception as error:
             failed += 1
             diagnostics.append(f"{record.kind} export failed for {record.source_path}: {error}")
+            logger.exception("素材导出异常 type=%s name=%s source=%s", record.kind, record.display_name, source_path, extra={"event": "material.export.failed", "error_code": "MATERIAL_EXPORT_FAILED", "details": {"kind": record.kind, "name": record.display_name, "source": str(source_path)}})
         finally:
             completed(label)
 
@@ -710,27 +730,37 @@ def export_game_materials(
         destination = group_root / _safe_filename(group.package_name)
         label = f"{group_kind}/{group.package_name}"
         announce(label)
+        logger.info("图集切割开始 type=%s package=%s source=%s destination=%s", group_kind, group.package_name, source_path, destination, extra={"event": "atlas.export.start", "details": {"kind": group_kind, "package": group.package_name, "source": str(source_path), "destination": str(destination)}})
         if not source_path.is_file():
             failed += 1
             diagnostics.append(f"atlas source missing: {group.source_path}")
+            logger.error("图集切割失败：源文件不存在 package=%s source=%s", group.package_name, source_path, extra={"event": "atlas.export.failed", "error_code": "ATLAS_SOURCE_MISSING", "details": {"package": group.package_name, "source": str(source_path), "destination": str(destination)}})
+            completed(label)
             continue
         try:
             destination.mkdir(parents=True, exist_ok=True)
             result = splitter(str(source_path), str(destination), False)
             if result is False:
                 raise RuntimeError("splitter returned failure")
+            outputs = sorted(path for path in destination.rglob("*") if path.is_file())
             exported += 1
+            logger.info("图集切割完成 package=%s source=%s destination=%s output_files=%s sample=%s", group.package_name, source_path, destination, len(outputs), [path.name for path in outputs[:20]], extra={"event": "atlas.export.complete", "details": {"package": group.package_name, "source": str(source_path), "destination": str(destination), "output_files": len(outputs), "output_sample": [str(path) for path in outputs[:20]]}})
         except Exception as error:
             failed += 1
             diagnostics.append(f"atlas export failed for {group.package_name}: {error}")
+            logger.exception("图集切割异常 package=%s source=%s destination=%s", group.package_name, source_path, destination, extra={"event": "atlas.export.failed", "error_code": "ATLAS_EXPORT_FAILED", "details": {"package": group.package_name, "source": str(source_path), "destination": str(destination)}})
         finally:
             completed(label)
 
     if burst_manifest_changed:
         try:
+            logger.info("BurstHead 清单写入开始 path=%s entries=%s", burst_output / ".burst-head-manifest.json", len(burst_manifest), extra={"event": "material.manifest.write.start"})
             _save_burst_manifest(burst_output, burst_manifest)
+            logger.info("BurstHead 清单写入完成 path=%s entries=%s", burst_output / ".burst-head-manifest.json", len(burst_manifest), extra={"event": "material.manifest.write.complete", "details": {"path": str(burst_output / ".burst-head-manifest.json"), "entries": len(burst_manifest)}})
         except Exception as error:
             failed += 1
             diagnostics.append(f"burst-head manifest save failed: {error}")
+            logger.exception("BurstHead 清单写入失败 path=%s", burst_output / ".burst-head-manifest.json", extra={"event": "material.manifest.write.failed", "error_code": "MATERIAL_MANIFEST_WRITE_FAILED", "details": {"path": str(burst_output / ".burst-head-manifest.json")}})
 
+    logger.info("游戏素材导出汇总 exported=%s failed=%s total_items=%s", exported, failed, total_items, extra={"event": "material.export.summary", "details": {"exported": exported, "failed": failed, "total_items": total_items, "diagnostics": diagnostics[:50]}})
     return MaterialExportSummary(exported=exported, failed=failed, diagnostics=tuple(diagnostics))

@@ -4,12 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from app.platform import database as db
+from app.platform.logger import configure_logging
+from app.platform.runtime_config import RuntimeConfig
 from app.features.versions.controller import VersionController
-from app.features.versions.download_worker import DownloadWorker
+from app.features.versions.download_worker import CheckUpdateThread, DownloadWorker
 from app.features.versions.page import DownloadProgressButton, VersionPage
 from app.features.versions.service import VersionService
 
@@ -26,6 +28,28 @@ def _init_version_db(tmp_path):
     db.save_version(200, {}, {"data": []})
     db.save_sub_bundles(100, ["same", "old"])
     db.save_sub_bundles(200, ["same", "new"])
+
+
+def test_check_update_worker_keeps_native_finished_signal(monkeypatch, qapp, tmp_path):
+    info = {"version": "test"}
+    versions = {"data": []}
+    monkeypatch.setattr(
+        "app.features.versions.download_worker.check_update",
+        lambda: (info, versions),
+    )
+    configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
+    worker = CheckUpdateThread(str(tmp_path / "bundles"), [])
+    results = []
+    finished = QSignalSpy(worker.finished)
+    worker.result_ready.connect(lambda *args: results.append(args))
+
+    worker.start()
+    assert worker.wait(5000)
+    qapp.processEvents()
+
+    assert results == [(info, versions, [], {"added": [], "removed": [], "common": 0, "old_total": 0, "new_total": 0})]
+    assert finished.count() == 1
+    assert finished.at(0) == []
 
 
 def test_version_page_owns_workspace_table_and_signals(qapp):
@@ -87,6 +111,7 @@ def test_download_worker_accepts_md5_verified_non_unity_payload(monkeypatch, tmp
     """Some manifest entries are video payloads rather than UnityFS bundles."""
     payload = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42mp41"
     expected_hash = hashlib.md5(payload).hexdigest()
+    session = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
     monkeypatch.setattr(
         "app.features.versions.download_worker.http_get",
         lambda _url: payload,
@@ -102,6 +127,11 @@ def test_download_worker_accepts_md5_verified_non_unity_payload(monkeypatch, tmp
     assert (tmp_path / f"{expected_hash}.bundle").read_bytes() == payload
     assert completed == [(expected_hash, f"{expected_hash}.bundle", str(tmp_path / f"{expected_hash}.bundle"))]
     assert failed == []
+    summaries = list((session.directory / "tasks").glob("*/summary.json"))
+    assert len(summaries) == 1
+    summary = __import__("json").loads(summaries[0].read_text(encoding="utf-8"))
+    assert summary["outcome"] == "success"
+    assert summary["details"]["downloaded"] == 1
 
 
 def test_download_version_does_not_start_a_second_worker(qapp, tmp_path):
@@ -272,7 +302,8 @@ def test_check_update_locks_action_and_animates_page_title(monkeypatch, qapp, tm
     _init_version_db(tmp_path)
 
     class FakeCheckThread(QObject):
-        finished = Signal(object, object, object, object)
+        result_ready = Signal(object, object, object, object)
+        finished = Signal()
         error = Signal(str)
 
         def __init__(self, *_args):
@@ -313,16 +344,22 @@ def test_check_update_locks_action_and_animates_page_title(monkeypatch, qapp, tm
     assert statuses[-1] == "检查更新中。"
 
     controller._check_thread.error.emit("network")
+    qapp.processEvents()
 
     assert checking_states == [True, False]
     assert page.workspace_title.text() == "版本工作区"
+    assert controller._check_thread is not None
+    controller._check_thread.finished.emit()
+    qapp.processEvents()
+    assert controller._check_thread is None
 
 
 def test_check_update_rejects_duplicate_running_check(monkeypatch, qapp, tmp_path):
     _init_version_db(tmp_path)
 
     class FakeCheckThread(QObject):
-        finished = Signal(object, object, object, object)
+        result_ready = Signal(object, object, object, object)
+        finished = Signal()
         error = Signal(str)
 
         def __init__(self, *_args):
@@ -353,7 +390,8 @@ def test_check_update_success_restores_state_and_routes_completion(monkeypatch, 
     _init_version_db(tmp_path)
 
     class FakeCheckThread(QObject):
-        finished = Signal(object, object, object, object)
+        result_ready = Signal(object, object, object, object)
+        finished = Signal()
         error = Signal(str)
 
         def __init__(self, *_args):
@@ -378,8 +416,15 @@ def test_check_update_success_restores_state_and_routes_completion(monkeypatch, 
     controller.status_changed.connect(statuses.append)
 
     controller.check_update(notify_errors=False)
-    controller._check_thread.finished.emit({}, [], [], {})
+    worker = controller._check_thread
+    worker.result_ready.emit({}, [], [], {})
+    qapp.processEvents()
 
     assert states == [True, False]
+    assert controller._check_thread is worker
     assert controller.page.workspace_title.text() == "版本工作区"
     assert statuses[-1] == "已是最新版本."
+
+    worker.finished.emit()
+    qapp.processEvents()
+    assert controller._check_thread is None

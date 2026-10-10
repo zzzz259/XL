@@ -74,7 +74,9 @@ class ImportController(QObject):
         requested = self._requested_categories
         if requested:
             completed = frozenset(self._completed_categories)
-            failed = requested - completed if not success else frozenset()
+            # A successful overall run may still have requested categories with
+            # no verified output. Preserve that partial result for the caller.
+            failed = requested - completed
         else:
             completed = frozenset({"all"}) if success else frozenset()
             failed = frozenset({"all"}) if not success else frozenset()

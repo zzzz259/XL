@@ -1,6 +1,7 @@
 import os
 import sys
 import types
+import logging
 
 from app.features.audio.processing import AudioDecryptProcessor
 
@@ -183,3 +184,73 @@ def test_audio_worker_keeps_cn_file_when_processing_same_named_jp_file(tmp_path)
     )
 
     assert cn_file.exists()
+
+
+def test_debank_copy_emits_structured_per_file_output_event(tmp_path, monkeypatch, caplog):
+    tools_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "tools", "epic7_debank_v1_0")
+    )
+    monkeypatch.syspath_prepend(tools_dir)
+    import epic7_debank
+    test_logger = logging.getLogger("audio-debank-test")
+    monkeypatch.setattr(epic7_debank, "logger", test_logger)
+
+    source = tmp_path / "staging" / "voice.wav"
+    source.parent.mkdir()
+    source.write_bytes(b"wave-data")
+    output_root = tmp_path / "output"
+
+    with caplog.at_level(logging.DEBUG, logger="audio-debank-test"):
+        copied, skipped, failed = epic7_debank._copy_job_audio(
+            {
+                "audio_files": [str(source)],
+                "bank_stem": "118",
+                "rel_path": "assets/fmodassets/voice_cn/btl/118.bank",
+                "bank_path": str(tmp_path / "input" / "118.bank"),
+                "out_rel": "voice/118/cn",
+                "bank_name": "118.bank",
+            },
+            str(output_root),
+            None,
+            None,
+        )
+
+    event = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "audio.output_file"
+    )
+    assert (copied, skipped, failed) == (1, 0, 0)
+    assert event.details["source"] == str(source)
+    normalized_output = event.details["output"].replace("\\", "/")
+    assert normalized_output.endswith("voice/118/cn/voice.wav")
+    assert event.details["size_bytes"] == len(b"wave-data")
+    assert event.details["outcome"] == "written"
+
+
+def test_bytes_conversion_records_input_and_output_file_event(tmp_path, monkeypatch, caplog):
+    from app.features.audio import processing
+
+    test_logger = logging.getLogger("audio-conversion-test")
+    monkeypatch.setattr(processing, "logger", test_logger)
+    material_root = tmp_path / "material"
+    source = material_root / "assets" / "fmodassets" / "voice_cn" / "btl" / "118.bytes"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"bank-data")
+    processor = AudioDecryptProcessor(
+        str(material_root), str(tmp_path / "output" / "audio"), str(tmp_path / "debank")
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="audio-conversion-test"):
+        converted = processor._convert_bytes_to_bank()
+
+    event = next(
+        record for record in caplog.records
+        if getattr(record, "event", None) == "audio.bytes_to_bank.file"
+    )
+    assert converted == 1
+    assert not source.exists()
+    assert event.outcome == "success"
+    assert event.details["source"].endswith("118.bytes")
+    assert event.details["output"].endswith("118.bank")
+    assert event.details["size_bytes"] == len(b"bank-data")

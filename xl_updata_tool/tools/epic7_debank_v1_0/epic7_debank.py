@@ -38,6 +38,21 @@ def _debug(msg):
         print(msg)
 
 
+def _event(name, message, *, details=None, level="info", outcome=None, error_code=None):
+    """Write a searchable JSONL event when hosted by XL; stay standalone-safe."""
+    if logger is None:
+        print(message)
+        return
+    extra = {"event": name}
+    if details is not None:
+        extra["details"] = details
+    if outcome is not None:
+        extra["outcome"] = outcome
+    if error_code is not None:
+        extra["error_code"] = error_code
+    getattr(logger, level)(message, extra=extra)
+
+
 DEFAULT_WORKERS = 6
 AUDIO_EXTENSIONS = {".wav", ".ogg", ".mp3"}
 BANK_STATE_FILENAME = ".bank_state.json"
@@ -395,7 +410,26 @@ def _safe_job_name(index, bank_stem):
 def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_timeout,
                       cancel_check=None):
     started = time.perf_counter()
+    _event(
+        "audio.bank.start",
+        "音频 bank 解包开始",
+        details={
+            "bank": job["bank_name"],
+            "source": job["bank_path"],
+            "relative_source": job["rel_path"],
+            "size_bytes": job.get("fingerprint", {}).get("size"),
+            "output_subdir": job.get("out_rel"),
+        },
+    )
     if cancel_check and cancel_check():
+        _event(
+            "audio.bank.complete",
+            "音频 bank 在执行前已取消",
+            details={"bank": job["bank_name"], "source": job["bank_path"]},
+            level="warning",
+            outcome="cancelled",
+            error_code="AUDIO_BANK_CANCELLED",
+        )
         return {
             **job,
             "status": "cancelled",
@@ -452,6 +486,24 @@ def _process_bank_job(job, folder4subcontractors, folder_cur, python_exe, bank_t
         status = "empty"
     else:
         status = "success"
+    _event(
+        "audio.bank.complete",
+        "音频 bank 解包结束",
+        details={
+            "bank": job["bank_name"],
+            "source": job["bank_path"],
+            "relative_source": job["rel_path"],
+            "output_subdir": job.get("out_rel"),
+            "method": method,
+            "returncode": returncode,
+            "audio_file_count": len(audio_files),
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+        },
+        level="info" if status == "success" else "warning",
+        outcome=status,
+        error_code=("AUDIO_BANK_EMPTY" if status == "empty" else "AUDIO_BANK_FAILED")
+        if status in ("empty", "failed") else None,
+    )
     return {
         **job,
         "status": status,
@@ -481,6 +533,14 @@ def _copy_job_audio(result, output_root, before_copy_callback, audio_transform_c
             )
         except Exception as exc:
             _log(f"[音频bank] 输出回调失败: {result['bank_name']}: {exc}")
+            _event(
+                "audio.output_prepare.failed",
+                "音频输出准备回调失败",
+                details={"bank": result["bank_name"], "source": result["rel_path"]},
+                level="error",
+                outcome="failed",
+                error_code="AUDIO_OUTPUT_PREPARE_FAILED",
+            )
 
     copied = 0
     skipped = 0
@@ -493,6 +553,19 @@ def _copy_job_audio(result, output_root, before_copy_callback, audio_transform_c
         try:
             if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
                 _debug(f"跳过已存在: {os.path.relpath(dst, output_root)}")
+                _event(
+                    "audio.output_file",
+                    "音频输出文件已存在且大小一致，跳过写入",
+                    details={
+                        "bank": result["bank_name"],
+                        "bank_source": result.get("bank_path"),
+                        "source": src,
+                        "output": dst,
+                        "size_bytes": os.path.getsize(dst),
+                        "outcome": "skipped_existing",
+                    },
+                    outcome="skipped",
+                )
                 skipped += 1
                 continue
             try:
@@ -502,9 +575,38 @@ def _copy_job_audio(result, output_root, before_copy_callback, audio_transform_c
                 # temp_dir 可能被调用方放在其他卷，跨卷时保留兼容复制路径。
                 shutil.copy2(src, dst)
                 _debug(f"[OK] 复制 {filename} → {os.path.relpath(dst, output_root)}")
+            output_size = os.path.getsize(dst) if os.path.isfile(dst) else 0
+            _event(
+                "audio.output_file",
+                "音频文件已写入最终输出目录",
+                details={
+                    "bank": result["bank_name"],
+                    "bank_source": result.get("bank_path"),
+                    "source": src,
+                    "output": dst,
+                    "size_bytes": output_size,
+                    "outcome": "written" if output_size > 0 else "written_empty",
+                },
+                level="info" if output_size > 0 else "warning",
+                outcome="success" if output_size > 0 else "partial",
+                error_code="AUDIO_OUTPUT_EMPTY" if output_size <= 0 else None,
+            )
             copied += 1
         except Exception as exc:
             _log(f"[音频bank] 复制失败: {filename}: {exc}")
+            _event(
+                "audio.output_file",
+                "音频文件写入最终输出目录失败",
+                details={
+                    "bank": result["bank_name"],
+                    "bank_source": result.get("bank_path"),
+                    "source": src,
+                    "output": dst,
+                },
+                level="error",
+                outcome="failed",
+                error_code="AUDIO_OUTPUT_WRITE_FAILED",
+            )
             failed += 1
     return copied, skipped, failed
 
@@ -582,6 +684,18 @@ def run(input_dir, output_dir, folder_cur=None, progress_callback=None, subdir_f
             bank_state["banks"].get(cache_key), fingerprint, out_rel, output_root
         ):
             cached_count += 1
+            _event(
+                "audio.bank.cache_hit",
+                "音频 bank 命中增量缓存",
+                details={
+                    "bank": bank_name,
+                    "source": bank_path,
+                    "fingerprint": fingerprint,
+                    "output_subdir": out_rel,
+                    "outputs": bank_state["banks"][cache_key].get("files", []),
+                },
+                outcome="cached",
+            )
             continue
         job_dir = os.path.join(folder4tempo, _safe_job_name(index, bank_stem))
         jobs.append({

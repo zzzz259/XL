@@ -123,18 +123,45 @@ if (-not $SkipTests) {
 }
 
 # ---------- 5. PyInstaller 打包 ----------
-Invoke-Step 'pyinstaller build.spec --noconfirm --clean' {
-    Push-Location $appDir
-    try { Invoke-Native $python @('-m', 'PyInstaller', 'build.spec', '--noconfirm', '--clean') }
-    finally { Pop-Location }
+$pythonCommand = Get-Command $python -CommandType Application -ErrorAction Stop | Select-Object -First 1
+$pythonExe = $pythonCommand.Source
+$pythonBin = Split-Path $pythonExe -Parent
+$pythonHome = $pythonBin
+$venvConfig = Join-Path (Split-Path $pythonBin -Parent) 'pyvenv.cfg'
+if (Test-Path $venvConfig) {
+    $homeLine = Select-String -LiteralPath $venvConfig -Pattern '^home\s*=' | Select-Object -First 1
+    if ($homeLine) { $pythonHome = ($homeLine.Line -replace '^home\s*=\s*', '').Trim() }
 }
-$xlExe = Join-Path $distDir 'XL.exe'
-if (-not (Test-Path $xlExe)) { throw "打包产物缺失: $xlExe" }
+$controlledPath = @(
+    $pythonBin,
+    $pythonHome,
+    (Join-Path $env:SystemRoot 'System32'),
+    $env:SystemRoot,
+    (Join-Path $env:SystemRoot 'System32\Wbem'),
+    (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+$originalPath = $env:PATH
+try {
+    # PyInstaller scans PATH to resolve native DLL imports. Keep unrelated host
+    # runtimes (for example Codex/Poppler's incompatible icuuc.dll) out of the
+    # bundle, and use the same controlled search path for the frozen smoke test.
+    $env:PATH = $controlledPath -join [IO.Path]::PathSeparator
+    Write-Host "==> PyInstaller / self-check 使用隔离 PATH: $env:PATH"
+    Invoke-Step 'pyinstaller build.spec --noconfirm --clean' {
+        Push-Location $appDir
+        try { Invoke-Native $python @('-m', 'PyInstaller', 'build.spec', '--noconfirm', '--clean') }
+        finally { Pop-Location }
+    }
+    $xlExe = Join-Path $distDir 'XL.exe'
+    if (-not (Test-Path $xlExe)) { throw "打包产物缺失: $xlExe" }
 
-# ---------- 6. 自检 ----------
-Invoke-Step 'XL.exe --self-check' {
-    Invoke-Native $xlExe @('--self-check')
-    Write-Host '    self-check 通过（退出码 0）'
+    # ---------- 6. 自检 ----------
+    Invoke-Step 'XL.exe --self-check' {
+        Invoke-Native $xlExe @('--self-check')
+        Write-Host '    self-check 通过（退出码 0）'
+    }
+} finally {
+    $env:PATH = $originalPath
 }
 
 # ---------- 7. 附带文件 ----------

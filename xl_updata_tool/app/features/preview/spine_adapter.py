@@ -24,7 +24,26 @@ except ImportError:
     PILLOW_AVAILABLE = False
 
 from app.platform.diagnostics import logger
+from app.platform.processes import run_external_process
 from app.platform.tool_locator import ToolLocator
+
+
+def _run_spine_cli(command, **kwargs):
+    """Capture CLI streams and the native SpineViewer log for every invocation."""
+    native_log = os.path.join(os.path.dirname(str(command[0])), "logs", "cli.log")
+    return run_external_process(
+        command,
+        tool="SpineViewerCLI",
+        tool_log_paths=(native_log,),
+        **kwargs,
+    )
+
+
+def _log_spine_export_event(event, message, *, details, outcome, level="info", error_code=None):
+    extra = {"event": event, "outcome": outcome, "details": details}
+    if error_code:
+        extra["error_code"] = error_code
+    getattr(logger, level)(message, extra=extra)
 
 
 def _append_explicit_skin(command, skin_name):
@@ -36,6 +55,23 @@ def _append_explicit_skin(command, skin_name):
 def _append_explicit_skins(command, skin_names):
     for skin_name in tuple(skin_names or ()):
         _append_explicit_skin(command, skin_name)
+
+
+def _merge_layer_order(record):
+    """Return SpineViewerCLI draw order: foreground first, background last.
+
+    The CLI draws the first merged skeleton in front of later skeletons. Keep
+    this policy explicit instead of inheriting bundle/catalog iteration order.
+    """
+    stem = os.path.splitext(os.path.basename(os.fspath(record.source_skel)))[0].casefold()
+    suffix = stem.rsplit("_", 1)[-1]
+    if suffix in {"fg", "foreground", "front"}:
+        layer = 0
+    elif suffix in {"bg", "background"}:
+        layer = 2
+    else:
+        layer = 1
+    return layer, stem, os.fspath(record.atlas_path).casefold()
 
 
 def build_spine_export_command(job, spine_cli):
@@ -59,6 +95,11 @@ def build_spine_export_command(job, spine_cli):
     )
     if not records:
         records = (job.record,)
+    if len(records) > 1:
+        # SpineViewerCLI merge order is visual Z order, not an implementation
+        # detail: its first skeleton is rendered in front. Establish the
+        # intended order by component role, independent of discovery order.
+        records = tuple(sorted(records, key=_merge_layer_order))
     record = records[0]
     settings = job.settings
     normalized_format = str(settings.format).casefold()
@@ -335,7 +376,7 @@ class SpineQueryRunner:
             "--skin",
         ]
         try:
-            proc = subprocess.run(
+            proc = _run_spine_cli(
                 command,
                 cwd=os.path.dirname(self.spine_cli) or None,
                 capture_output=True,
@@ -557,7 +598,7 @@ def get_animation_metadata(skel_path, atlas_path, spine_cli):
             "--animation",
         ]
         logger.debug(f"查询动画列表: {' '.join(cmd)}")
-        proc = subprocess.run(
+        proc = _run_spine_cli(
             cmd,
             cwd=os.path.dirname(spine_cli),
             capture_output=True,
@@ -692,7 +733,7 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
 
         try:
             logger.debug(f"导出皮肤: {skin_name} -> {output_path}")
-            proc = subprocess.run(
+            proc = _run_spine_cli(
                 cmd,
                 cwd=os.path.dirname(spine_cli),
                 capture_output=True,
@@ -712,7 +753,7 @@ def export_skel_skins(skel_path, atlas_path, spine_cli, output_dir, base_name, s
             # fallback: 不带 --pma
             logger.debug(f"--pma 皮肤导出失败，尝试不带 --pma: {skin_name}")
             cmd.remove("--pma")
-            proc = subprocess.run(
+            proc = _run_spine_cli(
                 cmd,
                 cwd=os.path.dirname(spine_cli),
                 capture_output=True,
@@ -762,7 +803,7 @@ def run_spine_export(
 
     try:
         logger.debug(f"执行命令: {' '.join(cmd_pma)}")
-        proc = subprocess.run(
+        proc = _run_spine_cli(
             cmd_pma,
             cwd=os.path.dirname(spine_cli),
             capture_output=True,
@@ -773,8 +814,38 @@ def run_spine_export(
         if proc.stderr:
             logger.debug(f"SpineViewerCLI stderr: {proc.stderr[:200]}")
 
-        if proc.returncode == 0 and os.path.exists(output_path):
+        output_size = os.path.getsize(output_path) if os.path.isfile(output_path) else 0
+        pma_details = {
+            "skeleton": skel_path,
+            "atlas": atlas_path,
+            "output": output_path,
+            "animation": animation,
+            "skin": skin_name,
+            "scale": scale,
+            "max_resolution": max_resolution,
+            "pma": True,
+            "returncode": proc.returncode,
+            "output_exists": os.path.isfile(output_path),
+            "size_bytes": output_size,
+            "stderr_tail": (proc.stderr or "")[-1000:],
+        }
+        if proc.returncode == 0 and output_size > 0:
+            _log_spine_export_event(
+                "spine.export.file",
+                "Spine 静态图片导出并验证成功",
+                details=pma_details,
+                outcome="success",
+            )
             return True
+
+        _log_spine_export_event(
+            "spine.export.attempt",
+            "Spine 静态图片 PMA 导出未通过验证，开始无 PMA 重试",
+            details=pma_details,
+            outcome="retry",
+            level="warning",
+            error_code="SPINE_EXPORT_PMA_FAILED",
+        )
 
         # fallback: 不带 --pma
         logger.debug("--pma 导出失败，尝试不带 --pma")
@@ -792,7 +863,7 @@ def run_spine_export(
         ]
         _append_explicit_skin(cmd_no_pma, skin_name)
         logger.debug(f"执行命令 (无--pma): {' '.join(cmd_no_pma)}")
-        proc = subprocess.run(
+        proc = _run_spine_cli(
             cmd_no_pma,
             cwd=os.path.dirname(spine_cli),
             capture_output=True,
@@ -803,13 +874,56 @@ def run_spine_export(
         if proc.stderr:
             logger.debug(f"SpineViewerCLI stderr: {proc.stderr[:200]}")
 
-        return proc.returncode == 0 and os.path.exists(output_path)
+        output_size = os.path.getsize(output_path) if os.path.isfile(output_path) else 0
+        details = {
+            "skeleton": skel_path,
+            "atlas": atlas_path,
+            "output": output_path,
+            "animation": animation,
+            "skin": skin_name,
+            "scale": scale,
+            "max_resolution": max_resolution,
+            "pma": False,
+            "returncode": proc.returncode,
+            "output_exists": os.path.isfile(output_path),
+            "size_bytes": output_size,
+            "stderr_tail": (proc.stderr or "")[-1000:],
+        }
+        succeeded = proc.returncode == 0 and output_size > 0
+        _log_spine_export_event(
+            "spine.export.file",
+            "Spine 静态图片导出完成" if succeeded else "Spine 静态图片导出失败",
+            details=details,
+            outcome="success" if succeeded else "failed",
+            level="info" if succeeded else "error",
+            error_code=None if succeeded else "SPINE_EXPORT_OUTPUT_INVALID",
+        )
+        return succeeded
 
     except subprocess.TimeoutExpired:
         logger.error(f"导出超时: {skel_path} (动画: {animation})")
+        _log_spine_export_event(
+            "spine.export.file",
+            "Spine 静态图片导出超时",
+            details={"skeleton": skel_path, "atlas": atlas_path, "output": output_path,
+                     "animation": animation, "skin": skin_name, "scale": scale,
+                     "max_resolution": max_resolution},
+            outcome="failed",
+            level="error",
+            error_code="SPINE_EXPORT_TIMEOUT",
+        )
         return False
     except Exception as e:
         logger.error(f"导出异常: {e}")
+        _log_spine_export_event(
+            "spine.export.file",
+            "Spine 静态图片导出发生异常",
+            details={"skeleton": skel_path, "atlas": atlas_path, "output": output_path,
+                     "animation": animation, "skin": skin_name, "error": str(e)},
+            outcome="failed",
+            level="error",
+            error_code="SPINE_EXPORT_EXCEPTION",
+        )
         return False
 
 
@@ -898,7 +1012,7 @@ def export_spine_media_file(spine_cli, skel_path, atlas_path,
         logger.debug(f"导出{label}视频: {' '.join(cmd)}")
 
         try:
-            proc = subprocess.run(
+            proc = _run_spine_cli(
                 cmd,
                 cwd=os.path.dirname(spine_cli),
                 capture_output=True,
@@ -994,7 +1108,7 @@ def ffmpeg_composite_videos(bg_path, role_path, output_path, fps, fmt="mp4"):
     logger.debug(f"FFmpeg合成视频: {' '.join(cmd)}")
 
     try:
-        proc = subprocess.run(
+        proc = _run_spine_cli(
             cmd,
             capture_output=True,
             text=True,

@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .logger import logger
+from .processes import run_external_process
 from .paths import get_data_dir, get_logs_dir, get_output_dir
 from .tool_locator import ToolLocator, ToolNotFoundError, resource_root
 
@@ -30,7 +31,7 @@ PROCESS_TIMEOUT = 30
 REQUIRED_DOTNET_RUNTIME = "Microsoft.NETCore.App 8.0."
 # (显示名, import 模块名)；Pillow 的 import 名是 PIL，pycryptodome 是 Crypto。
 PYTHON_MODULES = (
-    ("PySide6", "PySide6"),
+    ("PySide6.QtWidgets", "PySide6.QtWidgets"),
     ("Pillow", "PIL"),
     ("UnityPy", "UnityPy"),
     ("Crypto", "Crypto"),
@@ -158,8 +159,9 @@ def _check_java(locator: ToolLocator) -> CheckResult:
     except ToolNotFoundError as error:
         return CheckResult("Java 运行时（java -version）", False, str(error))
     try:
-        proc = subprocess.run(
+        proc = run_external_process(
             [java, "-version"],
+            tool="java-self-check",
             capture_output=True, text=True, timeout=PROCESS_TIMEOUT, check=False,
         )
     except (OSError, subprocess.SubprocessError) as error:
@@ -178,8 +180,9 @@ def _check_dotnet(locator: ToolLocator) -> CheckResult:
     except ToolNotFoundError as error:
         return CheckResult(name, False, str(error))
     try:
-        proc = subprocess.run(
+        proc = run_external_process(
             [dotnet, "--list-runtimes"],
+            tool="dotnet-self-check",
             capture_output=True, text=True, timeout=PROCESS_TIMEOUT, check=False,
             env=locator.subprocess_env(),
         )

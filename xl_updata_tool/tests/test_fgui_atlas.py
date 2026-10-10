@@ -7,6 +7,10 @@ from app.features.preview.fgui_atlas import (
     UIPackageTool,
 )
 from PIL import Image
+import json
+
+from app.platform.logger import configure_logging
+from app.platform.runtime_config import RuntimeConfig
 
 
 def _install_test_package(monkeypatch, *, package_name, sprites):
@@ -62,6 +66,27 @@ def test_chat_emoji_exports_sprite_ids_including_movieclip_frame_sprites(tmp_pat
         "image-id.png",
         "dv1q7f_0.png",
     }
+
+
+def test_atlas_cut_logs_individual_sprite_outcomes(tmp_path, monkeypatch):
+    session = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
+    package_name = "ChatEmoji"
+    _install_test_package(
+        monkeypatch,
+        package_name=package_name,
+        sprites=[("image-id", 0), ("dv1q7f_0", 1)],
+    )
+    source = tmp_path / "ChatEmoji_fui.bytes"
+    source.write_bytes(b"package")
+    _write_test_atlas(tmp_path, package_name, 2)
+    destination = tmp_path / "output"
+
+    UIPackageTool.split_atlas_to_package_dir(str(source), str(destination), is_override_exists=False)
+
+    events = [json.loads(line) for line in session.events_log.read_text(encoding="utf-8").splitlines()]
+    sprite_events = [event for event in events if event["event"] == "atlas.sprite.complete"]
+    assert {event["details"]["sprite_id"] for event in sprite_events} == {"image-id", "dv1q7f_0"}
+    assert all(event["details"]["output_bytes"] > 0 for event in sprite_events)
 
 
 def test_regular_fgui_package_uses_original_sprite_name_without_hash(tmp_path, monkeypatch):

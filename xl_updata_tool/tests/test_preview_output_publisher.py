@@ -4,6 +4,8 @@ from pathlib import Path
 from app.features.preview.output_publisher import publish_raw_spine_resources
 from app.features.preview.resource_catalog import discover_preview_resources
 from app.features.preview.service import PreviewService
+from app.platform.logger import configure_logging
+from app.platform.runtime_config import RuntimeConfig
 
 
 class _Runner:
@@ -24,6 +26,7 @@ def _create_spine_source(material_dir: Path, name: str = "battlespine_10080_2") 
 
 
 def test_publish_raw_spine_keeps_source_and_copies_complete_resource_group(tmp_path):
+    session = configure_logging(RuntimeConfig(debug=False), logs_dir=tmp_path / "logs")
     material_dir = tmp_path / "data" / "material"
     skel = _create_spine_source(material_dir)
     catalog = discover_preview_resources(material_dir, query_runner=_Runner())
@@ -40,6 +43,10 @@ def test_publish_raw_spine_keeps_source_and_copies_complete_resource_group(tmp_p
     }
     assert skel.read_bytes() == b"skeleton"
     assert (skel.parent / f"{skel.stem}.atlas").read_text(encoding="utf-8").startswith(skel.stem)
+    events = [json.loads(line) for line in session.events_log.read_text(encoding="utf-8").splitlines()]
+    archived = [event for event in events if event["event"] == "spine.archive.file"]
+    assert {event["details"]["kind"] for event in archived} == {"skeleton", "atlas", "texture"}
+    assert any(event["event"] == "spine.index.write.complete" for event in events)
 
 
 def test_publish_raw_spine_is_idempotent_and_reports_missing_atlas_textures(tmp_path):

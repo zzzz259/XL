@@ -25,10 +25,10 @@ class RuntimeConfig:
 
     @property
     def log_level(self) -> int:
-        """返回根应用 logger 应接受的最低级别。"""
+        """返回文件诊断日志级别；普通运行也完整保留 Debug 细节。"""
         import logging
 
-        return logging.DEBUG if self.debug else logging.INFO
+        return logging.DEBUG
 
     @property
     def console_level(self) -> int:
@@ -38,7 +38,8 @@ class RuntimeConfig:
 
     @property
     def capture_external_output(self) -> bool:
-        return self.debug
+        """正式版普通模式也必须捕获外部工具输出。"""
+        return True
 
 
 def parse_runtime_config(argv: Sequence[str] | None = None) -> RuntimeConfig:

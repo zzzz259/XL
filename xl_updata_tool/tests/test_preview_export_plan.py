@@ -314,6 +314,32 @@ def test_grouped_spine_export_uses_viewer_merge_for_all_parts(tmp_path):
     assert "export" not in command
 
 
+@pytest.mark.parametrize("source_order", ["character_first", "background_first"])
+def test_grouped_spine_merge_uses_explicit_visual_layer_order(tmp_path, source_order):
+    character = ready_record(source_suffix="2")
+    background = replace(
+        character,
+        source_skel="assets/cardspine_10080_2_bg.skel",
+        atlas_path="assets/cardspine_10080_2_bg.atlas",
+        attachment_fingerprint="background",
+    )
+    source_group = (
+        (character, background)
+        if source_order == "character_first"
+        else (background, character)
+    )
+
+    job = build_export_plan((source_group,), ExportSettings(), tmp_path)[0]
+    command = build_spine_export_command(job, "SpineViewerCLI.exe")
+
+    assert command[2:4] == [character.source_skel, background.source_skel]
+    atlas_args = [argument for argument in command if argument.startswith("--atlases=")]
+    assert atlas_args == [
+        f"--atlases={character.atlas_path}",
+        f"--atlases={background.atlas_path}",
+    ]
+
+
 def test_grouped_export_deduplicates_internal_skin_records_per_source(tmp_path):
     character = ready_record(source_suffix="4", skin_name="default")
     character_motion = replace(character, skin_name="motion_angry")
