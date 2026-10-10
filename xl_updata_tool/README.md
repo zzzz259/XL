@@ -35,7 +35,7 @@ Pop-Location
 在仓库根目录用 PowerShell 执行：
 
 ```powershell
-.\xl_updata_tool\scripts\release\build-release.ps1 -Version 2.0.0
+.\xl_updata_tool\scripts\release\build-release.ps1 -Version 2.0.1
 ```
 
 脚本默认在 `xl_updata_tool/build/.venv` 创建隔离构建环境；`-NoVenv` 才使用当前 Python。默认会准备 Java 和 .NET 运行时、执行 pytest/Ruff、打包并自检。仅在复用已准备的运行时时使用 `-SkipRuntimes`；只有明确接受省略验证时才使用 `-SkipTests`。产物位于 `xl_updata_tool/release/`，构建目录及其报告位于 `xl_updata_tool/build/`。版本发布 workflow 见仓库根 `.github/workflows/release.yml`。
