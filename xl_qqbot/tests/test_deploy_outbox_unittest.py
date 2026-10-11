@@ -156,6 +156,10 @@ class DeploymentOutboxTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(response.status, 200)
             self.assertEqual(await response.json(), {"ok": True, "results": {production_group: True}})
+            self.assertEqual(
+                {row.recipient for row in outbox.list_pending()},
+                {production_group},
+            )
         finally:
             await client.close()
 
