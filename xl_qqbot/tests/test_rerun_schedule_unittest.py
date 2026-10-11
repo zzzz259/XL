@@ -13,6 +13,7 @@ from bot_app.rerun_schedule_querier import RerunScheduleQuerier
 from bot_app.sender import QQSender
 from bot_app.config import GroupsConfig
 from bot_app.query_handler import QueryHandler
+from bot_app.selection import SelectionStore
 from bot_app.tiers import GroupTier
 
 
@@ -92,7 +93,7 @@ class RerunScheduleQueryTests(unittest.TestCase):
         async def run_query():
             sender = Sender()
             handler = QueryHandler(
-                None, None, None, sender,
+                None, None, SelectionStore(), sender,
                 tiers=GroupTier(GroupsConfig(debug=["g-debug"], features={"rerun_schedule_query": "debug"})),
                 rerun_querier=Querier(),
             )
@@ -126,7 +127,7 @@ class RerunScheduleQueryTests(unittest.TestCase):
         async def run_query():
             sender = Sender()
             handler = QueryHandler(
-                None, None, None, sender,
+                None, None, SelectionStore(), sender,
                 tiers=GroupTier(GroupsConfig(
                     test=["g-test"], features={"rerun_schedule_query": "test"},
                 )),
