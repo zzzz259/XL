@@ -88,6 +88,16 @@ class WatcherIdempotencyLoggingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("newly_queued=0", log_output)
         self.assertIn("already_sent=1", log_output)
 
+    async def test_first_delivery_is_logged_as_newly_queued(self):
+        with self.assertLogs("bot_app.watcher", level=logging.INFO) as captured:
+            await self.watcher._process_batch(self.batch)
+
+        self.assertEqual(self.outbox.count(), 1)
+        log_output = "\n".join(captured.output)
+        self.assertIn("newly_queued=1", log_output)
+        self.assertIn("already_sent=0", log_output)
+        self.assertIn("already_pending=0", log_output)
+
     async def test_existing_pending_recipient_is_logged_as_reused(self):
         self.outbox.enqueue_image(
             "game-card:v1:1:1_A_角色档案_长图.png",
