@@ -116,7 +116,7 @@ class WatcherSourceRoutingTests(unittest.IsolatedAsyncioTestCase):
         await self._watcher("main")._tick()
 
         pending = self.outbox.list_pending()
-        self.assertEqual({item.recipient for item in pending}, {"prod", "test", "debug"})
+        self.assertEqual({item.recipient for item in pending}, {"prod"})
         self.assertTrue(all(item.event_key == "game-update:1:start:77" for item in pending))
         self.assertEqual(self._watcher("main").notice.consumed_events, 1)
         self.assertEqual(self._watcher("test").notice.consumed_events, 0)
@@ -135,10 +135,10 @@ class WatcherSourceRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(main_keys, {"game-update:1:start:77"})
         self.assertEqual(
             test_keys,
-            {"game-update:1:start:77", "test:game-update:1:start:77"},
+            {"test:game-update:1:start:77"},
         )
         self.assertEqual(
-            len([item for item in pending if item.recipient == "test"]), 2
+            len([item for item in pending if item.recipient == "test"]), 1
         )
 
     async def test_test_finish_queues_lifecycle_and_card_in_order(self):
