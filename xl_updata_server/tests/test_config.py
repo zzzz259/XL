@@ -49,8 +49,9 @@ assetbundle_key = "yunguihaowan1234"
     def test_rerun_schedule_configuration_has_safe_defaults_and_aware_anchor(self):
         config = self._load()
         self.assertTrue(config.rerun_schedule_enabled)
-        self.assertEqual(config.rerun_schedule_anchor["new_character_id"], 10000223)
-        self.assertEqual(config.rerun_schedule_refresh_seconds, 3600)
+        self.assertEqual(config.rerun_schedule_anchor["new_character_id"], 10000224)
+        self.assertEqual(config.rerun_schedule_history_through_gacha_id, 24000087)
+        self.assertFalse(hasattr(config, "rerun_schedule_refresh_seconds"))
         self.assertEqual(config.rerun_schedule_overrides, ())
 
     def test_rerun_schedule_anchor_can_be_overridden_from_toml(self):
@@ -58,13 +59,13 @@ assetbundle_key = "yunguihaowan1234"
         self.addCleanup(temp_dir.cleanup)
         config_path = Path(temp_dir.name) / "config.toml"
         config_path.write_text(
-            '''[paths]\ndata_dir = "data"\n[cdn]\ncategories = ["Arts", "Data"]\n[security]\nassetbundle_key = "yunguihaowan1234"\n[rerun_schedule]\nenabled = false\nrefresh_seconds = 900\n[rerun_schedule.anchor]\nnew_character_id = 7\nnew_character_name = "新角色"\nrerun_character_id = 8\nrerun_character_name = "复刻角色"\nstart_at = "2026-01-01T10:00:00+08:00"\nend_at = "2026-01-22T05:00:00+08:00"\nsource = "operator_confirmed"\n[[rerun_schedule.overrides]]\ngacha_id = 77\npool_kind = "normal"\ncharacter_id = 10000214\nsource = "confirmed in announcement"\n''',
+            '''[paths]\ndata_dir = "data"\n[cdn]\ncategories = ["Arts", "Data"]\n[security]\nassetbundle_key = "yunguihaowan1234"\n[rerun_schedule]\nenabled = false\nhistory_through_gacha_id = 8\nrefresh_seconds = 900\n[rerun_schedule.anchor]\nnew_character_id = 7\nnew_character_name = "新角色"\nrerun_character_id = 8\nrerun_character_name = "复刻角色"\nstart_at = "2026-01-01T10:00:00+08:00"\nend_at = "2026-01-22T05:00:00+08:00"\nsource = "operator_confirmed"\n[[rerun_schedule.overrides]]\ngacha_id = 77\npool_kind = "normal"\ncharacter_id = 10000214\nsource = "confirmed in announcement"\n''',
             encoding="utf-8",
         )
         config = load_config(config_path)
         self.assertFalse(config.rerun_schedule_enabled)
-        self.assertEqual(config.rerun_schedule_refresh_seconds, 900)
         self.assertEqual(config.rerun_schedule_anchor["new_character_id"], 7)
+        self.assertEqual(config.rerun_schedule_history_through_gacha_id, 8)
         self.assertEqual(config.rerun_schedule_overrides[0]["gacha_id"], 77)
 
 

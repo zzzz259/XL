@@ -45,19 +45,9 @@ file_base_url = ""
 template = ""
 
 [groups]
-# 群分级：调试群什么功能都能用，测试群用测试+正式功能，其余群（默认）只用正式功能。
-# 累积语义：功能级别 L 在群级别 G 开放 ⟺ G >= L（production < test < debug）。
+# Shared router 用这些群 ID 选择运行环境；Bot 功能不再按群级别逐项开关。
 debug = []
 test = []
-
-[features]
-# 功能门禁：各功能所需的最低群级别，缺省 production（全部群可用）。
-# 调试新功能时把对应项改成 "debug" 或 "test" 并把自己的群加进 [groups] 对应列表。
-character_query = "production"   # @查图鉴（含候选选择）
-character_push = "production"    # 版本更新时新角色图鉴推送（watcher outbox）
-update_notice = "production"     # 版本开始/结束播报
-bilibili_watch = "production"    # B站动态/UP主监视推送
-rerun_schedule_query = "debug"   # @机器人复刻排期图片查询（默认仅调试群）
 
 [router]
 # 事件路由器（python -m bot_app.router）转发各级别服务的端口与超时（秒）。

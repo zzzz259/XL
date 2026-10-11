@@ -46,7 +46,7 @@ class ServerConfig:
     render_cards: bool = True
     rerun_schedule_enabled: bool = True
     rerun_schedule_anchor: dict = field(default_factory=lambda: dict(DEFAULT_ANCHOR))
-    rerun_schedule_refresh_seconds: int = 3600
+    rerun_schedule_history_through_gacha_id: int = 24000087
     rerun_schedule_forecast_limit: int = 20
     rerun_schedule_overrides: tuple[dict, ...] = ()
 
@@ -196,7 +196,9 @@ def load_config(path: str | Path) -> ServerConfig:
         render_cards=render_cards,
         rerun_schedule_enabled=bool(rerun.get("enabled", True)),
         rerun_schedule_anchor=rerun_anchor,
-        rerun_schedule_refresh_seconds=_read_int(rerun, "refresh_seconds", 3600),
+        rerun_schedule_history_through_gacha_id=_read_int(
+            rerun, "history_through_gacha_id", 24000087
+        ),
         rerun_schedule_forecast_limit=_read_int(rerun, "forecast_limit", 20),
         rerun_schedule_overrides=tuple(parsed_overrides),
     )

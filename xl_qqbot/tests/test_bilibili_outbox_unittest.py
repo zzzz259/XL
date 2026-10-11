@@ -25,11 +25,6 @@ class NoDirectSender:
         raise AssertionError("Bilibili proactive images must enter the router outbox")
 
 
-class PassThroughTiers:
-    def filter_groups(self, _feature, groups):
-        return list(groups)
-
-
 class FakeClient:
     def __init__(self):
         self.opus_feed = [{"opus_id": 101, "content": "feed title"}]
@@ -104,7 +99,6 @@ class BilibiliOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.watcher = BilibiliWatcher(
             self.config,
             NoDirectSender(),
-            tiers=PassThroughTiers(),
             proactive_outbox=self.outbox,
         )
         self.client = FakeClient()

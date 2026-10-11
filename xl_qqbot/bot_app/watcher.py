@@ -116,7 +116,7 @@ class Watcher:
 
     def _enqueue_update_event(self, event) -> None:
         """Durably enqueue the event for every update-notice-enabled group."""
-        group_openids = self._eligible_groups("update_notice")
+        group_openids = self._eligible_groups()
         if not group_openids:
             return
         if event.event == "start":
@@ -134,19 +134,13 @@ class Watcher:
         manifest = self._read_manifest(batch.version_dir)
         self.store.save_manifest(batch.version, manifest)
 
-        group_openids = self._eligible_groups(None)
+        group_openids = self._eligible_groups()
         if not group_openids:
             _logger.warning("没有配置目标群 openid，跳过版本 %s", batch.version)
             return
-        # 新角色图鉴推送按 character_push 门禁过滤；批次完成判定只看实际目标群
-        group_openids = self.tiers.filter_groups("character_push", group_openids)
-        if not group_openids:
-            _logger.info(
-                "character_push 在全部目标群均未开放，版本 %s 视为无需发送，清理 outbox 目录",
-                batch.version,
-            )
-            shutil.rmtree(batch.version_dir)
-            return
+        newly_queued = 0
+        already_sent = 0
+        already_pending = 0
 
         for image in batch.images:
             content = self.config.message.template.format(
@@ -157,14 +151,15 @@ class Watcher:
             event_key = (
                 f"{self._source_prefix}game-card:{batch.version}:{image.id or 'unknown'}:{image.file_name}"
             )
-            pending_groups = [
-                group_openid
-                for group_openid in group_openids
-                if not self.store.is_sent_to_group(
+            for group_openid in group_openids:
+                if self.store.is_sent_to_group(
                     batch.version, image.file_name, group_openid
+                ):
+                    already_sent += 1
+                    continue
+                existing = self.proactive_outbox.find_by_key(
+                    event_key, group_openid, 0
                 )
-            ]
-            for group_openid in pending_groups:
                 self.proactive_outbox.enqueue_image(
                     event_key,
                     group_openid,
@@ -172,15 +167,24 @@ class Watcher:
                     source_path=image.file_path,
                     content=content,
                 )
+                if existing is not None and existing.status == "sent":
+                    already_sent += 1
+                elif existing is not None:
+                    already_pending += 1
+                else:
+                    newly_queued += 1
 
         # All target rows and their copied attachments are now durable. The
         # dispatcher owns delivery/retry; only now may the source batch clear.
         shutil.rmtree(batch.version_dir)
         _logger.info(
-            "版本 %s 全部图鉴已持久入队 groups=%d images=%d",
+            "版本 %s 图鉴 FIFO 处理完成 groups=%d images=%d newly_queued=%d already_sent=%d already_pending=%d",
             batch.version,
             len(group_openids),
             len(batch.images),
+            newly_queued,
+            already_sent,
+            already_pending,
         )
 
     def _read_manifest(self, version_dir: str) -> dict:
@@ -198,10 +202,8 @@ class Watcher:
     def _update_event_key(self, event) -> str:
         return f"{self._source_prefix}game-update:{event.line_number}:{event.event}:{event.version}"
 
-    def _eligible_groups(self, feature: str | None) -> list[str]:
+    def _eligible_groups(self) -> list[str]:
         groups = self._target_groups()
-        if feature:
-            groups = self.tiers.filter_groups(feature, groups)
         minimum_rank = TIER_RANK[self.source.minimum_tier]
         if minimum_rank == TIER_RANK["production"]:
             return groups

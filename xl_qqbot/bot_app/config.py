@@ -2,7 +2,7 @@ import os
 import re
 import tomllib
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import List
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
@@ -83,11 +83,10 @@ class BilibiliConfig:
 
 @dataclass(frozen=True)
 class GroupsConfig:
-    """群分级 + 功能门禁配置：[groups] 群列表 + [features] 功能所需级别。"""
+    """Router 用于把群分配到对应运行环境的群列表。"""
 
     debug: List[str] = field(default_factory=list)
     test: List[str] = field(default_factory=list)
-    features: Dict[str, str] = field(default_factory=dict)  # 功能名 -> production/test/debug
 
 
 @dataclass(frozen=True)
@@ -247,23 +246,9 @@ def load_config(path: str = "config.toml") -> Config:
         raise ValueError(f"[bilibili] timezone 非法: {bilibili.timezone!r}")
 
     groups = raw.get("groups", {})
-    features_raw = raw.get("features", {})
-    if not isinstance(features_raw, dict):
-        raise ValueError("[features] 必须是表")
-    features: Dict[str, str] = {}
-    for name, tier in features_raw.items():
-        tier_value = str(tier).strip()
-        if tier_value not in ("production", "test", "debug"):
-            raise ValueError(
-                f"[features] {name} 级别非法: {tier_value!r}（只允许 production/test/debug）"
-            )
-        features[str(name).strip()] = tier_value
-    # The new schedule command remains debug-only until an operator opts in.
-    features.setdefault("rerun_schedule_query", "debug")
     groups_config = GroupsConfig(
         debug=[str(g).strip() for g in groups.get("debug", []) if str(g).strip()],
         test=[str(g).strip() for g in groups.get("test", []) if str(g).strip()],
-        features=features,
     )
 
     router = raw.get("router", {})

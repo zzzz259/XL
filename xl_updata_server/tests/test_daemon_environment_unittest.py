@@ -46,11 +46,6 @@ class TestDaemonEnvironment(unittest.TestCase):
             "burst_interval_seconds": 60,
             "burst_duration_seconds": 1200,
             "burst_anchor": datetime(2026, 1, 1, tzinfo=timezone.utc),
-            "rerun_schedule_enabled": True,
-            "rerun_schedule_refresh_seconds": 3600,
-            "rerun_schedule_forecast_limit": 20,
-            "data_dir": type("PathLike", (), {"__truediv__": lambda self, other: "schedule"})(),
-            "node_bin": "node",
         })()
 
         def stop_after_iteration(_seconds):
@@ -63,28 +58,25 @@ class TestDaemonEnvironment(unittest.TestCase):
             clock=lambda: datetime(2026, 10, 10, tzinfo=timezone.utc),
             sleeper=stop_after_iteration,
         )
-        with patch("server_app.daemon.time.monotonic", return_value=3601), patch(
-            "server_app.daemon.refresh_schedule_if_due", return_value=False
-        ) as refresh:
+        with patch("server_app.daemon.time.monotonic", return_value=3601):
             daemon.run(event)
         temp_dir.cleanup()
-        return pipeline.calls, refresh.call_count
+        return pipeline.calls
 
     def test_test_environment_never_scheduled_cdn_polls(self):
-        calls, _ = self.run_one_iteration("test", poll_enabled=False)
+        calls = self.run_one_iteration("test", poll_enabled=False)
 
         self.assertEqual(calls, 0)
 
     def test_main_environment_runs_scheduled_cdn_poll_when_enabled(self):
-        calls, _ = self.run_one_iteration("main", poll_enabled=True)
+        calls = self.run_one_iteration("main", poll_enabled=True)
 
         self.assertEqual(calls, 1)
 
-    def test_schedule_refresh_is_independent_from_cdn_polling(self):
-        calls, refresh_calls = self.run_one_iteration("test", poll_enabled=False)
+    def test_one_daemon_iteration_does_not_trigger_schedule_reprojection(self):
+        calls = self.run_one_iteration("test", poll_enabled=False)
 
         self.assertEqual(calls, 0)
-        self.assertEqual(refresh_calls, 1)
 
 
 if __name__ == "__main__":

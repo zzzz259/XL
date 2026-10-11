@@ -54,6 +54,7 @@ def rebuild_gacha_history(
     bottomups: Mapping[Any, Any],
     names: Mapping[Any, str] | None = None,
     overrides: Sequence[Mapping[str, Any]] | None = None,
+    through_gacha_id: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Build pool events, lifecycle events, queue, and deterministic anomalies.
 
@@ -77,7 +78,15 @@ def rebuild_gacha_history(
         if gacha_key in override_by_id:
             raise ValueError(f"重复的卡池覆盖项: {gacha_key}")
         override_by_id[gacha_key] = override
+    if through_gacha_id is not None and _int(through_gacha_id) is None:
+        raise ValueError("through_gacha_id must be an integer")
     sorted_pools = sorted(pools, key=_pool_order)
+    if through_gacha_id is not None:
+        cutoff = int(through_gacha_id)
+        sorted_pools = [
+            pool for pool in sorted_pools
+            if _int(pool.get("id")) is not None and int(pool["id"]) <= cutoff
+        ]
     first_by_id: dict[str, Mapping[str, Any]] = {}
     ordered: list[Mapping[str, Any]] = []
     anomalies: list[dict[str, Any]] = []

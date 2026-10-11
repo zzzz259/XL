@@ -24,11 +24,6 @@ class NoDirectSender:
         raise AssertionError("proactive game messages must use the router outbox")
 
 
-class PassThroughTiers:
-    def filter_groups(self, _feature, groups):
-        return list(groups)
-
-
 def make_config(root, groups=("g1",)):
     outbox_dir = root / "outbox"
     outbox_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +67,6 @@ class WatcherOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.watcher = Watcher(
             self.config,
             NoDirectSender(),
-            tiers=PassThroughTiers(),
             proactive_outbox=self.outbox,
         )
 

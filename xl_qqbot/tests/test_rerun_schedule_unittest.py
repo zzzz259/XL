@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock
 from bot_app.query_handler import is_rerun_schedule_query
 from bot_app.rerun_schedule_querier import RerunScheduleQuerier
 from bot_app.sender import QQSender
-from bot_app.config import GroupsConfig
+from bot_app.config import load_config
 from bot_app.query_handler import QueryHandler
-from bot_app.tiers import GroupTier
+from bot_app.selection import SelectionStore
 
 
 PNG = b"\x89PNG\r\n\x1a\nnot-a-real-image-but-a-png-signature"
@@ -26,6 +26,20 @@ class RerunScheduleQueryTests(unittest.TestCase):
                 self.assertTrue(is_rerun_schedule_query(query))
         self.assertFalse(is_rerun_schedule_query("我想看复刻活动公告"))
         self.assertFalse(is_rerun_schedule_query("复刻角色有哪些"))
+
+    def test_legacy_feature_levels_are_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                '[bot]\nappid = "1"\nsecret = "s"\n'
+                '[watch]\noutbox_dir = "/tmp/outbox"\n'
+                '[features]\nrerun_schedule_query = "debug"\n',
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path)
+
+        self.assertFalse(hasattr(config.groups, "features"))
 
     def test_querier_reads_versioned_image_and_reports_stale_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -92,8 +106,7 @@ class RerunScheduleQueryTests(unittest.TestCase):
         async def run_query():
             sender = Sender()
             handler = QueryHandler(
-                None, None, None, sender,
-                tiers=GroupTier(GroupsConfig(debug=["g-debug"], features={"rerun_schedule_query": "debug"})),
+                None, None, SelectionStore(), sender,
                 rerun_querier=Querier(),
             )
             await handler._answer_query("g-debug", "复刻表", reply_to="msg-1")
@@ -102,6 +115,46 @@ class RerunScheduleQueryTests(unittest.TestCase):
         import asyncio
         calls = asyncio.run(run_query())
         self.assertEqual(calls, [(str(Path("/safe/current.png")), "", ["g-debug"], "msg-1")])
+
+    def test_test_tier_bot_answers_explicit_display_name_mention(self):
+        class Sender:
+            def __init__(self):
+                self.calls = []
+
+            async def send_schedule_image(self, path, content, groups, reply_to):
+                self.calls.append((path, content, groups, reply_to))
+                return {groups[0]: True}
+
+            async def send_text(self, group, text, reply_to=""):
+                self.calls.append(("text", group, text, reply_to))
+                return True
+
+        class Querier:
+            def find(self):
+                return SimpleNamespace(
+                    status="found", image_path=Path("/safe/current.png"),
+                    source_version="123", stale=False, reason="",
+                )
+
+        async def run_query():
+            sender = Sender()
+            handler = QueryHandler(
+                None, None, SelectionStore(), sender,
+                rerun_querier=Querier(),
+            )
+            await handler.handle({
+                "type": "group_at", "muted": False,
+                "data": {
+                    "id": "msg-test", "group_openid": "g-test",
+                    "content": "@星落罗伯特 复刻表", "mentions": [],
+                    "author": {"member_openid": "user-test"},
+                },
+            })
+            return sender.calls
+
+        import asyncio
+        calls = asyncio.run(run_query())
+        self.assertEqual(calls, [(str(Path("/safe/current.png")), "", ["g-test"], "msg-test")])
 
 
 class RerunScheduleUploadTests(unittest.IsolatedAsyncioTestCase):

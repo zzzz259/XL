@@ -19,6 +19,34 @@ def pool(gacha_id, character_id, *, kind=1, bottom_type=201, pool_type=2, main_i
 
 
 class GachaHistoryTests(unittest.TestCase):
+    def test_anchor_cutoff_keeps_future_first_rerun_out_of_history(self):
+        pools = [
+            pool(24000015, 10000214),  # 朝雾 debut
+            pool(24000016, 10000215),  # 鎺 debut
+            pool(24000017, 10000212),  # 雪莉 debut
+            pool(24000086, 10000223),  # confirmed current new-character pool
+            pool(24000087, 10000212),  # confirmed current first-rerun pool
+            pool(24000088, 10000224),  # configured but not yet elapsed
+            pool(24000089, 10000214),  # configured 朝雾 first rerun, not yet elapsed
+        ]
+
+        result = rebuild_gacha_history(
+            pools,
+            {1: {"bottom_type": 201}},
+            {10000214: "朝雾", 10000215: "鎺", 10000212: "雪莉", 10000223: "罗蕾娜"},
+            through_gacha_id=24000087,
+        )
+
+        self.assertEqual([item["character_id"] for item in result["queue"]], [10000214, 10000215, 10000223])
+        self.assertEqual(
+            [event["gacha_id"] for event in result["events"]],
+            [24000015, 24000016, 24000017, 24000086, 24000087],
+        )
+        self.assertNotIn(
+            24000089,
+            [item["gacha_id"] for item in result["anomalies"] if item["reason"] == "out_of_order_first_rerun"],
+        )
+
     def test_report_aggregate_regression_fixture_yields_the_confirmed_eleven_queue(self):
         # This synthetic fixture encodes the report's confirmed aggregate counts
         # and final queue; it is not represented as a re-audit of the missing ZIP.
