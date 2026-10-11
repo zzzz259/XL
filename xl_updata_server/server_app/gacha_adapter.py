@@ -195,7 +195,7 @@ def parse_lua_table(source: str, table_name: str) -> dict[Any, Any]:
 
 
 def _is_table_entry_assignment(tokens: list[str], bracket_index: int) -> bool:
-    """Return whether a bracketed expression is followed by `= {`.
+    """Return whether a bracketed expression is followed by an assignment.
 
     Table names can also occur in executable code, e.g. `Words[locale .. id]`.
     Such reads are not table declarations and must not be passed to the narrower
@@ -209,11 +209,7 @@ def _is_table_entry_assignment(tokens: list[str], bracket_index: int) -> bool:
         elif token == "]":
             depth -= 1
             if depth == 0:
-                return (
-                    index + 2 < len(tokens)
-                    and tokens[index + 1] == "="
-                    and tokens[index + 2] == "{"
-                )
+                return index + 1 < len(tokens) and tokens[index + 1] == "="
     return False
 
 

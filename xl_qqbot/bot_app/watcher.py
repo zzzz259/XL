@@ -148,6 +148,14 @@ class Watcher:
             shutil.rmtree(batch.version_dir)
             return
 
+        newly_queued = 0
+        already_sent = 0
+        already_pending = 0
+        pending_keys = {
+            (item.event_key, item.recipient, item.ordinal)
+            for item in self.proactive_outbox.list_pending()
+        }
+
         for image in batch.images:
             content = self.config.message.template.format(
                 version=batch.version,
@@ -164,7 +172,9 @@ class Watcher:
                     batch.version, image.file_name, group_openid
                 )
             ]
+            already_sent += len(group_openids) - len(pending_groups)
             for group_openid in pending_groups:
+                queue_key = (event_key, group_openid, 0)
                 self.proactive_outbox.enqueue_image(
                     event_key,
                     group_openid,
@@ -172,15 +182,23 @@ class Watcher:
                     source_path=image.file_path,
                     content=content,
                 )
+                if queue_key in pending_keys:
+                    already_pending += 1
+                else:
+                    newly_queued += 1
+                    pending_keys.add(queue_key)
 
         # All target rows and their copied attachments are now durable. The
         # dispatcher owns delivery/retry; only now may the source batch clear.
         shutil.rmtree(batch.version_dir)
         _logger.info(
-            "版本 %s 全部图鉴已持久入队 groups=%d images=%d",
+            "版本 %s 图鉴 FIFO 处理完成 groups=%d images=%d newly_queued=%d already_sent=%d already_pending=%d",
             batch.version,
             len(group_openids),
             len(batch.images),
+            newly_queued,
+            already_sent,
+            already_pending,
         )
 
     def _read_manifest(self, version_dir: str) -> dict:
