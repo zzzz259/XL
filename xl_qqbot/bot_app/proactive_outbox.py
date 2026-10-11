@@ -245,6 +245,13 @@ class ProactiveOutbox:
             raise KeyError(f"unknown outbox row: {row_id}")
         return self._to_message(row)
 
+    def find_by_key(
+        self, event_key: str, recipient: str, ordinal: int
+    ) -> OutboxMessage | None:
+        """Return the durable row for an idempotency key, regardless of status."""
+        self._validate_key(event_key, recipient, ordinal)
+        return self._find_existing_key(event_key, recipient, ordinal)
+
     def list_pending(self) -> list[OutboxMessage]:
         with self._connect() as connection:
             rows = connection.execute(

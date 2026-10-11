@@ -8,8 +8,9 @@ from typing import Any
 
 
 _TOKEN = re.compile(
-    r"(?P<space>\s+)|(?P<comment>--\[\[.*?\]\]|--[^\r\n]*)|"
-    r"(?P<longstring>\[\[.*?\]\])|"
+    r"(?P<space>\s+)|"
+    r"(?P<comment>--\[(?P<comment_equals>=*)\[.*?\](?P=comment_equals)\]|--[^\r\n]*)|"
+    r"(?P<longstring>\[(?P<long_equals>=*)\[.*?\](?P=long_equals)\])|"
     r"(?P<string>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')|"
     r"(?P<identifier>[A-Za-z_][A-Za-z0-9_]*)|"
     r"(?P<number>0[xX][0-9A-Fa-f]+|\d+(?:\.\d+)?)|"
@@ -26,12 +27,12 @@ def _tokens(source: str) -> list[str]:
         if match is None:
             raise ValueError(f"unsupported Lua syntax at offset {position}")
         position = match.end()
-        kind = match.lastgroup
-        if kind in {"space", "comment"}:
+        if match.group("space") is not None or match.group("comment") is not None:
             continue
         token = match.group()
-        if kind == "longstring":
-            result.append(repr(token[2:-2]))
+        if match.group("longstring") is not None:
+            delimiter_width = len(match.group("long_equals")) + 2
+            result.append(repr(token[delimiter_width:-delimiter_width]))
         else:
             result.append(token)
     return result
@@ -178,20 +179,38 @@ def parse_lua_table(source: str, table_name: str) -> dict[Any, Any]:
                 continue
             index = cursor + 1
             continue
-        if tokens[cursor] == "[":
+        if tokens[cursor] == "[" and _is_table_entry_assignment(tokens, cursor):
             parser = _TableParser(tokens)
             parser.index = cursor
             key = parser._read_key()
-            if parser.peek() == "{":
-                value = parser.value()
-                result[key] = value
-                found = True
-                index = parser.index
-                continue
+            value = parser.value()
+            result[key] = value
+            found = True
+            index = parser.index
+            continue
         index += 1
     if not found:
         raise ValueError(f"Lua table {table_name} not found")
     return result
+
+
+def _is_table_entry_assignment(tokens: list[str], bracket_index: int) -> bool:
+    """Return whether a bracketed expression is followed by an assignment.
+
+    Table names can also occur in executable code, e.g. `Words[locale .. id]`.
+    Such reads are not table declarations and must not be passed to the narrower
+    literal-key parser.
+    """
+    depth = 0
+    for index in range(bracket_index, len(tokens)):
+        token = tokens[index]
+        if token == "[":
+            depth += 1
+        elif token == "]":
+            depth -= 1
+            if depth == 0:
+                return index + 1 < len(tokens) and tokens[index + 1] == "="
+    return False
 
 
 def load_gacha_tables(lua_dir: str) -> tuple[list[dict[str, Any]], dict[Any, Any]]:
