@@ -181,7 +181,7 @@ async def test_announcement_uses_exact_text_and_only_target_tier_groups(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_main_router_announcement_targets_every_configured_group(tmp_path):
+async def test_main_router_announcement_targets_only_production_group(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
     app = make_app(
@@ -203,20 +203,16 @@ async def test_main_router_announcement_targets_every_configured_group(tmp_path)
         )
         assert await response.json() == {
             "ok": True,
-            "results": {DEBUG_GROUP: True, TEST_GROUP: True, PROD_GROUP: True},
+            "results": {PROD_GROUP: True},
         }
-        assert {item.recipient for item in queue.list_pending()} == {
-            DEBUG_GROUP,
-            TEST_GROUP,
-            PROD_GROUP,
-        }
+        assert {item.recipient for item in queue.list_pending()} == {PROD_GROUP}
         assert sender.messages == []
     finally:
         await client.close()
 
 
 @pytest.mark.asyncio
-async def test_main_announcement_is_not_filtered_by_feature_level(tmp_path):
+async def test_main_announcement_is_only_sent_to_production_group(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
     app = make_app(
@@ -240,10 +236,10 @@ async def test_main_announcement_is_not_filtered_by_feature_level(tmp_path):
 
         assert await response.json() == {
             "ok": True,
-            "results": {TEST_GROUP: True, PROD_GROUP: True},
+            "results": {PROD_GROUP: True},
         }
         assert sender.messages == []
-        assert {item.recipient for item in queue.list_pending()} == {TEST_GROUP, PROD_GROUP}
+        assert {item.recipient for item in queue.list_pending()} == {PROD_GROUP}
     finally:
         await client.close()
 
@@ -299,11 +295,9 @@ async def test_authenticated_release_note_announcement_uses_supplied_content(tmp
 
         assert await response.json() == {
             "ok": True,
-            "results": {DEBUG_GROUP: True, TEST_GROUP: True, PROD_GROUP: True},
+            "results": {PROD_GROUP: True},
         }
         assert {(item.recipient, item.text) for item in queue.list_pending()} == {
-            (DEBUG_GROUP, "版本更新内容"),
-            (TEST_GROUP, "版本更新内容"),
             (PROD_GROUP, "版本更新内容"),
         }
         assert sender.messages == []
