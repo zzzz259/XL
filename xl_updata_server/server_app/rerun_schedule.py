@@ -1,4 +1,4 @@
-"""Time-aware projection and durable publication for the rerun schedule."""
+"""Version-anchored projection and durable publication for the rerun schedule."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ LOGGER = logging.getLogger(__name__)
 TIMEZONE = ZoneInfo("Asia/Shanghai")
 CYCLE_DAYS = 21
 DEFAULT_ANCHOR = {
-    "new_character_id": 10000223,
-    "new_character_name": "罗蕾娜",
-    "new_gacha_id": 24000086,
-    "rerun_character_id": 10000212,
-    "rerun_character_name": "雪莉",
-    "rerun_gacha_id": 24000087,
-    "start_at": "2026-09-22T10:00:00+08:00",
-    "end_at": "2026-10-13T05:00:00+08:00",
+    "new_character_id": 10000224,
+    "new_character_name": "雾铃",
+    "new_gacha_id": 24000088,
+    "rerun_character_id": 10000214,
+    "rerun_character_name": "朝雾",
+    "rerun_gacha_id": 24000089,
+    "start_at": "2026-10-13T10:00:00+08:00",
+    "end_at": "2026-11-03T05:00:00+08:00",
     "source": "user_confirmed",
 }
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -50,17 +50,15 @@ def project_schedule(
     history: dict[str, list[dict[str, Any]]],
     *,
     source_version: str | int,
-    as_of: datetime | None = None,
     anchor: dict[str, Any] | None = None,
     names: dict[Any, str] | None = None,
     classic_pool_dates: list[dict[str, str]] | None = None,
     forecast_limit: int = 20,
 ) -> dict[str, Any]:
-    """Project predicted periods without confusing a configured pool with confirmation."""
+    """Project one version snapshot from its confirmed anchor and first-rerun queue."""
     selected_anchor = dict(anchor or DEFAULT_ANCHOR)
     start = _parse_aware(selected_anchor["start_at"], "anchor.start_at")
     end = _parse_aware(selected_anchor["end_at"], "anchor.end_at")
-    now = _parse_aware(as_of or datetime.now(TIMEZONE), "as_of")
     if end <= start:
         raise ValueError("anchor.end_at must be after anchor.start_at")
     if not str(source_version).strip():
@@ -72,58 +70,23 @@ def project_schedule(
     for item in queue:
         item["character_id"] = int(item["character_id"])
         item["name"] = _name(names, item["character_id"], str(item.get("name", "")))
-    delta = now - start
-    cycle_index = max(0, int(delta.total_seconds() // (CYCLE_DAYS * 24 * 60 * 60)))
-    candidate_start = start + timedelta(days=CYCLE_DAYS * cycle_index)
-    candidate_end = end + timedelta(days=CYCLE_DAYS * cycle_index)
-    next_cycle_start = candidate_start + timedelta(days=CYCLE_DAYS)
-
-    if now < start:
-        period_state = "before_anchor"
-        current_mode = "confirmed"
-        current_badge = "待开始"
-        current_name_new = _name(names, selected_anchor["new_character_id"], selected_anchor["new_character_name"])
-        current_name_rerun = _name(names, selected_anchor["rerun_character_id"], selected_anchor["rerun_character_name"])
-        current_start, current_end = start, end
-        next_index = 1
-    elif cycle_index == 0 and start <= now < end:
-        period_state = "confirmed_active"
-        current_mode = "confirmed"
-        current_badge = "当前已确认"
-        current_name_new = _name(names, selected_anchor["new_character_id"], selected_anchor["new_character_name"])
-        current_name_rerun = _name(names, selected_anchor["rerun_character_id"], selected_anchor["rerun_character_name"])
-        current_start, current_end = start, end
-        next_index = 1
-    elif candidate_end <= now < next_cycle_start:
-        period_state = "between_periods"
-        current_mode = "confirmed" if cycle_index == 0 else "predicted"
-        current_badge = "上期已结束" if cycle_index == 0 else "上期预计已结束"
-        if cycle_index == 0:
-            current_name_new = _name(names, selected_anchor["new_character_id"], selected_anchor["new_character_name"])
-            current_name_rerun = _name(names, selected_anchor["rerun_character_id"], selected_anchor["rerun_character_name"])
-        elif cycle_index - 1 < len(queue):
-            current_name_new = queue[cycle_index - 1]["name"]
-            current_name_rerun = "普通复刻档期"
-        else:
-            current_name_new = "待确认"
-            current_name_rerun = "待确认"
-        current_start, current_end = candidate_start, candidate_end
-        next_index = cycle_index + 1
-    else:
-        period_state = "predicted_period"
-        current_mode = "predicted"
-        current_queue_index = cycle_index - 1
-        current_badge = "本期预计（非官方）"
-        if current_queue_index < len(queue):
-            current_item = queue[current_queue_index]
-            current_name_new = current_item["name"]
-            current_name_rerun = "普通复刻档期"
-            current_start, current_end = candidate_start, candidate_end
-        else:
-            current_name_new = "待确认"
-            current_name_rerun = "待确认"
-            current_start, current_end = candidate_start, candidate_end
-        next_index = cycle_index + 1
+    current_new_id = int(selected_anchor["new_character_id"])
+    current_rerun_id = int(selected_anchor["rerun_character_id"])
+    queue = [
+        item for item in queue
+        if item["character_id"] not in {current_new_id, current_rerun_id}
+    ]
+    queue.append({
+        "character_id": current_new_id,
+        "name": _name(names, current_new_id, str(selected_anchor["new_character_name"])),
+        "debut_gacha_id": int(selected_anchor["new_gacha_id"]),
+    })
+    period_state = "version_snapshot"
+    current_mode = "confirmed"
+    current_badge = "当前已确认"
+    current_name_new = _name(names, selected_anchor["new_character_id"], selected_anchor["new_character_name"])
+    current_name_rerun = _name(names, selected_anchor["rerun_character_id"], selected_anchor["rerun_character_name"])
+    current_start, current_end = start, end
 
     def forecast_for(period_index: int, item: dict[str, Any]) -> dict[str, Any]:
         forecast_start = start + timedelta(days=CYCLE_DAYS * period_index)
@@ -138,7 +101,7 @@ def project_schedule(
         }
 
     forecasts = [forecast_for(index + 1, item) for index, item in enumerate(queue)]
-    next_forecast = next((item for item in forecasts if item["period_index"] == next_index), None)
+    next_forecast = forecasts[0] if forecasts else None
     if next_forecast is None:
         next_display = {"name": "暂无待预测角色", "startsAt": "待定", "endsAt": "待定"}
     else:
@@ -181,7 +144,7 @@ def project_schedule(
         "events": list(history.get("events", [])),
         "anomalies": list(history.get("anomalies", [])),
         "period_state": period_state,
-        "generated_at": now.isoformat(),
+        "generated_at": datetime.now(TIMEZONE).isoformat(),
         "render": render,
     }
 
@@ -295,51 +258,3 @@ def render_schedule_png(
                 f"exit={completed.returncode} stderr={(completed.stderr or '').strip()[:1000]}"
             )
         return output_path.read_bytes()
-
-
-def refresh_schedule_if_due(
-    schedule_dir: str | Path,
-    *,
-    as_of: datetime,
-    refresh_seconds: int,
-    node_bin: str = "node",
-    renderer_script: str | Path | None = None,
-    forecast_limit: int = 20,
-) -> bool:
-    """Refresh cached dates/status at time boundaries, reusing parsed game history."""
-    if refresh_seconds <= 0:
-        raise ValueError("refresh_seconds must be positive")
-    if not (Path(schedule_dir) / "current.json").is_file():
-        return False
-    existing, _image = read_current_schedule(schedule_dir)
-    history = {
-        "queue": existing.get("queue", []),
-        "events": existing.get("events", []),
-        "anomalies": existing.get("anomalies", []),
-    }
-    names = {str(item.get("character_id")): str(item.get("name", "")) for item in history["queue"]}
-    anchor = existing.get("anchor") or DEFAULT_ANCHOR
-    projection = project_schedule(
-        history,
-        source_version=existing["source_version"],
-        as_of=as_of,
-        anchor=anchor,
-        names=names,
-        forecast_limit=forecast_limit,
-    )
-    generated_at = _parse_aware(existing["generated_at"], "generated_at")
-    now = _parse_aware(as_of, "as_of")
-    time_due = (now - generated_at).total_seconds() >= refresh_seconds
-    if (
-        projection["period_state"] == existing.get("period_state")
-        and projection["render"] == existing.get("render")
-        and not time_due
-    ):
-        return False
-    png = render_schedule_png(projection, node_bin=node_bin, renderer_script=renderer_script)
-    publish_schedule_snapshot(schedule_dir, projection, png)
-    LOGGER.info(
-        "stage=rerun_project game_version=%s period_state=%s queue_length=%d status=success",
-        projection["source_version"], projection["period_state"], len(projection["queue"]),
-    )
-    return True

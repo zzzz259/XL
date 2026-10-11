@@ -20,7 +20,7 @@ from .gacha_adapter import load_character_names, load_gacha_tables
 from .gacha_history import rebuild_gacha_history
 from .lua_decoder import decode_lua_directory
 from .pipeline import ProcessResult
-from .rerun_schedule import project_schedule, publish_schedule_snapshot, render_schedule_png
+from .rerun_schedule import DEFAULT_ANCHOR, project_schedule, publish_schedule_snapshot, render_schedule_png
 from .selector import bundle_hashes_for_assets, select_lua_assets
 from .versioning import read_current_pointer
 
@@ -75,11 +75,18 @@ def process_rerun_schedule(
         for character_id, value in characters.items()
         if isinstance(value, dict)
     })
+    anchor = getattr(config, "rerun_schedule_anchor", None) or DEFAULT_ANCHOR
+    anchor_gacha_ids = [int(anchor[key]) for key in ("new_gacha_id", "rerun_gacha_id")]
     history = rebuild_gacha_history(
         pools,
         bottomups,
         names,
         overrides=getattr(config, "rerun_schedule_overrides", ()),
+        through_gacha_id=getattr(
+            config,
+            "rerun_schedule_history_through_gacha_id",
+            max(anchor_gacha_ids),
+        ),
     )
     LOGGER.info(
         "stage=gacha_audit game_version=%s events=%d queue_length=%d anomaly_count=%d status=success",
@@ -88,7 +95,7 @@ def process_rerun_schedule(
     payload = project_schedule(
         history,
         source_version=version,
-        anchor=getattr(config, "rerun_schedule_anchor", None),
+        anchor=anchor,
         names=names,
         forecast_limit=getattr(config, "rerun_schedule_forecast_limit", 20),
     )
