@@ -166,20 +166,34 @@ test('rejects a row without its display date', () => {
   assert.throws(() => renderRerunSchedule(schedule), /firstReruns\[0\]\.date/);
 });
 
-test('renders dense Chinese forecast glyphs with native bold instead of synthetic stroke', () => {
+test('renders dense Chinese forecast glyphs with the bundled native CJK bold face', {
+  skip: process.platform === 'win32' ? 'Windows node-canvas cannot register the bundled OTF font' : false,
+}, () => {
   const actual = renderRerunSchedule(referenceSchedule());
-  const expected = createCanvas(920, 1600);
-  const expectedContext = expected.getContext('2d');
-  expectedContext.fillStyle = '#d7e5ef';
-  expectedContext.fillRect(53, 451, 813, 117);
-  expectedContext.font = 'bold 38px sans-serif';
-  expectedContext.fillStyle = '#21364d';
-  expectedContext.textAlign = 'left';
-  expectedContext.textBaseline = 'alphabetic';
-  expectedContext.fillText('朝雾', 79, 542, 156);
-
+  const expected = spawnSync(process.execPath, ['-e', `
+    const path = require('node:path');
+    const { createCanvas, registerFont } = require('canvas');
+    const fonts = process.argv[1];
+    registerFont(path.join(fonts, 'NotoSansCJKsc-Regular.otf'), {
+      family: 'ScheduleExpectedCJK', weight: 'normal',
+    });
+    registerFont(path.join(fonts, 'NotoSansCJKsc-Bold.otf'), {
+      family: 'ScheduleExpectedCJK', weight: 'bold',
+    });
+    const canvas = createCanvas(180, 55);
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#d7e5ef';
+    context.fillRect(0, 0, 180, 55);
+    context.font = 'bold 38px ScheduleExpectedCJK';
+    context.fillStyle = '#21364d';
+    context.textAlign = 'left';
+    context.textBaseline = 'alphabetic';
+    context.fillText('朝雾', -1, 37, 156);
+    process.stdout.write(Buffer.from(context.getImageData(0, 0, 180, 55).data).toString('base64'));
+  `, path.resolve(__dirname, '..', 'assets', 'fonts')], { encoding: 'utf8' });
+  assert.equal(expected.status, 0, expected.stderr);
   const actualPixels = actual.getContext('2d').getImageData(80, 505, 180, 55).data;
-  const expectedPixels = expectedContext.getImageData(80, 505, 180, 55).data;
+  const expectedPixels = Buffer.from(expected.stdout, 'base64');
   let differingPixels = 0;
   for (let offset = 0; offset < actualPixels.length; offset += 4) {
     if (
@@ -190,5 +204,5 @@ test('renders dense Chinese forecast glyphs with native bold instead of syntheti
       differingPixels += 1;
     }
   }
-  assert.equal(differingPixels, 0, `forecast glyph region has ${differingPixels} pixels differing from native bold`);
+  assert.equal(differingPixels, 0, `forecast glyph region has ${differingPixels} pixels differing from bundled Noto CJK bold`);
 });

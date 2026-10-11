@@ -103,6 +103,49 @@ class RerunScheduleQueryTests(unittest.TestCase):
         calls = asyncio.run(run_query())
         self.assertEqual(calls, [(str(Path("/safe/current.png")), "", ["g-debug"], "msg-1")])
 
+    def test_test_tier_bot_answers_explicit_display_name_mention(self):
+        class Sender:
+            def __init__(self):
+                self.calls = []
+
+            async def send_schedule_image(self, path, content, groups, reply_to):
+                self.calls.append((path, content, groups, reply_to))
+                return {groups[0]: True}
+
+            async def send_text(self, group, text, reply_to=""):
+                self.calls.append(("text", group, text, reply_to))
+                return True
+
+        class Querier:
+            def find(self):
+                return SimpleNamespace(
+                    status="found", image_path=Path("/safe/current.png"),
+                    source_version="123", stale=False, reason="",
+                )
+
+        async def run_query():
+            sender = Sender()
+            handler = QueryHandler(
+                None, None, None, sender,
+                tiers=GroupTier(GroupsConfig(
+                    test=["g-test"], features={"rerun_schedule_query": "test"},
+                )),
+                rerun_querier=Querier(),
+            )
+            await handler.handle({
+                "type": "group_at", "muted": False,
+                "data": {
+                    "id": "msg-test", "group_openid": "g-test",
+                    "content": "@星落罗伯特 复刻表", "mentions": [],
+                    "author": {"member_openid": "user-test"},
+                },
+            })
+            return sender.calls
+
+        import asyncio
+        calls = asyncio.run(run_query())
+        self.assertEqual(calls, [(str(Path("/safe/current.png")), "", ["g-test"], "msg-test")])
+
 
 class RerunScheduleUploadTests(unittest.IsolatedAsyncioTestCase):
     async def test_schedule_image_uses_local_multipart_not_outbox_url_mapping(self):
