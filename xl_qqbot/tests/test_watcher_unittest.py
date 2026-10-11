@@ -78,7 +78,14 @@ class WatcherIdempotencyLoggingTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir.cleanup()
 
     async def test_already_sent_recipient_is_logged_without_new_enqueue(self):
-        self.watcher.store.mark_sent_to_group("v1", self.image_name, "group-a")
+        sequence = self.outbox.enqueue_image(
+            "game-card:v1:1:1_A_角色档案_长图.png",
+            "group-a",
+            ordinal=0,
+            source_path=self.version_dir / self.image_name,
+            content="【星落】v1-A",
+        )
+        self.outbox.mark_sent(sequence)
 
         with self.assertLogs("bot_app.watcher", level=logging.INFO) as captured:
             await self.watcher._process_batch(self.batch)

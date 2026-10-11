@@ -151,10 +151,6 @@ class Watcher:
         newly_queued = 0
         already_sent = 0
         already_pending = 0
-        pending_keys = {
-            (item.event_key, item.recipient, item.ordinal)
-            for item in self.proactive_outbox.list_pending()
-        }
 
         for image in batch.images:
             content = self.config.message.template.format(
@@ -165,16 +161,15 @@ class Watcher:
             event_key = (
                 f"{self._source_prefix}game-card:{batch.version}:{image.id or 'unknown'}:{image.file_name}"
             )
-            pending_groups = [
-                group_openid
-                for group_openid in group_openids
-                if not self.store.is_sent_to_group(
+            for group_openid in group_openids:
+                if self.store.is_sent_to_group(
                     batch.version, image.file_name, group_openid
+                ):
+                    already_sent += 1
+                    continue
+                existing = self.proactive_outbox.find_by_key(
+                    event_key, group_openid, 0
                 )
-            ]
-            already_sent += len(group_openids) - len(pending_groups)
-            for group_openid in pending_groups:
-                queue_key = (event_key, group_openid, 0)
                 self.proactive_outbox.enqueue_image(
                     event_key,
                     group_openid,
@@ -182,11 +177,12 @@ class Watcher:
                     source_path=image.file_path,
                     content=content,
                 )
-                if queue_key in pending_keys:
+                if existing is not None and existing.status == "sent":
+                    already_sent += 1
+                elif existing is not None:
                     already_pending += 1
                 else:
                     newly_queued += 1
-                    pending_keys.add(queue_key)
 
         # All target rows and their copied attachments are now durable. The
         # dispatcher owns delivery/retry; only now may the source batch clear.
