@@ -34,21 +34,22 @@ categories = ["Arts", "Data"]
 [cards]
 enabled = true
 
-# 普通角色首次复刻排期（固定周期预测；池配置不等于官方已确认）
+# 普通角色首次复刻排期（每个游戏版本生成一次快照；仅人工锚点代表已确认）
 [rerun_schedule]
 enabled = true
-refresh_seconds = 3600
 forecast_limit = 20
+# 仅将此 ID 及之前的卡池纳入已发生历史；当前锚点之后的配置池不得重放为历史。
+history_through_gacha_id = 24000087
 
 [rerun_schedule.anchor]
-new_character_id = 10000223
-new_character_name = "罗蕾娜"
-new_gacha_id = 24000086
-rerun_character_id = 10000212
-rerun_character_name = "雪莉"
-rerun_gacha_id = 24000087
-start_at = "2026-09-22T10:00:00+08:00"
-end_at = "2026-10-13T05:00:00+08:00"
+new_character_id = 10000224
+new_character_name = "雾铃"
+new_gacha_id = 24000088
+rerun_character_id = 10000214
+rerun_character_name = "朝雾"
+rerun_gacha_id = 24000089
+start_at = "2026-10-13T10:00:00+08:00"
+end_at = "2026-11-03T05:00:00+08:00"
 source = "user_confirmed"
 
 # 可选：以 Gacha ID 精确纠偏；每项必须提供可审计来源。
