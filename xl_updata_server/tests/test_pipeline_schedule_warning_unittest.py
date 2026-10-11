@@ -16,6 +16,7 @@ class PipelineScheduleWarningTests(unittest.TestCase):
                     version_timestamp=123,
                     processed=True,
                     schedule_enabled=True,
+                    warnings=("rerun_schedule: parser failed",),
                 )
 
             with self.assertLogs("server_app.pipeline", level="ERROR"):
@@ -23,8 +24,9 @@ class PipelineScheduleWarningTests(unittest.TestCase):
 
         self.assertTrue(result.processed)
         self.assertIsNone(result.error)
-        self.assertEqual(len(result.warnings), 1)
-        self.assertIn("rerun schedule", result.warnings[0].lower())
+        self.assertEqual(len(result.warnings), 2)
+        self.assertEqual(result.warnings[0], "rerun_schedule: parser failed")
+        self.assertIn("rerun schedule", result.warnings[1].lower())
 
 
 if __name__ == "__main__":

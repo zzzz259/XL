@@ -56,6 +56,19 @@ class TestUpdateJobStore(unittest.TestCase):
         self.assertEqual(warnings[0], "schedule parse failed")
         self.assertEqual(len(warnings[1]), 500)
 
+    def test_job_warning_control_characters_are_sanitized(self):
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        self.store.create("job-control-warning", "manual", now)
+        self.store.finish(
+            "job-control-warning",
+            "succeeded",
+            now,
+            {"warnings": ["parse\nfailed\tpath"]},
+        )
+
+        warnings = self.store.get("job-control-warning")["result"]["warnings"]
+        self.assertEqual(warnings, ["parse failed path"])
+
     def test_latest_job_returns_persisted_status_after_restart(self):
         now = datetime(2026, 10, 10, tzinfo=timezone.utc)
         self.store.create("scheduled-1", "scheduled", now)

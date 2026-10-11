@@ -59,8 +59,9 @@ class UpdatePipeline:
                 self._carry_forward_cards(result.version_timestamp)
                 if result.schedule_enabled:
                     schedule_warning = self._sync_current_schedule(result.version_timestamp)
-                    if schedule_warning and not result.warnings:
-                        result = replace(result, warnings=(schedule_warning,))
+                    if schedule_warning:
+                        warnings = tuple(dict.fromkeys((*result.warnings, schedule_warning)))[:5]
+                        result = replace(result, warnings=warnings)
             return result
         except Exception as error:
             LOGGER.exception("update processing failed")

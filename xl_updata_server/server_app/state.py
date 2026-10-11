@@ -146,7 +146,8 @@ class UpdateJobStore:
                 continue
             if key == "warnings":
                 if isinstance(value, (list, tuple)):
-                    warnings = [item[:500] for item in value if isinstance(item, str)][:5]
+                    warnings = [" ".join(item.split())[:500] for item in value if isinstance(item, str)][:5]
+                    warnings = [item for item in warnings if item]
                     if warnings:
                         safe_result[key] = warnings
             elif isinstance(value, (str, int, float, bool, type(None))):
