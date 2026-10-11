@@ -227,7 +227,7 @@ def build_deployment_app(
         notice_groups = [
             group
             for group in unique_groups
-            if tier == "main" or tiers.tier_of(group) == tier
+            if tiers.tier_of(group) == ("production" if tier == "main" else tier)
         ]
         results = {}
         for group in notice_groups:

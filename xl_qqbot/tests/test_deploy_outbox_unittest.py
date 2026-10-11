@@ -136,6 +136,29 @@ class DeploymentOutboxTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await client.close()
 
+    async def test_main_announcement_is_routed_only_to_production(self):
+        debug_group, test_group, production_group = "main-debug", "main-test", "main-prod"
+        outbox = ProactiveOutbox(self.root / "main-data")
+        app = build_deployment_app(
+            control=DeploymentControl(self.root / "main-maintenance.json"),
+            bearer_token=TOKEN,
+            proactive_outbox=outbox,
+            tiers=GroupTier(GroupsConfig(debug=[debug_group], test=[test_group])),
+            target_groups=[debug_group, test_group, production_group],
+        )
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        try:
+            response = await client.post(
+                "/deployment/announce",
+                json={"tier": "main", "phase": "complete", "notification_id": "tx-main"},
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+            self.assertEqual(response.status, 200)
+            self.assertEqual(await response.json(), {"ok": True, "results": {production_group: True}})
+        finally:
+            await client.close()
+
 
 if __name__ == "__main__":
     unittest.main()
