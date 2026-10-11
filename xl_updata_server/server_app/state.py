@@ -92,6 +92,7 @@ class UpdateJobStore:
             "card_count",
             "new_character_count",
             "updated_character_count",
+            "warnings",
         }
     )
     _TERMINAL = frozenset({"succeeded", "failed", "interrupted"})
@@ -139,11 +140,17 @@ class UpdateJobStore:
     ) -> None:
         if status not in self._TERMINAL:
             raise ValueError("update job finish status must be terminal")
-        safe_result = {
-            key: value
-            for key, value in result.items()
-            if key in self._RESULT_FIELDS and isinstance(value, (str, int, float, bool, type(None)))
-        }
+        safe_result = {}
+        for key, value in result.items():
+            if key not in self._RESULT_FIELDS:
+                continue
+            if key == "warnings":
+                if isinstance(value, (list, tuple)):
+                    warnings = [item[:500] for item in value if isinstance(item, str)][:5]
+                    if warnings:
+                        safe_result[key] = warnings
+            elif isinstance(value, (str, int, float, bool, type(None))):
+                safe_result[key] = value
         if result.get("error"):
             safe_result["error"] = "update failed"
         encoded = json.dumps(safe_result, ensure_ascii=False, separators=(",", ":"))

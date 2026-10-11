@@ -7,7 +7,7 @@ import json
 import logging
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .versioning import VersionWorkspace, publish_version, read_current_pointer, write_current_pointer
@@ -29,6 +29,8 @@ class ProcessResult:
     error: str | None = None
     new_character_count: int = 0
     updated_character_count: int = 0  # 同 ID 但内容变更、被重渲的角色数（v1 全字段比较，从严）
+    warnings: tuple[str, ...] = ()
+    schedule_enabled: bool = False
 
 
 class UpdatePipeline:
@@ -50,11 +52,15 @@ class UpdatePipeline:
                 raise TypeError("update processor must return ProcessResult")
             if result.processed:
                 publish_version(workspace, self.versions_dir, result.version_timestamp)
-                self._carry_forward_schedule(result.version_timestamp)
+                if result.schedule_enabled:
+                    self._carry_forward_schedule(result.version_timestamp)
                 write_current_pointer(self.data_dir, result.version_timestamp)
                 self._sync_current_character_data(result.version_timestamp)
                 self._carry_forward_cards(result.version_timestamp)
-                self._sync_current_schedule(result.version_timestamp)
+                if result.schedule_enabled:
+                    schedule_warning = self._sync_current_schedule(result.version_timestamp)
+                    if schedule_warning and not result.warnings:
+                        result = replace(result, warnings=(schedule_warning,))
             return result
         except Exception as error:
             LOGGER.exception("update processing failed")
@@ -130,7 +136,7 @@ class UpdatePipeline:
             previous_version,
         )
 
-    def _sync_current_schedule(self, version_timestamp: int) -> None:
+    def _sync_current_schedule(self, version_timestamp: int) -> str | None:
         """Mirror the immutable snapshot to data/rerun_schedule for operators."""
         source = self.versions_dir / str(version_timestamp) / "rerun_schedule"
         try:
@@ -152,12 +158,14 @@ class UpdatePipeline:
                 shutil.copy2(snapshot, target_snapshot)
             self._atomic_copy(snapshot, target / "current.png")
             self._atomic_copy(manifest, target / "current.json")
+            return None
         except (OSError, ValueError, KeyError, TypeError) as error:
             LOGGER.exception(
                 "stage=rerun_publish game_version=%s status=failed mirror_error=%s",
                 version_timestamp,
                 error,
             )
+            return f"rerun schedule publish: {error}"[:500]
 
     @staticmethod
     def _atomic_copy(source: Path, destination: Path) -> None:

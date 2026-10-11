@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from server_app.processor import process_rerun_schedule
+from server_app.processor import _attempt_rerun_schedule, process_rerun_schedule
 from server_app.rerun_schedule import read_current_schedule
 
 PNG_1PX = bytes.fromhex(
@@ -17,6 +17,21 @@ PNG_1PX = bytes.fromhex(
 
 
 class RerunScheduleProcessorTests(unittest.TestCase):
+    def test_schedule_parse_failure_is_returned_as_nonfatal_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch(
+                "server_app.processor.process_rerun_schedule",
+                side_effect=ValueError("malformed Lua table key"),
+            ):
+                with self.assertLogs("server_app.processor", level="ERROR"):
+                    result, warnings = _attempt_rerun_schedule(
+                        root / "lua", root / "stage", "v2", {}, SimpleNamespace()
+                    )
+
+        self.assertIsNone(result)
+        self.assertEqual(warnings, ("rerun_schedule: malformed Lua table key",))
+
     def test_decoded_pool_tables_produce_versioned_json_and_png(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

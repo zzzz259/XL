@@ -32,6 +32,15 @@ class ImmediatePipeline:
         return ProcessResult(version_timestamp=555, processed=True)
 
 
+class WarningPipeline:
+    def run_once(self):
+        return ProcessResult(
+            version_timestamp=555,
+            processed=True,
+            warnings=("rerun_schedule: malformed Lua table key",),
+        )
+
+
 def make_config(environment="main", polling=True):
     return SimpleNamespace(
         environment=environment,
@@ -102,6 +111,25 @@ class TestUpdateCoordinator(unittest.TestCase):
 
         self.assertFalse(coordinator.status()["accepting"])
         self.assertIsNone(coordinator.enqueue_manual())
+
+    def test_schedule_warning_is_visible_in_persisted_successful_job(self):
+        coordinator = UpdateCoordinator(
+            make_config("test", polling=False),
+            WarningPipeline(),
+            StateStore(self.database),
+            clock=lambda: self.now,
+        )
+
+        job_id = coordinator.enqueue_manual()
+        self.assertIsNotNone(job_id)
+        self.assertTrue(coordinator.wait_idle(timeout=2))
+
+        job = coordinator.get_job(job_id)
+        self.assertEqual(job["status"], "succeeded")
+        self.assertEqual(
+            job["result"]["warnings"],
+            ["rerun_schedule: malformed Lua table key"],
+        )
 
     def test_scheduled_run_is_persisted_for_status_after_restart(self):
         coordinator = UpdateCoordinator(

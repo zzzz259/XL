@@ -217,5 +217,6 @@ def _result_fields(result: ProcessResult) -> dict:
         "card_count": result.card_count,
         "new_character_count": result.new_character_count,
         "updated_character_count": result.updated_character_count,
+        "warnings": list(result.warnings[:5]),
         "error": "update failed" if result.error else None,
     }

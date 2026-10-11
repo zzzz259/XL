@@ -39,6 +39,23 @@ class TestUpdateJobStore(unittest.TestCase):
         self.assertIsNone(self.store.get("missing"))
         self.assertIsNone(self.store.latest())
 
+    def test_job_warnings_are_bounded_and_persisted_as_strings(self):
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        self.store.create("job-warnings", "manual", now)
+        self.store.finish(
+            "job-warnings",
+            "succeeded",
+            now,
+            {
+                "warnings": ["schedule parse failed", "x" * 600, object()],
+            },
+        )
+
+        warnings = self.store.get("job-warnings")["result"]["warnings"]
+        self.assertEqual(len(warnings), 2)
+        self.assertEqual(warnings[0], "schedule parse failed")
+        self.assertEqual(len(warnings[1]), 500)
+
     def test_latest_job_returns_persisted_status_after_restart(self):
         now = datetime(2026, 10, 10, tzinfo=timezone.utc)
         self.store.create("scheduled-1", "scheduled", now)
