@@ -100,6 +100,14 @@ class GachaLuaAdapterTests(unittest.TestCase):
             {90214: {"name": "朝雾"}},
         )
 
+    def test_parses_levelled_lua_long_string_with_bracket_markup(self):
+        source = "BaseWord_cn = { [80582011] = { name = [=[%s[color=#f6ff6c]+%d[/color]]=] } }"
+
+        self.assertEqual(
+            parse_lua_table(source, "BaseWord_cn"),
+            {80582011: {"name": "%s[color=#f6ff6c]+%d[/color]"}},
+        )
+
     def test_parses_literal_values_in_static_table_assignments(self):
         source = '''
         BaseWord_cn = BaseWord_cn or {}

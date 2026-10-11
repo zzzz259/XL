@@ -3,11 +3,38 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+_SENSITIVE_WARNING_ASSIGNMENT = re.compile(
+    r"(?i)(?P<key>(?:[\w-]*(?:token|secret|password|pat)|authorization|api[_-]?key))"
+    r"(?P<separator>\s*[:=]\s*)(?:(?P<scheme>Bearer)\s+)?(?P<value>[^\s,;]+)"
+)
+_AUTHORIZATION_WARNING_VALUE = re.compile(
+    r"(?i)(?P<key>authorization)(?P<separator>\s*[:=]\s*)[^,;]+"
+)
+_BEARER_WARNING_VALUE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
+
+
+def _sanitize_warning(value: str) -> str:
+    text = " ".join(value.split())
+
+    def redact(match: re.Match) -> str:
+        scheme = match.group("scheme")
+        replacement = f"{scheme} [REDACTED]" if scheme else "[REDACTED]"
+        return f"{match.group('key')}{match.group('separator')}{replacement}"
+
+    text = _AUTHORIZATION_WARNING_VALUE.sub(
+        lambda match: f"{match.group('key')}{match.group('separator')}[REDACTED]",
+        text,
+    )
+    text = _SENSITIVE_WARNING_ASSIGNMENT.sub(redact, text)
+    text = _BEARER_WARNING_VALUE.sub("Bearer [REDACTED]", text)
+    return text[:500]
 
 
 @dataclass
@@ -146,7 +173,7 @@ class UpdateJobStore:
                 continue
             if key == "warnings":
                 if isinstance(value, (list, tuple)):
-                    warnings = [" ".join(item.split())[:500] for item in value if isinstance(item, str)][:5]
+                    warnings = [_sanitize_warning(item) for item in value if isinstance(item, str)][:5]
                     warnings = [item for item in warnings if item]
                     if warnings:
                         safe_result[key] = warnings

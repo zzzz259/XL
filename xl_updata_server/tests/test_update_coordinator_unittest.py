@@ -37,7 +37,7 @@ class WarningPipeline:
         return ProcessResult(
             version_timestamp=555,
             processed=True,
-            warnings=("rerun_schedule: malformed Lua table key",),
+            warnings=("rerun_schedule: malformed Lua table key", "GITHUB_TOKEN=ghp_example"),
         )
 
 
@@ -128,7 +128,11 @@ class TestUpdateCoordinator(unittest.TestCase):
         self.assertEqual(job["status"], "succeeded")
         self.assertEqual(
             job["result"]["warnings"],
-            ["rerun_schedule: malformed Lua table key"],
+            ["rerun_schedule: malformed Lua table key", "GITHUB_TOKEN=[REDACTED]"],
+        )
+        self.assertEqual(
+            coordinator.status()["last_run"]["warnings"],
+            ["rerun_schedule: malformed Lua table key", "GITHUB_TOKEN=[REDACTED]"],
         )
 
     def test_scheduled_run_is_persisted_for_status_after_restart(self):

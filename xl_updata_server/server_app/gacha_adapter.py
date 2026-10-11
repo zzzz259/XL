@@ -8,8 +8,9 @@ from typing import Any
 
 
 _TOKEN = re.compile(
-    r"(?P<space>\s+)|(?P<comment>--\[\[.*?\]\]|--[^\r\n]*)|"
-    r"(?P<longstring>\[\[.*?\]\])|"
+    r"(?P<space>\s+)|"
+    r"(?P<comment>--\[(?P<comment_equals>=*)\[.*?\](?P=comment_equals)\]|--[^\r\n]*)|"
+    r"(?P<longstring>\[(?P<long_equals>=*)\[.*?\](?P=long_equals)\])|"
     r"(?P<string>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')|"
     r"(?P<identifier>[A-Za-z_][A-Za-z0-9_]*)|"
     r"(?P<number>0[xX][0-9A-Fa-f]+|\d+(?:\.\d+)?)|"
@@ -26,12 +27,12 @@ def _tokens(source: str) -> list[str]:
         if match is None:
             raise ValueError(f"unsupported Lua syntax at offset {position}")
         position = match.end()
-        kind = match.lastgroup
-        if kind in {"space", "comment"}:
+        if match.group("space") is not None or match.group("comment") is not None:
             continue
         token = match.group()
-        if kind == "longstring":
-            result.append(repr(token[2:-2]))
+        if match.group("longstring") is not None:
+            delimiter_width = len(match.group("long_equals")) + 2
+            result.append(repr(token[delimiter_width:-delimiter_width]))
         else:
             result.append(token)
     return result

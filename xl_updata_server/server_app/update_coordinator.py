@@ -10,7 +10,7 @@ from datetime import datetime
 from .config import ServerConfig
 from .pipeline import ProcessResult, UpdatePipeline
 from .scheduler import PollScheduler
-from .state import ScheduleState, StateStore, UpdateJobStore
+from .state import ScheduleState, StateStore, UpdateJobStore, _sanitize_warning
 
 
 class UpdateCoordinator:
@@ -217,6 +217,6 @@ def _result_fields(result: ProcessResult) -> dict:
         "card_count": result.card_count,
         "new_character_count": result.new_character_count,
         "updated_character_count": result.updated_character_count,
-        "warnings": list(result.warnings[:5]),
+        "warnings": [_sanitize_warning(item) for item in result.warnings[:5]],
         "error": "update failed" if result.error else None,
     }

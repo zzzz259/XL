@@ -60,8 +60,12 @@ class UpdatePipeline:
                 if result.schedule_enabled:
                     schedule_warning = self._sync_current_schedule(result.version_timestamp)
                     if schedule_warning:
-                        warnings = tuple(dict.fromkeys((*result.warnings, schedule_warning)))[:5]
-                        result = replace(result, warnings=warnings)
+                        warnings = list(dict.fromkeys((*result.warnings, schedule_warning)))
+                        if schedule_warning not in warnings[:5]:
+                            warnings = [*warnings[:4], schedule_warning]
+                        else:
+                            warnings = warnings[:5]
+                        result = replace(result, warnings=tuple(warnings))
             return result
         except Exception as error:
             LOGGER.exception("update processing failed")

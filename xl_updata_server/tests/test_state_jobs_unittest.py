@@ -69,6 +69,34 @@ class TestUpdateJobStore(unittest.TestCase):
         warnings = self.store.get("job-control-warning")["result"]["warnings"]
         self.assertEqual(warnings, ["parse failed path"])
 
+    def test_job_warning_credentials_are_redacted(self):
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        self.store.create("job-secret-warning", "manual", now)
+        self.store.finish(
+            "job-secret-warning",
+            "succeeded",
+            now,
+            {
+                "warnings": [
+                    "Authorization: Bearer abc123",
+                    "Authorization: Basic abc123",
+                    "GITHUB_TOKEN=ghp_example",
+                    "schedule parse failed",
+                ],
+            },
+        )
+
+        warnings = self.store.get("job-secret-warning")["result"]["warnings"]
+        self.assertEqual(
+            warnings,
+            [
+                "Authorization: [REDACTED]",
+                "Authorization: [REDACTED]",
+                "GITHUB_TOKEN=[REDACTED]",
+                "schedule parse failed",
+            ],
+        )
+
     def test_latest_job_returns_persisted_status_after_restart(self):
         now = datetime(2026, 10, 10, tzinfo=timezone.utc)
         self.store.create("scheduled-1", "scheduled", now)
