@@ -15,7 +15,6 @@ from .matcher import CharacterMatcher, render_candidates_message
 from .querier import CharacterQuerier
 from .selection import SelectionStore
 from .sender import QQSender
-from .tiers import GroupTier
 from .updater import ServiceMute
 
 _logger = logging.getLogger(__name__)
@@ -95,13 +94,12 @@ class QueryHandler:
 
     def __init__(self, querier: CharacterQuerier, matcher: CharacterMatcher,
                  selection: SelectionStore, sender: QQSender,
-                 tiers: GroupTier | None = None, bot_openid: str = "",
-                 mute: ServiceMute | None = None, rerun_querier=None):
+                 bot_openid: str = "", mute: ServiceMute | None = None,
+                 rerun_querier=None):
         self._querier = querier
         self._matcher = matcher
         self._selection = selection
         self._sender = sender
-        self._tiers = tiers or GroupTier()
         self._bot_openid = bot_openid
         self._rerun_querier = rerun_querier
         # 不传 mute 时自持（路由器转发模式按事件 muted 标志驱动）；
@@ -184,19 +182,12 @@ class QueryHandler:
     async def _answer_query(self, group_openid: str, query: str, member_openid: str = "", reply_to: str = "") -> None:
         # Explicit schedule intent precedes character fuzzy matching.
         if is_rerun_schedule_query(query):
-            if not self._tiers.available("rerun_schedule_query", group_openid):
-                _logger.debug("功能 rerun_schedule_query 在群 %s 未开放，忽略查询", group_openid)
-                return
             if self._mute.muted:
                 _logger.info("更新期间静音，忽略复刻表查询 group=%s", group_openid)
                 return
             if member_openid:
                 self._selection.clear(group_openid, member_openid)
             await self._answer_rerun_schedule(group_openid, reply_to)
-            return
-        # 功能门禁：character_query 在该群未开放则静默忽略
-        if not self._tiers.available("character_query", group_openid):
-            _logger.debug("功能 character_query 在群 %s 未开放，忽略查询", group_openid)
             return
         # 版本更新期间暂停响应 @查询（用户要求更新中不响应）
         if self._mute.muted:
@@ -268,10 +259,6 @@ class QueryHandler:
 
     async def _handle_selection(self, group_openid: str, member_openid: str, digit: str, reply_to: str = "") -> bool:
         """处理数字选择；返回 True 表示消息已消费（含静音抑制）。"""
-        # 功能门禁：character_query 未开放的群不应存在待选择，兜底静默消费
-        if not self._tiers.available("character_query", group_openid):
-            _logger.debug("功能 character_query 在群 %s 未开放，忽略候选选择", group_openid)
-            return True
         pending = self._selection.get(group_openid, member_openid)
         if pending is None:
             return False

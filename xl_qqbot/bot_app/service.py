@@ -20,7 +20,6 @@ from .querier import CharacterQuerier
 from .rerun_schedule_querier import RerunScheduleQuerier
 from .selection import SelectionStore
 from .sender import QQSender
-from .tiers import GroupTier
 
 _logger = logging.getLogger(__name__)
 
@@ -37,7 +36,6 @@ def build_app(config: Config) -> web.Application:
         CharacterMatcher(config.watch.character_data, config.watch.data_dir),
         SelectionStore(),
         sender,
-        tiers=GroupTier(config.groups),
         bot_openid=config.bot.openid,
         rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
     )

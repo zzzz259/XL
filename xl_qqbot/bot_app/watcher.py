@@ -116,7 +116,7 @@ class Watcher:
 
     def _enqueue_update_event(self, event) -> None:
         """Durably enqueue the event for every update-notice-enabled group."""
-        group_openids = self._eligible_groups("update_notice")
+        group_openids = self._eligible_groups()
         if not group_openids:
             return
         if event.event == "start":
@@ -134,20 +134,10 @@ class Watcher:
         manifest = self._read_manifest(batch.version_dir)
         self.store.save_manifest(batch.version, manifest)
 
-        group_openids = self._eligible_groups(None)
+        group_openids = self._eligible_groups()
         if not group_openids:
             _logger.warning("没有配置目标群 openid，跳过版本 %s", batch.version)
             return
-        # 新角色图鉴推送按 character_push 门禁过滤；批次完成判定只看实际目标群
-        group_openids = self.tiers.filter_groups("character_push", group_openids)
-        if not group_openids:
-            _logger.info(
-                "character_push 在全部目标群均未开放，版本 %s 视为无需发送，清理 outbox 目录",
-                batch.version,
-            )
-            shutil.rmtree(batch.version_dir)
-            return
-
         newly_queued = 0
         already_sent = 0
         already_pending = 0
@@ -212,10 +202,8 @@ class Watcher:
     def _update_event_key(self, event) -> str:
         return f"{self._source_prefix}game-update:{event.line_number}:{event.event}:{event.version}"
 
-    def _eligible_groups(self, feature: str | None) -> list[str]:
+    def _eligible_groups(self) -> list[str]:
         groups = self._target_groups()
-        if feature:
-            groups = self.tiers.filter_groups(feature, groups)
         minimum_rank = TIER_RANK[self.source.minimum_tier]
         if minimum_rank == TIER_RANK["production"]:
             return groups
