@@ -100,6 +100,18 @@ class GachaLuaAdapterTests(unittest.TestCase):
             {90214: {"name": "朝雾"}},
         )
 
+    def test_parses_literal_values_in_static_table_assignments(self):
+        source = '''
+        BaseWord_cn = BaseWord_cn or {}
+        BaseWord_cn[90214] = "朝雾"
+        BaseWord_cn[90215] = false
+        '''
+
+        self.assertEqual(
+            parse_lua_table(source, "BaseWord_cn"),
+            {90214: "朝雾", 90215: False},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

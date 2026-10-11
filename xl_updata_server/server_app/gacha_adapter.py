@@ -182,12 +182,11 @@ def parse_lua_table(source: str, table_name: str) -> dict[Any, Any]:
             parser = _TableParser(tokens)
             parser.index = cursor
             key = parser._read_key()
-            if parser.peek() == "{":
-                value = parser.value()
-                result[key] = value
-                found = True
-                index = parser.index
-                continue
+            value = parser.value()
+            result[key] = value
+            found = True
+            index = parser.index
+            continue
         index += 1
     if not found:
         raise ValueError(f"Lua table {table_name} not found")
