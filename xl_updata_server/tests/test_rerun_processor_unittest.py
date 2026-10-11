@@ -81,6 +81,44 @@ class RerunScheduleProcessorTests(unittest.TestCase):
             self.assertTrue(image_path.is_file())
             self.assertTrue((stage / "rerun_schedule" / "current.png").is_file())
 
+    def test_computed_word_lookup_does_not_block_schedule_render(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lua = root / "lua"
+            stage = root / "stage"
+            lua.mkdir()
+            (lua / "basegacha.lua").write_text(
+                "BaseGacha = { [24000060] = { id=24000060, type=2, sort=60, bottom_up=1, "
+                "bottom_main_type=1, main_card_ids={10000214} } }",
+                encoding="utf-8",
+            )
+            (lua / "basegachabottomup.lua").write_text(
+                "BaseGachaBottomUp = { [1] = { bottom_type=201 } }", encoding="utf-8"
+            )
+            (lua / "basecard.lua").write_text(
+                "BaseCard = { [10000214] = { name=function() return T(90214) end } }",
+                encoding="utf-8",
+            )
+            (lua / "baseword_cn.lua").write_text(
+                'BaseWord_cn = { [90214] = { name="朝雾" } }\n'
+                'function lookup(locale, word_id) return BaseWord_cn[locale .. word_id] end',
+                encoding="utf-8",
+            )
+            config = SimpleNamespace(
+                rerun_schedule_enabled=True,
+                rerun_schedule_anchor=None,
+                rerun_schedule_forecast_limit=20,
+                node_bin="node",
+            )
+
+            with patch(
+                "server_app.processor.render_schedule_png", return_value=PNG_1PX
+            ):
+                result = process_rerun_schedule(lua, stage, "v2", {}, config)
+            self.assertTrue((stage / "rerun_schedule" / "current.png").is_file())
+
+        self.assertEqual(result["render"]["next"]["name"], "朝雾")
+
     def test_missing_gacha_lua_is_a_nonfatal_skip(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
