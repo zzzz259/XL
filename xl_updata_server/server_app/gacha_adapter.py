@@ -178,7 +178,7 @@ def parse_lua_table(source: str, table_name: str) -> dict[Any, Any]:
                 continue
             index = cursor + 1
             continue
-        if tokens[cursor] == "[":
+        if tokens[cursor] == "[" and _is_table_entry_assignment(tokens, cursor):
             parser = _TableParser(tokens)
             parser.index = cursor
             key = parser._read_key()
@@ -192,6 +192,29 @@ def parse_lua_table(source: str, table_name: str) -> dict[Any, Any]:
     if not found:
         raise ValueError(f"Lua table {table_name} not found")
     return result
+
+
+def _is_table_entry_assignment(tokens: list[str], bracket_index: int) -> bool:
+    """Return whether a bracketed expression is followed by `= {`.
+
+    Table names can also occur in executable code, e.g. `Words[locale .. id]`.
+    Such reads are not table declarations and must not be passed to the narrower
+    literal-key parser.
+    """
+    depth = 0
+    for index in range(bracket_index, len(tokens)):
+        token = tokens[index]
+        if token == "[":
+            depth += 1
+        elif token == "]":
+            depth -= 1
+            if depth == 0:
+                return (
+                    index + 2 < len(tokens)
+                    and tokens[index + 1] == "="
+                    and tokens[index + 2] == "{"
+                )
+    return False
 
 
 def load_gacha_tables(lua_dir: str) -> tuple[list[dict[str, Any]], dict[Any, Any]]:

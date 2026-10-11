@@ -87,6 +87,19 @@ class GachaLuaAdapterTests(unittest.TestCase):
             names = load_character_names(root)
         self.assertEqual(names["10000214"], "朝雾")
 
+    def test_ignores_computed_table_reads_after_static_declaration(self):
+        source = '''
+        BaseWord_cn = { [90214] = { name="朝雾" } }
+        function lookup(locale, word_id)
+          return BaseWord_cn[locale .. word_id]
+        end
+        '''
+
+        self.assertEqual(
+            parse_lua_table(source, "BaseWord_cn"),
+            {90214: {"name": "朝雾"}},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
