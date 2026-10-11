@@ -5,8 +5,8 @@ from pathlib import Path
 from bot_app.config import load_config
 
 
-class RerunScheduleFeatureConfigTests(unittest.TestCase):
-    def test_query_defaults_to_debug_tier(self):
+class LegacyFeatureConfigTests(unittest.TestCase):
+    def test_features_are_not_created_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
             config_file = Path(directory) / "config.toml"
             config_file.write_text(
@@ -14,9 +14,9 @@ class RerunScheduleFeatureConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             config = load_config(str(config_file))
-        self.assertEqual(config.groups.features["rerun_schedule_query"], "debug")
+        self.assertFalse(hasattr(config.groups, "features"))
 
-    def test_explicit_feature_tier_can_be_promoted(self):
+    def test_legacy_feature_levels_are_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
             config_file = Path(directory) / "config.toml"
             config_file.write_text(
@@ -25,7 +25,7 @@ class RerunScheduleFeatureConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
             config = load_config(str(config_file))
-        self.assertEqual(config.groups.features["rerun_schedule_query"], "test")
+        self.assertFalse(hasattr(config.groups, "features"))
 
 
 if __name__ == "__main__":

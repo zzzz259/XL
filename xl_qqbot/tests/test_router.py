@@ -247,12 +247,10 @@ async def test_forward_unknown_tier_drops():
 
 # ---------- _RouterClient._route ----------
 
-def make_router(tmp_path, features=None, events_parent=None):
+def make_router(tmp_path, events_parent=None):
     data_dir = tmp_path / "data"
     group_store = GroupStore(str(data_dir))
-    tiers = GroupTier(GroupsConfig(
-        debug=[DEBUG_G], test=[TEST_G], features=features or {},
-    ))
+    tiers = GroupTier(GroupsConfig(debug=[DEBUG_G], test=[TEST_G]))
     forwarder = TierForwarder({"debug": 8781, "test": 8782, "production": 8783})
     forwarder._session = FakeSession()
     # update_status.json 与 watcher 同一目录约定：outbox_dir 的父目录

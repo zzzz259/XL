@@ -14,7 +14,6 @@ from bot_app.query_handler import (
 )
 from bot_app.querier import CharacterQuerier
 from bot_app.selection import SelectionStore
-from bot_app.tiers import GroupTier
 from bot_app.updater import ServiceMute
 
 CHARACTERS = {
@@ -36,7 +35,7 @@ class FakeSender:
         return {g: True for g in groups}
 
 
-def make_handler(tmp_path, aliases=None, tiers=None, mute=None):
+def make_handler(tmp_path, aliases=None, mute=None):
     data_dir = tmp_path / "data"
     char_file = data_dir / "character_data" / "current.json"
     char_file.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +59,6 @@ def make_handler(tmp_path, aliases=None, tiers=None, mute=None):
         CharacterMatcher(char_file, data_dir),
         SelectionStore(),
         sender,
-        tiers=tiers or GroupTier(),
         bot_openid="",
         mute=mute,
     )

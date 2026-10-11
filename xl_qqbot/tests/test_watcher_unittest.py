@@ -25,11 +25,6 @@ class NoDirectSender:
         raise AssertionError("watcher must persist messages instead of sending")
 
 
-class PassThroughTiers:
-    def filter_groups(self, _feature, groups):
-        return list(groups)
-
-
 class WatcherIdempotencyLoggingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -54,7 +49,6 @@ class WatcherIdempotencyLoggingTests(unittest.IsolatedAsyncioTestCase):
         self.watcher = Watcher(
             config,
             NoDirectSender(),
-            tiers=PassThroughTiers(),
             proactive_outbox=self.outbox,
         )
         self.image_name = "1_A_角色档案_长图.png"

@@ -11,10 +11,9 @@ from unittest.mock import AsyncMock
 from bot_app.query_handler import is_rerun_schedule_query
 from bot_app.rerun_schedule_querier import RerunScheduleQuerier
 from bot_app.sender import QQSender
-from bot_app.config import GroupsConfig
+from bot_app.config import load_config
 from bot_app.query_handler import QueryHandler
 from bot_app.selection import SelectionStore
-from bot_app.tiers import GroupTier
 
 
 PNG = b"\x89PNG\r\n\x1a\nnot-a-real-image-but-a-png-signature"
@@ -27,6 +26,20 @@ class RerunScheduleQueryTests(unittest.TestCase):
                 self.assertTrue(is_rerun_schedule_query(query))
         self.assertFalse(is_rerun_schedule_query("我想看复刻活动公告"))
         self.assertFalse(is_rerun_schedule_query("复刻角色有哪些"))
+
+    def test_legacy_feature_levels_are_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.toml"
+            config_path.write_text(
+                '[bot]\nappid = "1"\nsecret = "s"\n'
+                '[watch]\noutbox_dir = "/tmp/outbox"\n'
+                '[features]\nrerun_schedule_query = "debug"\n',
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path)
+
+        self.assertFalse(hasattr(config.groups, "features"))
 
     def test_querier_reads_versioned_image_and_reports_stale_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -94,7 +107,6 @@ class RerunScheduleQueryTests(unittest.TestCase):
             sender = Sender()
             handler = QueryHandler(
                 None, None, SelectionStore(), sender,
-                tiers=GroupTier(GroupsConfig(debug=["g-debug"], features={"rerun_schedule_query": "debug"})),
                 rerun_querier=Querier(),
             )
             await handler._answer_query("g-debug", "复刻表", reply_to="msg-1")
@@ -128,9 +140,6 @@ class RerunScheduleQueryTests(unittest.TestCase):
             sender = Sender()
             handler = QueryHandler(
                 None, None, SelectionStore(), sender,
-                tiers=GroupTier(GroupsConfig(
-                    test=["g-test"], features={"rerun_schedule_query": "test"},
-                )),
                 rerun_querier=Querier(),
             )
             await handler.handle({
