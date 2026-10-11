@@ -1,15 +1,41 @@
 "use strict";
 
-const { createCanvas } = require("canvas");
+const { createCanvas, registerFont } = require("canvas");
 const { getClassicPoolMarks } = require("./classic_pool_markers");
 const fs = require("node:fs");
+const path = require("node:path");
 
 const WIDTH = 920;
 const HEIGHT_BASE = 940;
 const ROW_TOP = 750;
 const ROW_HEIGHT = 48;
 const ROW_GAP = 12;
-const FONT_FAMILY = "sans-serif";
+const FONT_DIRECTORY = path.resolve(__dirname, "..", "assets", "fonts");
+const FONT_FAMILY = "Noto Sans CJK SC";
+
+function registerScheduleFonts() {
+  const regular = path.join(FONT_DIRECTORY, "NotoSansCJKsc-Regular.otf");
+  const bold = path.join(FONT_DIRECTORY, "NotoSansCJKsc-Bold.otf");
+  if (!fs.existsSync(regular) || !fs.existsSync(bold)) {
+    throw new Error(`排期渲染所需的 Noto CJK 字体缺失: ${FONT_DIRECTORY}`);
+  }
+
+  try {
+    registerFont(regular, { family: FONT_FAMILY, weight: "normal" });
+    registerFont(bold, { family: FONT_FAMILY, weight: "bold" });
+  } catch (error) {
+    // The Windows node-canvas font host cannot register these bundled OTF files.
+    // Keep local previews usable; the Linux server must use the bundled CJK faces.
+    if (process.platform !== "win32") {
+      throw new Error(`注册排期渲染字体失败: ${error.message}`, { cause: error });
+    }
+    process.stderr.write(`排期字体在 Windows 上不可注册，使用系统字体预览: ${error.message}\n`);
+    return "sans-serif";
+  }
+  return FONT_FAMILY;
+}
+
+const ACTIVE_FONT_FAMILY = registerScheduleFonts();
 const COLORS = Object.freeze({
   background: "#eef0f2",
   topbar: "#1f6b8b",
@@ -81,7 +107,7 @@ function roundedRect(ctx, x, y, width, height, radius, fill, stroke = null) {
 }
 
 function drawText(ctx, value, x, y, size, color, weight = "normal", align = "left", maxWidth) {
-  ctx.font = `${weight} ${size}px ${FONT_FAMILY}`;
+  ctx.font = `${weight} ${size}px ${ACTIVE_FONT_FAMILY}`;
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "alphabetic";
@@ -130,7 +156,7 @@ function drawNextCard(ctx, next) {
 
 function fitFontSize(ctx, text, maxWidth, startSize, minSize = 12) {
   for (let size = startSize; size >= minSize; size -= 1) {
-    ctx.font = `bold ${size}px ${FONT_FAMILY}`;
+    ctx.font = `bold ${size}px ${ACTIVE_FONT_FAMILY}`;
     if (ctx.measureText(text).width <= maxWidth) return size;
   }
   return minSize;
@@ -142,7 +168,7 @@ function drawMarkerTag(ctx, x, y, width, height, label, type, fontSize) {
   const border = isHalfAnniversary ? COLORS.halfAnniversaryBorder : COLORS.anniversaryBorder;
   const textColor = isHalfAnniversary ? COLORS.halfAnniversaryText : COLORS.anniversaryText;
   roundedRect(ctx, x, y, width, height, Math.min(11, height / 2), fill, border);
-  ctx.font = `bold ${fontSize}px ${FONT_FAMILY}`;
+  ctx.font = `bold ${fontSize}px ${ACTIVE_FONT_FAMILY}`;
   const metrics = ctx.measureText(label);
   const baseline = y + height / 2
     + (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
