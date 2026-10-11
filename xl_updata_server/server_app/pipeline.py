@@ -30,7 +30,7 @@ class ProcessResult:
     new_character_count: int = 0
     updated_character_count: int = 0  # 同 ID 但内容变更、被重渲的角色数（v1 全字段比较，从严）
     warnings: tuple[str, ...] = ()
-    schedule_enabled: bool = False
+    schedule_enabled: bool = True
 
 
 class UpdatePipeline:
