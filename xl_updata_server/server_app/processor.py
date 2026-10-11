@@ -102,6 +102,24 @@ def process_rerun_schedule(
     return published
 
 
+def _attempt_rerun_schedule(
+    decoded_lua: Path,
+    staging: Path,
+    version: str | int,
+    characters: dict,
+    config: ServerConfig,
+) -> tuple[dict | None, tuple[str, ...]]:
+    """Keep valid game-data processing independent while returning schedule diagnostics."""
+    try:
+        return process_rerun_schedule(decoded_lua, staging, version, characters, config), ()
+    except Exception as error:
+        LOGGER.exception(
+            "stage=rerun_render game_version=%s status=failed fallback=last_known_good",
+            version,
+        )
+        return None, (f"rerun_schedule: {error}"[:500],)
+
+
 def bundle_output_dir(version_root: Path, category: str) -> Path:
     return version_root / "bundles" / category
 
@@ -338,21 +356,13 @@ class ProductionUpdateProcessor:
         if not character_ids:
             raise ValueError("角色 Lua 未解析出角色 ID")
 
-        try:
-            process_rerun_schedule(
-                decoded_lua,
-                staging,
-                update_info.timestamp,
-                characters,
-                self.config,
-            )
-        except Exception:
-            # A schedule parser/render failure must not discard otherwise-valid
-            # game character data; the last published immutable schedule remains.
-            LOGGER.exception(
-                "stage=rerun_render game_version=%s status=failed fallback=last_known_good",
-                update_info.timestamp,
-            )
+        _, schedule_warnings = _attempt_rerun_schedule(
+            decoded_lua,
+            staging,
+            update_info.timestamp,
+            characters,
+            self.config,
+        )
 
         is_baseline = current is None
         current_ids = set(current.get("characters", {}).keys()) if current else set()
@@ -459,6 +469,8 @@ class ProductionUpdateProcessor:
             card_failure_count=card_report.failed,
             new_character_count=len(new_character_ids),
             updated_character_count=len(updated_character_ids),
+            warnings=schedule_warnings,
+            schedule_enabled=getattr(self.config, "rerun_schedule_enabled", True),
         )
 
     def _download_hashes(self, hashes: tuple[str, ...], directory: Path) -> tuple[Path, ...]:

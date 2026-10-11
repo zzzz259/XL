@@ -148,6 +148,10 @@ class Watcher:
             shutil.rmtree(batch.version_dir)
             return
 
+        newly_queued = 0
+        already_sent = 0
+        already_pending = 0
+
         for image in batch.images:
             content = self.config.message.template.format(
                 version=batch.version,
@@ -157,14 +161,15 @@ class Watcher:
             event_key = (
                 f"{self._source_prefix}game-card:{batch.version}:{image.id or 'unknown'}:{image.file_name}"
             )
-            pending_groups = [
-                group_openid
-                for group_openid in group_openids
-                if not self.store.is_sent_to_group(
+            for group_openid in group_openids:
+                if self.store.is_sent_to_group(
                     batch.version, image.file_name, group_openid
+                ):
+                    already_sent += 1
+                    continue
+                existing = self.proactive_outbox.find_by_key(
+                    event_key, group_openid, 0
                 )
-            ]
-            for group_openid in pending_groups:
                 self.proactive_outbox.enqueue_image(
                     event_key,
                     group_openid,
@@ -172,15 +177,24 @@ class Watcher:
                     source_path=image.file_path,
                     content=content,
                 )
+                if existing is not None and existing.status == "sent":
+                    already_sent += 1
+                elif existing is not None:
+                    already_pending += 1
+                else:
+                    newly_queued += 1
 
         # All target rows and their copied attachments are now durable. The
         # dispatcher owns delivery/retry; only now may the source batch clear.
         shutil.rmtree(batch.version_dir)
         _logger.info(
-            "版本 %s 全部图鉴已持久入队 groups=%d images=%d",
+            "版本 %s 图鉴 FIFO 处理完成 groups=%d images=%d newly_queued=%d already_sent=%d already_pending=%d",
             batch.version,
             len(group_openids),
             len(batch.images),
+            newly_queued,
+            already_sent,
+            already_pending,
         )
 
     def _read_manifest(self, version_dir: str) -> dict:
