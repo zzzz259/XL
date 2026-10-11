@@ -74,7 +74,7 @@ def test_unreadable_persisted_maintenance_state_fails_startup(tmp_path, monkeypa
         DeploymentControl(path)
 
 
-def make_app(control, sender=None, groups=None, features=None, outbox=None):
+def make_app(control, sender=None, groups=None, outbox=None):
     outbox = outbox or ProactiveOutbox(control.path.parent / "proactive-data")
     app = build_deployment_app(
         control=control,
@@ -84,7 +84,6 @@ def make_app(control, sender=None, groups=None, features=None, outbox=None):
             GroupsConfig(
                 debug=[DEBUG_GROUP],
                 test=[TEST_GROUP],
-                features=features or {},
             )
         ),
         target_groups=groups or [DEBUG_GROUP, TEST_GROUP, PROD_GROUP],
@@ -182,13 +181,12 @@ async def test_announcement_uses_exact_text_and_only_target_tier_groups(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_main_router_announcement_targets_every_notice_enabled_group(tmp_path):
+async def test_main_router_announcement_targets_every_configured_group(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
     app = make_app(
         control,
         sender,
-        features={"update_notice": "test"},
     )
     queue = app["test_outbox"]
     client = TestClient(TestServer(app))
@@ -205,11 +203,12 @@ async def test_main_router_announcement_targets_every_notice_enabled_group(tmp_p
         )
         assert await response.json() == {
             "ok": True,
-            "results": {DEBUG_GROUP: True, TEST_GROUP: True},
+            "results": {DEBUG_GROUP: True, TEST_GROUP: True, PROD_GROUP: True},
         }
         assert {item.recipient for item in queue.list_pending()} == {
             DEBUG_GROUP,
             TEST_GROUP,
+            PROD_GROUP,
         }
         assert sender.messages == []
     finally:
@@ -217,14 +216,13 @@ async def test_main_router_announcement_targets_every_notice_enabled_group(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_announcement_with_no_notice_enabled_groups_is_not_success(tmp_path):
+async def test_main_announcement_is_not_filtered_by_feature_level(tmp_path):
     control = DeploymentControl(tmp_path / "maintenance.json")
     sender = RecordingSender()
     app = make_app(
         control,
         sender,
         groups=[TEST_GROUP, PROD_GROUP],
-        features={"update_notice": "debug"},
     )
     queue = app["test_outbox"]
     client = TestClient(TestServer(app))
@@ -240,9 +238,12 @@ async def test_announcement_with_no_notice_enabled_groups_is_not_success(tmp_pat
             headers={"Authorization": f"Bearer {TOKEN}"},
         )
 
-        assert await response.json() == {"ok": False, "results": {}}
+        assert await response.json() == {
+            "ok": True,
+            "results": {TEST_GROUP: True, PROD_GROUP: True},
+        }
         assert sender.messages == []
-        assert queue.count() == 0
+        assert {item.recipient for item in queue.list_pending()} == {TEST_GROUP, PROD_GROUP}
     finally:
         await client.close()
 

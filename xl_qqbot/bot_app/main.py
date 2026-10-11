@@ -101,7 +101,6 @@ async def _run_event_client(
         matcher,
         selection,
         sender,
-        tiers=GroupTier(config.groups),
         bot_openid=config.bot.openid,
         mute=mute,
         rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
@@ -122,14 +121,12 @@ async def _run_event_client(
 async def _amain(config) -> None:
     sender = QQSender(config)
     mute = ServiceMute()
-    # 群分级 + 功能门禁：tiers 每次现算，配置改动立即生效
+    # 群分级仅供共享 router 路由和 test 来源隔离使用。
     tiers = GroupTier(config.groups)
     proactive_outbox = ProactiveOutbox(config.watch.data_dir)
     proactive_dispatcher = ProactiveDispatcher(proactive_outbox, sender)
     watcher = Watcher(config, sender, mute, tiers, proactive_outbox=proactive_outbox)
-    bili_watcher = BilibiliWatcher(
-        config, sender, tiers, proactive_outbox=proactive_outbox
-    )
+    bili_watcher = BilibiliWatcher(config, sender, proactive_outbox=proactive_outbox)
     await sender.start()
     stop_event = asyncio.Event()
 

@@ -246,9 +246,7 @@ async def _amain_router(config: Config) -> None:
         for source in sources
     ]
     main_watcher = next(w for w in watchers if w.source.name == "main")
-    bili_watcher = BilibiliWatcher(
-        config, sender, tiers, proactive_outbox=proactive_outbox
-    )
+    bili_watcher = BilibiliWatcher(config, sender, proactive_outbox=proactive_outbox)
     deployment_control = DeploymentControl(
         Path(config.watch.data_dir) / "maintenance.json"
     )
