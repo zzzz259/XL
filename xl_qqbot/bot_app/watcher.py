@@ -204,6 +204,11 @@ class Watcher:
 
     def _eligible_groups(self) -> list[str]:
         groups = self._target_groups()
+        if self.source.name == "main":
+            return [
+                group for group in groups
+                if self.tiers.tier_of(group) == "production"
+            ]
         minimum_rank = TIER_RANK[self.source.minimum_tier]
         if minimum_rank == TIER_RANK["production"]:
             return groups
