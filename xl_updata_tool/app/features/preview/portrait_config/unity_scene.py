@@ -69,6 +69,29 @@ class UnityInteraction:
 
 
 @dataclass(frozen=True, slots=True)
+class UnityExternalFile:
+    """One-based Unity PPtr fileID entry from a SerializedFile externals table."""
+
+    file_id: int
+    name: str
+    path: str
+    serialized_file_key: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class UnityObjectPointer:
+    """Raw typetree PPtr with its owning object and exact field location."""
+
+    source: AssetRef
+    field_path: str
+    file_id: int
+    path_id: int
+    external_name: str = ""
+    external_path: str = ""
+    serialized_file_key: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class UnitySceneParseResult:
     bundle_hash: str
     game_objects: tuple[tuple[AssetRef, str], ...]
@@ -76,6 +99,9 @@ class UnitySceneParseResult:
     parts: tuple[UnityScenePart, ...]
     interactions: tuple[UnityInteraction, ...]
     diagnostics: tuple[SceneDiagnostic, ...]
+    references: tuple[UnityObjectPointer, ...] = ()
+    externals: tuple[UnityExternalFile, ...] = ()
+    version_timestamp: int | None = None
 
     def sort_key(self, part: UnityScenePart) -> tuple[Any, ...]:
         sibling_path = tuple(node.sibling_index for node in part.transform_chain)
@@ -191,7 +217,68 @@ def _renderer_refs(tree: dict[str, Any], bundle_hash: str, objects: dict[int, An
     return tuple(refs)
 
 
-def parse_unity_scene(bundle_path: Path, bundle_hash: str) -> UnitySceneParseResult:
+def _external_files(objects: dict[int, Any]) -> tuple[UnityExternalFile, ...]:
+    """Capture the serialized-file external tables, preserving their PPtr IDs."""
+    found: dict[tuple[str, int, str, str], UnityExternalFile] = {}
+    for obj in objects.values():
+        serialized = getattr(obj, "assets_file", None)
+        header = getattr(serialized, "header", None)
+        file_key = "|".join((
+            str(getattr(serialized, "name", "")),
+            str(getattr(header, "file_size", "")),
+            str(getattr(header, "data_offset", "")),
+        ))
+        for file_id, external in enumerate(getattr(serialized, "externals", ()), start=1):
+            name = str(getattr(external, "name", "") or "")
+            path = str(getattr(external, "path", "") or "")
+            key = (file_key, file_id, name, path)
+            found.setdefault(key, UnityExternalFile(file_id, name, path, file_key))
+    return tuple(sorted(found.values(), key=lambda item: (item.file_id, item.name, item.path)))
+
+
+def _pointer_records(trees: dict[int, dict[str, Any]], objects: dict[int, Any],
+                     bundle_hash: str) -> tuple[UnityObjectPointer, ...]:
+    records: set[UnityObjectPointer] = set()
+
+    def walk(owner_id: int, value: Any, field_path: str) -> None:
+        if isinstance(value, dict):
+            if "m_FileID" in value and "m_PathID" in value:
+                file_id, path_id = _ptr(value)
+                if path_id:
+                    external_name = external_path = ""
+                    serialized = getattr(objects.get(owner_id), "assets_file", None)
+                    header = getattr(serialized, "header", None)
+                    file_key = "|".join((
+                        str(getattr(serialized, "name", "")),
+                        str(getattr(header, "file_size", "")),
+                        str(getattr(header, "data_offset", "")),
+                    ))
+                    externals = getattr(serialized, "externals", ())
+                    if file_id > 0 and file_id <= len(externals):
+                        external = externals[file_id - 1]
+                        external_name = str(getattr(external, "name", "") or "")
+                        external_path = str(getattr(external, "path", "") or "")
+                    records.add(UnityObjectPointer(
+                        AssetRef(str(bundle_hash), owner_id), field_path, file_id, path_id,
+                        external_name, external_path, file_key,
+                    ))
+                return
+            for key, child in value.items():
+                walk(owner_id, child, f"{field_path}.{key}" if field_path else str(key))
+        elif isinstance(value, (list, tuple)):
+            for index, child in enumerate(value):
+                walk(owner_id, child, f"{field_path}[{index}]")
+
+    for owner_id, tree in trees.items():
+        walk(owner_id, tree, "")
+    return tuple(sorted(records, key=lambda item: (
+        item.source.bundle_hash, item.source.path_id, item.field_path,
+        item.file_id, item.path_id,
+    )))
+
+
+def parse_unity_scene(bundle_path: Path, bundle_hash: str,
+                      version_timestamp: int | None = None) -> UnitySceneParseResult:
     """Read a prefab's object graph and retain exact Unity object identities."""
     diagnostics: list[SceneDiagnostic] = []
     try:
@@ -199,9 +286,10 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str) -> UnitySceneParseRes
     except Exception as exc:
         return UnitySceneParseResult(str(bundle_hash), (), (), (), (), (
             SceneDiagnostic("bundle_load_failed", f"UnityPy could not load {bundle_path}: {exc}"),
-        ))
+        ), version_timestamp=version_timestamp)
 
     objects = {int(obj.path_id): obj for obj in env.objects}
+    external_files = _external_files(objects)
     types = {path_id: str(obj.type.name) for path_id, obj in objects.items()}
     accepted_types = {"GameObject", "Transform", "RectTransform", "MeshRenderer", "SkinnedMeshRenderer",
                       "SpriteRenderer", "MeshFilter", "Sprite", "MonoBehaviour"}
@@ -511,5 +599,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str) -> UnitySceneParseRes
     ))
     interactions.sort(key=lambda event: (event.component_ref.bundle_hash, event.component_ref.path_id,
                                          event.gesture, event.animation))
+    references = _pointer_records(trees, objects, str(bundle_hash))
     return UnitySceneParseResult(str(bundle_hash), game_objects, component_refs, tuple(parts),
-                                tuple(interactions), tuple(diagnostics))
+                                tuple(interactions), tuple(diagnostics), references, external_files,
+                                version_timestamp)

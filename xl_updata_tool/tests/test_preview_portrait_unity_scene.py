@@ -250,3 +250,14 @@ def test_real_prefab_parser_compatibility_contract_is_preserved(monkeypatch):
         "hero": {"name": "hero", "type": "character", "pos": (1.0, 2.0)},
         "backdrop": {"name": "backdrop", "type": "background", "pos": (3.0, -1.0)},
     }) == {"bg_name": "backdrop", "pixel_offset": (200.0, -300.0), "ppu": 100.0}
+
+
+def test_scene_parser_binds_selected_version_to_result(monkeypatch):
+    monkeypatch.setattr(
+        unity_scene, "_load_environment",
+        lambda _path: SimpleNamespace(objects=_scene_objects()),
+    )
+
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash", 402)
+
+    assert parsed.version_timestamp == 402
