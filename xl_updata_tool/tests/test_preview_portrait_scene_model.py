@@ -125,3 +125,46 @@ def test_duplicate_unity_object_references_are_reported_in_stable_order():
     assert [(item.code, item.part_id) for item in diagnostics] == [
         ("duplicate_object_ref", "duplicate-component")
     ]
+
+
+def test_from_dict_reports_unknown_fields_at_each_nested_boundary_deterministically():
+    data = _scene().to_dict()
+    data["parts"][0]["extra_part"] = True
+    data["parts"][0]["renderer"]["extra_renderer"] = True
+    data["parts"][0]["spine"]["extra_spine"] = True
+    data["parts"][1]["sprite"]["extra_sprite"] = True
+    data["interactions"][0]["extra_interaction"] = True
+    data["diagnostics"] = [{"code": "source", "extra_diagnostic": True}]
+
+    first = PortraitScene.from_dict(data)
+    second = PortraitScene.from_dict(data)
+
+    nested = [item.details for item in first.diagnostics if item.code == "unknown_field"]
+    assert nested == [
+        (("boundary", "diagnostic"), ("field", "extra_diagnostic")),
+        (("boundary", "interaction"), ("field", "extra_interaction")),
+        (("boundary", "part"), ("field", "extra_part"), ("part_id", "spine-main")),
+        (("boundary", "renderer"), ("field", "extra_renderer"), ("part_id", "spine-main")),
+        (("boundary", "spine"), ("field", "extra_spine"), ("part_id", "spine-main")),
+        (("boundary", "sprite"), ("field", "extra_sprite"), ("part_id", "sprite-fx")),
+    ]
+    assert first.diagnostics == second.diagnostics
+
+
+def test_validate_requires_prefab_and_interaction_refs_in_asset_inventory():
+    scene = _scene()
+    interaction = replace(
+        scene.interactions[0],
+        target=AssetRef("bundle-a", 900),
+        collider=AssetRef("bundle-a", 901),
+    )
+    invalid = replace(scene, prefab=AssetRef("bundle-a", 999), interactions=(interaction,))
+
+    diagnostics = invalid.validate()
+
+    assert [(item.code, item.source) for item in diagnostics] == [
+        ("missing_asset", AssetRef("bundle-a", 999)),
+        ("missing_interaction_target", AssetRef("bundle-a", 900)),
+        ("missing_asset", AssetRef("bundle-a", 900)),
+        ("missing_asset", AssetRef("bundle-a", 901)),
+    ]

@@ -93,6 +93,21 @@ def _unref(value: dict[str, Any] | None) -> AssetRef | None:
     return None if value is None else AssetRef.from_dict(value)
 
 
+def _unknown_fields(
+    data: dict[str, Any], known: set[str], boundary: str, part_id: str = ""
+) -> list[SceneDiagnostic]:
+    return [
+        SceneDiagnostic(
+            "unknown_field",
+            f"Unknown field at {boundary}: {key}",
+            "warning",
+            part_id=part_id,
+            details=tuple(sorted([("boundary", boundary), ("field", key)] + ([ ("part_id", part_id) ] if part_id else []))),
+        )
+        for key in sorted(set(data) - known)
+    ]
+
+
 def _part_dict(part: ScenePart) -> dict[str, Any]:
     renderer, spine, sprite = part.renderer, part.spine, part.sprite
     return {
@@ -176,24 +191,48 @@ class PortraitScene:
                                        str(d.get("part_id", "")), _unref(d.get("source")),
                                        tuple((str(k), str(v)) for k, v in d.get("details", ())))
                        for d in data.get("diagnostics", ())]
+        diagnostic_fields = {"code", "message", "severity", "part_id", "source", "details"}
+        for item in data.get("diagnostics", ()):
+            diagnostics.extend(_unknown_fields(item, diagnostic_fields, "diagnostic", str(item.get("part_id", ""))))
         diagnostics.extend(SceneDiagnostic("unknown_scene_field", f"Unknown scene field: {key}", "warning",
                                            details=(("field", key),)) for key in sorted(set(data) - known))
-        interactions = tuple(InteractionEvent(str(i["gesture"]), int(i.get("finger_count", 1)),
-                                              _unref(i.get("target")), str(i.get("animation", "")),
-                                              str(i.get("callback", "")), str(i.get("fallback", "")),
-                                              _unref(i.get("collider"))) for i in data.get("interactions", ()))
+        interaction_fields = {"gesture", "finger_count", "target", "animation", "callback", "fallback", "collider"}
+        interactions_list = []
+        for item in data.get("interactions", ()):
+            diagnostics.extend(_unknown_fields(item, interaction_fields, "interaction"))
+            interactions_list.append(InteractionEvent(str(item["gesture"]), int(item.get("finger_count", 1)),
+                                              _unref(item.get("target")), str(item.get("animation", "")),
+                                              str(item.get("callback", "")), str(item.get("fallback", "")),
+                                              _unref(item.get("collider"))))
+        part_fields = {"part_id", "object_ref", "game_object_name", "hierarchy_path", "renderer", "spine", "sprite"}
+        nested_fields = {
+            "renderer": {"kind", "enabled", "sorting_layer", "sorting_order", "transform", "material"},
+            "spine": {"skeleton", "atlas", "texture", "material", "default_animation", "loop", "time_scale",
+                      "initial_skin", "animations", "skins"},
+            "sprite": {"sprite", "rect", "pivot", "texture"},
+        }
+        parts = []
+        for value in data.get("parts", ()):
+            part_id = str(value.get("part_id", ""))
+            diagnostics.extend(_unknown_fields(value, part_fields, "part", part_id))
+            for boundary, fields in nested_fields.items():
+                nested = value.get(boundary)
+                if nested is not None:
+                    diagnostics.extend(_unknown_fields(nested, fields, boundary, part_id))
+            parts.append(_part(value))
         return cls(str(data["game_version"]), str(data["version_timestamp"]), str(data["entry_config_id"]),
                    str(data["character_id"]), str(data["skin_id"]), AssetRef.from_dict(data["prefab"]),
-                   tuple(map(str, data.get("source_bundles", ()))), tuple(_part(p) for p in data.get("parts", ())),
+                   tuple(map(str, data.get("source_bundles", ()))), tuple(parts),
                    tuple(AssetRef.from_dict(x) for x in data.get("available_assets", ())),
-                   interactions, tuple(diagnostics), SCHEMA_VERSION)
+                   tuple(interactions_list), tuple(diagnostics), SCHEMA_VERSION)
 
     def validate(self) -> tuple[SceneDiagnostic, ...]:
         found = list(self.diagnostics)
         seen_ids: set[str] = set()
         seen_refs: set[AssetRef] = set()
         known_assets = set(self.available_assets)
-        known_assets.add(self.prefab)
+        if self.prefab not in known_assets:
+            found.append(SceneDiagnostic("missing_asset", "Prefab is absent from the scene asset index", source=self.prefab))
         for part in self.parts:
             if not part.part_id or part.part_id in seen_ids:
                 found.append(SceneDiagnostic("duplicate_part_id", f"Empty or duplicate part_id: {part.part_id!r}",
@@ -218,4 +257,8 @@ class PortraitScene:
             if event.target is not None and event.target not in seen_refs:
                 found.append(SceneDiagnostic("missing_interaction_target", "Interaction target is not a scene part",
                                              source=event.target))
+            for ref in (event.target, event.collider):
+                if ref is not None and ref not in known_assets:
+                    found.append(SceneDiagnostic("missing_asset", "Interaction reference is absent from the scene asset index",
+                                                 source=ref))
         return tuple(found)
