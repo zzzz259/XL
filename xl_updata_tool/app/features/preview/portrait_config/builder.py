@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
+from collections.abc import Callable
 
 from .asset_index import AssetIndex, IndexedAsset
 from .cache import PortraitSceneCache, file_sha256
@@ -25,14 +26,16 @@ from .model import (
 )
 from .unity_scene import UnitySceneParseResult, UnityScenePart, parse_unity_scene
 
-PARSER_VERSION = "1"
+PARSER_VERSION = "3"
 
 
 def _metadata(root: PortraitRoot) -> dict[str, str]:
     return dict(root.metadata)
 
 
-def _root_config_hash(root: PortraitRoot, prefab_hash: str) -> str:
+def _root_config_hash(
+    root: PortraitRoot, prefab_hash: str, container_assets: tuple[IndexedAsset, ...] = (),
+) -> str:
     # Hash this parsed root rather than its whole Lua source file: one unrelated
     # skin entry changing must not invalidate every skin declared in that file.
     payload = {
@@ -42,6 +45,12 @@ def _root_config_hash(root: PortraitRoot, prefab_hash: str) -> str:
         "position": root.position,
         "metadata": root.metadata,
         "unresolved_reason": root.unresolved_reason,
+        "container_assets": [
+            (item.name, item.container, item.path_id, item.asset_type)
+            for item in sorted(container_assets, key=lambda asset: (
+                asset.name.casefold(), asset.path_id, asset.asset_type,
+            ))
+        ],
     }
     config_digest = hashlib.sha256(json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -49,6 +58,101 @@ def _root_config_hash(root: PortraitRoot, prefab_hash: str) -> str:
     return hashlib.sha256(
         f"{root.version_timestamp}\0{config_digest}\0{prefab_hash}".encode("utf-8")
     ).hexdigest()
+
+
+def _container_part_refs(part: UnityScenePart) -> set[AssetRef]:
+    if part.component_type == "SkeletonAnimation":
+        # Atlas assets may be shared by otherwise unrelated SkeletonData; the
+        # skeleton JSON is the identity-bearing reference for this Spine part.
+        candidates = {part.skeleton_json_ref}
+    elif part.component_type == "SpriteRenderer":
+        # A texture can back many Sprites/Prefabs. Match the actual Sprite.
+        candidates = {part.sprite_ref}
+    else:
+        # Materials are routinely shared; Mesh is the renderer's stable asset.
+        candidates = {part.mesh_ref}
+    refs = {ref for ref in candidates if ref is not None}
+    return refs
+
+
+def _scope_to_container(
+    parsed: UnitySceneParseResult, assets: tuple[IndexedAsset, ...], index: AssetIndex,
+) -> UnitySceneParseResult:
+    """Limit a whole-bundle parse to renderers evidenced by one AS Container."""
+    listed = {AssetRef(asset.bundle_hash, asset.path_id) for asset in assets}
+    parts = tuple(
+        part for part in parsed.parts
+        if _container_part_refs(part) & listed
+    )
+    selected_objects = {
+        ref for part in parts
+        for ref in (part.component_ref, part.game_object_ref,
+                    *(node.component_ref for node in part.transform_chain))
+    }
+    # Follow local PPtrs from the selected renderers (e.g. SkeletonAnimation ->
+    # SkeletonDataAsset -> skeleton JSON/atlas) without importing pointers from
+    # other Prefabs that happen to share the same bundle.
+    pointers_by_source: dict[AssetRef, list] = {}
+    for pointer in parsed.references:
+        pointers_by_source.setdefault(pointer.source, []).append(pointer)
+    scoped_refs = []
+    seen_pointers = set()
+    traversal_sources = {
+        ref for part in parts
+        for ref in (part.component_ref, part.renderer_ref, part.skeleton_ref, part.sprite_ref)
+        if ref is not None
+    }
+    scoped_interactions = tuple(
+        item for item in parsed.interactions
+        if item.component_ref in selected_objects or item.game_object_ref in selected_objects
+        or item.target_component in selected_objects
+    )
+    traversal_sources.update(item.component_ref for item in scoped_interactions)
+    known_sources = set(traversal_sources)
+    pending_sources = list(traversal_sources)
+    while pending_sources:
+        source = pending_sources.pop()
+        for pointer in pointers_by_source.get(source, ()):
+            field = pointer.field_path.casefold()
+            if not any(token in field for token in (
+                "skeletondataasset", "skeletonjson", "atlasassets", "m_materials",
+                "m_mesh", "m_sprite", "texture", "collider",
+            )):
+                continue
+            if pointer in seen_pointers:
+                continue
+            seen_pointers.add(pointer)
+            scoped_refs.append(pointer)
+            if pointer.file_id == 0:
+                target = AssetRef(parsed.bundle_hash, pointer.path_id)
+                if target not in known_sources:
+                    known_sources.add(target)
+                    pending_sources.append(target)
+    interactions = scoped_interactions
+    diagnostics = tuple(
+        item for item in parsed.diagnostics
+        if item.source is None or item.source in known_sources
+    )
+    game_objects = tuple(item for item in parsed.game_objects if item[0] in selected_objects)
+    component_refs = tuple(item for item in parsed.component_refs
+                           if item[0] in known_sources or item[1] in selected_objects)
+    # AssetStudio's export map contains exportable resources, not every Unity
+    # GameObject/Transform/MonoBehaviour. Keep only PPtrs that the selected
+    # version catalog can actually resolve (plus external PPtrs); local
+    # structural links were already consumed by UnityPy during scene parsing.
+    indexed_paths = {
+        (asset.bundle_hash.casefold(), asset.path_id)
+        for asset in index.assets if asset.version_timestamp == index.version_timestamp
+    }
+    indexed_refs = tuple(
+        pointer for pointer in scoped_refs
+        if pointer.file_id != 0
+        or (parsed.bundle_hash.casefold(), pointer.path_id) in indexed_paths
+    )
+    return replace(
+        parsed, game_objects=game_objects, component_refs=component_refs, parts=parts,
+        interactions=interactions, references=indexed_refs, diagnostics=diagnostics,
+    )
 
 
 def _incomplete_scene(
@@ -195,12 +299,14 @@ def _interactions(
 
 
 def _scene_assets(
-    prefab: AssetRef,
+    prefab: AssetRef | None,
     parts: tuple[ScenePart, ...],
     interactions: tuple[InteractionEvent, ...],
     resolved: ResolvedScene,
 ) -> tuple[AssetRef, ...]:
-    refs: set[AssetRef] = {prefab}
+    refs: set[AssetRef] = set()
+    if prefab is not None:
+        refs.add(prefab)
     for item in resolved.references:
         refs.add(item.source)
         if item.target is not None:
@@ -300,6 +406,7 @@ def build_portrait_scenes(
     *,
     game_version: str = "",
     cache: PortraitSceneCache | None = None,
+    cache_hit_callback: Callable[[str], None] | None = None,
 ) -> list[PortraitScene]:
     """Build each configured skin from an exact prefab reference and its PPtrs."""
     version_timestamp = int(version_timestamp)
@@ -346,6 +453,35 @@ def build_portrait_scenes(
             ))
             continue
         prefab_matches = index.find_by_name_exact(root.prefab_name)
+        container_assets: tuple[IndexedAsset, ...] = ()
+        if not prefab_matches:
+            container_assets = index.find_by_container_exact(root.prefab_name)
+            bundle_hashes = {item.bundle_hash for item in container_assets}
+            container_paths = {item.container.casefold() for item in container_assets}
+            if len(container_paths) > 1:
+                scenes.append(_incomplete_scene(
+                    version_timestamp, root, game_version, "ambiguous_prefab_asset",
+                    "Configured Prefab basename matches multiple AssetStudio containers",
+                    (("prefab_name", root.prefab_name),
+                     ("matches", str(len(container_paths)))),
+                ))
+                continue
+            if len(bundle_hashes) == 1:
+                # AssetStudio emits one row per contained asset, not a Prefab
+                # row. Keep a stable indexed anchor while retaining the full
+                # container's asset evidence for scene scoping and cache keys.
+                prefab_matches = (min(container_assets, key=lambda item: (
+                    0 if item.name.casefold().endswith(".skel") else 1,
+                    item.name.casefold(), item.path_id,
+                )),)
+            elif len(bundle_hashes) > 1:
+                scenes.append(_incomplete_scene(
+                    version_timestamp, root, game_version, "ambiguous_prefab_asset",
+                    "Configured Prefab container maps to more than one source bundle",
+                    (("prefab_name", root.prefab_name),
+                     ("matches", str(len(bundle_hashes)))),
+                ))
+                continue
         if not prefab_matches:
             scenes.append(_incomplete_scene(
                 version_timestamp, root, game_version, "prefab_asset_missing",
@@ -371,17 +507,30 @@ def build_portrait_scenes(
             ))
             continue
 
-        config_hash = _root_config_hash(root, prefab_asset.bundle_hash)
+        config_hash = _root_config_hash(root, prefab_asset.bundle_hash, container_assets)
         cache_key = cache.key_for(version_timestamp, root.skin_id) if cache else ""
         if cache is not None:
             cached = cache.load(cache_key, config_hash, index)
             if cached is not None:
                 scenes.append(cached)
+                if cache_hit_callback:
+                    cache_hit_callback(root.skin_id)
                 continue
 
         parsed = parse_unity_scene(
             prefab_asset.bundle_path, prefab_asset.bundle_hash, version_timestamp,
         )
+        if container_assets:
+            parsed = _scope_to_container(parsed, container_assets, index)
+            if not parsed.parts:
+                scenes.append(_incomplete_scene(
+                    version_timestamp, root, game_version, "prefab_scene_parts_unmatched",
+                    "AssetStudio container has no matching Unity renderer parts",
+                    (("prefab_name", root.prefab_name),
+                     ("bundle_hash", prefab_asset.bundle_hash),
+                     ("container_assets", str(len(container_assets)))),
+                ))
+                continue
         resolved = resolve_scene_assets(parsed, index)
         parts = tuple(
             _part_to_model(part, resolved, order)
@@ -391,7 +540,10 @@ def build_portrait_scenes(
         source_bundles = _source_bundles(prefab_asset, parts, resolved)
         asset_dependencies = _asset_dependencies(resolved)
         source_bundle_details = _source_bundle_details(source_bundles, asset_dependencies, index)
-        prefab_ref = AssetRef(prefab_asset.bundle_hash, prefab_asset.path_id)
+        prefab_ref = (
+            None if container_assets
+            else AssetRef(prefab_asset.bundle_hash, prefab_asset.path_id)
+        )
         scene = PortraitScene(
             game_version=game_version,
             version_timestamp=str(version_timestamp),
@@ -406,6 +558,7 @@ def build_portrait_scenes(
             diagnostics=_unique_diagnostics(resolved.diagnostics),
             source_bundle_details=source_bundle_details,
             asset_dependencies=asset_dependencies,
+            prefab_container=container_assets[0].container if container_assets else "",
         )
         resource_diagnostics = []
         for source_part, model_part in zip(parsed.sorted_parts(), parts, strict=True):

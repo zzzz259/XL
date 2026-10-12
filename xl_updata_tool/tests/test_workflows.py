@@ -96,7 +96,9 @@ def test_import_postprocess_workflow_routes_audio_then_preview_then_lua():
     workflow.handle_import_finished(True, "导入完成", "dialog", lambda *args, **kwargs: finished.append((args, kwargs)))
     audio.processing_finished.emit(True)
 
-    assert preview.started == [{"force": False, "shared_dialog": "dialog"}]
+    assert preview.started == [{
+        "force": False, "shared_dialog": "dialog", "import_result": result,
+    }]
     assert finished == []
 
     preview.processing_finished.emit(True)

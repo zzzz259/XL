@@ -129,6 +129,92 @@ def test_missing_or_ambiguous_prefab_is_explicit_and_never_filename_guessed(tmp_
     assert any(item.code == "ambiguous_prefab_asset" for item in ambiguous.diagnostics)
 
 
+def test_builder_resolves_assetstudio_container_and_keeps_only_its_renderers(tmp_path, monkeypatch):
+    import json
+
+    bundle_root = tmp_path / "bundles"
+    bundle_root.mkdir()
+    bundle = bundle_root / f"{PREFAB_HASH}.bundle"
+    bundle.write_bytes(b"bundle")
+    catalog = tmp_path / "assets_map.json"
+    catalog.write_text(json.dumps([
+        {"Name": "hero-data", "Container": "assets/cardspine/cardspine_10118_3.prefab",
+         "Source": f"C:/input/{PREFAB_HASH}.bundle", "PathID": 20, "Type": "MonoBehaviour"},
+        {"Name": "cardspine_10118_3.skel", "Container": "assets/cardspine/cardspine_10118_3.prefab",
+         "Source": f"C:/input/{PREFAB_HASH}.bundle", "PathID": 21, "Type": "TextAsset"},
+        {"Name": "cardspine_10118_3.atlas", "Container": "assets/cardspine/cardspine_10118_3.prefab",
+         "Source": f"C:/input/{PREFAB_HASH}.bundle", "PathID": 22, "Type": "TextAsset"},
+        {"Name": "other.skel", "Container": "assets/cardspine/other.prefab",
+         "Source": f"C:/input/{PREFAB_HASH}.bundle", "PathID": 31, "Type": "TextAsset"},
+    ]), encoding="utf-8")
+    index = AssetIndex.from_catalog(catalog, bundle_root, VERSION)
+    parsed = _parsed_scene()
+    selected_part = replace(
+        parsed.parts[0], skeleton_ref=AssetRef(PREFAB_HASH, 20),
+        skeleton_json_ref=AssetRef(PREFAB_HASH, 21),
+        atlas_refs=(AssetRef(PREFAB_HASH, 22),),
+    )
+    other_part = replace(
+        selected_part, component_ref=AssetRef(PREFAB_HASH, 32),
+        skeleton_json_ref=AssetRef(PREFAB_HASH, 31),
+        atlas_refs=(AssetRef(PREFAB_HASH, 33),),
+    )
+    unrelated_part = replace(
+        selected_part, component_ref=AssetRef(PREFAB_HASH, 44),
+        skeleton_json_ref=AssetRef(PREFAB_HASH, 999),
+        atlas_refs=(AssetRef(PREFAB_HASH, 22),),
+    )
+    monkeypatch.setattr(builder, "parse_unity_scene",
+                        lambda *_args: replace(parsed, parts=(selected_part, other_part, unrelated_part)))
+
+    scene = builder.build_portrait_scenes(VERSION, [_root(tmp_path)], index)[0]
+
+    assert scene.prefab is None
+    assert scene.prefab_container == "assets/cardspine/cardspine_10118_3.prefab"
+    assert len(scene.parts) == 1
+    assert scene.parts[0].object_ref == selected_part.component_ref
+    assert not [item for item in scene.validate() if item.severity == "error"]
+    restored = type(scene).from_dict(scene.to_dict())
+    assert restored.prefab is None
+    assert restored.prefab_container == scene.prefab_container
+
+
+def test_builder_rejects_container_name_shared_across_bundles(tmp_path, monkeypatch):
+    first = _asset("hero.skel", PREFAB_HASH, 21, tmp_path / "bundles")
+    second = _asset("hero.skel", "c" * 32, 22, tmp_path / "bundles")
+    first = replace(first, container="assets/cardspine/cardspine_10118_3.prefab")
+    second = replace(second, container="assets/cardspine/cardspine_10118_3.prefab")
+    index = AssetIndex(VERSION, (first, second))
+    monkeypatch.setattr(
+        builder, "parse_unity_scene",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("ambiguous container must not parse")),
+    )
+
+    scene = builder.build_portrait_scenes(VERSION, [_root(tmp_path)], index)[0]
+
+    assert scene.prefab is None
+    assert any(item.code == "ambiguous_prefab_asset" for item in scene.diagnostics)
+
+
+def test_builder_rejects_same_container_basename_in_different_paths(tmp_path, monkeypatch):
+    first = _asset("hero.skel", PREFAB_HASH, 21, tmp_path / "bundles")
+    second = replace(
+        first, name="other.skel", path_id=22,
+        container="assets/other/cardspine_10118_3.prefab",
+    )
+    first = replace(first, container="assets/cardspine/cardspine_10118_3.prefab")
+    index = AssetIndex(VERSION, (first, second))
+    monkeypatch.setattr(
+        builder, "parse_unity_scene",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("basename collision must not parse")),
+    )
+
+    scene = builder.build_portrait_scenes(VERSION, [_root(tmp_path)], index)[0]
+
+    assert scene.prefab is None
+    assert any(item.code == "ambiguous_prefab_asset" for item in scene.diagnostics)
+
+
 def test_root_or_index_version_mismatch_does_not_parse_bundle(tmp_path, monkeypatch):
     root = _root(tmp_path, version=401)
     monkeypatch.setattr(

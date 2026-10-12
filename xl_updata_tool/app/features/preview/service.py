@@ -18,6 +18,7 @@ from .resource_catalog import discover_preview_resources, display_skin_name
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .resource_state import PreviewResourceState
 from .output_publisher import RawSpinePublishSummary, publish_raw_spine_resources
+from .portrait_config.import_service import PortraitImportSummary, generate_portrait_manifests
 from .fgui_atlas import UIPackageTool
 from .material_catalog import (
     GameMaterialCatalog,
@@ -33,6 +34,7 @@ class PreviewPreprocessSummary:
     catalog: object
     spine: RawSpinePublishSummary
     materials: MaterialExportSummary
+    portrait: PortraitImportSummary | None = None
 
 
 class PreviewService:
@@ -96,21 +98,22 @@ class PreviewService:
         progress_callback=None,
         cancel_check=None,
         detail_progress_callback=None,
+        import_result=None,
     ) -> PreviewPreprocessSummary:
         """Build all non-user-selected preview outputs after AS import."""
         progress = progress_callback or (lambda _current, _total, _message: None)
         cancelled = cancel_check or (lambda: False)
-        progress(0, 4, "发现角色 Spine 和皮肤")
+        progress(0, 5, "发现角色 Spine 和皮肤")
         catalog = self.discover_preview_resources()
         if cancelled():
             return PreviewPreprocessSummary(catalog, RawSpinePublishSummary(), MaterialExportSummary())
 
-        progress(1, 4, "发布原始 Spine 资源")
+        progress(1, 5, "发布原始 Spine 资源")
         spine_summary = self.publish_raw_spine_resources(catalog)
         if cancelled():
             return PreviewPreprocessSummary(catalog, spine_summary, MaterialExportSummary())
 
-        progress(2, 4, "切割游戏图集和大头照")
+        progress(2, 5, "切割游戏图集和大头照")
         material_catalog = self.discover_game_materials()
         material_summary = self.export_game_materials(
             material_catalog,
@@ -129,9 +132,70 @@ class PreviewService:
             raise RuntimeError(
                 f"游戏素材导出失败（{material_summary.failed} 项）：{details}"
             )
-        progress(3, 4, "写入图片预览资源索引")
-        progress(4, 4, "图片资源预处理完成")
-        return PreviewPreprocessSummary(catalog, spine_summary, material_summary)
+        if cancelled():
+            return PreviewPreprocessSummary(catalog, spine_summary, material_summary)
+        progress(3, 5, "写入图片预览资源索引")
+        portrait_summary = None
+        lua_result = getattr(import_result, "lua_export_result", None)
+        if (
+            import_result is not None
+            and {"lua", "character"}.issubset(import_result.completed_categories)
+            and isinstance(lua_result, dict)
+            and lua_result.get("version")
+            and lua_result.get("directory")
+        ):
+            version = int(lua_result["version"])
+            bundle_root = self.material_dir.parent / "bundles" / str(version)
+            catalog_path = bundle_root / "_map" / "assets_map.json"
+            lua_version_dir = Path(lua_result["directory"])
+            logger.info("立绘场景清单阶段开始 version=%s", version, extra={
+                "event": "portrait_import.start", "details": {
+                    "version": version, "catalog": str(catalog_path),
+                    "lua_root": str(lua_version_dir.parent), "bundle_root": str(bundle_root),
+                },
+            })
+            progress(4, 5, "根据游戏配置生成立绘场景清单")
+            portrait_summary = generate_portrait_manifests(
+                self.material_dir.parent, version, catalog_path, lua_version_dir.parent,
+                bundle_root, cancel_check=cancelled,
+                progress_callback=lambda skin, current, total: (
+                    detail_progress_callback(current, total, f"立绘场景 · {skin}")
+                    if detail_progress_callback else None
+                ),
+            )
+            if portrait_summary.status == "cancelled":
+                logger.info("立绘场景清单阶段取消", extra={
+                    "event": "portrait_import.cancelled",
+                    "details": {"roots": portrait_summary.roots},
+                })
+            elif portrait_summary.status == "skipped":
+                logger.warning("立绘场景清单阶段跳过 diagnostic=%s", portrait_summary.diagnostic,
+                               extra={"event": "portrait_import.skipped",
+                                      "error_code": portrait_summary.diagnostic})
+            elif portrait_summary.status == "partial":
+                logger.warning(
+                    "立绘场景清单部分完成 roots=%s complete=%s incomplete=%s cache_hits=%s",
+                    portrait_summary.roots, portrait_summary.complete,
+                    portrait_summary.incomplete, portrait_summary.cache_hits,
+                    extra={"event": "portrait_import.partial", "details": {
+                        "roots": portrait_summary.roots,
+                        "complete": portrait_summary.complete,
+                        "incomplete": portrait_summary.incomplete,
+                        "cache_hits": portrait_summary.cache_hits,
+                    }},
+                )
+            else:
+                logger.info("立绘场景清单阶段完成 roots=%s complete=%s incomplete=%s cache_hits=%s",
+                            portrait_summary.roots, portrait_summary.complete,
+                            portrait_summary.incomplete, portrait_summary.cache_hits,
+                            extra={"event": "portrait_import.complete", "details": {
+                                "roots": portrait_summary.roots,
+                                "complete": portrait_summary.complete,
+                                "incomplete": portrait_summary.incomplete,
+                                "cache_hits": portrait_summary.cache_hits,
+                            }})
+        progress(5, 5, "图片资源预处理完成")
+        return PreviewPreprocessSummary(catalog, spine_summary, material_summary, portrait_summary)
 
     def discover_game_materials(self, metadata=None) -> GameMaterialCatalog:
         return discover_materials(self.material_dir, metadata)

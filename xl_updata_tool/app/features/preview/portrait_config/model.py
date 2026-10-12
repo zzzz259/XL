@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -225,6 +225,7 @@ class PortraitScene:
     diagnostics: tuple[SceneDiagnostic, ...] = ()
     source_bundle_details: tuple[SourceBundle, ...] = ()
     asset_dependencies: tuple[AssetDependency, ...] = ()
+    prefab_container: str = ""
     schema_version: int = field(default=SCHEMA_VERSION)
 
     def to_dict(self) -> dict[str, Any]:
@@ -232,6 +233,7 @@ class PortraitScene:
             "schema_version": self.schema_version, "game_version": self.game_version,
             "version_timestamp": self.version_timestamp, "entry_config_id": self.entry_config_id,
             "character_id": self.character_id, "skin_id": self.skin_id, "prefab": _ref(self.prefab),
+            "prefab_container": self.prefab_container,
             "source_bundles": list(self.source_bundles), "parts": [_part_dict(item) for item in self.parts],
             "source_bundle_details": [{
                 "bundle_hash": item.bundle_hash, "path": item.path,
@@ -255,7 +257,7 @@ class PortraitScene:
         if int(data.get("schema_version", -1)) != SCHEMA_VERSION:
             raise ValueError(f"Unsupported portrait scene schema_version: {data.get('schema_version')!r}")
         known = {"schema_version", "game_version", "version_timestamp", "entry_config_id", "character_id",
-                 "skin_id", "prefab", "source_bundles", "source_bundle_details", "asset_dependencies",
+                 "skin_id", "prefab", "prefab_container", "source_bundles", "source_bundle_details", "asset_dependencies",
                  "parts", "available_assets", "interactions", "diagnostics"}
         diagnostics = [SceneDiagnostic(str(d["code"]), str(d.get("message", "")), str(d.get("severity", "error")),
                                        str(d.get("part_id", "")), _unref(d.get("source")),
@@ -307,7 +309,7 @@ class PortraitScene:
                        AssetRef.from_dict(item["source"]), str(item.get("field_path", "")),
                        AssetRef.from_dict(item["target"]),
                    ) for item in data.get("asset_dependencies", ())),
-                   SCHEMA_VERSION)
+                   str(data.get("prefab_container", "")), SCHEMA_VERSION)
 
     def validate(self) -> tuple[SceneDiagnostic, ...]:
         found = list(self.diagnostics)
@@ -315,7 +317,8 @@ class PortraitScene:
         seen_refs: set[AssetRef] = set()
         known_assets = set(self.available_assets)
         if self.prefab is None:
-            found.append(SceneDiagnostic("missing_prefab", "Portrait scene has no resolved Prefab"))
+            if not self.prefab_container:
+                found.append(SceneDiagnostic("missing_prefab", "Portrait scene has no resolved Prefab"))
         elif self.prefab not in known_assets:
             found.append(SceneDiagnostic("missing_asset", "Prefab is absent from the scene asset index", source=self.prefab))
         for part in self.parts:

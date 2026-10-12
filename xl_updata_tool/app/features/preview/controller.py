@@ -86,7 +86,7 @@ class PreviewController(QObject):
     def unread_snapshot(self) -> PreviewUnreadSnapshot:
         return build_preview_unread_snapshot(self.service)
 
-    def start_postprocess(self, force: bool = False, shared_dialog=None) -> bool:
+    def start_postprocess(self, force: bool = False, shared_dialog=None, import_result=None) -> bool:
         """Run image discovery/material publishing after AS import."""
         del force  # The publisher is content-addressed and safe to repeat.
         worker = self._postprocess_worker
@@ -94,7 +94,7 @@ class PreviewController(QObject):
             self.status_changed.emit("图片资源预处理已在进行中")
             return False
         self.status_changed.emit("正在处理图片资源：发现 Spine、切割图集…")
-        worker = PreviewPostprocessWorker(self.service, self)
+        worker = PreviewPostprocessWorker(self.service, self, import_result=import_result)
         worker.progress_value.connect(self._on_postprocess_progress)
         worker.detail_progress.connect(self._on_postprocess_detail_progress)
         worker.finished_processing.connect(self._on_postprocess_finished)
@@ -105,7 +105,7 @@ class PreviewController(QObject):
         self._postprocess_dialog = shared_dialog
         if shared_dialog is not None:
             shared_dialog.setLabelText("正在处理图片资源…\n发现 Spine、切割图集和大头照")
-            shared_dialog.setRange(0, 4)
+            shared_dialog.setRange(0, 5)
             shared_dialog.setValue(0)
             shared_dialog.canceled.connect(worker.cancel)
             shared_dialog.show()
@@ -148,9 +148,22 @@ class PreviewController(QObject):
         self._loaded = False
         self._preloaded = False
         material_summary = summary.materials
+        portrait_text = ""
+        portrait = summary.portrait
+        if portrait is not None:
+            if portrait.status in {"complete", "partial"}:
+                state = "完成" if portrait.status == "complete" else "部分完成"
+                portrait_text = (
+                    f"；立绘场景{state} {portrait.complete}，不完整 {portrait.incomplete}"
+                )
+            elif portrait.status == "skipped":
+                portrait_text = f"；立绘场景跳过（{portrait.diagnostic}）"
+            elif portrait.status == "cancelled":
+                portrait_text = "；立绘场景生成已取消，已完成缓存保留"
         self.status_changed.emit(
             f"图片资源预处理完成：Spine {summary.spine.published} 组，"
             f"游戏素材成功 {material_summary.exported}，失败 {material_summary.failed}"
+            f"{portrait_text}"
         )
         self.badge_changed.emit()
         self.processing_finished.emit(was_shared)

@@ -102,7 +102,9 @@ class PortraitSceneCache:
         config_hash: str,
         source_hashes: dict[str, str],
     ) -> str:
-        if scene.prefab is None or any(item.severity == "error" for item in scene.validate()):
+        if (scene.prefab is None and not scene.prefab_container) or any(
+            item.severity == "error" for item in scene.validate()
+        ):
             raise ValueError("only complete, validated portrait scenes can be cached")
         key = self.key_for(scene.version_timestamp, scene.skin_id)
         path = self._path_for_key(key)
