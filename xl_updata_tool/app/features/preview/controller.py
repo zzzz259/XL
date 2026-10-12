@@ -192,6 +192,7 @@ class PreviewController(QObject):
         self.page.context_menu_requested.connect(self.show_context_menu)
         self.page.item_double_clicked.connect(self.open_item)
         self.page.selection_changed.connect(self.update_status)
+        self.page.portrait_scene_selection_changed.connect(self._on_portrait_scene_selected)
         if hasattr(self.page, "export_selected_requested"):
             self.page.export_selected_requested.connect(self._on_export_selected_requested)
         if hasattr(self.page, "character_browser"):
@@ -329,9 +330,28 @@ class PreviewController(QObject):
                 f"资源发现完成：导出 {summary.exported} 项，失败 {summary.failed} 项"
             )
         else:
-            self.status_changed.emit(f"资源发现完成：发现 {len(catalog.skins)} 个皮肤")
+            self.status_changed.emit(
+                f"资源发现完成：场景 {len(catalog.portrait_scenes)} 个，"
+                f"原始 Spine 资源 {len(catalog.skins)} 项"
+            )
         self.badge_changed.emit()
         return catalog
+
+    def _on_portrait_scene_selected(self, scenes) -> None:
+        if not scenes:
+            return
+        scene = scenes[0]
+        errors = [item for item in scene.validate() if item.severity == "error"]
+        if errors:
+            self.status_changed.emit(
+                f"立绘场景 {scene.character_id or '独立资源'} / {scene.skin_id}："
+                f"{len(errors)} 项配置问题；悬停场景行可查看详情"
+            )
+        else:
+            self.status_changed.emit(
+                f"已查看立绘场景 {scene.character_id or '独立资源'} / {scene.skin_id} "
+                f"（版本 {scene.version_timestamp}）"
+            )
 
     def preload_index(self) -> bool:
         """Prepare catalog/state views without starting the full image scan."""

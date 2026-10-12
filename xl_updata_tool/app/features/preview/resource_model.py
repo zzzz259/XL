@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .portrait_config.model import PortraitScene
+
 
 @dataclass(frozen=True, slots=True)
 class SpineSkinRecord:
@@ -37,9 +39,17 @@ class PreviewResourceCatalog:
     burst_heads: tuple[object, ...] = ()
     unmatched: tuple[SpineSkinRecord, ...] = ()
     eventcovers: tuple[SpineSkinRecord, ...] = ()
+    portrait_scenes: tuple[PortraitScene, ...] = ()
+    portrait_diagnostics: tuple[tuple[str, str], ...] = ()
 
     @classmethod
-    def from_records(cls, records: Iterable[SpineSkinRecord]) -> "PreviewResourceCatalog":
+    def from_records(
+        cls,
+        records: Iterable[SpineSkinRecord],
+        *,
+        portrait_scenes: Iterable[PortraitScene] = (),
+        portrait_diagnostics: Iterable[tuple[str, str]] = (),
+    ) -> "PreviewResourceCatalog":
         characters: dict[str, list[SpineSkinRecord]] = {}
         skins: dict[str, SpineSkinRecord] = {}
         unmatched: list[SpineSkinRecord] = []
@@ -59,6 +69,8 @@ class PreviewResourceCatalog:
             skins=skins,
             unmatched=tuple(unmatched),
             eventcovers=tuple(eventcovers),
+            portrait_scenes=tuple(portrait_scenes),
+            portrait_diagnostics=tuple(portrait_diagnostics),
         )
 
 
@@ -85,6 +97,29 @@ def skin_key(record: SpineSkinRecord) -> str:
     )
     payload = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def portrait_scene_key(scene: PortraitScene) -> str:
+    """Version-scoped unread identity for one Lua-configured portrait scene."""
+    identity = (
+        str(scene.game_version), str(scene.version_timestamp),
+        str(scene.character_id), str(scene.skin_id),
+    )
+    payload = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def portrait_scene_status(scene: PortraitScene) -> str:
+    """Map scene diagnostics to an explicit catalog status."""
+    diagnostics = scene.validate()
+    if any(item.severity == "error" and item.code.startswith("unsupported_") for item in diagnostics):
+        return "unsupported"
+    if any(item.severity == "error" for item in diagnostics):
+        return "incomplete"
+    container = scene.prefab_container.casefold().replace("\\", "/")
+    if not scene.character_id or "/eventcovers/" in container:
+        return "standalone"
+    return "complete"
 
 
 def spine_source_stem(path: str) -> str:

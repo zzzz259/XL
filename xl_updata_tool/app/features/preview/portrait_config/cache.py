@@ -96,6 +96,82 @@ class PortraitSceneCache:
             return None
         return scene
 
+    def load_manifest(self, key: str) -> PortraitScene | None:
+        """Load a display manifest without hashing or opening source bundles.
+
+        This is intentionally separate from ``load``: only ``load`` may reuse
+        a complete build cache after source verification. The preview catalog
+        may still display an incomplete scene and its diagnostics.
+        """
+        try:
+            envelope = json.loads(self._path_for_key(key).read_text(encoding="utf-8"))
+            scene_data = envelope["scene"]
+            scene = PortraitScene.from_dict(scene_data)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError,
+                json.JSONDecodeError):
+            return None
+        parts = PurePosixPath(str(key).replace("\\", "/")).parts
+        if (
+            len(parts) != 2
+            or envelope.get("cache_format_version") != CACHE_FORMAT_VERSION
+            or envelope.get("schema_version") != SCHEMA_VERSION
+            or envelope.get("parser_version") != self.parser_version
+            or str(envelope.get("version_timestamp")) != parts[0]
+            or str(scene.version_timestamp) != parts[0]
+            or Path(parts[1]).stem != scene.skin_id
+        ):
+            return None
+        return scene
+
+    def store_snapshot(self, scene: PortraitScene) -> str:
+        """Atomically persist a scene result for catalog display, even if partial.
+
+        Incomplete snapshots are never reusable by ``load`` because they do not
+        contain source hashes and may include validation errors.
+        """
+        if not any(item.severity == "error" for item in scene.validate()):
+            raise ValueError("store_snapshot is reserved for incomplete portrait scenes")
+        key = self.key_for(scene.version_timestamp, scene.skin_id)
+        snapshot_cache = PortraitSceneCache(
+            self.cache_root / "_incomplete", parser_version=self.parser_version,
+        )
+        path = snapshot_cache._path_for_key(key)
+        envelope = {
+            "cache_format_version": CACHE_FORMAT_VERSION,
+            "schema_version": SCHEMA_VERSION,
+            "parser_version": self.parser_version,
+            "version_timestamp": int(scene.version_timestamp),
+            "skin_id": scene.skin_id,
+            "config_hash": "",
+            "source_hashes": {},
+            "scene": scene.to_dict(),
+        }
+        encoded = json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if PortraitScene.from_dict(json.loads(encoded)["scene"]) != scene:
+            raise ValueError("portrait scene snapshot round-trip changed scene data")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="\n", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            ) as temporary:
+                temp_name = temporary.name
+                temporary.write(encoded)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            if PortraitScene.from_dict(json.loads(Path(temp_name).read_text(encoding="utf-8"))["scene"]) != scene:
+                raise ValueError("staged portrait scene snapshot validation failed")
+            os.replace(temp_name, path)
+            temp_name = None
+        finally:
+            if temp_name is not None:
+                try:
+                    Path(temp_name).unlink()
+                except FileNotFoundError:
+                    pass
+        return key
+
     def store(
         self,
         scene: PortraitScene,
@@ -145,6 +221,13 @@ class PortraitSceneCache:
                 raise ValueError("staged portrait scene cache validation failed")
             os.replace(temp_name, path)
             temp_name = None
+            snapshot_path = (
+                self.cache_root / "_incomplete" / Path(*PurePosixPath(key).parts)
+            )
+            try:
+                snapshot_path.unlink()
+            except FileNotFoundError:
+                pass
         finally:
             if temp_name is not None:
                 try:

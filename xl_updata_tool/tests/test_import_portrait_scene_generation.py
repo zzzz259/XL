@@ -1,4 +1,5 @@
 from app.features.preview.portrait_config.import_service import generate_portrait_manifests
+from app.features.preview.portrait_config.model import PortraitScene, SceneDiagnostic
 
 
 class _EmptyIndex:
@@ -153,3 +154,41 @@ def test_cancellation_stops_before_loading_or_building(tmp_path, monkeypatch):
                                          tmp_path / "bundles" / "123",
                                          cancel_check=lambda: True)
     assert result.status == "cancelled"
+
+
+def test_incomplete_scene_is_persisted_for_catalog_diagnostics(tmp_path, monkeypatch):
+    root = type("Root", (), {"skin_id": "12002183"})()
+    scene = PortraitScene(
+        game_version="test", version_timestamp="123", entry_config_id="12002183",
+        character_id="10118", skin_id="12002183", prefab=None,
+        source_bundles=("bundle-a",), parts=(),
+        diagnostics=(SceneDiagnostic("missing_asset", "atlas unavailable"),),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10118_3.prefab",
+    )
+    monkeypatch.setattr(
+        "app.features.preview.portrait_config.import_service.load_portrait_roots",
+        lambda *_: [root],
+    )
+    monkeypatch.setattr(
+        "app.features.preview.portrait_config.import_service.AssetIndex.from_catalog",
+        lambda *_: _EmptyIndex(),
+    )
+    monkeypatch.setattr(
+        "app.features.preview.portrait_config.import_service.build_portrait_scenes",
+        lambda *_args, **_kwargs: [scene],
+    )
+    data_root = tmp_path / "data"
+    bundle = data_root / "bundles" / "123"
+    bundle.mkdir(parents=True)
+    catalog = bundle / "_map" / "assets_map.json"
+    catalog.parent.mkdir()
+    catalog.write_text("[]", encoding="utf-8")
+    lua = tmp_path / "lua"
+    lua.mkdir()
+
+    result = generate_portrait_manifests(data_root, 123, catalog, lua, bundle)
+
+    manifest = data_root / "cache" / "portrait-scenes" / "_incomplete" / "123" / "12002183.json"
+    assert result.status == "partial"
+    assert manifest.is_file()
+    assert "atlas unavailable" in manifest.read_text(encoding="utf-8")

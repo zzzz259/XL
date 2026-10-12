@@ -13,6 +13,7 @@ from .asset_index import AssetIndex
 from .builder import PARSER_VERSION, build_portrait_scenes
 from .cache import PortraitSceneCache
 from .lua_config import load_portrait_roots
+from .model import PortraitScene
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,8 @@ def generate_portrait_manifests(
             for scene in scenes:
                 errors = [item for item in scene.diagnostics if item.severity == "error"]
                 status = "incomplete" if errors else "complete"
+                if errors and isinstance(scene, PortraitScene):
+                    cache.store_snapshot(scene)
                 if errors:
                     incomplete += 1
                 else:

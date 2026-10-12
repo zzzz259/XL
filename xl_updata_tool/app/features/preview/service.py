@@ -14,7 +14,9 @@ from .catalog import (
     scan_cardspine_roles,
     scan_preview_roles,
 )
-from .resource_catalog import discover_preview_resources, display_skin_name
+from .resource_catalog import (
+    discover_preview_resources, display_skin_name, load_portrait_scene_catalog,
+)
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .resource_state import PreviewResourceState
 from .output_publisher import RawSpinePublishSummary, publish_raw_spine_resources
@@ -207,12 +209,12 @@ class PreviewService:
     def load_published_preview_resources(self) -> PreviewResourceCatalog:
         """Load the postprocess index without querying or scanning source assets."""
         index_path = self.preview_dir.parent / "preview_index.json"
-        if not index_path.is_file():
-            return PreviewResourceCatalog.from_records(())
-        try:
-            payload = json.loads(index_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            return PreviewResourceCatalog.from_records(())
+        payload = {}
+        if index_path.is_file():
+            try:
+                payload = json.loads(index_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                logger.warning("图片预览索引不可读取，将继续加载立绘场景清单: %s", index_path)
         records = []
         for group in payload.get("spine", ()) if isinstance(payload, dict) else ():
             for value in group.get("records", ()) if isinstance(group, dict) else ():
@@ -232,7 +234,18 @@ class PreviewService:
                     )
                 except (TypeError, ValueError):
                     continue
-        return PreviewResourceCatalog.from_records(records)
+        scenes, diagnostics = load_portrait_scene_catalog(
+            self.material_dir.parent / "cache" / "portrait-scenes",
+        )
+        for manifest_path, diagnostic in diagnostics:
+            logger.warning("立绘场景清单被隔离 path=%s reason=%s", manifest_path, diagnostic, extra={
+                "event": "portrait_catalog.manifest_rejected",
+                "error_code": "PORTRAIT_MANIFEST_REJECTED",
+                "details": {"manifest_path": manifest_path, "reason": diagnostic},
+            })
+        return PreviewResourceCatalog.from_records(
+            records, portrait_scenes=scenes, portrait_diagnostics=diagnostics,
+        )
 
     def export_game_materials(
         self,

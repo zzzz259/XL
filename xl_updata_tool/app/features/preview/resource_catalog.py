@@ -12,6 +12,8 @@ from pathlib import Path
 from .character_names import display_skin_number
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .spine_adapter import SkinQueryResult, SpineQueryRunner
+from .portrait_config.builder import PARSER_VERSION
+from .portrait_config.cache import PortraitSceneCache
 
 
 _CHARACTER_ID_KEYS = ("character_id", "characterId", "char_id", "charId", "role_id", "roleId", "id")
@@ -330,3 +332,38 @@ def discover_preview_resources(material_dir, character_data=None, query_runner=N
             )
 
     return PreviewResourceCatalog.from_records(records)
+
+
+def load_portrait_scene_catalog(cache_root, *, parser_version=PARSER_VERSION):
+    """Load versioned display manifests without touching AB bundles or UnityPy."""
+    root = Path(cache_root)
+    if not root.is_dir():
+        return (), ()
+    scenes_by_identity = {}
+    diagnostics = []
+    roots = (root, root / "_incomplete")
+    for manifest_root in roots:
+        if not manifest_root.is_dir():
+            continue
+        cache = PortraitSceneCache(manifest_root, parser_version=parser_version)
+        try:
+            version_dirs = sorted(
+                (path for path in manifest_root.iterdir() if path.is_dir() and path.name.isdigit()),
+                key=lambda path: path.name,
+            )
+        except OSError as error:
+            diagnostics.append((str(manifest_root), f"manifest_directory_unreadable:{type(error).__name__}"))
+            continue
+        for version_dir in version_dirs:
+            for manifest_path in sorted(version_dir.glob("*.json"), key=lambda path: path.name):
+                key = f"{version_dir.name}/{manifest_path.name}"
+                scene = cache.load_manifest(key)
+                if scene is None:
+                    diagnostics.append((str(manifest_path), "manifest_invalid_or_outdated"))
+                    continue
+                scenes_by_identity[(scene.version_timestamp, scene.skin_id)] = scene
+    scenes = list(scenes_by_identity.values())
+    scenes.sort(key=lambda scene: (
+        scene.character_id or "", scene.skin_id, scene.version_timestamp,
+    ))
+    return tuple(scenes), tuple(diagnostics)

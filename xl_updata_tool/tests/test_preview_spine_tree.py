@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from app.features.preview.resource_model import PreviewResourceCatalog, SpineSkinRecord, skin_key
+from app.features.preview.portrait_config.model import PortraitScene, SceneDiagnostic
 from app.features.preview.resource_state import PreviewResourceState
 from app.features.preview.spine_tree import PreviewSpineTree
 
@@ -279,3 +280,78 @@ def test_spine_tree_default_selection_is_single_and_ctrl_allows_multiple(qapp):
     tree._mouse_multi_select = True
     role.child(0).setCheckState(0, Qt.Checked)
     assert set(tree.selected_records()) == {first, second}
+
+
+def test_spine_tree_displays_manifest_skin_once_and_keeps_raw_resources_separate(qapp):
+    raw = _record("10080", "default", "cardspine_10080_4", "raw", "cardspine")
+    scene = PortraitScene(
+        game_version="test",
+        version_timestamp="20261012",
+        entry_config_id="12002183",
+        character_id="10080",
+        skin_id="12002183",
+        prefab=None,
+        source_bundles=("bundle-a",),
+        parts=(),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10080_4.prefab",
+    )
+    tree = PreviewSpineTree()
+
+    tree.set_catalog(PreviewResourceCatalog.from_records([raw], portrait_scenes=(scene,)))
+
+    role = next(
+        tree.topLevelItem(index)
+        for index in range(tree.topLevelItemCount())
+        if tree.topLevelItem(index).data(0, Qt.UserRole).get("role_id") == "10080"
+    )
+    scene_items = [
+        item for item in _walk(role)
+        if (item.data(0, Qt.UserRole) or {}).get("kind") == "portrait_scene"
+    ]
+    raw_root = next(
+        tree.topLevelItem(index)
+        for index in range(tree.topLevelItemCount())
+        if tree.topLevelItem(index).text(0) == "原始 Spine 资源"
+    )
+
+    assert len(scene_items) == 1
+    assert scene_items[0].text(0).startswith("角色立绘 4")
+    assert "完整" in scene_items[0].text(1)
+    assert not (scene_items[0].flags() & Qt.ItemIsUserCheckable)
+    assert raw_root.childCount() == 1
+
+
+def test_spine_tree_shows_incomplete_manifest_diagnostic(qapp):
+    scene = PortraitScene(
+        game_version="test",
+        version_timestamp="20261012",
+        entry_config_id="12002183",
+        character_id="10080",
+        skin_id="12002183",
+        prefab=None,
+        source_bundles=("bundle-a",),
+        parts=(),
+        diagnostics=(SceneDiagnostic("missing_asset", "Atlas path ID 12 is unresolved"),),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10080_4.prefab",
+    )
+    state = PreviewResourceState(Path.cwd() / f".task8-scene-read-{uuid4().hex}.json")
+    tree = PreviewSpineTree(state=state)
+
+    tree.set_catalog(PreviewResourceCatalog.from_records((), portrait_scenes=(scene,)))
+
+    item = next(
+        item for item in _walk(tree.topLevelItem(0))
+        if (item.data(0, Qt.UserRole) or {}).get("kind") == "portrait_scene"
+    )
+    assert "不完整" in item.text(1)
+    assert "Atlas path ID 12 is unresolved" in item.toolTip(0)
+    received = []
+    tree.portrait_scenes_changed.connect(received.append)
+
+    tree.setCurrentItem(item)
+
+    assert received[-1] == (scene,)
+    assert tree.selected_portrait_scenes() == (scene,)
+    assert not state.is_new(item.data(0, Qt.UserRole)["scene_key"])
+    assert "新" not in item.text(1)
+    state.path.unlink(missing_ok=True)
