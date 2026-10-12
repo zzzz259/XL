@@ -8,6 +8,7 @@ from app.features.preview.portrait_config.model import (
     ScenePart,
     SpineState,
     SpriteState,
+    TransformState,
 )
 
 
@@ -79,6 +80,27 @@ def test_scene_round_trip_preserves_spine_sprite_order_and_interactions():
     assert [part.part_id for part in restored.parts] == ["spine-main", "sprite-fx", "spine-bg"]
     assert restored.parts[1].renderer.sorting_order == 3
     assert restored.interactions[0].animation == "touch"
+
+
+def test_scene_round_trip_preserves_full_transform_chain_and_explicit_sort_order():
+    scene = _scene()
+    part = replace(
+        scene.parts[0],
+        transform_chain=(TransformState(
+            AssetRef("bundle-a", 99), (10.0, 20.0, 0.0), (0.0, 0.0, 0.5, 0.5),
+            (2.0, 1.0, 1.0), 3,
+        ),),
+        sorting_layer_value=7,
+        renderer_depth=-0.25,
+        stable_order=2,
+    )
+
+    restored = PortraitScene.from_dict(replace(scene, parts=(part, *scene.parts[1:])).to_dict())
+
+    assert restored.parts[0].transform_chain == part.transform_chain
+    assert restored.parts[0].sorting_layer_value == 7
+    assert restored.parts[0].renderer_depth == -0.25
+    assert restored.parts[0].stable_order == 2
 
 
 def test_duplicate_game_object_names_keep_distinct_unity_component_identities():

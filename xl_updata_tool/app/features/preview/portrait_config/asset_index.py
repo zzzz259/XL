@@ -62,6 +62,22 @@ class AssetIndex:
         return any(asset.bundle_hash.casefold() == str(bundle_hash).casefold()
                    and asset.version_timestamp == self.version_timestamp for asset in self.assets)
 
+    def find_by_name_exact(self, name: str) -> tuple[IndexedAsset, ...]:
+        """Find configured prefab names exactly; callers must handle ambiguity."""
+        wanted = str(name)
+        return tuple(asset for asset in self.assets
+                     if asset.version_timestamp == self.version_timestamp and asset.name == wanted)
+
+    def bundle_path_for(self, bundle_hash: str) -> Path | None:
+        matches = {asset.bundle_path for asset in self.assets
+                   if asset.version_timestamp == self.version_timestamp
+                   and asset.bundle_hash.casefold() == str(bundle_hash).casefold()}
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ValueError(f"ambiguous bundle path for hash {bundle_hash}")
+        return next(iter(matches))
+
     def find_external(self, identifier: str, path_id: int) -> tuple[IndexedAsset, ...]:
         """Resolve a Unity CAB identifier to exact bundle hash/path ID matches."""
         bundle_hash = canonical_bundle_hash(identifier)
