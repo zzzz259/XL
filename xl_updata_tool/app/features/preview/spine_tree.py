@@ -25,6 +25,7 @@ class PreviewSpineTree(QTreeWidget):
 
     selection_changed = Signal(object)
     portrait_scenes_changed = Signal(object)
+    portrait_scene_checks_changed = Signal(object)
 
     _ROLE = "role"
     _SKIN = "skin"
@@ -68,6 +69,7 @@ class PreviewSpineTree(QTreeWidget):
     def set_catalog(self, catalog: PreviewResourceCatalog | None) -> None:
         """Replace displayed resources while retaining checks for stable skin keys."""
         previous = {skin_key(record) for record in self.selected_records()}
+        previous_scenes = {portrait_scene_key(scene) for scene in self.checked_portrait_scenes()}
         self._catalog = catalog or PreviewResourceCatalog.from_records(())
         records_by_group: OrderedDict[str, tuple[str | None, list[SpineSkinRecord]]] = OrderedDict()
         has_scenes = bool(self._catalog.portrait_scenes)
@@ -143,7 +145,13 @@ class PreviewSpineTree(QTreeWidget):
                             f"{diagnostic.severity}: {diagnostic.code} — {diagnostic.message}"
                             for diagnostic in diagnostics
                         ))
-                    self._make_readonly(item)
+                    if (
+                        portrait_scene_status(scene) in {"complete", "standalone"}
+                        and any(part.spine is not None for part in scene.parts)
+                    ):
+                        self._make_checkable(item, enabled=True)
+                    else:
+                        self._make_readonly(item)
                     role_item.addChild(item)
 
             raw_root = None
@@ -229,7 +237,10 @@ class PreviewSpineTree(QTreeWidget):
 
             self._refresh_statuses()
             self._restore_selection(previous)
+            self._restore_scene_checks(previous_scenes)
+            self._refresh_parent_checks()
             self.expandAll()
+            self.setCurrentItem(None)
         finally:
             self._updating = False
         self._emit_selection()
@@ -255,6 +266,31 @@ class PreviewSpineTree(QTreeWidget):
         data = item.data(0, Qt.UserRole) if item is not None else {}
         scene = (data or {}).get("scene") if (data or {}).get("kind") == self._SCENE else None
         return (scene,) if scene is not None else ()
+
+    def checked_portrait_scenes(self):
+        """Return manifest-backed scene rows checked for export."""
+        return tuple(
+            (item.data(0, Qt.UserRole) or {}).get("scene")
+            for item in self._scene_items()
+            if item.checkState(0) == Qt.Checked
+            and (item.data(0, Qt.UserRole) or {}).get("scene") is not None
+        )
+
+    def _scene_items(self):
+        stack = [
+            self.topLevelItem(index)
+            for index in reversed(range(self.topLevelItemCount()))
+        ]
+        while stack:
+            item = stack.pop()
+            if (item.data(0, Qt.UserRole) or {}).get("kind") == self._SCENE:
+                yield item
+            stack.extend(item.child(index) for index in reversed(range(item.childCount())))
+
+    def _restore_scene_checks(self, wanted: set[str]) -> None:
+        for item in self._scene_items():
+            if (item.data(0, Qt.UserRole) or {}).get("scene_key") in wanted:
+                item.setCheckState(0, Qt.Checked)
 
     def selected_record_groups(self) -> tuple[tuple[SpineSkinRecord, ...], ...]:
         """Return every source part belonging to each checked visible skin."""
@@ -440,7 +476,15 @@ class PreviewSpineTree(QTreeWidget):
 
     def _has_eligible_descendant(self, item: QTreeWidgetItem) -> bool:
         if not item.childCount():
-            records = (item.data(0, Qt.UserRole) or {}).get("records", ())
+            data = item.data(0, Qt.UserRole) or {}
+            if data.get("kind") == self._SCENE:
+                scene = data.get("scene")
+                return bool(
+                    scene is not None
+                    and portrait_scene_status(scene) in {"complete", "standalone"}
+                    and any(part.spine is not None for part in scene.parts)
+                )
+            records = data.get("records", ())
             return any(self._is_eligible(record) for record in records)
         return any(self._has_eligible_descendant(item.child(index)) for index in range(item.childCount()))
 
@@ -485,11 +529,11 @@ class PreviewSpineTree(QTreeWidget):
             self.mark_selected_read()
 
     def _clear_other_checks(self, selected_item: QTreeWidgetItem) -> None:
-        for skin_item in self._skin_items():
-            if skin_item is selected_item or self._is_descendant(selected_item, skin_item):
+        for checked_item in (*tuple(self._skin_items()), *tuple(self._scene_items())):
+            if checked_item is selected_item or self._is_descendant(selected_item, checked_item):
                 continue
-            if skin_item.checkState(0) != Qt.Unchecked:
-                skin_item.setCheckState(0, Qt.Unchecked)
+            if checked_item.checkState(0) != Qt.Unchecked:
+                checked_item.setCheckState(0, Qt.Unchecked)
 
     @staticmethod
     def _is_descendant(parent: QTreeWidgetItem, item: QTreeWidgetItem) -> bool:
@@ -573,3 +617,4 @@ class PreviewSpineTree(QTreeWidget):
 
     def _emit_selection(self) -> None:
         self.selection_changed.emit(self.selected_records())
+        self.portrait_scene_checks_changed.emit(self.checked_portrait_scenes())

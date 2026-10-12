@@ -10,7 +10,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from app.features.preview.resource_model import PreviewResourceCatalog, SpineSkinRecord, skin_key
-from app.features.preview.portrait_config.model import PortraitScene, SceneDiagnostic
+from app.features.preview.portrait_config.model import (
+    AssetRef, PortraitScene, SceneDiagnostic, ScenePart, SpineState,
+)
 from app.features.preview.resource_state import PreviewResourceState
 from app.features.preview.spine_tree import PreviewSpineTree
 
@@ -321,6 +323,33 @@ def test_spine_tree_displays_manifest_skin_once_and_keeps_raw_resources_separate
     assert raw_root.childCount() == 1
 
 
+def test_spine_tree_checks_manifest_scene_separately_from_current_preview_selection(qapp):
+    skeleton = AssetRef("bundle-a", 1)
+    atlas = AssetRef("bundle-a", 2)
+    part = ScenePart(
+        "role", AssetRef("bundle-a", 3), "cardspine_10080_4",
+        spine=SpineState(skeleton, default_animation="idle", skeleton_json=skeleton, atlases=(atlas,)),
+    )
+    scene = PortraitScene(
+        game_version="test", version_timestamp="20261012", entry_config_id="12002183",
+        character_id="10080", skin_id="12002183", prefab=None,
+        source_bundles=("bundle-a",), parts=(part,),
+        available_assets=(part.object_ref, skeleton, atlas),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10080_4.prefab",
+    )
+    tree = PreviewSpineTree()
+    tree.set_catalog(PreviewResourceCatalog.from_records((), portrait_scenes=(scene,)))
+    item = next(
+        item for item in _walk(tree.topLevelItem(0))
+        if (item.data(0, Qt.UserRole) or {}).get("kind") == "portrait_scene"
+    )
+
+    item.setCheckState(0, Qt.Checked)
+
+    assert tree.checked_portrait_scenes() == (scene,)
+    assert tree.selected_portrait_scenes() == ()
+
+
 def test_spine_tree_shows_incomplete_manifest_diagnostic(qapp):
     scene = PortraitScene(
         game_version="test",
@@ -348,6 +377,7 @@ def test_spine_tree_shows_incomplete_manifest_diagnostic(qapp):
     received = []
     tree.portrait_scenes_changed.connect(received.append)
 
+    tree.setCurrentItem(None)
     tree.setCurrentItem(item)
 
     assert received[-1] == (scene,)

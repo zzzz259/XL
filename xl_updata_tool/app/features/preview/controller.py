@@ -21,6 +21,8 @@ from .export_plan import ExportSettings, build_default_export_plan, build_export
 from .character_names import CharacterNameResolver
 from .spine_adapter import build_spine_export_command, get_animation_metadata, get_animation_names
 from .resource_model import display_skin_key
+from .portrait_config.asset_index import AssetIndex
+from .portrait_scene_export import build_portrait_scene_export_jobs, scene_resource_family
 from .output_browser import OutputBrowserCatalog
 from .unread import PreviewUnreadSnapshot, build_preview_unread_snapshot
 
@@ -631,13 +633,40 @@ class PreviewController(QObject):
         def run_job(job):
             try:
                 command = build_spine_export_command(job, spine_cli)
+                scene_job = hasattr(job, "scene") and hasattr(job, "sources")
+                if scene_job:
+                    resource_label = f"scene {job.scene.character_id}/{job.scene.skin_id}"
+                    animation_label = ",".join(source.animation for source in job.sources)
+                    skin_label = ",".join(source.skin for source in job.sources)
+                    input_resources = [{
+                        "part_id": source.part_id,
+                        "skel": str(source.skeleton_path),
+                        "atlas": str(source.atlas_path),
+                        "animation": source.animation,
+                        "skin": source.skin,
+                        "unity_order": source.unity_order,
+                        "skeleton_ref": source.skeleton_ref.to_dict(),
+                        "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
+                        "source_bundle_hashes": sorted({
+                            source.skeleton_ref.bundle_hash,
+                            *(reference.bundle_hash for reference in source.atlas_refs),
+                        }),
+                    } for source in job.sources]
+                else:
+                    resource_label = job.record.resource_family
+                    animation_label = job.settings.animation
+                    skin_label = ",".join(job.settings.skins)
+                    input_resources = [
+                        {"skel": record.source_skel, "atlas": record.atlas_path, "skin": record.skin_name, "resource_family": record.resource_family}
+                        for record in getattr(job, "records", (job.record,))
+                    ]
                 logger.info(
                     "SpineViewerCLI 导出开始（模式=%s，资源=%s，格式=%s，动画=%s，皮肤=%s，命令=%s）",
                     getattr(job, "export_mode", "custom"),
-                    job.record.resource_family,
+                    resource_label,
                     job.settings.format,
-                    job.settings.animation,
-                    ",".join(job.settings.skins),
+                    animation_label,
+                    skin_label,
                     subprocess.list2cmdline(command),
                 )
                 result = run_external_process(
@@ -652,10 +681,7 @@ class PreviewController(QObject):
                 output_bytes = job.output_path.stat().st_size if output_exists else 0
                 update_process_manifest(
                     result,
-                    input_resources=[
-                        {"skel": record.source_skel, "atlas": record.atlas_path, "skin": record.skin_name, "resource_family": record.resource_family}
-                        for record in getattr(job, "records", (job.record,))
-                    ],
+                    input_resources=input_resources,
                     requested_output=str(job.output_path),
                     output_verified=result.returncode == 0 and output_exists and output_bytes > 0,
                     output_bytes=output_bytes,
@@ -691,6 +717,12 @@ class PreviewController(QObject):
             return False
         selected_from_page = records is None
         if selected_from_page:
+            scenes = tuple(self.page.checked_portrait_scenes())
+            if scenes:
+                if self.page.selected_spine_record_groups():
+                    self.status_changed.emit("请分别导出组装立绘场景与原始 Spine 资源")
+                    return False
+                return self._start_portrait_scene_export(scenes, settings=settings, runner=runner)
             record_groups = tuple(self.page.selected_spine_record_groups())
             records = record_groups
         else:
@@ -835,6 +867,121 @@ class PreviewController(QObject):
         self.page.preview_progress.setFormat(f"导出中... {current}/{total}")
         self.status_changed.emit(f"导出中 [{current}/{total}]: {label}")
         self.progress_changed.emit(current, total, f"导出 Spine 皮肤: {label}")
+
+    def _start_portrait_scene_export(self, scenes, *, settings=None, runner=None) -> bool:
+        """Resolve checked manifests and queue one CLI job per scene artifact."""
+        from dataclasses import replace
+
+        from app.platform.tool_locator import ToolLocator
+
+        if self._selected_export_worker is not None:
+            return False
+        scene_indices = {}
+        bundles_root = self.service.material_dir.parent / "bundles"
+        for scene in scenes:
+            try:
+                version_dir = bundles_root / str(scene.version_timestamp)
+                map_path = version_dir / "_map" / "assets_map.json"
+                if not map_path.is_file():
+                    raise ValueError(f"版本 {scene.version_timestamp} 缺少 AssetStudio 资源索引")
+                if scene.version_timestamp not in scene_indices:
+                    scene_indices[scene.version_timestamp] = AssetIndex.from_catalog(
+                        map_path, version_dir, int(scene.version_timestamp),
+                    )
+            except (OSError, ValueError, TypeError) as error:
+                self._notify_export_error(f"立绘场景资源索引不可用：{error}")
+                return False
+
+        spine_cli = None
+        if runner is None:
+            spine_cli = ToolLocator.create().spineviewer_cli()
+            if not os.path.isfile(spine_cli):
+                self._notify_export_error(f"SpineViewerCLI 不存在：{spine_cli}")
+                return False
+
+        name_resolver = CharacterNameResolver.from_output_root(self.service.preview_dir.parent)
+        if settings is None:
+            try:
+                initial_jobs = build_portrait_scene_export_jobs(
+                    scenes[0], scene_indices[scenes[0].version_timestamp],
+                    self.service.material_dir, self.service.preview_dir, name_resolver,
+                )
+            except (OSError, ValueError) as error:
+                self._notify_export_error(f"立绘场景配置无法导出：{error}")
+                return False
+            first = initial_jobs[0].sources[0]
+            animation_durations = {}
+            animation_names = ()
+            if spine_cli:
+                animation_durations = get_animation_metadata(
+                    str(first.skeleton_path), str(first.atlas_path), spine_cli,
+                )
+                animation_names = tuple(animation_durations) or get_animation_names(
+                    str(first.skeleton_path), str(first.atlas_path), spine_cli,
+                )
+            skin_names = tuple(dict.fromkeys(
+                source.skin or initial_jobs[0].settings.skins[0]
+                for source in initial_jobs[0].sources
+            ))
+            family_summary = tuple(dict.fromkeys(scene_resource_family(scene) for scene in scenes))
+            dialog = ExportSettingsDialog(
+                str(first.skeleton_path), str(first.atlas_path), "PNG", self.page,
+                animation_names=animation_names,
+                animation_durations=animation_durations,
+                skin_names=skin_names,
+                resource_family=family_summary[0] if family_summary else "spine",
+                selected_group_count=len(scenes),
+                family_summary=family_summary,
+            )
+            if dialog.exec() != QDialog.Accepted:
+                return False
+            if getattr(dialog, "export_mode", lambda: "custom")() == "custom":
+                if len(scenes) != 1:
+                    self.status_changed.emit("自定义导出仅支持恰好一个立绘场景")
+                    return False
+                settings = dialog.settings()
+
+        if settings is not None and not isinstance(settings, ExportSettings):
+            settings = ExportSettings(**settings)
+        try:
+            jobs = []
+            for scene in scenes:
+                scene_jobs = build_portrait_scene_export_jobs(
+                    scene, scene_indices[scene.version_timestamp],
+                    self.service.material_dir, self.service.preview_dir,
+                    name_resolver, settings=settings,
+                )
+                jobs.extend(
+                    replace(job, export_mode="custom") if settings is not None else job
+                    for job in scene_jobs
+                )
+        except (OSError, ValueError) as error:
+            self._notify_export_error(f"立绘场景配置无法导出：{error}")
+            return False
+        if not jobs:
+            self.status_changed.emit("没有可导出的立绘场景")
+            return False
+        if runner is None:
+            runner = self._default_skin_runner(spine_cli)
+
+        self._selected_export_worker = PreviewExportWorker(
+            tuple(jobs), settings=settings or jobs[0].settings, runner=runner, parent=self,
+        )
+        self._selected_export_worker.skin_progress.connect(self._on_selected_export_progress)
+        self._selected_export_worker.finished.connect(self._on_selected_export_summary)
+        self._selected_export_worker.export_finished.connect(self._on_selected_export_finished)
+        self._selected_export_worker.error.connect(self._on_selected_export_error)
+        self._selected_export_cancelled = False
+        self.page.btn_reload.setText("取消导出")
+        self.page.btn_reload.setEnabled(True)
+        self.page.btn_export_selected.setText("取消导出")
+        self.page.btn_export_selected.setEnabled(True)
+        self.page.preview_progress.setVisible(True)
+        self.page.preview_progress.setMaximum(len(jobs))
+        self.page.preview_progress.setValue(0)
+        self.status_changed.emit(f"准备导出 {len(jobs)} 个立绘场景资源")
+        self._selected_export_worker.start()
+        return True
 
     def _on_selected_export_summary(self, summary):
         self.status_changed.emit(summary)

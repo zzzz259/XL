@@ -687,6 +687,9 @@ class PreviewPage(QWidget):
     def selected_spine_record_groups(self):
         return self.spine_tree.selected_record_groups()
 
+    def checked_portrait_scenes(self):
+        return self.spine_tree.checked_portrait_scenes()
+
     def selected_spine_skin_names(self):
         return self.spine_tree.selected_skin_names()
 

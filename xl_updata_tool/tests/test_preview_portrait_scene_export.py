@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+
+import pytest
+
+from app.features.preview.export_plan import ExportSettings
+from app.features.preview.portrait_config.asset_index import AssetIndex
+from app.features.preview.portrait_config.model import (
+    AssetRef,
+    PortraitScene,
+    RendererState,
+    ScenePart,
+    SpineState,
+)
+from app.features.preview.portrait_scene_export import build_portrait_scene_export_job
+from app.features.preview.spine_adapter import build_spine_export_command
+
+
+VERSION = 134351472190013976
+BUNDLE_HASH = "a" * 32
+
+
+def _scene(parts):
+    refs = tuple(
+        ref
+        for part in parts
+        for ref in (part.object_ref, part.spine.skeleton_json, *part.spine.atlases)
+    )
+    return PortraitScene(
+        game_version="vA160",
+        version_timestamp=str(VERSION),
+        entry_config_id="12002183",
+        character_id="10118",
+        skin_id="12002183",
+        prefab=None,
+        source_bundles=(BUNDLE_HASH,),
+        parts=tuple(parts),
+        available_assets=refs,
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10118_3.prefab",
+    )
+
+
+def _part(part_id, stem, *, order, animation, skin="", loop=False, path_start=1):
+    skeleton = AssetRef(BUNDLE_HASH, path_start)
+    atlas = AssetRef(BUNDLE_HASH, path_start + 1)
+    return ScenePart(
+        part_id=part_id,
+        object_ref=AssetRef(BUNDLE_HASH, path_start + 2),
+        game_object_name=stem,
+        renderer=RendererState("Spine", True, sorting_order=order),
+        spine=SpineState(
+            skeleton=skeleton,
+            default_animation=animation,
+            animations=tuple(dict.fromkeys((animation, "idle", "bloom", "hover"))),
+            skins=("default", "motion_stander", "alternate"),
+            loop=loop,
+            initial_skin=skin,
+            skeleton_json=skeleton,
+            atlases=(atlas,),
+        ),
+        sorting_layer_value=0,
+        renderer_depth=float(order),
+        stable_order=path_start,
+    )
+
+
+def _index(tmp_path, parts):
+    bundle_root = tmp_path / "bundles" / str(VERSION)
+    bundle_root.mkdir(parents=True)
+    (bundle_root / f"{BUNDLE_HASH}.bundle").write_bytes(b"bundle")
+    records = []
+    material_root = tmp_path / "material"
+    for part in parts:
+        stem = part.game_object_name
+        container = f"assets/art/models/cardspine/prefab/{stem}.prefab"
+        for ref, name in (
+            (part.spine.skeleton_json, f"{stem}.skel"),
+            (part.spine.atlases[0], f"{stem}.atlas"),
+        ):
+            records.append({
+                "Name": name,
+                "Container": container,
+                "Source": f"{BUNDLE_HASH}.bundle",
+                "PathID": ref.path_id,
+                "Type": "TextAsset",
+            })
+            output = material_root / container.rsplit("/", 1)[0] / name
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(name.encode())
+    catalog = tmp_path / "assets_map.json"
+    catalog.write_text(json.dumps(records), encoding="utf-8")
+    return AssetIndex.from_catalog(catalog, bundle_root, VERSION), material_root
+
+
+def test_scene_export_resolves_exact_refs_and_builds_one_ordered_merge(tmp_path):
+    character = _part("character", "cardspine_10118_3", order=4, animation="idle", path_start=1)
+    background = _part("background", "cardspine_10118_3_bg", order=2, animation="bloom", path_start=4)
+    scene = _scene((background, character))
+    index, material_root = _index(tmp_path, (character, background))
+
+    job = build_portrait_scene_export_job(
+        scene,
+        index,
+        material_root,
+        tmp_path / "output",
+        ExportSettings(),
+    )
+
+    assert [source.part_id for source in job.sources] == ["character", "background"]
+    assert job.sources[0].animation == "idle"
+    assert job.sources[1].animation == "bloom"
+    assert job.sources[0].skeleton_path.name == "cardspine_10118_3.skel"
+    assert job.sources[1].atlas_path.name == "cardspine_10118_3_bg.atlas"
+    command = build_spine_export_command(job, "SpineViewerCLI.exe")
+    assert command[1] == "merge"
+    assert command[2:4] == [str(source.skeleton_path) for source in job.sources]
+    assert command[command.index("--animations") + 1] == "idle/bloom"
+
+
+def test_scene_export_three_parts_preserves_front_to_back_order_and_distinct_animations(tmp_path):
+    front = _part("front", "cardspine_10118_front", order=8, animation="gesture", path_start=1)
+    middle = _part("middle", "cardspine_10118_middle", order=4, animation="idle", path_start=4)
+    back = _part("back", "cardspine_10118_back", order=1, animation="bloom", path_start=7)
+    scene = _scene((back, middle, front))
+    index, material_root = _index(tmp_path, (front, middle, back))
+
+    job = build_portrait_scene_export_job(
+        scene, index, material_root, tmp_path / "output", ExportSettings(),
+    )
+    command = build_spine_export_command(job, "SpineViewerCLI.exe")
+
+    assert [source.part_id for source in job.sources] == ["front", "middle", "back"]
+    assert command[2:5] == [str(source.skeleton_path) for source in job.sources]
+    assert command[command.index("--animations") + 1] == "gesture/idle/bloom"
+    assert len([arg for arg in command if arg.startswith("--atlases=")]) == 3
+
+
+def test_scene_export_rejects_duplicate_exact_identity_mapping(tmp_path):
+    part = _part("character", "cardspine_10118_3", order=4, animation="idle")
+    scene = _scene((part,))
+    index, material_root = _index(tmp_path, (part,))
+    asset = index.find_exact(BUNDLE_HASH, part.spine.skeleton_json.path_id)[0]
+    duplicate = replace(asset, name="other.skel")
+    index = replace(index, assets=(*index.assets, duplicate))
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        build_portrait_scene_export_job(
+            scene, index, material_root, tmp_path / "output", ExportSettings()
+        )
+
+
+def test_scene_export_rejects_per_part_skin_not_supported_by_merge(tmp_path):
+    character = _part("character", "cardspine_10118_3", order=4, animation="idle", skin="dress")
+    background = _part("background", "cardspine_10118_3_bg", order=2, animation="idle", path_start=4)
+    scene = _scene((character, background))
+    index, material_root = _index(tmp_path, (character, background))
+
+    with pytest.raises(ValueError, match="skin.*merge"):
+        build_portrait_scene_export_job(
+            scene, index, material_root, tmp_path / "output", ExportSettings()
+        )
+
+
+def test_builtin_scene_plan_keeps_cardspine_static_and_video_together(tmp_path):
+    from app.features.preview.portrait_scene_export import build_portrait_scene_export_jobs
+
+    part = _part("character", "cardspine_10118_3", order=4, animation="idle")
+    scene = _scene((part,))
+    index, material_root = _index(tmp_path, (part,))
+
+    jobs = build_portrait_scene_export_jobs(scene, index, material_root, tmp_path / "output")
+
+    assert [job.settings.format for job in jobs] == ["Png", "Mp4"]
+    assert [job.output_path.name for job in jobs] == [
+        "10118_角色立绘_3.png", "10118_角色立绘_3.mp4",
+    ]
+    assert all(job.sources[0].animation == "idle" for job in jobs)
+
+
+def test_scene_export_rejects_renderer_animation_missing_from_skeleton(tmp_path):
+    part = _part("character", "cardspine_10118_3", order=4, animation="missing")
+    part = replace(part, spine=replace(part.spine, animations=("idle", "hover")))
+    scene = _scene((part,))
+    index, material_root = _index(tmp_path, (part,))
+
+    with pytest.raises(ValueError, match="animation is unavailable"):
+        build_portrait_scene_export_job(
+            scene, index, material_root, tmp_path / "output", ExportSettings()
+        )
+
+
+def test_builtin_battlespine_scene_selects_motion_stander_for_single_skeleton(tmp_path):
+    from app.features.preview.portrait_scene_export import build_portrait_scene_export_jobs
+
+    part = _part("battle", "battlespine_10118_2", order=4, animation="idle")
+    scene = replace(
+        _scene((part,)),
+        prefab_container="assets/art/models/battlespine/prefab/battlespine_10118_2.prefab",
+    )
+    index, material_root = _index(tmp_path, (part,))
+
+    job = build_portrait_scene_export_jobs(scene, index, material_root, tmp_path / "output")[0]
+    command = build_spine_export_command(job, "SpineViewerCLI.exe")
+
+    assert job.settings.scale == 1
+    assert job.settings.format == "Png"
+    assert command[command.index("--skins") + 1] == "motion_stander"
+
+
+def test_custom_scene_settings_override_manifest_animation_skin_and_loop(tmp_path):
+    part = _part("battle", "battlespine_10118_2", order=4, animation="idle", skin="motion_stander")
+    scene = replace(
+        _scene((part,)),
+        prefab_container="assets/art/models/battlespine/prefab/battlespine_10118_2.prefab",
+    )
+    index, material_root = _index(tmp_path, (part,))
+
+    job = build_portrait_scene_export_job(
+        scene,
+        index,
+        material_root,
+        tmp_path / "output",
+        ExportSettings(
+            animation="hover", loop=True, static=False, format="Mp4",
+            skins=("alternate",),
+        ),
+        export_mode="custom",
+    )
+    command = build_spine_export_command(job, "SpineViewerCLI.exe")
+
+    assert job.sources[0].animation == "hover"
+    assert job.sources[0].skin == "alternate"
+    assert job.sources[0].loop is True
+    assert command[command.index("--animations") + 1] == "hover"
+    assert command[command.index("--skins") + 1] == "alternate"
+    assert "--loop" in command
+
+
+def test_custom_scene_rejects_multiple_internal_skins_for_one_output(tmp_path):
+    part = _part("battle", "battlespine_10118_2", order=4, animation="idle")
+    scene = replace(
+        _scene((part,)),
+        prefab_container="assets/art/models/battlespine/prefab/battlespine_10118_2.prefab",
+    )
+    index, material_root = _index(tmp_path, (part,))
+
+    with pytest.raises(ValueError, match="exactly one internal skin"):
+        build_portrait_scene_export_job(
+            scene,
+            index,
+            material_root,
+            tmp_path / "output",
+            ExportSettings(skins=("default", "alternate")),
+            export_mode="custom",
+        )

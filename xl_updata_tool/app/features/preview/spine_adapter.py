@@ -82,6 +82,9 @@ def build_spine_export_command(job, spine_cli):
     command must receive every skeleton and matching atlas in one invocation;
     do not render those parts independently and composite them afterwards.
     """
+    if hasattr(job, "sources") and hasattr(job, "scene"):
+        return _build_portrait_scene_command(job, spine_cli)
+
     raw_records = tuple(getattr(job, "records", ()) or (job.record,))
     records = tuple(
         dict.fromkeys(
@@ -192,6 +195,82 @@ def build_spine_export_command(job, spine_cli):
         command.append("--pma")
     if not settings.static and normalized_format == "gif":
         command.append("--loop")
+    return command
+
+
+def _build_portrait_scene_command(job, spine_cli):
+    """Build one CLI invocation from the manifest's ordered Spine sources."""
+    sources = tuple(job.sources)
+    if not sources:
+        raise ValueError("portrait scene export has no Spine sources")
+    settings = job.settings
+    is_merge = len(sources) > 1
+    if is_merge:
+        if len({source.loop for source in sources}) > 1:
+            raise ValueError("SpineViewerCLI merge cannot represent different per-part loop settings")
+        if len({source.time_scale for source in sources}) > 1:
+            raise ValueError("SpineViewerCLI merge cannot represent different per-part time scales")
+        if any(source.skin and source.skin.casefold() != "default" for source in sources):
+            raise ValueError("per-part skin selection is unsupported by SpineViewerCLI merge")
+        if any(str(skin).casefold() != "default" for skin in tuple(settings.skins or ())):
+            raise ValueError("SpineViewerCLI merge cannot select the requested scene skin")
+
+    normalized_format = str(settings.format).casefold()
+    format_name = {"png": "Png", "mp4": "Mp4", "gif": "Gif"}.get(normalized_format)
+    if format_name is None:
+        raise ValueError(f"Unsupported Spine export format: {settings.format}")
+
+    def number(value):
+        numeric = float(value)
+        return str(int(numeric)) if numeric.is_integer() else str(numeric)
+
+    command = [os.fspath(spine_cli), "merge" if is_merge else "export"]
+    command.extend(os.fspath(source.skeleton_path) for source in sources)
+    command.extend(["-f", format_name, "-o", os.fspath(job.output_path)])
+    if is_merge:
+        command.extend(f"--atlases={os.fspath(source.atlas_path)}" for source in sources)
+        command.extend(["--animations", "/".join(source.animation for source in sources)])
+    else:
+        source = sources[0]
+        command.extend(["--atlas", os.fspath(source.atlas_path), "--animations", source.animation])
+
+    command.extend([
+        "--scale", str(settings.scale),
+        "--max-resolution", str(settings.max_resolution),
+        "--margin", str(settings.margin),
+        "--time", number(settings.time_offset),
+    ])
+    if settings.static:
+        command.extend(["--duration", "0", "--fps", "1"])
+    else:
+        if settings.duration is not None:
+            command.extend(["--duration", number(settings.duration)])
+        command.extend(["--fps", str(settings.fps)])
+
+    if not is_merge:
+        selected_skin = sources[0].skin
+        if not selected_skin:
+            selected_skin = next(
+                (str(skin) for skin in tuple(settings.skins or ()) if str(skin).casefold() != "default"),
+                "",
+            )
+        _append_explicit_skin(command, selected_skin)
+    if settings.physics and settings.physics != "Update":
+        command.extend(["--physics", str(settings.physics)])
+    time_scale = sources[0].time_scale
+    effective_speed = float(settings.speed) * time_scale
+    if effective_speed != 1:
+        command.extend(["--speed", number(effective_speed)])
+    if not is_merge and (settings.static or settings.disable_track_loop):
+        command.append("--disable-track-loop")
+    if not settings.static and sources[0].loop:
+        command.append("--loop")
+    if settings.transparent:
+        command.extend(["--color", "#00000000"])
+    elif getattr(settings, "background_color", ""):
+        command.extend(["--color", str(settings.background_color)])
+    if settings.pma:
+        command.append("--pma")
     return command
 
 
