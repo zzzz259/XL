@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from .character_names import CharacterNameResolver, display_resource_family, display_skin_number
@@ -21,8 +21,29 @@ class SpineSource:
     skin: str
     time_scale: float
     unity_order: tuple[int, int, float, int]
-    skeleton_ref: AssetRef
-    atlas_refs: tuple[AssetRef, ...]
+    skeleton_ref: AssetRef | None = None
+    atlas_refs: tuple[AssetRef, ...] = ()
+    source_kind: str = "spine"
+    sprite_ref: AssetRef | None = None
+    texture_ref: AssetRef | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SpriteSource:
+    part_id: str
+    texture_path: Path
+    rect: tuple[float, ...]
+    pivot: tuple[float, ...]
+    pixels_per_unit: float
+    transform_chain: tuple
+    color: tuple[float, ...]
+    flip_x: bool
+    flip_y: bool
+    mask_interaction: int
+    blend_mode: str
+    unity_order: tuple[int, int, float, int]
+    sprite_ref: AssetRef
+    texture_ref: AssetRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,10 +53,54 @@ class PortraitSceneExportJob:
     output_path: Path
     settings: ExportSettings
     export_mode: str = "builtin"
+    sprite_sources: tuple[SpriteSource, ...] = ()
 
     @property
     def resource_family(self) -> str:
         return scene_resource_family(self.scene)
+
+
+def prepare_portrait_scene_export_job(
+    job: PortraitSceneExportJob, work_dir: str | Path,
+) -> PortraitSceneExportJob:
+    """Materialize static Sprite inputs and order all renderers for one CLI merge."""
+    if not job.sprite_sources:
+        return job
+    from .portrait_config.static_layer_renderer import (
+        StaticLayerSpec, generate_static_layer, order_render_sources,
+    )
+
+    generated_sources = []
+    for source in job.sprite_sources:
+        generated = generate_static_layer(StaticLayerSpec(
+            part_id=source.part_id,
+            texture_path=source.texture_path,
+            rect=source.rect,
+            pivot=source.pivot,
+            pixels_per_unit=source.pixels_per_unit,
+            transform_chain=source.transform_chain,
+            unity_order=source.unity_order,
+            color=source.color,
+            flip_x=source.flip_x,
+            flip_y=source.flip_y,
+            mask_interaction=source.mask_interaction,
+            blend_mode=source.blend_mode,
+        ), work_dir)
+        generated_sources.append(SpineSource(
+            part_id=generated.part_id,
+            skeleton_path=generated.skeleton_path,
+            atlas_path=generated.atlas_path,
+            animation="idle",
+            loop=False,
+            skin="default",
+            time_scale=1.0,
+            unity_order=generated.unity_order,
+            source_kind="static_sprite",
+            sprite_ref=source.sprite_ref,
+            texture_ref=source.texture_ref,
+        ))
+    ordered = order_render_sources((*job.sources, *generated_sources))
+    return replace(job, sources=ordered, sprite_sources=())
 
 
 def _resolve_asset_path(index: AssetIndex, material_root: Path, reference: AssetRef) -> Path:
@@ -117,20 +182,39 @@ def build_portrait_scene_export_job(
         part for part in scene.parts
         if part.renderer is None or part.renderer.enabled
     )
-    unsupported = tuple(
-        part.part_id for part in active_parts
-        if part.spine is None and part.sprite is not None
-    )
-    if unsupported:
-        raise ValueError(
-            "scene contains Sprite layers that require the static-layer renderer: "
-            + ", ".join(unsupported)
-        )
-
     sources = []
+    sprite_sources = []
     for part in active_parts:
         spine = part.spine
+        if spine is None and part.sprite is None:
+            continue
+        renderer = part.renderer
+        unity_order = (
+            int(part.sorting_layer_value),
+            int(renderer.sorting_order if renderer else 0),
+            float(part.renderer_depth),
+            int(part.stable_order),
+        )
         if spine is None:
+            sprite = part.sprite
+            if sprite.texture is None:
+                raise ValueError(f"scene part {part.part_id} has no exact Sprite texture reference")
+            sprite_sources.append(SpriteSource(
+                part_id=part.part_id,
+                texture_path=_resolve_asset_path(asset_index, Path(material_root), sprite.texture),
+                rect=tuple(map(float, sprite.rect)),
+                pivot=tuple(map(float, sprite.pivot)),
+                pixels_per_unit=float(sprite.pixels_per_unit),
+                transform_chain=part.transform_chain,
+                color=tuple(map(float, renderer.color if renderer else (1.0, 1.0, 1.0, 1.0))),
+                flip_x=bool(renderer.flip_x) if renderer else False,
+                flip_y=bool(renderer.flip_y) if renderer else False,
+                mask_interaction=int(renderer.mask_interaction) if renderer else 0,
+                blend_mode=str(renderer.blend_mode if renderer else "normal"),
+                unity_order=unity_order,
+                sprite_ref=sprite.sprite,
+                texture_ref=sprite.texture,
+            ))
             continue
         if spine.skeleton_json is None:
             raise ValueError(f"scene part {part.part_id} has no exact Spine skeleton TextAsset reference")
@@ -148,13 +232,6 @@ def build_portrait_scene_export_job(
             raise ValueError(
                 f"scene part {part.part_id} animation is unavailable: {animation}"
             )
-        renderer = part.renderer
-        unity_order = (
-            int(part.sorting_layer_value),
-            int(renderer.sorting_order if renderer else 0),
-            float(part.renderer_depth),
-            int(part.stable_order),
-        )
         sources.append(SpineSource(
             part_id=part.part_id,
             skeleton_path=_resolve_asset_path(asset_index, Path(material_root), spine.skeleton_json),
@@ -192,7 +269,9 @@ def build_portrait_scene_export_job(
     if not output_stem:
         raise ValueError("portrait scene output name is empty after sanitization")
     output_path = Path(output_dir) / f"{output_stem}.{extension}"
-    return PortraitSceneExportJob(scene, tuple(sources), output_path, settings, export_mode)
+    return PortraitSceneExportJob(
+        scene, tuple(sources), output_path, settings, export_mode, tuple(sprite_sources),
+    )
 
 
 def scene_resource_family(scene: PortraitScene) -> str:

@@ -27,6 +27,24 @@ from app.features.preview.prefab_parser import parse_prefab, compute_pixel_offse
 from app.features.preview.export_plan import ExportSettings
 
 
+def _sprite_source_metadata(source):
+    return {
+        "part_id": source.part_id,
+        "texture_path": str(source.texture_path),
+        "sprite_ref": source.sprite_ref.to_dict(),
+        "texture_ref": source.texture_ref.to_dict(),
+        "rect": list(source.rect),
+        "pivot": list(source.pivot),
+        "pixels_per_unit": source.pixels_per_unit,
+        "unity_order": list(source.unity_order),
+        "color": list(source.color),
+        "flip_x": source.flip_x,
+        "flip_y": source.flip_y,
+        "mask_interaction": source.mask_interaction,
+        "blend_mode": source.blend_mode,
+    }
+
+
 class PreviewExportWorker(QThread):
     """图片预览导出工作线程（.skel → PNG，含配对合成 + 皮肤导出）
 
@@ -136,6 +154,7 @@ class PreviewExportWorker(QThread):
                         "source_bundles": list(scene.source_bundles),
                     },
                     "sources": source_details,
+                    "sprite_sources": [_sprite_source_metadata(source) for source in job.sprite_sources],
                     "settings": asdict(job.settings),
                     "export_mode": getattr(job, "export_mode", "builtin"),
                     "output": str(job.output_path),
@@ -243,6 +262,7 @@ class PreviewExportWorker(QThread):
                     "skeleton_ref": source.skeleton_ref.to_dict(),
                     "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
                 } for source in job.sources],
+                "sprite_sources": [_sprite_source_metadata(source) for source in job.sprite_sources],
                 "settings": asdict(job.settings),
                 "export_mode": getattr(job, "export_mode", "builtin"),
                 "output_path": str(job.output_path),

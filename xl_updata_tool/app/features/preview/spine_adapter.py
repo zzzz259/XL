@@ -74,7 +74,7 @@ def _merge_layer_order(record):
     return layer, stem, os.fspath(record.atlas_path).casefold()
 
 
-def build_spine_export_command(job, spine_cli):
+def build_spine_export_command(job, spine_cli, temporary_dir=None):
     """Build a SpineViewerCLI export command from a ``SkinExportJob``.
 
     A visible skin may consist of several source skeletons (for example the
@@ -83,6 +83,11 @@ def build_spine_export_command(job, spine_cli):
     do not render those parts independently and composite them afterwards.
     """
     if hasattr(job, "sources") and hasattr(job, "scene"):
+        if getattr(job, "sprite_sources", ()):
+            if temporary_dir is None:
+                raise ValueError("mixed Spine/Sprite export requires a per-job temporary directory")
+            from .portrait_scene_export import prepare_portrait_scene_export_job
+            job = prepare_portrait_scene_export_job(job, temporary_dir)
         return _build_portrait_scene_command(job, spine_cli)
 
     raw_records = tuple(getattr(job, "records", ()) or (job.record,))

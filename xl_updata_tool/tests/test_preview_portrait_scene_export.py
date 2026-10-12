@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -13,8 +14,13 @@ from app.features.preview.portrait_config.model import (
     RendererState,
     ScenePart,
     SpineState,
+    SpriteState,
+    TransformState,
 )
-from app.features.preview.portrait_scene_export import build_portrait_scene_export_job
+from app.features.preview.portrait_scene_export import (
+    build_portrait_scene_export_job,
+    prepare_portrait_scene_export_job,
+)
 from app.features.preview.spine_adapter import build_spine_export_command
 
 
@@ -26,7 +32,13 @@ def _scene(parts):
     refs = tuple(
         ref
         for part in parts
-        for ref in (part.object_ref, part.spine.skeleton_json, *part.spine.atlases)
+        for ref in (
+            part.object_ref,
+            *(node.object_ref for node in part.transform_chain),
+            *((part.spine.skeleton_json, *part.spine.atlases) if part.spine else ()),
+            *((part.sprite.sprite, part.sprite.texture) if part.sprite else ()),
+        )
+        if ref is not None
     )
     return PortraitScene(
         game_version="vA160",
@@ -76,8 +88,9 @@ def _index(tmp_path, parts):
         stem = part.game_object_name
         container = f"assets/art/models/cardspine/prefab/{stem}.prefab"
         for ref, name in (
-            (part.spine.skeleton_json, f"{stem}.skel"),
-            (part.spine.atlases[0], f"{stem}.atlas"),
+            *(((part.spine.skeleton_json, f"{stem}.skel"),
+               (part.spine.atlases[0], f"{stem}.atlas")) if part.spine else ()),
+            *(((part.sprite.texture, f"{stem}.png"),) if part.sprite else ()),
         ):
             records.append({
                 "Name": name,
@@ -88,7 +101,11 @@ def _index(tmp_path, parts):
             })
             output = material_root / container.rsplit("/", 1)[0] / name
             output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_bytes(name.encode())
+            if name.endswith(".png"):
+                from PIL import Image
+                Image.new("RGBA", (8, 8), (1, 2, 3, 0)).save(output)
+            else:
+                output.write_bytes(name.encode())
     catalog = tmp_path / "assets_map.json"
     catalog.write_text(json.dumps(records), encoding="utf-8")
     return AssetIndex.from_catalog(catalog, bundle_root, VERSION), material_root
@@ -135,6 +152,58 @@ def test_scene_export_three_parts_preserves_front_to_back_order_and_distinct_ani
     assert command[2:5] == [str(source.skeleton_path) for source in job.sources]
     assert command[command.index("--animations") + 1] == "gesture/idle/bloom"
     assert len([arg for arg in command if arg.startswith("--atlases=")]) == 3
+
+
+def test_scene_export_interleaves_sprite_and_spine_in_single_merge(tmp_path):
+    front = _part("front", "cardspine_10118_front", order=4, animation="idle", path_start=1)
+    back = _part("back", "cardspine_10118_back", order=2, animation="bloom", path_start=4)
+    sprite = ScenePart(
+        part_id="sprite:middle",
+        object_ref=AssetRef(BUNDLE_HASH, 20),
+        game_object_name="static-middle",
+        renderer=RendererState("SpriteRenderer", True, sorting_order=3),
+        sprite=SpriteState(
+            sprite=AssetRef(BUNDLE_HASH, 21),
+            rect=(0, 0, 8, 8),
+            pivot=(0.5, 0.5),
+            texture=AssetRef(BUNDLE_HASH, 22),
+            pixels_per_unit=100.0,
+        ),
+        transform_chain=(TransformState(
+            AssetRef(BUNDLE_HASH, 23), (0.5, 1.0, 0.0), (0, 0, 0, 1), (1, 1, 1), 1,
+        ),),
+        renderer_depth=3.0,
+        stable_order=1,
+    )
+    scene = _scene((back, sprite, front))
+    index, material_root = _index(tmp_path, (front, back, sprite))
+
+    job = build_portrait_scene_export_job(scene, index, material_root, tmp_path / "output", ExportSettings())
+    prepared = prepare_portrait_scene_export_job(job, tmp_path / "temp")
+    command = build_spine_export_command(prepared, "SpineViewerCLI.exe")
+
+    assert [source.part_id for source in prepared.sources] == ["front", "sprite:middle", "back"]
+    assert command[1] == "merge"
+    assert len(command[2:5]) == 3
+    assert command[command.index("--animations") + 1] == "idle/idle/bloom"
+    assert all(Path(source).is_file() for source in command[2:5])
+    assert len([arg for arg in command if arg.startswith("--atlases=")]) == 3
+
+
+def test_scene_export_rejects_masked_sprite_with_structured_diagnostic(tmp_path):
+    character = _part("character", "cardspine_10118_3", order=2, animation="idle")
+    sprite = ScenePart(
+        part_id="masked",
+        object_ref=AssetRef(BUNDLE_HASH, 30),
+        game_object_name="masked",
+        renderer=RendererState("SpriteRenderer", True, mask_interaction=1),
+        sprite=SpriteState(AssetRef(BUNDLE_HASH, 31), (0, 0, 8, 8), (0.5, 0.5), AssetRef(BUNDLE_HASH, 32)),
+    )
+    scene = _scene((character, sprite))
+    index, material_root = _index(tmp_path, (character, sprite))
+
+    with pytest.raises(ValueError, match="unsupported_sprite_mask"):
+        build_portrait_scene_export_job(scene, index, material_root, tmp_path / "output", ExportSettings())
 
 
 def test_scene_export_rejects_duplicate_exact_identity_mapping(tmp_path):

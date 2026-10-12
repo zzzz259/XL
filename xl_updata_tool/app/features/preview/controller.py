@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
+from contextlib import nullcontext
 from collections import OrderedDict
 
 from PySide6.QtCore import QPoint, QObject, Qt, QMimeData, QUrl, Signal
@@ -22,7 +24,11 @@ from .character_names import CharacterNameResolver
 from .spine_adapter import build_spine_export_command, get_animation_metadata, get_animation_names
 from .resource_model import display_skin_key
 from .portrait_config.asset_index import AssetIndex
-from .portrait_scene_export import build_portrait_scene_export_jobs, scene_resource_family
+from .portrait_scene_export import (
+    build_portrait_scene_export_jobs,
+    prepare_portrait_scene_export_job,
+    scene_resource_family,
+)
 from .output_browser import OutputBrowserCatalog
 from .unread import PreviewUnreadSnapshot, build_preview_unread_snapshot
 
@@ -632,81 +638,120 @@ class PreviewController(QObject):
     def _default_skin_runner(self, spine_cli):
         def run_job(job):
             try:
-                command = build_spine_export_command(job, spine_cli)
                 scene_job = hasattr(job, "scene") and hasattr(job, "sources")
-                if scene_job:
-                    resource_label = f"scene {job.scene.character_id}/{job.scene.skin_id}"
-                    animation_label = ",".join(source.animation for source in job.sources)
-                    skin_label = ",".join(source.skin for source in job.sources)
-                    input_resources = [{
-                        "part_id": source.part_id,
-                        "skel": str(source.skeleton_path),
-                        "atlas": str(source.atlas_path),
-                        "animation": source.animation,
-                        "skin": source.skin,
-                        "unity_order": source.unity_order,
-                        "skeleton_ref": source.skeleton_ref.to_dict(),
-                        "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
-                        "source_bundle_hashes": sorted({
-                            source.skeleton_ref.bundle_hash,
-                            *(reference.bundle_hash for reference in source.atlas_refs),
-                        }),
-                    } for source in job.sources]
-                else:
-                    resource_label = job.record.resource_family
-                    animation_label = job.settings.animation
-                    skin_label = ",".join(job.settings.skins)
-                    input_resources = [
-                        {"skel": record.source_skel, "atlas": record.atlas_path, "skin": record.skin_name, "resource_family": record.resource_family}
-                        for record in getattr(job, "records", (job.record,))
-                    ]
-                logger.info(
-                    "SpineViewerCLI 导出开始（模式=%s，资源=%s，格式=%s，动画=%s，皮肤=%s，命令=%s）",
-                    getattr(job, "export_mode", "custom"),
-                    resource_label,
-                    job.settings.format,
-                    animation_label,
-                    skin_label,
-                    subprocess.list2cmdline(command),
+                temporary_context = (
+                    tempfile.TemporaryDirectory(prefix="xl-portrait-scene-")
+                    if scene_job and job.sprite_sources else nullcontext(None)
                 )
-                result = run_external_process(
-                    command,
-                    tool="SpineViewerCLI-export",
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-                output_exists = job.output_path.is_file()
-                output_bytes = job.output_path.stat().st_size if output_exists else 0
-                update_process_manifest(
-                    result,
-                    input_resources=input_resources,
-                    requested_output=str(job.output_path),
-                    output_verified=result.returncode == 0 and output_exists and output_bytes > 0,
-                    output_bytes=output_bytes,
-                    business_outcome="success" if result.returncode == 0 and output_exists and output_bytes > 0 else "failed",
-                    error_code=("SPINE_OUTPUT_NOT_CREATED" if result.returncode == 0 and not output_exists else "SPINE_OUTPUT_EMPTY" if result.returncode == 0 and output_exists and output_bytes <= 0 else "SPINE_CLI_NONZERO_EXIT" if result.returncode != 0 else None),
-                )
-                if result.returncode != 0:
-                    logger.error(
-                        "SpineViewerCLI 导出失败（命令=%s）: %s",
-                        subprocess.list2cmdline(command),
-                        result.stderr.strip(),
+                with temporary_context as temporary_dir:
+                    execution_job = (
+                        prepare_portrait_scene_export_job(job, temporary_dir)
+                        if scene_job and job.sprite_sources else job
                     )
-                    return False
-                if not job.output_path.is_file() or job.output_path.stat().st_size <= 0:
-                    logger.error("SpineViewerCLI 未生成有效输出: %s", job.output_path)
-                    return False
-                logger.info(
-                    "SpineViewerCLI 导出完成（格式=%s，输出=%s，大小=%s）",
-                    job.settings.format,
-                    job.output_path,
-                    job.output_path.stat().st_size,
-                )
-                return job.output_path.is_file()
+                    command = build_spine_export_command(execution_job, spine_cli)
+                    if scene_job:
+                        resource_label = f"scene {job.scene.character_id}/{job.scene.skin_id}"
+                        animation_label = ",".join(source.animation for source in execution_job.sources)
+                        skin_label = ",".join(source.skin for source in execution_job.sources)
+                        input_resources = [{
+                            "source_kind": source.source_kind,
+                            "part_id": source.part_id,
+                            "skel": str(source.skeleton_path),
+                            "atlas": str(source.atlas_path),
+                            "animation": source.animation,
+                            "skin": source.skin,
+                            "unity_order": source.unity_order,
+                            "skeleton_ref": source.skeleton_ref.to_dict() if source.skeleton_ref else None,
+                            "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
+                            "sprite_ref": source.sprite_ref.to_dict() if source.sprite_ref else None,
+                            "texture_ref": source.texture_ref.to_dict() if source.texture_ref else None,
+                            "source_bundle_hashes": sorted({
+                                reference.bundle_hash
+                                for reference in (source.skeleton_ref, *source.atlas_refs,
+                                                  source.sprite_ref, source.texture_ref)
+                                if reference is not None
+                            }),
+                        } for source in execution_job.sources]
+                        if job.sprite_sources:
+                            logger.info(
+                                "混合场景静态图层已准备: count=%s temp=%s",
+                                len(job.sprite_sources), temporary_dir,
+                                extra={"event": "spine.static_layers.prepared", "details": {
+                                    "layers": [{
+                                        "part_id": source.part_id,
+                                        "sprite_ref": source.sprite_ref.to_dict(),
+                                        "texture_ref": source.texture_ref.to_dict(),
+                                        "unity_order": source.unity_order,
+                                        "rect": source.rect,
+                                        "pivot": source.pivot,
+                                        "pixels_per_unit": source.pixels_per_unit,
+                                    } for source in job.sprite_sources],
+                                }},
+                            )
+                    else:
+                        resource_label = job.record.resource_family
+                        animation_label = job.settings.animation
+                        skin_label = ",".join(job.settings.skins)
+                        input_resources = [
+                            {"skel": record.source_skel, "atlas": record.atlas_path, "skin": record.skin_name, "resource_family": record.resource_family}
+                            for record in getattr(job, "records", (job.record,))
+                        ]
+                    logger.info(
+                        "SpineViewerCLI 导出开始（模式=%s，资源=%s，格式=%s，动画=%s，皮肤=%s，命令=%s）",
+                        getattr(job, "export_mode", "custom"),
+                        resource_label,
+                        job.settings.format,
+                        animation_label,
+                        skin_label,
+                        subprocess.list2cmdline(command),
+                    )
+                    result = run_external_process(
+                        command,
+                        tool="SpineViewerCLI-export",
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                    output_exists = job.output_path.is_file()
+                    output_bytes = job.output_path.stat().st_size if output_exists else 0
+                    update_process_manifest(
+                        result,
+                        input_resources=input_resources,
+                        requested_output=str(job.output_path),
+                        output_verified=result.returncode == 0 and output_exists and output_bytes > 0,
+                        output_bytes=output_bytes,
+                        business_outcome="success" if result.returncode == 0 and output_exists and output_bytes > 0 else "failed",
+                        error_code=("SPINE_OUTPUT_NOT_CREATED" if result.returncode == 0 and not output_exists else "SPINE_OUTPUT_EMPTY" if result.returncode == 0 and output_exists and output_bytes <= 0 else "SPINE_CLI_NONZERO_EXIT" if result.returncode != 0 else None),
+                    )
+                    if result.returncode != 0:
+                        logger.error(
+                            "SpineViewerCLI 导出失败（命令=%s）: %s",
+                            subprocess.list2cmdline(command),
+                            result.stderr.strip(),
+                        )
+                        return False
+                    if not job.output_path.is_file() or job.output_path.stat().st_size <= 0:
+                        logger.error("SpineViewerCLI 未生成有效输出: %s", job.output_path)
+                        return False
+                    logger.info(
+                        "SpineViewerCLI 导出完成（格式=%s，输出=%s，大小=%s）",
+                        job.settings.format,
+                        job.output_path,
+                        job.output_path.stat().st_size,
+                    )
+                    return job.output_path.is_file()
             except (OSError, subprocess.SubprocessError) as error:
                 logger.error("Spine 皮肤导出异常: %s", error)
+                return False
+            except ValueError as error:
+                error_code = getattr(error, "code", "PORTRAIT_RENDER_PLAN_INVALID")
+                logger.error(
+                    "角色场景渲染计划不完整: %s",
+                    error,
+                    extra={"event": "spine.scene.render_unsupported", "error_code": error_code,
+                           "details": {"message": str(error), "part_id": getattr(error, "part_id", "")}},
+                )
                 return False
 
         return run_job

@@ -53,6 +53,7 @@ class UnityScenePart:
     draw_mode: int = 0
     mask_interaction: int = 0
     sorting_layer_id: int = 0
+    blend_mode: str = "normal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +218,32 @@ def _renderer_refs(tree: dict[str, Any], bundle_hash: str, objects: dict[int, An
     return tuple(refs)
 
 
+def _renderer_blend_mode(tree: dict[str, Any], trees: dict[int, dict[str, Any]],
+                         objects: dict[int, Any]) -> str:
+    """Recognize standard alpha/PMA blend factors; fail closed otherwise."""
+    material_pointers = tuple(tree.get("m_Materials", ()))
+    if not material_pointers:
+        return "normal"
+    for pointer in material_pointers:
+        material_ref = _asset_ref("", pointer, objects)
+        if material_ref is None:
+            return "unsupported"
+        material_tree = trees.get(material_ref.path_id)
+        if not isinstance(material_tree, dict):
+            return "unsupported"
+        saved = material_tree.get("m_SavedProperties", {})
+        floats = saved.get("m_Floats", {}) if isinstance(saved, dict) else {}
+        if not isinstance(floats, dict):
+            return "unsupported"
+        source = floats.get("_SrcBlend", floats.get("m_SrcBlend"))
+        destination = floats.get("_DstBlend", floats.get("m_DstBlend"))
+        if source is None or destination is None:
+            return "unsupported"
+        if (int(float(source)), int(float(destination))) not in {(1, 10), (5, 10)}:
+            return "unsupported"
+    return "normal"
+
+
 def _external_files(objects: dict[int, Any]) -> tuple[UnityExternalFile, ...]:
     """Capture the serialized-file external tables, preserving their PPtr IDs."""
     found: dict[tuple[str, int, str, str], UnityExternalFile] = {}
@@ -292,7 +319,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
     external_files = _external_files(objects)
     types = {path_id: str(obj.type.name) for path_id, obj in objects.items()}
     accepted_types = {"GameObject", "Transform", "RectTransform", "MeshRenderer", "SkinnedMeshRenderer",
-                      "SpriteRenderer", "MeshFilter", "Sprite", "MonoBehaviour"}
+                      "SpriteRenderer", "MeshFilter", "Sprite", "Material", "MonoBehaviour"}
     trees: dict[int, dict[str, Any]] = {}
     kinds: dict[int, str] = {}
     for path_id, obj in objects.items():
@@ -537,6 +564,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
             for field_name, pointer in missing_refs:
                 _record_unresolved(pointer, AssetRef(str(bundle_hash), component_id), field_name, objects, diagnostics)
             materials = _renderer_refs(renderer_tree, str(bundle_hash), objects)
+            blend_mode = _renderer_blend_mode(renderer_tree, trees, objects)
             parts.append(UnityScenePart(
                 AssetRef(str(bundle_hash), game_object_id), AssetRef(str(bundle_hash), component_id),
                 names.get(game_object_id, ""), component_type, hierarchy, transform_chain, world_position,
@@ -551,6 +579,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
                 bool(tree.get("m_FlipY", tree.get("initialFlipY", False))), color, renderer_size,
                 int(renderer_tree.get("m_DrawMode", 0) or 0),
                 int(renderer_tree.get("m_MaskInteraction", 0) or 0), sorting_layer_id,
+                blend_mode,
             ))
 
         for component_id in spine_components:

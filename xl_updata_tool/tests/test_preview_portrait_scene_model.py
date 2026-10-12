@@ -34,7 +34,10 @@ def _scene() -> PortraitScene:
         game_object_name="Effect",
         hierarchy_path="Root/Effect",
         renderer=RendererState(kind="sprite", enabled=True, sorting_layer="Default", sorting_order=3),
-        sprite=SpriteState(sprite=AssetRef("bundle-a", 31), rect=(0, 0, 64, 64), pivot=(0.5, 0.5)),
+        sprite=SpriteState(
+            sprite=AssetRef("bundle-a", 31), rect=(0, 0, 64, 64), pivot=(0.5, 0.5),
+            texture=AssetRef("bundle-a", 32),
+        ),
     )
     spine_b = ScenePart(
         part_id="spine-bg",
@@ -56,6 +59,7 @@ def _scene() -> PortraitScene:
         available_assets=(
             AssetRef("bundle-a", 1), AssetRef("bundle-a", 10), AssetRef("bundle-a", 20),
             AssetRef("bundle-a", 21), AssetRef("bundle-a", 30), AssetRef("bundle-a", 31),
+            AssetRef("bundle-a", 32),
             AssetRef("bundle-b", 10), AssetRef("bundle-b", 20),
         ),
         interactions=(
@@ -147,6 +151,29 @@ def test_duplicate_unity_object_references_are_reported_in_stable_order():
     assert [(item.code, item.part_id) for item in diagnostics] == [
         ("duplicate_object_ref", "duplicate-component")
     ]
+
+
+def test_sprite_render_metadata_round_trips_for_exact_static_rendering():
+    scene = _scene()
+    sprite = replace(
+        scene.parts[1],
+        renderer=replace(
+            scene.parts[1].renderer,
+            color=(0.8, 0.7, 0.6, 0.5),
+            flip_x=True,
+            mask_interaction=0,
+            blend_mode="normal",
+        ),
+        sprite=replace(scene.parts[1].sprite, pixels_per_unit=128.0),
+    )
+
+    restored = PortraitScene.from_dict(replace(scene, parts=(scene.parts[0], sprite, scene.parts[2])).to_dict())
+
+    assert restored.parts[1].sprite.pixels_per_unit == 128.0
+    assert restored.parts[1].renderer.color == (0.8, 0.7, 0.6, 0.5)
+    assert restored.parts[1].renderer.flip_x is True
+    assert restored.parts[1].renderer.mask_interaction == 0
+    assert restored.parts[1].renderer.blend_mode == "normal"
 
 
 def test_from_dict_reports_unknown_fields_at_each_nested_boundary_deterministically():

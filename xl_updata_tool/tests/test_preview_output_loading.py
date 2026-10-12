@@ -138,7 +138,7 @@ def test_preview_service_loads_versioned_scene_manifests_without_source_discover
         prefab_container="assets/art/models/cardspine/prefab/cardspine_10118_3.prefab",
     )
     PortraitSceneCache(
-        data_root / "cache" / "portrait-scenes", parser_version="3",
+        data_root / "cache" / "portrait-scenes", parser_version="4",
     ).store_snapshot(scene)
     service = PreviewService(data_root / "material", tmp_path / "output" / "character")
     monkeypatch.setattr(

@@ -26,7 +26,7 @@ from .model import (
 )
 from .unity_scene import UnitySceneParseResult, UnityScenePart, parse_unity_scene
 
-PARSER_VERSION = "3"
+PARSER_VERSION = "4"
 
 
 def _metadata(root: PortraitRoot) -> dict[str, str]:
@@ -230,6 +230,11 @@ def _part_to_model(
         material=part.material_refs[0] if part.material_refs else None,
         materials=part.material_refs,
         mesh=part.mesh_ref,
+        color=part.renderer_color,
+        flip_x=part.flip_x,
+        flip_y=part.flip_y,
+        mask_interaction=part.mask_interaction,
+        blend_mode=part.blend_mode,
     )
     spine = None
     if skeleton is not None:
@@ -252,6 +257,7 @@ def _part_to_model(
             rect=part.sprite_rect,
             pivot=part.sprite_pivot,
             texture=sprite_texture,
+            pixels_per_unit=part.pixels_to_units,
         )
     transform_chain = tuple(TransformState(
         object_ref=node.component_ref,

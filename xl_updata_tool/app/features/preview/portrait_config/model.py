@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -31,6 +31,11 @@ class RendererState:
     material: AssetRef | None = None
     materials: tuple[AssetRef, ...] = ()
     mesh: AssetRef | None = None
+    color: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0)
+    flip_x: bool = False
+    flip_y: bool = False
+    mask_interaction: int = 0
+    blend_mode: str = "normal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +60,7 @@ class SpriteState:
     rect: tuple[float, ...] = ()
     pivot: tuple[float, ...] = ()
     texture: AssetRef | None = None
+    pixels_per_unit: float = 100.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +165,8 @@ def _part_dict(part: ScenePart) -> dict[str, Any]:
             "sorting_order": renderer.sorting_order, "transform": list(renderer.transform),
             "material": _ref(renderer.material), "materials": [item.to_dict() for item in renderer.materials],
             "mesh": _ref(renderer.mesh),
+            "color": list(renderer.color), "flip_x": renderer.flip_x, "flip_y": renderer.flip_y,
+            "mask_interaction": renderer.mask_interaction, "blend_mode": renderer.blend_mode,
         },
         "spine": None if spine is None else {
             "skeleton": spine.skeleton.to_dict(), "atlas": _ref(spine.atlas), "texture": _ref(spine.texture),
@@ -170,7 +178,7 @@ def _part_dict(part: ScenePart) -> dict[str, Any]:
         },
         "sprite": None if sprite is None else {
             "sprite": sprite.sprite.to_dict(), "rect": list(sprite.rect), "pivot": list(sprite.pivot),
-            "texture": _ref(sprite.texture),
+            "texture": _ref(sprite.texture), "pixels_per_unit": sprite.pixels_per_unit,
         },
     }
 
@@ -181,6 +189,9 @@ def _part(value: dict[str, Any]) -> ScenePart:
         str(r["kind"]), bool(r["enabled"]), str(r.get("sorting_layer", "Default")),
         int(r.get("sorting_order", 0)), tuple(map(float, r.get("transform", ()))), _unref(r.get("material")),
         tuple(AssetRef.from_dict(item) for item in r.get("materials", ())), _unref(r.get("mesh")),
+        tuple(map(float, r.get("color", (1.0, 1.0, 1.0, 1.0)))),
+        bool(r.get("flip_x", False)), bool(r.get("flip_y", False)),
+        int(r.get("mask_interaction", 0)), str(r.get("blend_mode", "normal")),
     )
     spine = None if s is None else SpineState(
         AssetRef.from_dict(s["skeleton"]), _unref(s.get("atlas")), _unref(s.get("texture")),
@@ -193,6 +204,7 @@ def _part(value: dict[str, Any]) -> ScenePart:
     sprite = None if p is None else SpriteState(
         AssetRef.from_dict(p["sprite"]), tuple(map(float, p.get("rect", ()))),
         tuple(map(float, p.get("pivot", ()))), _unref(p.get("texture")),
+        float(p.get("pixels_per_unit", 100.0)),
     )
     transform_chain = tuple(TransformState(
         AssetRef.from_dict(item["object_ref"]),
@@ -282,10 +294,10 @@ class PortraitScene:
         }
         nested_fields = {
             "renderer": {"kind", "enabled", "sorting_layer", "sorting_order", "transform", "material",
-                          "materials", "mesh"},
+                          "materials", "mesh", "color", "flip_x", "flip_y", "mask_interaction", "blend_mode"},
             "spine": {"skeleton", "atlas", "texture", "material", "default_animation", "loop", "time_scale",
                       "initial_skin", "animations", "skins", "skeleton_json", "atlases"},
-            "sprite": {"sprite", "rect", "pivot", "texture"},
+            "sprite": {"sprite", "rect", "pivot", "texture", "pixels_per_unit"},
         }
         parts = []
         for value in data.get("parts", ()):
@@ -341,6 +353,28 @@ class PortraitScene:
                 ) if x)
             if part.sprite:
                 refs.extend(x for x in (part.sprite.sprite, part.sprite.texture) if x)
+                if part.sprite.texture is None:
+                    found.append(SceneDiagnostic(
+                        "missing_sprite_texture", "Sprite has no resolved exact Texture2D reference",
+                        part_id=part.part_id, source=part.sprite.sprite,
+                    ))
+                if part.sprite.pixels_per_unit <= 0:
+                    found.append(SceneDiagnostic(
+                        "invalid_sprite_pixels_per_unit", "Sprite pixels-per-unit must be positive",
+                        part_id=part.part_id, source=part.sprite.sprite,
+                    ))
+            if part.renderer and part.sprite:
+                if part.renderer.mask_interaction != 0:
+                    found.append(SceneDiagnostic(
+                        "unsupported_sprite_mask", "SpriteRenderer mask interaction is not supported",
+                        part_id=part.part_id, source=part.object_ref,
+                    ))
+                if part.renderer.blend_mode != "normal":
+                    found.append(SceneDiagnostic(
+                        "unsupported_sprite_blend", "SpriteRenderer blend mode is not supported",
+                        part_id=part.part_id, source=part.object_ref,
+                        details=(("blend_mode", part.renderer.blend_mode),),
+                    ))
             for ref in refs:
                 if ref not in known_assets:
                     found.append(SceneDiagnostic("missing_asset", "Referenced Unity asset is absent from the scene asset index",

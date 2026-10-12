@@ -117,6 +117,25 @@ def test_sprite_rect_pivot_and_sorting_come_from_serialized_data_not_names(monke
     assert any(diagnostic.code == "unsupported_enabled_renderer" for diagnostic in parsed.diagnostics)
 
 
+def test_sprite_material_blend_mode_is_classified_from_material_typetree(monkeypatch):
+    objects = _scene_objects()
+    renderer = next(obj for obj in objects if obj.path_id == 10)
+    renderer.tree["m_Materials"] = [_ptr(72)]
+    material = next(obj for obj in objects if obj.path_id == 72)
+    material.tree["m_SavedProperties"] = {"m_Floats": {"_SrcBlend": 1.0, "_DstBlend": 10.0}}
+    monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=objects))
+
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
+
+    sprite = next(part for part in parsed.parts if part.component_type == "SpriteRenderer")
+    assert sprite.blend_mode == "normal"
+
+    material.tree["m_SavedProperties"]["m_Floats"]["_DstBlend"] = 1.0
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
+    sprite = next(part for part in parsed.parts if part.component_type == "SpriteRenderer")
+    assert sprite.blend_mode == "unsupported"
+
+
 def test_skeleton_data_asset_and_renderer_component_are_linked_without_duplicate_mesh_part(monkeypatch):
     monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=_scene_objects()))
 
