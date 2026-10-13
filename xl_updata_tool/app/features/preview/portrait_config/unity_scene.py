@@ -533,8 +533,36 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
             skeleton_ref = _asset_ref(bundle_hash, skeleton_pointer, objects)
             skeleton_tree = trees.get(skeleton_ref.path_id, {}) if skeleton_ref else {}
             skeleton_json = _asset_ref(bundle_hash, skeleton_tree.get("skeletonJSON"), objects)
-            atlas_refs = tuple(ref for pointer in skeleton_tree.get("atlasAssets", ())
-                               if (ref := _asset_ref(bundle_hash, pointer, objects)) is not None)
+            atlas_refs_list = []
+            for pointer in skeleton_tree.get("atlasAssets", ()):
+                atlas_asset = _asset_ref(bundle_hash, pointer, objects)
+                if atlas_asset is None:
+                    continue
+                atlas_asset_tree = trees.get(atlas_asset.path_id, {})
+                atlas_file_pointer = atlas_asset_tree.get("atlasFile")
+                if atlas_file_pointer is None:
+                    # Some older data stores the exported atlas TextAsset directly;
+                    # an AtlasAsset MonoBehaviour without its file is not an atlas.
+                    atlas_object = objects.get(atlas_asset.path_id)
+                    atlas_type = getattr(getattr(atlas_object, "type", None), "name", "")
+                    if atlas_type == "TextAsset":
+                        atlas_refs_list.append(atlas_asset)
+                    else:
+                        diagnostics.append(SceneDiagnostic(
+                            "atlas_file_missing",
+                            "AtlasAsset does not reference an atlas TextAsset",
+                            source=atlas_asset,
+                            details=(("atlas_asset_path_id", str(atlas_asset.path_id)),),
+                        ))
+                    continue
+                atlas_file = _asset_ref(bundle_hash, atlas_file_pointer, objects)
+                if atlas_file is None:
+                    _record_unresolved(
+                        atlas_file_pointer, atlas_asset, "atlasFile", objects, diagnostics,
+                    )
+                    continue
+                atlas_refs_list.append(atlas_file)
+            atlas_refs = tuple(atlas_refs_list)
             missing_refs = []
             if component_type == "SkeletonAnimation" and skeleton_pointer and skeleton_ref is None:
                 missing_refs.append(("skeletonDataAsset", skeleton_pointer))

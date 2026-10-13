@@ -115,7 +115,7 @@ def _scope_to_container(
         for pointer in pointers_by_source.get(source, ()):
             field = pointer.field_path.casefold()
             if not any(token in field for token in (
-                "skeletondataasset", "skeletonjson", "atlasassets", "m_materials",
+                "skeletondataasset", "skeletonjson", "atlasassets", "atlasfile", "m_materials",
                 "m_mesh", "m_sprite", "texture", "collider",
             )):
                 continue

@@ -226,6 +226,8 @@ def build_portrait_scene_export_job(
         animation = str(spine.default_animation or "").strip()
         if export_mode == "custom":
             animation = str(settings.animation or "").strip()
+        elif not animation:
+            animation = str(settings.animation or "").strip()
         if not animation:
             raise ValueError(f"scene part {part.part_id} has no configured animation")
         if spine.animations and animation not in spine.animations:

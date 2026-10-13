@@ -248,6 +248,23 @@ def test_builtin_scene_plan_keeps_cardspine_static_and_video_together(tmp_path):
     assert all(job.sources[0].animation == "idle" for job in jobs)
 
 
+def test_builtin_scene_uses_preset_animation_when_one_part_has_no_prefab_animation(tmp_path):
+    from app.features.preview.portrait_scene_export import build_portrait_scene_export_jobs
+
+    character = _part("character", "cardspine_10124_3", order=2, animation="idle", path_start=1)
+    background = _part("background", "cardspine_10124_3_bg", order=1, animation="", path_start=4)
+    scene = _scene((character, background))
+    index, material_root = _index(tmp_path, (character, background))
+
+    jobs = build_portrait_scene_export_jobs(scene, index, material_root, tmp_path / "output")
+
+    assert [job.settings.format for job in jobs] == ["Png", "Mp4"]
+    assert [[source.animation for source in job.sources] for job in jobs] == [
+        ["idle", "idle"],
+        ["idle", "idle"],
+    ]
+
+
 def test_scene_export_rejects_renderer_animation_missing_from_skeleton(tmp_path):
     part = _part("character", "cardspine_10118_3", order=4, animation="missing")
     part = replace(part, spine=replace(part.spine, animations=("idle", "hover")))

@@ -84,6 +84,60 @@ def test_nested_transform_chain_and_same_gameobject_spine_components_are_distinc
     assert spine_parts[0].hierarchy_path == "root/hero"
 
 
+def test_skeleton_atlas_assets_resolve_through_atlas_asset_to_text_asset(monkeypatch):
+    objects = _scene_objects()
+    skeleton_data = next(obj for obj in objects if obj.path_id == 50)
+    skeleton_data.tree["atlasAssets"] = [_ptr(61)]
+    objects.extend([
+        FakeObject(60, "TextAsset", {"m_Name": "hero.skel"}),
+        FakeObject(61, "MonoBehaviour", {"m_Name": "hero_Atlas", "atlasFile": _ptr(64)}),
+        FakeObject(64, "TextAsset", {"m_Name": "hero.atlas"}),
+    ])
+    monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=objects))
+
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
+
+    spine = next(part for part in parsed.parts if part.component_ref.path_id == 5)
+    assert [ref.path_id for ref in spine.atlas_refs] == [64]
+
+
+def test_atlas_asset_without_atlas_file_is_not_mistaken_for_atlas_text(monkeypatch):
+    objects = _scene_objects()
+    skeleton_data = next(obj for obj in objects if obj.path_id == 50)
+    skeleton_data.tree["atlasAssets"] = [_ptr(61)]
+    objects.extend([
+        FakeObject(60, "TextAsset", {"m_Name": "hero.skel"}),
+        FakeObject(61, "MonoBehaviour", {"m_Name": "hero_Atlas"}),
+    ])
+    monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=objects))
+
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
+
+    spine = next(part for part in parsed.parts if part.component_ref.path_id == 5)
+    assert spine.atlas_refs == ()
+    assert any(item.code == "atlas_file_missing" for item in parsed.diagnostics)
+
+
+@pytest.mark.parametrize(
+    ("pointer", "diagnostic"),
+    [(_ptr(999), "unresolved_pptr"),
+     ({"m_FileID": 1, "m_PathID": 999}, "unresolved_external_pptr")],
+)
+def test_unresolved_atlas_asset_pointer_is_reported(monkeypatch, pointer, diagnostic):
+    objects = _scene_objects()
+    skeleton_data = next(obj for obj in objects if obj.path_id == 50)
+    skeleton_data.tree["atlasAssets"] = [pointer]
+    monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=objects))
+
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
+
+    item = next(
+        item for item in parsed.diagnostics
+        if item.code == diagnostic and dict(item.details).get("path_id") == "999"
+    )
+    assert dict(item.details)["field"] == "atlasAssets"
+
+
 def test_touch_event_resolves_exact_component_reference_not_gameobject_name(monkeypatch):
     monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=_scene_objects()))
 
