@@ -102,6 +102,26 @@ class GachaHistoryTests(unittest.TestCase):
         self.assertEqual(result["anomalies"][0]["expected_character_id"], 101)
         self.assertEqual(result["anomalies"][0]["actual_character_id"], 102)
 
+    def test_history_uses_gacha_id_order_and_ignores_ui_sort(self):
+        earlier = pool(24000080, 10000218)
+        later = pool(24000086, 10000223)
+        earlier["sort"] = 7
+        later["sort"] = 6
+
+        result = rebuild_gacha_history(
+            [later, earlier],
+            {1: {"bottom_type": 201}},
+        )
+
+        self.assertEqual(
+            [event["gacha_id"] for event in result["events"]],
+            [24000080, 24000086],
+        )
+        self.assertEqual(
+            [item["debut_gacha_id"] for item in result["queue"]],
+            [24000080, 24000086],
+        )
+
     def test_special_and_unknown_pools_never_change_normal_queue(self):
         pools = [
             pool(10, 101),

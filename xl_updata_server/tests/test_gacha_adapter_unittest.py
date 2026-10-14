@@ -71,6 +71,27 @@ class GachaLuaAdapterTests(unittest.TestCase):
         self.assertEqual(pools[0]["main_card_ids"], [10000223])
         self.assertEqual(bottomups[9]["bottom_type"], 201)
 
+    def test_loads_pools_in_gacha_id_order_ignoring_ui_sort(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "BaseGacha.lua").write_text(
+                "BaseGacha = {"
+                "[24000086]={id=24000086,type=2,sort=6,bottom_up=1,bottom_main_type=1,main_card_ids={2}},"
+                "[24000080]={id=24000080,type=2,sort=7,bottom_up=1,bottom_main_type=1,main_card_ids={1}}"
+                "}",
+                encoding="utf-8",
+            )
+            (root / "BaseGachaBottomUp.lua").write_text(
+                "BaseGachaBottomUp = {[1]={bottom_type=201}}", encoding="utf-8"
+            )
+
+            pools, _ = load_gacha_tables(root)
+
+        self.assertEqual([item["id"] for item in pools], [24000080, 24000086])
+
     def test_resolves_headliner_names_through_basecard_translation_ids(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
