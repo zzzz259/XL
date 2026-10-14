@@ -248,7 +248,7 @@ def load_gacha_tables(lua_dir: str) -> tuple[list[dict[str, Any]], dict[Any, Any
                 if numeric_keys == list(range(1, len(field_value) + 1)) and len(numeric_keys) == len(field_value):
                     normalized[list_field] = [field_value[item_key] for item_key in numeric_keys]
         pools.append(normalized)
-    pools.sort(key=lambda item: (_int_sort(item.get("sort")), _int_sort(item.get("id"))))
+    pools.sort(key=lambda item: _int_sort(item.get("id")))
     return pools, bottomups
 
 

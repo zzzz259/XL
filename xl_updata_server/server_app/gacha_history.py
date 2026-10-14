@@ -13,15 +13,12 @@ def _int(value: Any) -> int | None:
         return None
 
 
-def _pool_order(pool: Mapping[str, Any]) -> tuple[int, int, str]:
-    """Use configured sort when numeric, then numeric Gacha ID as stable tie-break."""
+def _pool_order(pool: Mapping[str, Any]) -> tuple[int, int | str]:
+    """Order historical pools by numeric Gacha ID; UI sort is not chronology."""
     gacha_id = _int(pool.get("id"))
-    configured_sort = _int(pool.get("sort"))
-    return (
-        configured_sort if configured_sort is not None else (gacha_id if gacha_id is not None else 2**63 - 1),
-        gacha_id if gacha_id is not None else 2**63 - 1,
-        str(pool.get("id", "")),
-    )
+    if gacha_id is not None:
+        return 0, gacha_id
+    return 1, str(pool.get("id", ""))
 
 
 def _bottom_type(bottomups: Mapping[Any, Any], key: Any) -> int | None:
@@ -59,8 +56,8 @@ def rebuild_gacha_history(
     """Build pool events, lifecycle events, queue, and deterministic anomalies.
 
     The queue contains normal single-headliner characters with a debut but no
-    first normal rerun. Ordering is the configured numeric ``sort`` field when
-    present, then numeric Gacha ID, with original string ID as a stable tie-break.
+    first normal rerun. Historical ordering uses numeric Gacha ID only;
+    the game's ``sort`` field controls concurrent banner display order, not chronology.
     """
     display_names = names or {}
     override_by_id: dict[str, Mapping[str, Any]] = {}
