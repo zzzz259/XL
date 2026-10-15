@@ -40,6 +40,27 @@ jobs:
           print(f"Allowed PR flow: {head_ref} -> {base_ref}")
           PY
 
+  branch-lineage:
+    if: github.event_name == 'push' || github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify staged branch ancestry
+        run: |
+          git merge-base --is-ancestor origin/main origin/test || {
+            echo "main must be an ancestor of test" >&2
+            exit 1
+          }
+          git merge-base --is-ancestor origin/test origin/debug || {
+            echo "test must be an ancestor of debug" >&2
+            exit 1
+          }
+          echo "Branch lineage is valid: main <= test <= debug"
+
   desktop-tool:
     runs-on: windows-latest
     defaults:

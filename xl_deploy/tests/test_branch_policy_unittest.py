@@ -7,12 +7,10 @@ class PullRequestFlowTests(unittest.TestCase):
     def test_task_branch_can_target_debug(self):
         self.assertTrue(is_allowed_pull_request("codex/task", "debug"))
 
-    def test_only_debug_can_target_test(self):
-        self.assertTrue(is_allowed_pull_request("debug", "test"))
+    def test_stage_promotion_prs_are_rejected(self):
+        self.assertFalse(is_allowed_pull_request("debug", "test"))
+        self.assertFalse(is_allowed_pull_request("test", "main"))
         self.assertFalse(is_allowed_pull_request("codex/task", "test"))
-
-    def test_only_test_can_target_main(self):
-        self.assertTrue(is_allowed_pull_request("test", "main"))
         self.assertFalse(is_allowed_pull_request("codex/task", "main"))
 
     def test_long_lived_branches_cannot_bypass_debug(self):
