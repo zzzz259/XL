@@ -15,7 +15,6 @@ PNG_1PX = bytes.fromhex(
     "0000000b49444154789c636000020000050001a5f645400000000049454e44ae426082"
 )
 
-
 class RerunScheduleProcessorTests(unittest.TestCase):
     def test_user_confirmed_current_period_is_not_replayed_as_history(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -87,6 +86,44 @@ class RerunScheduleProcessorTests(unittest.TestCase):
             lua = root / "lua"
             stage = root / "stage"
             lua.mkdir()
+            (lua / "basegacha.lua").write_text(
+                "BaseGacha = { [24000060] = { id=24000060, type=2, sort=60, bottom_up=1, "
+                "bottom_main_type=1, main_card_ids={10000214} } }",
+                encoding="utf-8",
+            )
+            (lua / "basegachabottomup.lua").write_text(
+                "BaseGachaBottomUp = { [1] = { bottom_type=201 } }", encoding="utf-8"
+            )
+            config = SimpleNamespace(
+                rerun_schedule_enabled=True,
+                rerun_schedule_anchor=None,
+                node_bin="node",
+            )
+            with patch(
+                "server_app.processor.render_schedule_png", return_value=PNG_1PX
+            ):
+                result = process_rerun_schedule(
+                    lua,
+                    stage,
+                    "134351472190013976",
+                    {"10000214": {"name": "朝雾"}},
+                    config,
+                )
+
+            self.assertIsNotNone(result)
+            self.assertEqual(result["queue"][0]["character_id"], 10000224)
+            payload, image_path = read_current_schedule(stage / "rerun_schedule")
+            self.assertEqual(payload["source_version"], "134351472190013976")
+            self.assertEqual(payload["render"]["next"]["name"], "雾铃")
+            self.assertTrue(image_path.is_file())
+            self.assertTrue((stage / "rerun_schedule" / "current.png").is_file())
+
+    def test_mixed_case_lua_names_are_resolved_on_case_sensitive_filesystems(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lua = root / "lua"
+            stage = root / "stage"
+            lua.mkdir()
             (lua / "BaseGacha.lua").write_text(
                 "BaseGacha = { [24000060] = { id=24000060, type=2, sort=60, bottom_up=1, "
                 "bottom_main_type=1, main_card_ids={10000214} } }",
@@ -128,7 +165,6 @@ class RerunScheduleProcessorTests(unittest.TestCase):
             self.assertEqual(payload["source_version"], "134351472190013976")
             self.assertEqual(payload["render"]["next"]["name"], "雾铃")
             self.assertTrue(image_path.is_file())
-            self.assertTrue((stage / "rerun_schedule" / "current.png").is_file())
 
     def test_computed_word_lookup_does_not_block_schedule_render(self):
         with tempfile.TemporaryDirectory() as directory:
