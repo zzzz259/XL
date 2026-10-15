@@ -16,6 +16,11 @@ def test_user_units_use_fixed_release_paths_and_keep_runtime_data_external():
         "xl-qqbot-test.service": "test",
         "xl-qqbot-prod.service": "main",
         "xl-qqbot-router.service": "main",
+        "xl-qqbot-test-notify.service": "test",
+        "xl-qqbot-test-jobs.service": "test",
+        "xl-qqbot-main-notify.service": "main",
+        "xl-qqbot-main-jobs.service": "main",
+        "xl-qqbot-control.service": "main",
         "xl-updata-server.service": "main",
     }
 
@@ -53,6 +58,11 @@ def test_runtime_bot_units_exclude_checkout_cwd_from_import_resolution():
         "xl-qqbot-router.service",
         "xl-qqbot-prod.service",
         "xl-qqbot-test.service",
+        "xl-qqbot-test-notify.service",
+        "xl-qqbot-test-jobs.service",
+        "xl-qqbot-main-notify.service",
+        "xl-qqbot-main-jobs.service",
+        "xl-qqbot-control.service",
     ):
         content = read(f"xl_deploy/deploy/{filename}")
         assert "-P -m bot_app." in content

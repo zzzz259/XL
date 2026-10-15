@@ -117,9 +117,9 @@ class QueryHandler:
         if not isinstance(data, dict):
             _logger.warning("事件 data 不是对象，已忽略: %r", data)
             return
+        event_type = payload.get("event_type") or payload.get("type") or ""
         await self.handle_event(
-            str(payload.get("type") or ""), data,
-            muted=payload.get("muted"),
+            str(event_type), data, muted=payload.get("muted")
         )
 
     async def handle_event(self, etype: str, data: dict, muted=None) -> None:

@@ -11,17 +11,23 @@ def test_debug_branch_is_noop_while_test_bot_targets_both_lower_tiers():
     assert debug.impacted_units == ()
     assert debug.announcement_scope == ()
     assert test.impacted_tiers == ("debug", "test")
-    assert test.impacted_units == ("xl-qqbot-test.service",)
+    assert test.impacted_units == (
+        "xl-qqbot-test.service",
+        "xl-qqbot-test-notify.service",
+        "xl-qqbot-test-jobs.service",
+    )
     assert test.announcement_scope == ("debug", "test")
 
 
 @pytest.mark.parametrize(
     ("paths", "units", "tiers", "notice"),
     [
-        (["xl_qqbot/bot_app/router.py"], ("xl-qqbot-prod.service", "xl-qqbot-router.service"), ("debug", "test", "production"), ("main",)),
+        (["xl_qqbot/bot_app/router.py"],
+         ("xl-qqbot-prod.service", "xl-qqbot-router.service", "xl-qqbot-main-notify.service", "xl-qqbot-control.service", "xl-qqbot-main-jobs.service"),
+         ("debug", "test", "production"), ("main",)),
         (["xl_updata_server/server_app/processor.py"], ("xl-updata-server.service",), ("production",), ("main",)),
         (["xl_qqbot/bot_app/service.py", "xl_updata_server/run_server.py"],
-         ("xl-qqbot-prod.service", "xl-qqbot-router.service", "xl-updata-server.service"),
+         ("xl-qqbot-prod.service", "xl-qqbot-router.service", "xl-qqbot-main-notify.service", "xl-qqbot-control.service", "xl-qqbot-main-jobs.service", "xl-updata-server.service"),
          ("debug", "test", "production"), ("main",)),
     ],
 )

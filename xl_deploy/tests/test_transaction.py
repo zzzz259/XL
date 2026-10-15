@@ -695,6 +695,7 @@ def test_router_health_check_authenticates_and_retries_until_ready(monkeypatch):
     def urlopen(request, timeout):
         nonlocal attempts
         attempts += 1
+        assert request.full_url == "http://127.0.0.1:8785/gateway/health"
         assert request.get_header("Authorization") == "Bearer local-token"
         if attempts == 1:
             raise urllib.error.HTTPError(request.full_url, 503, "starting", {}, None)

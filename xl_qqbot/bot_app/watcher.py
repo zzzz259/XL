@@ -26,19 +26,25 @@ class Watcher:
     def __init__(
         self,
         config: Config,
-        sender: QQSender,
+        sender: QQSender | None = None,
         mute: ServiceMute | None = None,
         tiers: GroupTier | None = None,
         proactive_outbox: ProactiveOutbox | None = None,
         source: UpdateSourceConfig | None = None,
+        notification_client=None,
     ):
         self.config = config
         self.source = source or UpdateSourceConfig(
             name="main", outbox_dir=config.watch.outbox_dir
         )
         self.sender = sender
-        self.proactive_outbox = proactive_outbox or ProactiveOutbox(
-            config.watch.data_dir
+        self.notification_client = notification_client
+        self.proactive_outbox = (
+            proactive_outbox
+            if proactive_outbox is not None
+            else None
+            if notification_client is not None
+            else ProactiveOutbox(config.watch.data_dir)
         )
         self.state_dir = (
             config.watch.data_dir
@@ -81,14 +87,14 @@ class Watcher:
         consumed = offset
         for event in events:
             if event.event == "start":
-                self._enqueue_update_event(event)
+                await self._enqueue_update_event(event)
                 self.mute.muted = True
                 _logger.info("已将更新开始通知写入发件箱 version=%s", event.version)
             elif event.event == "finish":
                 batch = batches.pop(str(event.version), None)
                 if batch is not None:
                     await self._process_batch(batch)
-                self._enqueue_update_event(event)
+                await self._enqueue_update_event(event)
                 self.mute.muted = False
                 _logger.info(
                     "已将更新结束通知写入发件箱 version=%s new=%d error=%s",
@@ -114,7 +120,7 @@ class Watcher:
             if new_offset > consumed:
                 self.notice.mark_consumed(new_offset)
 
-    def _enqueue_update_event(self, event) -> None:
+    async def _enqueue_update_event(self, event) -> None:
         """Durably enqueue the event for every update-notice-enabled group."""
         group_openids = self._eligible_groups()
         if not group_openids:
@@ -125,9 +131,27 @@ class Watcher:
             text = "版本更新失败，服务已恢复，将等待下次自动重试"
         else:
             text = f"版本更新结束，一共有{event.new_characters}个新角色"
+        event_key = self._update_event_key(event)
+        if self.notification_client is not None:
+            await self.notification_client.enqueue(
+                event_key=event_key,
+                tier="main" if self.source.name == "main" else "test",
+                messages=[
+                    {
+                        "recipient": group_openid,
+                        "ordinal": 0,
+                        "kind": "text",
+                        "text": text,
+                    }
+                    for group_openid in group_openids
+                ],
+            )
+            return
+        if self.proactive_outbox is None:
+            raise RuntimeError("update watcher has no notification sink")
         for group_openid in group_openids:
             self.proactive_outbox.enqueue_text(
-                self._update_event_key(event), group_openid, 0, text
+                event_key, group_openid, 0, text
             )
 
     async def _process_batch(self, batch: VersionBatch) -> None:
@@ -157,6 +181,10 @@ class Watcher:
                 ):
                     already_sent += 1
                     continue
+                if self.notification_client is not None:
+                    continue
+                if self.proactive_outbox is None:
+                    raise RuntimeError("update watcher has no notification sink")
                 existing = self.proactive_outbox.find_by_key(
                     event_key, group_openid, 0
                 )
@@ -173,6 +201,31 @@ class Watcher:
                     already_pending += 1
                 else:
                     newly_queued += 1
+
+            if self.notification_client is not None:
+                recipients = [
+                    group_openid
+                    for group_openid in group_openids
+                    if not self.store.is_sent_to_group(
+                        batch.version, image.file_name, group_openid
+                    )
+                ]
+                if recipients:
+                    await self.notification_client.enqueue(
+                        event_key=event_key,
+                        tier="main" if self.source.name == "main" else "test",
+                        messages=[
+                            {
+                                "recipient": group_openid,
+                                "ordinal": 0,
+                                "kind": "image",
+                                "media_path": image.file_path,
+                                "text": content,
+                            }
+                            for group_openid in recipients
+                        ],
+                    )
+                    newly_queued += len(recipients)
 
         # All target rows and their copied attachments are now durable. The
         # dispatcher owns delivery/retry; only now may the source batch clear.
