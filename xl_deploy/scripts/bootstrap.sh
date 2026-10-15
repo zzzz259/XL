@@ -15,6 +15,35 @@ readonly UNIT_DIR="$HOME_DIR/.config/systemd/user"
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly TEMPLATE_DIR="$REPO_ROOT/xl_deploy/deploy"
 
+# The host's default python3 may be older than the deployment venv. TOML
+# inventory and the systemd argument parser need a modern interpreter. Prefer
+# an existing release venv, then a versioned system interpreter. Keep dry-run
+# usable when none is available by reporting mappings as unavailable instead
+# of crashing.
+INVENTORY_PYTHON="${XL_DEPLOY_INVENTORY_PYTHON:-}"
+if [[ -z "$INVENTORY_PYTHON" ]]; then
+  for candidate in "$CURRENT/main/.venvs/xl-deploy-poll.service/bin/python" "$CURRENT/test/.venvs/xl-deploy-poll.service/bin/python"; do
+    if [[ -x "$candidate" ]] && "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
+      INVENTORY_PYTHON="$candidate"
+      break
+    fi
+  done
+fi
+if [[ -z "$INVENTORY_PYTHON" ]]; then
+  for interpreter in python3.11 python3.12 python3.13 python3; do
+    candidate="$(command -v "$interpreter" 2>/dev/null || true)"
+    if [[ -n "$candidate" ]] && "$candidate" -c 'import tomllib' >/dev/null 2>&1; then
+      INVENTORY_PYTHON="$candidate"
+      break
+    fi
+  done
+fi
+if [[ -n "$INVENTORY_PYTHON" ]] && ! "$INVENTORY_PYTHON" -c 'import tomllib' >/dev/null 2>&1; then
+  printf 'Ignoring XL_DEPLOY_INVENTORY_PYTHON without tomllib: %s\n' "$INVENTORY_PYTHON" >&2
+  INVENTORY_PYTHON=""
+fi
+readonly INVENTORY_PYTHON
+
 if [[ "$HOME_DIR" != "/home/admin" ]]; then
   printf 'This deployment layout is pinned to /home/admin; refusing HOME=%s\n' "$HOME_DIR" >&2
   exit 1
@@ -64,7 +93,11 @@ report_config_mappings() {
     printf 'Config/data mappings unavailable: config is missing: %s\n' "$config_path"
     return
   fi
-  python3 - "$config_path" "$working_directory" <<'PY'
+  if [[ -z "$INVENTORY_PYTHON" ]]; then
+    printf 'Config/data mappings unavailable: Python 3.11+ with tomllib was not found.\n'
+    return 0
+  fi
+  "$INVENTORY_PYTHON" - "$config_path" "$working_directory" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
@@ -155,8 +188,12 @@ report_effective_unit() {
   printf '%s\n' "$effective_properties" | sed 's/^/  /'
   effective_directory="$(sed -n 's/^WorkingDirectory=//p' <<<"$effective_properties" | tail -n 1)"
   [[ "$effective_directory" == /* ]] || effective_directory=""
+  if [[ -z "$INVENTORY_PYTHON" ]]; then
+    printf '  Effective config mapping unavailable: Python 3.11+ with tomllib was not found.\n'
+    return 0
+  fi
   effective_exec="$(systemctl --user show "$unit_name" --no-pager --property=ExecStart --value 2>/dev/null || true)"
-  effective_config="$(printf '%s' "$effective_exec" | python3 "$REPO_ROOT/xl_deploy/operator_inventory.py" --extract-systemd-config)"
+  effective_config="$(printf '%s' "$effective_exec" | "$INVENTORY_PYTHON" "$REPO_ROOT/xl_deploy/operator_inventory.py" --extract-systemd-config)"
   if [[ -z "$effective_config" && "$effective_exec" == *"--config"* ]]; then
     printf '  Effective config mapping unresolved: explicit --config could not be parsed safely.\n'
     return
