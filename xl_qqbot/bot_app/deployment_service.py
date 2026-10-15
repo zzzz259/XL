@@ -25,6 +25,7 @@ _ANNOUNCEMENTS = {
     "starting": "检测到更新，正在更新bot，期间将暂停服务",
     "complete": "更新完毕",
 }
+_START_NOTICE_DELIVERY_TIMEOUT_SECONDS = 30
 
 
 def build_deployment_service_app(
@@ -134,15 +135,24 @@ def build_deployment_service_app(
             for group in notice_groups
         ]
         try:
+            event_key = f"deployment:{notification_id}"
             queued = await notification_client.enqueue(
-                event_key=f"deployment:{notification_id}",
+                event_key=event_key,
                 tier=tier,
                 messages=messages,
             )
             if len(queued) != len(messages):
                 raise RuntimeError("notification API returned an incomplete queue receipt")
+            if phase == "starting" and not await notification_client.wait_for_delivery(
+                event_key,
+                expected_total=len(messages),
+                timeout_seconds=_START_NOTICE_DELIVERY_TIMEOUT_SECONDS,
+            ):
+                raise RuntimeError("start notice was not delivered before timeout")
         except Exception:
-            _logger.exception("部署公告未能持久入队 tier=%s id=%s", tier, notification_id)
+            _logger.exception(
+                "部署公告入队或发送确认失败 tier=%s id=%s", tier, notification_id
+            )
             results = {group: False for group in notice_groups}
             return web.json_response(
                 {"ok": False, "results": results}, status=503
