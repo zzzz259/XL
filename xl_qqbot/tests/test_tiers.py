@@ -303,7 +303,10 @@ async def test_bilibili_watch_sends_to_allowed_groups(tmp_path):
         for item in watcher.proactive_outbox.list_pending()
         if item.kind == "text"
     ]
-    assert text_groups == [DEBUG_G, PROD_G]
+    # Bilibili automation belongs to the production tier; debug/test groups
+    # must not receive production notices.
+    assert text_groups == [PROD_G]
+    assert DEBUG_G not in text_groups
     assert watcher.state.target(DEFAULT_BILI_MID).last_opus_id == 102
 
 
