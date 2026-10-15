@@ -1,0 +1,21 @@
+[Unit]
+Description=XL QQ Bot deployment control API
+After=network-online.target xl-qqbot-router.service xl-qqbot-test-notify.service xl-qqbot-main-notify.service
+Wants=network-online.target xl-qqbot-router.service xl-qqbot-test-notify.service xl-qqbot-main-notify.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_qqbot
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/xl_deploy/current/main/xl_qqbot
+ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-qqbot-control.service/bin/python -P -m bot_app.deployment_service
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+CPUQuota=20%
+MemoryMax=160M
+Nice=10
+
+[Install]
+WantedBy=default.target

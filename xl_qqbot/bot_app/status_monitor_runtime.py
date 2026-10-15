@@ -38,8 +38,10 @@ def select_status_recipients(
 
 def build_status_monitor(
     config: Config,
-    outbox: ProactiveOutbox,
+    outbox: ProactiveOutbox | None,
     probe_factory: Callable[[Config], Probe] | None,
+    *,
+    notification_client=None,
 ) -> StatusMonitor | None:
     """Build only when explicitly enabled and an external probe is supplied."""
     status_config = config.server_status
@@ -65,4 +67,5 @@ def build_status_monitor(
         recipients=recipients,
         interval_seconds=status_config.interval_seconds,
         confirm_delay_seconds=status_config.confirm_delay_seconds,
+        notification_client=notification_client,
     )

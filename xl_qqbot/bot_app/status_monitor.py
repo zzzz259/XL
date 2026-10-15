@@ -171,18 +171,20 @@ class StatusMonitor:
         self,
         probe: Probe,
         history: StatusHistory,
-        outbox: ProactiveOutbox,
+        outbox: ProactiveOutbox | None,
         recipients: Iterable[str],
         *,
         interval_seconds: float = 30,
         confirm_delay_seconds: float = 3,
         sleeper: Sleeper = asyncio.sleep,
+        notification_client=None,
     ):
         if interval_seconds <= 0 or confirm_delay_seconds <= 0:
             raise ValueError("sampling intervals must be positive")
         self.probe = probe
         self.history = history
         self.outbox = outbox
+        self.notification_client = notification_client
         self.recipients = tuple(dict.fromkeys(r for r in recipients if r))
         self.interval_seconds = interval_seconds
         self.confirm_delay_seconds = confirm_delay_seconds
@@ -233,8 +235,25 @@ class StatusMonitor:
         )
         self.history.record_transition(event_key, previous, candidate, first.observed_at)
         message = self._message(candidate)
-        for ordinal, recipient in enumerate(self.recipients):
-            self.outbox.enqueue_text(event_key, recipient, ordinal, message)
+        if self.notification_client is not None:
+            await self.notification_client.enqueue(
+                event_key=event_key,
+                tier="test",
+                messages=[
+                    {
+                        "recipient": recipient,
+                        "ordinal": ordinal,
+                        "kind": "text",
+                        "text": message,
+                    }
+                    for ordinal, recipient in enumerate(self.recipients)
+                ],
+            )
+        elif self.outbox is not None:
+            for ordinal, recipient in enumerate(self.recipients):
+                self.outbox.enqueue_text(event_key, recipient, ordinal, message)
+        else:
+            raise RuntimeError("status monitor has no notification sink")
         self.confirmed_state = candidate
         return True
 

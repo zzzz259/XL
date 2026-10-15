@@ -14,21 +14,43 @@ cursor. Changes outside a branch's service mapping are recorded as no-ops.
 | Branch | Immutable pointer | Services affected |
 |---|---|---|
 | `debug` | `/home/admin/xl_deploy/current/debug` | CI/integration only; no runtime units |
-| `test` | `/home/admin/xl_deploy/current/test` | `xl-qqbot-test.service` and/or `xl-updata-server-test.service` |
-| `main` | `/home/admin/xl_deploy/current/main` | `xl-qqbot-prod.service`, shared `xl-qqbot-router.service`, and/or `xl-updata-server.service` as selected by changed paths |
+| `test` | `/home/admin/xl_deploy/current/test` | `xl-qqbot-test.service`, `xl-qqbot-test-notify.service`, `xl-qqbot-test-jobs.service`, and/or `xl-updata-server-test.service` |
+| `main` | `/home/admin/xl_deploy/current/main` | `xl-qqbot-prod.service`, shared `xl-qqbot-router.service`, `xl-qqbot-main-notify.service`, `xl-qqbot-control.service`, `xl-qqbot-main-jobs.service`, and/or `xl-updata-server.service` |
 
-The one shared router retains each group's original `debug`/`test`/`production`
-tier classification; both debug and test traffic are forwarded to the test Bot
-worker at `127.0.0.1:8782`, while production uses `8783`. Test Bot changes
-pause/drain both lower tiers but do not restart the router. The debug-to-test
-forwarding rule is shipped by `main`, because the router owns the shared QQ
-gateway. Debug runtime changes are therefore CI-verified no-ops. Test and main
-backend configurations, bearer secrets, state databases, downloads, versions,
-character output and Bot outboxes must remain separate. The test server is
-always available for local control but its `environment = "test"` policy
-forcibly disables scheduled CDN polling; GitHub deployment itself never starts
-a game update. Both backend services are placed in `xl-updata.slice`, capped at
-one CPU core in aggregate.
+The Bot remains two existing projects: `xl_qqbot` and `xl_updata_server`.
+Inside `xl_qqbot`, one Gateway process owns the QQ login and forwards raw event
+envelopes to the test worker (`8782`) or production worker (`8783`). The test
+branch does not own or restart the shared Gateway. Test Bot changes restart its
+query worker, test notification service, and test jobs, pausing/draining only
+debug/test tiers. Main Bot changes restart the production worker, shared
+Gateway, main notifier, deployment control, and main jobs; because the Gateway
+login is shared, that transaction pauses/drains all tiers, while notices still
+go only to the main groups. Debug runtime changes are CI-verified no-ops.
+
+| Loopback port | Process | Purpose |
+|---:|---|---|
+| 8782 | `xl-qqbot-test.service` | debug/test query worker |
+| 8783 | `xl-qqbot-prod.service` | main query worker |
+| 8784 | `xl-qqbot-control.service` | deployment announcements and maintenance API |
+| 8785 | `xl-qqbot-router.service` | single Gateway plus event forwarding and drain API |
+| 8786 | `xl-qqbot-test-notify.service` | test/debug durable notification queue and sender |
+| 8787 | `xl-qqbot-main-notify.service` | main durable notification queue and sender |
+| 8790 | `xl-updata-server.service` | main data update API |
+| 8791 | `xl-updata-server-test.service` | test data update API |
+
+All Bot-internal endpoints bind only to `127.0.0.1`; keep them closed to public
+ingress. `8781` is an old debug field with no debug worker in this topology.
+Test and main configs, queue databases, image spools, status files, downloads,
+versions, character output and Bot data roots remain separate. Notifications
+are accepted only for the owning tier (`debug`/`test` or `main`/`production`)
+and acknowledged after durable queue insertion. Bot workers still send
+immediate query replies through the QQ HTTP API; the notifier handles proactive
+jobs and deployment announcements.
+
+Test and main `xl_updata_server` configurations and bearer secrets remain
+separate. The test server's `environment = "test"` policy disables scheduled
+CDN polling; GitHub deployment itself never starts a game update. Both backend
+services are placed in `xl-updata.slice`, capped at one CPU core in aggregate.
 
 The test Bot's external `config.toml` must retain the same `[groups].debug` and
 `[groups].test` IDs and feature-level settings as the router's classification.
@@ -37,17 +59,14 @@ the router preserves the group ID and routes by the original tier. Copying
 only the test group list would accidentally evaluate debug groups as the
 default tier.
 
-Point the test Bot worker's `[watch]` data root, `character_data`,
-`versions_dir`, and `outbox_dir` at the test backend's data tree. The shared
-router keeps its main paths and can additionally watch both update sources via
-`[[watch.update_sources]]`: `main` must match `[watch].outbox_dir`; `test` points
-to the test backend outbox and uses `minimum_tier = "test"`. The main source
-keeps its existing delivery reach, while test lifecycle notices and character
-cards are enqueued only for test/debug groups. Both sources feed the same
-persistent FIFO, but use separate event cursors, sent records, and idempotency
-keys so equal game versions do not collide. A manual test-server run uses the
-ordinary update pipeline and writes events and artifacts only to test data;
-the router then queues its notices/cards without direct sending.
+Point the test worker and test jobs' `[watch]` data root, `character_data`,
+`versions_dir`, and `outbox_dir` at the test backend's data tree. Main worker and
+main jobs use the main backend tree. Each jobs process sends proactive messages
+to its matching notifier, whose separate FIFO and media spool live below that
+release's configured `watch.data_dir/notifications/{test,production}`. Test
+updates therefore queue only to debug/test; main updates and Bilibili notices
+queue only to main/production. A manual test-server run uses the ordinary
+update pipeline and writes events and artifacts only to test data.
 
 Code is stored in `/home/admin/xl_deploy/releases/<sha>-<transaction-id>`;
 each runtime branch (`test` and `main`) has an independent atomic `current`
@@ -63,8 +82,12 @@ against its external config and checks the corresponding loopback `/healthz`
 after startup. A missing or unloadable native renderer dependency therefore
 fails staging while the active release remains untouched.
 
-The router process itself owns the deployment-control API on
-`127.0.0.1:8784`. There is no separate externally exposed control service.
+The deployment-control API is a separate `xl-qqbot-control.service` process on
+`127.0.0.1:8784`; it retains the controller's announce, maintenance, and drain
+contracts. It calls the Gateway coordination API on `8785` and the test/main
+notifier APIs on `8786`/`8787`. The Gateway API tracks readiness and in-flight
+requests so deployments can pause and drain before stopping workers. None of
+these services is exposed outside loopback.
 
 ## Update server control API
 
@@ -153,9 +176,11 @@ chmod 600 ~/.config/xl_updata_server/api.env ~/.config/xl_updata_server-test/api
 
 It must contain `GITHUB_TOKEN=...` for a token limited to read-only repository
 and Actions metadata. Separately create
-`~/.config/xl_deploy/router.token` containing the router bearer token; it must
-match the deployment token in the existing bot config and be at least 32 random
-characters. Both files must be mode `600`; config directories should be `700`.
+`~/.config/xl_deploy/router.token` containing the internal Bot API bearer token;
+it must match `router.deployment_token`, `gateway.control_token`, and
+`notification.api_token` in the relevant external Bot configs and be at least
+32 random characters. Both files must be mode `600`; config directories should
+be `700`.
 Never place credentials or the production assetbundle key in Git.
 
 Provision distinct backend tokens in the two `api.env` files above. Keep
@@ -223,23 +248,26 @@ send `检测到更新，正在更新bot，期间将暂停服务` before placing 
 into maintenance and stopping them; keep all existing state/data directories
 untouched. The account's user systemd
 manager must persist after logout; have the server operator arrange linger
-through the approved host process. Port 8784 remains loopback-only; do not
-open it in a firewall. Only after those checks should you run:
+through the approved host process. Ports 8782–8787 remain loopback-only; do not
+open them in a firewall. Only after those checks should you run:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now xl-qqbot-router.service xl-qqbot-prod.service
-systemctl --user enable --now xl-qqbot-test.service
+systemctl --user enable --now xl-qqbot-test.service xl-qqbot-test-notify.service
+systemctl --user enable --now xl-qqbot-main-notify.service xl-qqbot-control.service
 systemctl --user enable --now xl-updata-server.service xl-updata-server-test.service
+systemctl --user enable --now xl-qqbot-test-jobs.service xl-qqbot-main-jobs.service
 systemctl --user enable --now xl-deploy-poll.timer
 ```
 
 ## Update order, recovery, and notices
 
-For QQ bot tiers, the controller first asks the router to durably enqueue
+For QQ bot tiers, the controller first asks the deployment-control service to
+durably enqueue
 `检测到更新，正在更新bot，期间将暂停服务` before pausing/draining and stopping
-affected services. A successful response means the persistent router FIFO
-accepted the message; it does not mean QQ has already delivered it. Deployment
+affected services. A successful response means the selected tier Notification
+Service durably accepted the message; it does not mean QQ has already delivered it. Deployment
 continues during the 02:00–08:00 Asia/Shanghai send curfew, while the queued
 start/completion/release/rollback messages wait for 08:00. It stages and
 preflights the immutable release first, switches only that branch pointer,
@@ -247,7 +275,8 @@ starts services and checks readiness, then resumes routing. Backend-only
 updates also notify and pause/drain their corresponding service tiers:
 test-backend updates affect `debug` and `test`; main-backend updates affect
 `production`. Only after health checks pass does it durably enqueue
-`更新完毕`; any new non-empty project announcement follows in FIFO order.
+`更新完毕`; any new non-empty project announcement follows in the destination
+tier's notifier FIFO.
 
 Optional version announcements are maintained in
 `xl_deploy/announcements/<change-id>.md` in the same candidate commit as the
@@ -260,9 +289,9 @@ Release notes are not used as deployment announcements.
 
 Each notification request carries an idempotency key derived from the durable
 deployment transaction ID and phase (plus tier). Replaying a transaction journal
-therefore does not add duplicate queue rows. If the router cannot persist a
-notice, it rejects the request and the deploy transaction must not proceed past
-the start-notice gate. Router queue delivery remains at-least-once: a crash
+therefore does not add duplicate queue rows. If the selected notifier cannot
+persist a notice, the control API rejects the request and the deploy transaction
+must not proceed past the start-notice gate. Queue delivery remains at-least-once: a crash
 after QQ accepts a message but before the local acknowledgement may cause a
 duplicate.
 
@@ -277,6 +306,9 @@ delete a release or journal to clear an error. Inspect with:
 bash xl_deploy/scripts/doctor.sh
 journalctl --user -u xl-deploy-poll.service -n 100 --no-pager
 journalctl --user -u xl-qqbot-router.service -n 100 --no-pager
+journalctl --user -u xl-qqbot-control.service -n 100 --no-pager
+journalctl --user -u xl-qqbot-test-notify.service -n 100 --no-pager
+journalctl --user -u xl-qqbot-main-notify.service -n 100 --no-pager
 ```
 
 QQ delivery is **at-least-once**: if QQ accepts a message but the process exits

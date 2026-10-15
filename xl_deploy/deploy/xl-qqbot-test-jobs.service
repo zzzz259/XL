@@ -1,0 +1,21 @@
+[Unit]
+Description=XL QQ Bot test tier automation jobs
+After=network-online.target xl-qqbot-test-notify.service xl-updata-server-test.service
+Wants=network-online.target xl-qqbot-test-notify.service xl-updata-server-test.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_qqbot-test
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/xl_deploy/current/test/xl_qqbot
+ExecStart=/home/admin/xl_deploy/current/test/.venvs/xl-qqbot-test-jobs.service/bin/python -P -m bot_app.automation --tier test
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+CPUQuota=30%
+MemoryMax=200M
+Nice=10
+
+[Install]
+WantedBy=default.target

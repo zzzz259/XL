@@ -5,11 +5,14 @@ Linux 常驻 QQ 群机器人，基于腾讯官方 QQ 机器人平台和 `qq-botp
 ## 功能与架构
 
 - 群内 `@机器人 + 角色名` 查询角色资料，支持中文名、别名、英文名和拼音匹配；歧义时让提问者选择候选。
-- 群内 `@机器人 复刻` / `复刻表` 等查询服务端已发布的普通首次复刻排期图；默认只开放给 debug 群。
+- 群内 `@机器人 复刻` / `复刻表` 等查询服务端已发布的普通首次复刻排期图；按群所属环境路由，不使用内置功能权限门禁。
 - Watcher 轮询 `xl_updata_server` 的 outbox，逐群分发新增图鉴，整批成功后清理该版本 outbox；失败项保留重试状态。
 - BilibiliWatcher 监视配置的多个 UP 主。`full` 模式发布图文详情/原图和视频通知；`notice` 只发布通知。接口、SESSDATA 和状态文件说明见[配置与运维](docs/配置与运维.md)。
-- 部署使用一个网关路由器、test 与 production 两个独立本地 HTTP worker。路由器独占 QQ Gateway，保留 debug/test/production 群分级；debug 和 test 群都转发至 test worker（8782），production 转发至 production worker（8783）。`debug_port=8781` 仅为旧配置兼容保留，新拓扑不部署 debug worker。
-- `bot_app.main` 保留旧的一体化兼容入口；新部署和分级隔离以 router + service units 为准。
+- 一个 Gateway 进程持有唯一 QQ Gateway 登录；它只做群识别、tier 分流和原始事件转发。debug/test 群进入 test worker（8782），main 群进入 production worker（8783）。业务事件解析留在各自 worker。
+- test/main 各自有后台任务进程和持久通知服务。后台任务产生更新、状态或 B 站消息后写入本 tier 通知队列；通知服务负责 FIFO、重试和 QQ API 发送。worker 的群内即时回复仍由 worker 自己调用 QQ HTTP API。
+- 部署控制 API 是独立 `bot_app.deployment_service` 进程（8784），Gateway 协作 API 是 8785；test/main 通知 API 分别为 8786/8787。所有内部端口只绑定 `127.0.0.1`。
+- `debug` 只做 CI，不部署运行服务；`test` release 运行 test worker/通知/后台任务；`main` release 运行正式 worker、唯一 Gateway、main 通知、部署控制和 main 后台任务。部署与回滚细节见[配置与运维](docs/配置与运维.md)和 [xl_deploy 运维指南](../xl_deploy/README.md)。
+- `bot_app.main` 保留旧的一体化兼容入口；新部署使用独立 service units。
 
 ## 本地环境、配置和测试
 

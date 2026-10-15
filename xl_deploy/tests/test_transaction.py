@@ -550,8 +550,14 @@ def test_failed_preflight_keeps_unique_artifact_and_same_sha_can_retry(tmp_path)
     assert branch_current(transaction, "test") == runner.candidates[1].resolve()
 
 
-def test_preflight_creates_one_release_local_venv_per_impacted_unit(tmp_path):
-    from xl_deploy.runner import CommandRunner, service_venv_path
+def test_preflight_creates_release_local_venvs_for_all_branch_units(tmp_path):
+    from xl_deploy.runner import (
+        BACKEND_UNITS,
+        BOT_UNITS,
+        BRANCH_UNITS,
+        CommandRunner,
+        service_venv_path,
+    )
 
     commands = []
     release = tmp_path / "release"
@@ -580,21 +586,23 @@ def test_preflight_creates_one_release_local_venv_per_impacted_unit(tmp_path):
 
     venv_commands = [args for args, _ in commands if args[1:3] == ["-m", "venv"]]
     assert plan.impacted_units == ("xl-updata-server.service",)
-    assert len(venv_commands) == 4
+    branch_units = set(BRANCH_UNITS[plan.branch])
+    assert len(venv_commands) == len(branch_units)
     venv_paths = [Path(args[-1]) for args in venv_commands]
-    assert len(set(venv_paths)) == 4
+    assert set(venv_paths) == {
+        service_venv_path(release, unit) for unit in branch_units
+    }
     assert all(path.is_relative_to(release / ".venvs") for path in venv_paths)
     install_commands = [args for args, _ in commands if "pip" in args]
-    assert len(install_commands) == 3
-    assert sum(str(bot_requirements) in args for args in install_commands) == 2
+    dependency_units = branch_units & (BOT_UNITS | BACKEND_UNITS)
+    assert len(install_commands) == len(dependency_units)
+    assert sum(str(bot_requirements) in args for args in install_commands) == len(
+        branch_units & BOT_UNITS
+    )
     assert sum(str(backend_requirements) in args for args in install_commands) == 1
     assert {Path(args[0]).parent.parent for args in install_commands} == {
         service_venv_path(release, unit)
-        for unit in (
-            "xl-qqbot-prod.service",
-            "xl-qqbot-router.service",
-            "xl-updata-server.service",
-        )
+        for unit in dependency_units
     }
     npm_commands = [(args, kwargs) for args, kwargs in commands if args[0] == "npm"]
     canvas_checks = [(args, kwargs) for args, kwargs in commands if args[0] == "node"]
@@ -695,6 +703,7 @@ def test_router_health_check_authenticates_and_retries_until_ready(monkeypatch):
     def urlopen(request, timeout):
         nonlocal attempts
         attempts += 1
+        assert request.full_url == "http://127.0.0.1:8785/gateway/health"
         assert request.get_header("Authorization") == "Bearer local-token"
         if attempts == 1:
             raise urllib.error.HTTPError(request.full_url, 503, "starting", {}, None)

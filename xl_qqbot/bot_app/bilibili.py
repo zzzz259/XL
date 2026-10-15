@@ -39,6 +39,7 @@ import aiohttp
 from .config import DEFAULT_BILI_MID, BilibiliTarget, Config
 from .groups import GroupStore
 from .proactive_outbox import ProactiveOutbox
+from .tiers import GroupTier
 
 _logger = logging.getLogger(__name__)
 
@@ -590,12 +591,19 @@ class BilibiliWatcher:
         config: Config,
         sender,
         proactive_outbox: ProactiveOutbox | None = None,
+        notification_client=None,
     ):
         self.config = config
         self.sender = sender
-        self.proactive_outbox = proactive_outbox or ProactiveOutbox(
-            config.watch.data_dir
+        self.notification_client = notification_client
+        self.proactive_outbox = (
+            proactive_outbox
+            if proactive_outbox is not None
+            else None
+            if notification_client is not None
+            else ProactiveOutbox(config.watch.data_dir)
         )
+        self.tiers = GroupTier(config.groups)
         self.group_store = GroupStore(config.watch.data_dir)
         self.state = BilibiliStateStore(config.watch.data_dir)
         self.tmp_dir = os.path.join(config.watch.data_dir, "bili_tmp")
@@ -752,13 +760,11 @@ class BilibiliWatcher:
                 entry = entries_by_id.get(opus_id) or {}
                 title = str(entry.get("title") or "").strip() or "新动态"
                 text = format_notice_text(name, title, opus_link(opus_id))
-                for group_openid in group_openids:
-                    self.proactive_outbox.enqueue_text(
-                        f"bilibili:opus:{target.mid}:{opus_id}:notice",
-                        group_openid,
-                        0,
-                        text,
-                    )
+                await self._enqueue_text(
+                    f"bilibili:opus:{target.mid}:{opus_id}:notice",
+                    group_openids,
+                    text,
+                )
                 state.mark_opus(opus_id)
                 _logger.info(
                     "已将 B 站图文通知写入发件箱 mid=%s opus=%s groups=%d",
@@ -791,13 +797,11 @@ class BilibiliWatcher:
     ) -> bool:
         text = format_opus_text(dyn)
         if text:
-            for group_openid in group_openids:
-                self.proactive_outbox.enqueue_text(
-                    f"bilibili:opus:{target.mid}:{opus_id}:full-text",
-                    group_openid,
-                    0,
-                    text,
-                )
+            await self._enqueue_text(
+                f"bilibili:opus:{target.mid}:{opus_id}:full-text",
+                group_openids,
+                text,
+            )
         else:
             _logger.info("图文动态 %s 无文字内容，只发图片", dyn["id_str"])
 
@@ -816,13 +820,12 @@ class BilibiliWatcher:
                     error,
                 )
                 return False
-            for group_openid in group_openids:
-                self.proactive_outbox.enqueue_image(
-                    f"bilibili:opus:{target.mid}:{opus_id}:image",
-                    group_openid,
-                    index,
-                    path,
-                )
+            await self._enqueue_image(
+                f"bilibili:opus:{target.mid}:{opus_id}:image",
+                group_openids,
+                index,
+                path,
+            )
             try:
                 os.remove(path)
             except OSError:
@@ -878,13 +881,11 @@ class BilibiliWatcher:
         for video in fresh:
             title = video["title"] or "新视频"
             text = format_notice_text(name, title, video_link(video["bvid"]))
-            for group_openid in group_openids:
-                self.proactive_outbox.enqueue_text(
-                    f"bilibili:video:{target.mid}:{video['bvid']}",
-                    group_openid,
-                    0,
-                    text,
-                )
+            await self._enqueue_text(
+                f"bilibili:video:{target.mid}:{video['bvid']}",
+                group_openids,
+                text,
+            )
             state.mark_video(video["created"], video["bvid"])
             _logger.info(
                 "已将 B 站视频通知写入发件箱 mid=%s bvid=%s title=%r groups=%d",
@@ -896,6 +897,52 @@ class BilibiliWatcher:
 
     def _target_groups(self) -> List[str]:
         manual = self.config.target.group_openids
-        if manual:
-            return sorted(set(manual))
-        return sorted(self.group_store.openids())
+        groups = set(manual) if manual else self.group_store.openids()
+        return sorted(
+            group for group in groups if self.tiers.tier_of(group) == "production"
+        )
+
+    async def _enqueue_text(self, event_key: str, groups: List[str], text: str) -> None:
+        if self.notification_client is not None:
+            await self.notification_client.enqueue(
+                event_key=event_key,
+                tier="main",
+                messages=[
+                    {
+                        "recipient": group,
+                        "ordinal": 0,
+                        "kind": "text",
+                        "text": text,
+                    }
+                    for group in groups
+                ],
+            )
+            return
+        if self.proactive_outbox is None:
+            raise RuntimeError("Bilibili watcher has no notification sink")
+        for group in groups:
+            self.proactive_outbox.enqueue_text(event_key, group, 0, text)
+
+    async def _enqueue_image(
+        self, event_key: str, groups: List[str], ordinal: int, path: str
+    ) -> None:
+        if self.notification_client is not None:
+            await self.notification_client.enqueue(
+                event_key=event_key,
+                tier="main",
+                messages=[
+                    {
+                        "recipient": group,
+                        "ordinal": ordinal,
+                        "kind": "image",
+                        "media_path": path,
+                        "text": "",
+                    }
+                    for group in groups
+                ],
+            )
+            return
+        if self.proactive_outbox is None:
+            raise RuntimeError("Bilibili watcher has no notification sink")
+        for group in groups:
+            self.proactive_outbox.enqueue_image(event_key, group, ordinal, path)

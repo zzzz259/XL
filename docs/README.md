@@ -29,11 +29,11 @@
 ### QQ bot
 
 - [README](../xl_qqbot/README.md)：功能、拓扑、快速启动与项目测试入口。
-- [配置与运维](../xl_qqbot/docs/配置与运维.md)：TOML 配置、权限分级、systemd 部署、状态/日志及故障排查。
+- [配置与运维](../xl_qqbot/docs/配置与运维.md)：TOML 配置、tier 路由、Bot 进程职责、systemd 部署、状态/日志及故障排查。
 
 ### 自动部署控制器
 
-- [运维指南](../xl_deploy/README.md)：分支映射、XL CI 精确 SHA 门禁、user systemd 定时器、安全盘点、切换与恢复流程。
+- [运维指南](../xl_deploy/README.md)：分支到服务映射、单 Gateway 与 tier 隔离、XL CI 精确 SHA 门禁、user systemd 定时器、安全盘点、切换与恢复流程。
 
 ## 随工具分发的第三方材料与日志
 

@@ -1,0 +1,21 @@
+[Unit]
+Description=XL QQ Bot main tier automation jobs
+After=network-online.target xl-qqbot-main-notify.service xl-updata-server.service
+Wants=network-online.target xl-qqbot-main-notify.service xl-updata-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_qqbot
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/admin/xl_deploy/current/main/xl_qqbot
+ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-qqbot-main-jobs.service/bin/python -P -m bot_app.automation --tier production
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+CPUQuota=30%
+MemoryMax=200M
+Nice=10
+
+[Install]
+WantedBy=default.target

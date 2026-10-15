@@ -150,6 +150,37 @@ class StatusMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(starts), 2)
         self.assertGreaterEqual(starts[1] - starts[0], 0.34)
 
+    async def test_transition_uses_test_notification_service_when_configured(self):
+        class RecordingNotificationClient:
+            def __init__(self):
+                self.calls = []
+
+            async def enqueue(self, **request):
+                self.calls.append(request)
+                return []
+
+        samples = iter([
+            StatusSample(True, 0, False, None, True, observed_at=100.0),
+            StatusSample(True, 0, False, None, True, observed_at=103.0),
+        ])
+        notification_client = RecordingNotificationClient()
+        monitor = StatusMonitor(
+            lambda: next(samples), self.history, None,
+            ["debug", "test"], sleeper=self._sleep,
+            notification_client=notification_client,
+        )
+        monitor.set_confirmed_state(Status.MAINTENANCE_CONFIRMED)
+
+        self.assertTrue(await monitor.observe_once())
+
+        self.assertEqual(len(notification_client.calls), 1)
+        request = notification_client.calls[0]
+        self.assertEqual(request["tier"], "test")
+        self.assertEqual(
+            [item["recipient"] for item in request["messages"]], ["debug", "test"]
+        )
+        self.assertEqual(request["event_key"], "game-status:MAINTENANCE_CONFIRMED:OPEN_CANDIDATE_GATEWAY_REACHABLE:100000")
+
     async def _sleep(self, seconds):
         self.delays.append(seconds)
 

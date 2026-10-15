@@ -20,7 +20,14 @@ class TestMainServerMappingTests(unittest.TestCase):
             "test", "b" * 40, ["xl_qqbot/bot_app/service.py"]
         )
 
-        self.assertEqual(plan.impacted_units, ("xl-qqbot-test.service",))
+        self.assertEqual(
+            plan.impacted_units,
+            (
+                "xl-qqbot-test.service",
+                "xl-qqbot-test-notify.service",
+                "xl-qqbot-test-jobs.service",
+            ),
+        )
         self.assertEqual(plan.impacted_tiers, ("debug", "test"))
         self.assertEqual(plan.announcement_scope, ("debug", "test"))
 
@@ -42,7 +49,12 @@ class TestMainServerMappingTests(unittest.TestCase):
 
         self.assertEqual(
             plan.impacted_units,
-            ("xl-qqbot-test.service", "xl-updata-server-test.service"),
+            (
+                "xl-qqbot-test.service",
+                "xl-qqbot-test-notify.service",
+                "xl-qqbot-test-jobs.service",
+                "xl-updata-server-test.service",
+            ),
         )
         self.assertEqual(plan.impacted_tiers, ("debug", "test"))
         self.assertEqual(plan.announcement_scope, ("debug", "test"))
@@ -52,7 +64,13 @@ class TestMainServerMappingTests(unittest.TestCase):
 
         self.assertEqual(
             plan.impacted_units,
-            ("xl-qqbot-prod.service", "xl-qqbot-router.service"),
+            (
+                "xl-qqbot-prod.service",
+                "xl-qqbot-router.service",
+                "xl-qqbot-main-notify.service",
+                "xl-qqbot-control.service",
+                "xl-qqbot-main-jobs.service",
+            ),
         )
         self.assertEqual(plan.impacted_tiers, ("debug", "test", "production"))
         self.assertEqual(plan.announcement_scope, ("main",))
