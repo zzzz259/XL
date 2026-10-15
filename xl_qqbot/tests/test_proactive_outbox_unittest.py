@@ -21,6 +21,23 @@ class ProactiveOutboxTests(unittest.TestCase):
         self.assertEqual(duplicate_id, first_id)
         self.assertEqual(self.outbox.count(), 1)
 
+    def test_event_status_counts_sent_and_pending_rows_without_exposing_content(self):
+        sent_id = self.outbox.enqueue_text(
+            "deployment:tx-start", "group-a", 0, "开始"
+        )
+        self.outbox.enqueue_text("deployment:tx-start", "group-b", 0, "开始")
+        self.outbox.mark_sent(sent_id)
+
+        self.assertEqual(
+            self.outbox.event_status("deployment:tx-start"),
+            {"total": 2, "sent": 1, "pending": 1},
+        )
+        self.assertEqual(
+            self.outbox.event_status("deployment:unknown"),
+            {"total": 0, "sent": 0, "pending": 0},
+        )
+
+
     def test_insertion_sequence_is_global_and_monotonic(self):
         first_id = self.outbox.enqueue_text("event-1", "group-a", 0, "A1")
         second_id = self.outbox.enqueue_text("event-1", "group-b", 0, "B1")

@@ -8,6 +8,7 @@ import hmac
 import logging
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import aiohttp
 from aiohttp import web
@@ -93,6 +94,65 @@ class NotificationClient:
             )
         return queued
 
+    async def wait_for_delivery(
+        self,
+        event_key: str,
+        *,
+        expected_total: int,
+        timeout_seconds: float,
+        poll_interval_seconds: float = 0.25,
+    ) -> bool:
+        if self._session is None or self._session.closed:
+            raise RuntimeError("notification client is not started")
+        if (
+            isinstance(expected_total, bool)
+            or not isinstance(expected_total, int)
+            or expected_total <= 0
+            or timeout_seconds <= 0
+            or poll_interval_seconds <= 0
+        ):
+            raise ValueError("delivery count and timeouts must be positive")
+        url = f"{self.base_url}/notifications/{quote(event_key, safe='')}"
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        while True:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return False
+            request_timeout = aiohttp.ClientTimeout(total=min(5.0, remaining))
+            try:
+                async with self._session.get(
+                    url,
+                    timeout=request_timeout,
+                    headers={"Authorization": f"Bearer {self.bearer_token}"},
+                ) as response:
+                    body = await response.json()
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                raise NotificationDeliveryError(
+                    "notification delivery-status request failed"
+                ) from exc
+            status = body if isinstance(body, dict) else {}
+            if response.status not in (200, 404) or status.get("ok") is not True:
+                raise NotificationDeliveryError(
+                    f"notification delivery-status rejected (HTTP {response.status})"
+                )
+            total = status.get("total", 0)
+            sent = status.get("sent", 0)
+            pending = status.get("pending", 0)
+            if (
+                total == expected_total
+                and sent == expected_total
+                and pending == 0
+            ):
+                return True
+            if total > expected_total:
+                raise NotificationDeliveryError(
+                    "notification delivery count exceeded the expected total"
+                )
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return False
+            await asyncio.sleep(min(poll_interval_seconds, remaining))
+
 
 class NotificationService:
     """Validate tier scope and persist every item before acknowledging intake."""
@@ -161,6 +221,14 @@ class NotificationService:
             return 503, {"ok": False, "error": "notification service unavailable"}
         return 200, {"ok": True, "queued": queued}
 
+    def event_status(self, event_key: str) -> tuple[int, dict]:
+        if not isinstance(event_key, str) or _EVENT_KEY_RE.fullmatch(event_key) is None:
+            return 400, {"ok": False, "error": "invalid event_key"}
+        status = self.outbox.event_status(event_key)
+        if status["total"] == 0:
+            return 404, {"ok": True, **status}
+        return 200, {"ok": True, **status}
+
     def _validate_message(self, item: object) -> dict | tuple[int, dict]:
         if not isinstance(item, dict):
             return 400, {"ok": False, "error": "message must be an object"}
@@ -211,7 +279,7 @@ def build_notification_app(
 
     @web.middleware
     async def authenticate_notifications(request: web.Request, handler):
-        if request.path != "/notifications":
+        if request.path == "/health":
             return await handler(request)
         scheme, separator, supplied_value = request.headers.get(
             "Authorization", ""
@@ -241,6 +309,12 @@ def build_notification_app(
         status, response = service.enqueue(payload)
         return web.json_response(response, status=status)
 
+    async def event_status(request: web.Request) -> web.Response:
+        status, response = service.event_status(
+            request.match_info.get("event_key", "")
+        )
+        return web.json_response(response, status=status)
+
     async def on_startup(app: web.Application) -> None:
         await sender.start()
         stop_event = asyncio.Event()
@@ -262,6 +336,7 @@ def build_notification_app(
     )
     app.router.add_get("/health", health)
     app.router.add_post("/notifications", enqueue)
+    app.router.add_get("/notifications/{event_key}", event_status)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     return app
