@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+from collections.abc import Callable
 from pathlib import Path
 
 import aiohttp
@@ -30,6 +31,8 @@ from .groups import GroupStore, learn_group_from_event
 from .proactive_dispatcher import ProactiveDispatcher
 from .proactive_outbox import ProactiveOutbox
 from .sender import QQSender
+from .status_monitor import Probe
+from .status_monitor_runtime import build_status_monitor
 from .tiers import GroupTier
 from .updater import ServiceMute, read_update_status
 from .watcher import Watcher
@@ -224,13 +227,19 @@ def _setup_logging() -> None:
     logging.getLogger().setLevel(logging.INFO)
 
 
-async def _amain_router(config: Config) -> None:
+async def _amain_router(
+    config: Config,
+    status_probe_factory: Callable[[Config], Probe] | None = None,
+) -> None:
     sender = QQSender(config)
     await sender.start()
     proactive_outbox = ProactiveOutbox(config.watch.data_dir)
     proactive_dispatcher = ProactiveDispatcher(proactive_outbox, sender)
     mute = ServiceMute()
     tiers = GroupTier(config.groups)
+    status_monitor = build_status_monitor(
+        config, proactive_outbox, status_probe_factory
+    )
     sources = config.watch.update_sources or (
         UpdateSourceConfig(name="main", outbox_dir=config.watch.outbox_dir),
     )
@@ -292,7 +301,7 @@ async def _amain_router(config: Config) -> None:
         loop.add_signal_handler(sig, _shutdown)
 
     try:
-        await asyncio.gather(
+        background_tasks = [
             *(watcher.run() for watcher in watchers),
             bili_watcher.run(),
             proactive_dispatcher.run(stop_event),
@@ -310,7 +319,10 @@ async def _amain_router(config: Config) -> None:
                 client_name="路由器网关",
                 readiness_control=deployment_control,
             ),
-        )
+        ]
+        if status_monitor is not None:
+            background_tasks.append(status_monitor.run(stop_event))
+        await asyncio.gather(*background_tasks)
     except asyncio.CancelledError:
         pass
     finally:
