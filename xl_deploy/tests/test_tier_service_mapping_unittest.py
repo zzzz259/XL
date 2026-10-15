@@ -1,5 +1,5 @@
-import unittest
 import tomllib
+import unittest
 from pathlib import Path
 
 from xl_deploy.planner import plan_deployment
