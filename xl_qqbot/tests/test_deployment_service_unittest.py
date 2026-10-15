@@ -17,6 +17,7 @@ class FakeNotificationClient:
     def __init__(self, ready=True):
         self.ready = ready
         self.calls = []
+        self.delivery_succeeds = True
 
     async def health(self):
         return self.ready
@@ -28,6 +29,9 @@ class FakeNotificationClient:
             for i, item in enumerate(request["messages"])
         ]
 
+    async def wait_for_delivery(self, event_key, *, expected_total, timeout_seconds):
+        self.delivery_request = (event_key, expected_total, timeout_seconds)
+        return self.delivery_succeeds
 
 class FakeGatewayClient:
     def __init__(self, ready=True):
@@ -118,6 +122,11 @@ class DeploymentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.test_notifications.calls[0]["tier"], "test")
         self.assertEqual(len(self.main_notifications.calls), 1)
         self.assertEqual(self.main_notifications.calls[0]["tier"], "main")
+        self.assertEqual(
+            self.test_notifications.delivery_request,
+            ("deployment:tx-test-start", 1, 30),
+        )
+        self.assertFalse(hasattr(self.main_notifications, "delivery_request"))
 
     async def test_invalid_bearer_token_is_rejected(self):
         response = await self.post(
@@ -193,6 +202,35 @@ class DeploymentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((await response.json())["ok"])
         finally:
             await client.close()
+
+    async def test_start_announcement_fails_when_delivery_is_not_confirmed(self):
+        self.test_notifications.delivery_succeeds = False
+        response = await self.post(
+            "/deployment/announce",
+            {
+                "tier": "test",
+                "phase": "starting",
+                "notification_id": "tx-pending-start",
+            },
+        )
+
+        self.assertEqual(response.status, 503)
+        self.assertFalse((await response.json())["ok"])
+
+    async def test_completion_announcement_does_not_wait_for_delivery(self):
+        self.test_notifications.delivery_succeeds = False
+        response = await self.post(
+            "/deployment/announce",
+            {
+                "tier": "debug",
+                "phase": "complete",
+                "notification_id": "tx-complete",
+            },
+        )
+
+        self.assertEqual(response.status, 200)
+        self.assertFalse(hasattr(self.test_notifications, "delivery_request"))
+
 
 
 if __name__ == "__main__":
