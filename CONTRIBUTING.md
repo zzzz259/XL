@@ -5,14 +5,15 @@
 ## 分支晋级
 
 ```text
-codex/<task> ──PR──> debug ──验证后 PR──> test ──发布验收 PR──> main ──tag──> Release
+codex/<task> ──PR──> debug ──CI 成功后快进──> test ──验收后快进──> main ──tag──> Release
 ```
 
 - `debug`：唯一开发入口，也是最新开发状态。所有新功能、修复、运行配置和文档都先通过短期分支 PR 合入 `debug`。
-- `test`：候选验证快照。只通过 `debug -> test` PR 接收已集成变更；在此进行端到端、部署或用户验收。
-- `main`：稳定发布快照，进度最落后。只通过 `test -> main` PR 接收已验收变更；发布 tag 只能指向 `main` 上的提交。
+- `test`：候选验证快照。只在 `debug` 对应 SHA 的 CI 成功后，从 `debug` 快进更新；在此进行端到端、部署或用户验收。
+- `main`：稳定发布快照，进度最落后。只在 test 验收通过后，从 `test` 快进更新；发布 tag 只能指向 `main` 上的提交。
 - `codex/<简短任务名>` 或 `<类型>/<简短任务名>`：短期任务分支，从当前目标阶段分支创建。不要长期维护已合并分支。
-- 不直接 push 三条长期分支。PR 来源/目标必须遵守 `task -> debug -> test -> main`；`XL CI / branch-flow` 校验晋级方向。提交代码、紧急修复、运维配置或公告均不得绕过 `debug`，不存在直接修复 `test`/`main` 的例外。
+- 所有代码、紧急修复、运维配置和公告先经短期分支 PR 合入 `debug`，不存在绕过 `debug` 的例外。阶段晋级不创建 PR：先确认源 SHA 的 `XL CI` 成功，再将源分支 ref 快进推到下一阶段。这样目标分支与源分支共享相同提交，保持 `main` 是 `test` 祖先、`test` 是 `debug` 祖先。
+- 禁止使用 GitHub merge commit、squash merge 或 rebase merge 晋级 `debug -> test` / `test -> main`。这些方式会在目标分支创建独有提交，破坏分支阶段顺序。`XL CI / branch-flow` 拒绝阶段晋级 PR；`branch-lineage` 在分支更新后检查祖先顺序。
 
 示例（以下分支名按实际任务替换）：
 
@@ -25,7 +26,18 @@ git push -u origin codex/update-docs
 # 创建 PR：codex/update-docs -> debug
 ```
 
-任务 PR 合入 `debug` 后，只有在进入下一阶段时才依次开 `debug -> test`、`test -> main` 晋级 PR。确认 PR 已合并且目标分支包含提交后，删除短期分支。不得将 main 倒灌至 debug，也不得从 topic 分支直接创建面向 test/main 的 PR。
+任务 PR 合入 `debug` 后，逐级晋级时在确认对应源 SHA 的 CI 全绿后执行快进更新。以下命令会因目标分支不是源分支祖先而被 Git 拒绝，不要加 `--force`：
+
+```powershell
+git fetch origin debug test main
+git merge-base --is-ancestor origin/test origin/debug
+git push origin origin/debug:refs/heads/test
+# test 验收完成且其 SHA 的 CI 成功后：
+git merge-base --is-ancestor origin/main origin/test
+git push origin origin/test:refs/heads/main
+```
+
+短期任务分支在 PR 合入 `debug` 后立即删除。不得将 `test` 或 `main` 倒灌进 `debug`，也不得从 topic 分支直接创建面向 `test`/`main` 的 PR。
 
 ## Pull Request 与提交
 
@@ -55,7 +67,7 @@ Pop-Location
 
 服务端与 bot 的安装、测试命令见各自 README。GUI、资源导入、外部 CLI 和生产部署等无法由单元测试代表的路径，PR 必须列明实际人工/集成验证情况；不得把未运行的验证写成通过。
 
-CI 配置位于 `.github/workflows/`。GitHub 仓库设置还必须对 `debug`、`test`、`main` 启用分支保护：禁止直接 push，要求通过 PR，并将 `XL CI / branch-flow` 与所需的 `XL CI` 检查设为必需检查。workflow 本身不会自动配置这些仓库级保护规则。
+CI 配置位于 `.github/workflows/`。GitHub 仓库设置应要求 `debug` 的代码变更通过 PR，并要求 `XL CI / branch-flow` 与相关 `XL CI` 检查通过。`test` 和 `main` 的晋级必须允许受控的直接快进更新；不要对它们设置“必须通过 PR”规则，也禁止 force push。`branch-lineage` 会在每次分支更新后检查拓扑；`branch-flow` 会拒绝面向 `test`/`main` 的 PR。workflow 本身不会自动配置这些仓库级规则。
 
 服务器自动部署由仓库级 [`xl_deploy`](xl_deploy/README.md) 控制器执行，不是 GitHub Actions CI 本身直接部署。轮询器仍每分钟检查 `debug`、`test`、`main` 并等待对应 SHA 的 `XL CI` 成功。`debug` 只用于开发集成和 CI，不部署运行时；`test` 更新 test Bot 和独立 test 更新服务；`main` 更新正式 Bot、共享 router 和正式更新服务。debug/test 群保持各自分级能力，但都由共享 router 转发给 test Bot；router 的这项映射随 main 发布，因为 gateway 不能被 test 部署影响。test 更新服务常驻提供本机控制 API，但强制关闭 CDN 定时轮询，只有认证手动触发才处理一次。test/main 配置、状态、下载与数据目录必须分离。完整映射、接口、通知、数据保留、健康检查与回滚规则以 [`xl_deploy/README.md`](xl_deploy/README.md) 为准。
 
