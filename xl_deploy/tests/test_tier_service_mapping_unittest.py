@@ -1,10 +1,9 @@
-from pathlib import Path
 import tomllib
 import unittest
+from pathlib import Path
 
 from xl_deploy.planner import plan_deployment
 from xl_deploy.runner import BRANCH_UNITS, CommandRunner, service_venv_path
-
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "xl_deploy" / "deploy"
