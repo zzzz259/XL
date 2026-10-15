@@ -102,6 +102,14 @@ class RouterConfig:
 
 
 @dataclass(frozen=True)
+class ServerStatusConfig:
+    enabled: bool = False
+    interval_seconds: int = 30
+    confirm_delay_seconds: int = 3
+    recipient_tiers: tuple[str, ...] = ("debug", "test")
+
+
+@dataclass(frozen=True)
 class Config:
     bot: BotConfig
     watch: WatchConfig
@@ -111,6 +119,7 @@ class Config:
     bilibili: BilibiliConfig = field(default_factory=BilibiliConfig)
     groups: GroupsConfig = field(default_factory=GroupsConfig)
     router: RouterConfig = field(default_factory=RouterConfig)
+    server_status: ServerStatusConfig = field(default_factory=ServerStatusConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -276,6 +285,30 @@ def load_config(path: str = "config.toml") -> Config:
     if router_config.deployment_token and len(router_config.deployment_token) < 32:
         raise ValueError("[router] deployment_token 必须至少 32 个字符")
 
+    status_raw = raw.get("server_status", {})
+    raw_tiers = status_raw.get("recipient_tiers", ["debug", "test"])
+    if not isinstance(raw_tiers, list):
+        raise ValueError("[server_status] recipient_tiers 必须是数组")
+    status_tiers = tuple(dict.fromkeys(str(tier).strip() for tier in raw_tiers))
+    if not status_tiers or any(tier not in ("debug", "test") for tier in status_tiers):
+        raise ValueError("[server_status] recipient_tiers 只允许 debug/test 且不能为空")
+    status_interval = int(status_raw.get("interval_seconds", 30))
+    status_confirm_delay = int(status_raw.get("confirm_delay_seconds", 3))
+    if status_interval < 1:
+        raise ValueError("[server_status] interval_seconds 必须 >= 1")
+    if status_confirm_delay < 1 or status_confirm_delay >= status_interval:
+        raise ValueError(
+            "[server_status] confirm_delay_seconds 必须 >= 1 且小于 interval_seconds"
+        )
+    if not isinstance(status_raw.get("enabled", False), bool):
+        raise ValueError("[server_status] enabled 必须是布尔值")
+    server_status = ServerStatusConfig(
+        enabled=status_raw.get("enabled", False),
+        interval_seconds=status_interval,
+        confirm_delay_seconds=status_confirm_delay,
+        recipient_tiers=status_tiers,
+    )
+
     return Config(
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
@@ -295,4 +328,5 @@ def load_config(path: str = "config.toml") -> Config:
         bilibili=bilibili,
         groups=groups_config,
         router=router_config,
+        server_status=server_status,
     )
