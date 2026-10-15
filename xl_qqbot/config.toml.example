@@ -13,8 +13,8 @@ data_dir = "/home/admin/xl_qqbot/data"
 # @机器人+角色名 查询用的角色数据与图鉴图片目录
 character_data = "/home/admin/xl_updata_server/data/character_data/current.json"
 versions_dir = "/home/admin/xl_updata_server/data/versions"
-# 若同时监视 test 更新服务，取消下面 4 行注释并填入 test 服务的 outbox 路径。
-# main 的路径必须与上面的 outbox_dir 一致；test 更新只会发送到 test/debug 群。
+# automation jobs 读取更新来源；test jobs 只处理 test，main jobs 只处理 main。
+# main 源路径必须与上面的 outbox_dir 一致；test 通知仅进入 test/debug 群。
 # [[watch.update_sources]]
 # name = "main"
 # outbox_dir = "/home/admin/xl_updata_server/data/outbox"
@@ -50,18 +50,39 @@ debug = []
 test = []
 
 [router]
-# 事件路由器（python -m bot_app.router）转发各级别服务的端口与超时（秒）。
-# 级别服务用 python -m bot_app.service --tier <级> --port <端口> 启动。
+# Gateway Router 转发 worker 的端口与超时；部署 API 由 bot_app.deployment_service 启动。
 # Legacy compatibility only; current router forwards debug groups to test_port.
 debug_port = 8781
 test_port = 8782
 production_port = 8783
 forward_timeout = 8
-# 部署控制 API 仅监听 127.0.0.1，供本机部署控制器调用。
+# 部署控制 API 仅监听 127.0.0.1，部署控制进程使用此端口。
 deployment_control_port = 8784
-# 使用至少 32 个随机字符；留空时部署 API 会拒绝所有请求。
+# 使用至少 32 个随机字符；需与 gateway.control_token、notification.api_token 相同。
 # 可用 python -c "import secrets; print(secrets.token_urlsafe(32))" 生成。
 deployment_token = ""
+
+[gateway]
+# Gateway 的维护/排空协作 API，仅监听 127.0.0.1。
+control_port = 8785
+# 填入与 router.deployment_token 相同的内网 Bearer token；不要提交真实 token。
+control_token = ""
+
+[notification]
+# test/production 通知服务共用内网 Bearer token；与 router.deployment_token 相同。
+# 请在服务器外部配置中填入至少 32 个随机字符，不要提交真实 token。
+api_token = ""
+test_port = 8786
+production_port = 8787
+
+[server_status]
+# 游戏服务器状态采样，仅 test automation jobs 可运行；默认关闭。无 provider 时不会发起请求。
+enabled = false
+# 常规状态探测间隔；候选变化会按 confirm_delay_seconds 快速复查。
+interval_seconds = 30
+confirm_delay_seconds = 3
+# 仅可选 debug/test，production 不接收此功能播报。
+recipient_tiers = ["debug", "test"]
 
 [bilibili]
 # B 站 UP 主动态/视频监视。enabled=false 可关闭。

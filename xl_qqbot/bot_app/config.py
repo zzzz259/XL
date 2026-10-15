@@ -102,6 +102,31 @@ class RouterConfig:
 
 
 @dataclass(frozen=True)
+class NotificationConfig:
+    """Ports and shared bearer credential for tier notification APIs."""
+
+    api_token: str = ""
+    test_port: int = 8786
+    production_port: int = 8787
+
+
+@dataclass(frozen=True)
+class GatewayConfig:
+    """Gateway-only internal coordination API settings."""
+
+    control_port: int = 8785
+    control_token: str = ""
+
+
+@dataclass(frozen=True)
+class ServerStatusConfig:
+    enabled: bool = False
+    interval_seconds: int = 30
+    confirm_delay_seconds: int = 3
+    recipient_tiers: tuple[str, ...] = ("debug", "test")
+
+
+@dataclass(frozen=True)
 class Config:
     bot: BotConfig
     watch: WatchConfig
@@ -111,6 +136,9 @@ class Config:
     bilibili: BilibiliConfig = field(default_factory=BilibiliConfig)
     groups: GroupsConfig = field(default_factory=GroupsConfig)
     router: RouterConfig = field(default_factory=RouterConfig)
+    notification: NotificationConfig = field(default_factory=NotificationConfig)
+    gateway: GatewayConfig = field(default_factory=GatewayConfig)
+    server_status: ServerStatusConfig = field(default_factory=ServerStatusConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -276,6 +304,76 @@ def load_config(path: str = "config.toml") -> Config:
     if router_config.deployment_token and len(router_config.deployment_token) < 32:
         raise ValueError("[router] deployment_token 必须至少 32 个字符")
 
+    notification_raw = raw.get("notification", {})
+    notification_config = NotificationConfig(
+        api_token=str(notification_raw.get("api_token", "")).strip(),
+        test_port=int(notification_raw.get("test_port", NotificationConfig.test_port)),
+        production_port=int(
+            notification_raw.get(
+                "production_port", NotificationConfig.production_port
+            )
+        ),
+    )
+    notification_ports = {
+        notification_config.test_port,
+        notification_config.production_port,
+    }
+    if any(port < 1 or port > 65535 for port in notification_ports):
+        raise ValueError("[notification] 端口必须在 1 到 65535 之间")
+    reserved_ports = service_ports | {router_config.deployment_control_port, 8785}
+    if len(notification_ports) != 2 or notification_ports & reserved_ports:
+        raise ValueError("[notification] 端口不能与 Gateway、Router 或 worker 服务端口重复")
+    if notification_config.api_token and len(notification_config.api_token) < 32:
+        raise ValueError("[notification] api_token 必须至少 32 个字符")
+
+    gateway_raw = raw.get("gateway", {})
+    gateway_config = GatewayConfig(
+        control_port=int(gateway_raw.get("control_port", GatewayConfig.control_port)),
+        control_token=str(gateway_raw.get("control_token", "")).strip(),
+    )
+    if gateway_config.control_port < 1 or gateway_config.control_port > 65535:
+        raise ValueError("[gateway] control_port 必须在 1 到 65535 之间")
+    occupied_ports = service_ports | {router_config.deployment_control_port} | notification_ports
+    if gateway_config.control_port in occupied_ports:
+        raise ValueError("[gateway] control_port 不能与其他服务端口重复")
+    if gateway_config.control_token and len(gateway_config.control_token) < 32:
+        raise ValueError("[gateway] control_token 必须至少 32 个字符")
+    internal_tokens = tuple(
+        token
+        for token in (
+            router_config.deployment_token,
+            gateway_config.control_token,
+            notification_config.api_token,
+        )
+        if token
+    )
+    if len(set(internal_tokens)) > 1:
+        raise ValueError("internal API bearer tokens must match")
+
+    status_raw = raw.get("server_status", {})
+    raw_tiers = status_raw.get("recipient_tiers", ["debug", "test"])
+    if not isinstance(raw_tiers, list):
+        raise ValueError("[server_status] recipient_tiers 必须是数组")
+    status_tiers = tuple(dict.fromkeys(str(tier).strip() for tier in raw_tiers))
+    if not status_tiers or any(tier not in ("debug", "test") for tier in status_tiers):
+        raise ValueError("[server_status] recipient_tiers 只允许 debug/test 且不能为空")
+    status_interval = int(status_raw.get("interval_seconds", 30))
+    status_confirm_delay = int(status_raw.get("confirm_delay_seconds", 3))
+    if status_interval < 1:
+        raise ValueError("[server_status] interval_seconds 必须 >= 1")
+    if status_confirm_delay < 1 or status_confirm_delay >= status_interval:
+        raise ValueError(
+            "[server_status] confirm_delay_seconds 必须 >= 1 且小于 interval_seconds"
+        )
+    if not isinstance(status_raw.get("enabled", False), bool):
+        raise ValueError("[server_status] enabled 必须是布尔值")
+    server_status = ServerStatusConfig(
+        enabled=status_raw.get("enabled", False),
+        interval_seconds=status_interval,
+        confirm_delay_seconds=status_confirm_delay,
+        recipient_tiers=status_tiers,
+    )
+
     return Config(
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
@@ -295,4 +393,7 @@ def load_config(path: str = "config.toml") -> Config:
         bilibili=bilibili,
         groups=groups_config,
         router=router_config,
+        notification=notification_config,
+        gateway=gateway_config,
+        server_status=server_status,
     )

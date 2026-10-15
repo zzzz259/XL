@@ -301,7 +301,10 @@ require_private_config() {
   fi
 }
 
-for unit in xl-qqbot-router.service xl-qqbot-prod.service xl-qqbot-test.service; do
+for unit in xl-qqbot-router.service xl-qqbot-prod.service xl-qqbot-test.service \
+            xl-qqbot-test-notify.service xl-qqbot-test-jobs.service \
+            xl-qqbot-main-notify.service xl-qqbot-main-jobs.service \
+            xl-qqbot-control.service; do
   working_directory="$(sed -n 's/^WorkingDirectory=//p' "$TEMPLATE_DIR/$unit")"
   if [[ -z "$working_directory" ]]; then
     printf 'Refusing activation: no explicit WorkingDirectory mapping in %s\n' "$unit" >&2
@@ -372,6 +375,9 @@ PY
 
 unit_names=(xl-deploy-poll.service xl-deploy-poll.timer xl-qqbot-router.service
             xl-qqbot-test.service xl-qqbot-prod.service
+            xl-qqbot-test-notify.service xl-qqbot-test-jobs.service
+            xl-qqbot-main-notify.service xl-qqbot-main-jobs.service
+            xl-qqbot-control.service
             xl-updata-server.service xl-updata-server-test.service xl-updata.slice)
 existing_units=()
 existing_dropins=()

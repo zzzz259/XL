@@ -5,8 +5,41 @@ on:
     branches: [debug, test, main]
   pull_request:
     branches: [debug, test, main]
+  pull_request_target:
+    branches: [debug, test, main]
+
+permissions:
+  contents: read
 
 jobs:
+  branch-flow:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the trusted base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          persist-credentials: false
+
+      - name: Enforce forward-only branch flow
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          python - <<'PY'
+          import os
+
+          from xl_deploy.branch_policy import is_allowed_pull_request
+
+          head_ref = os.environ["HEAD_REF"]
+          base_ref = os.environ["BASE_REF"]
+          if not is_allowed_pull_request(head_ref, base_ref):
+              print(f"Rejected PR flow {head_ref} -> {base_ref}.")
+              raise SystemExit(1)
+          print(f"Allowed PR flow: {head_ref} -> {base_ref}")
+          PY
+
   desktop-tool:
     runs-on: windows-latest
     defaults:
