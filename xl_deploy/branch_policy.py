@@ -1,7 +1,5 @@
 """Validation for the repository's forward-only branch promotion flow."""
 
-from __future__ import annotations
-
 import os
 
 
