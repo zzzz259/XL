@@ -89,6 +89,16 @@ notifier APIs on `8786`/`8787`. The Gateway API tracks readiness and in-flight
 requests so deployments can pause and drain before stopping workers. None of
 these services is exposed outside loopback.
 
+Test worker deployment does not replace the shared Gateway or deployment
+control plane: those services are owned by the main release. A test update can
+validate the test worker/notifier/jobs path while the production Gateway still
+runs its previous release. Before promoting a Gateway/control-plane change to
+main, complete the one-time controller/bootstrap cutover below and verify the
+installed control, Gateway, notifier, jobs, and worker units and their external
+configuration. A start notice is a deployment gate only after every target
+group's delivery is acknowledged; durable queue insertion alone does not prove
+that QQ received it.
+
 ## Update server control API
 
 Each backend exposes its own loopback-only control API: production on
@@ -244,7 +254,8 @@ debug branch is CI-only and does not require a current release pointer; its
 first exact-SHA CI success is recorded as a no-op cursor. Then ensure each
 runtime pointer targets a verified/preflighted release and
 the old service/config/data mapping is confirmed. For the initial bot cutover,
-send `检测到更新，正在更新bot，期间将暂停服务` before placing the old router/tiers
+send and confirm delivery of
+`检测到更新，正在更新bot，期间将暂停服务` before placing the old router/tiers
 into maintenance and stopping them; keep all existing state/data directories
 untouched. The account's user systemd
 manager must persist after logout; have the server operator arrange linger

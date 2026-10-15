@@ -91,6 +91,48 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 401)
         self.assertEqual(self.outbox.count(), 0)
 
+    async def test_delivery_status_requires_authentication(self):
+        response = await self.client.get("/notifications/event-1")
+
+        self.assertEqual(response.status, 401)
+
+    async def test_delivery_status_returns_only_counts(self):
+        sequence = self.outbox.enqueue_text("event-1", TEST_GROUP, 0, "公告内容")
+        self.outbox.mark_sent(sequence)
+        response = await self.client.get(
+            "/notifications/event-1",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(
+            await response.json(),
+            {"ok": True, "total": 1, "sent": 1, "pending": 0},
+        )
+
+    async def test_notification_client_waits_until_event_is_sent(self):
+        sequence = self.outbox.enqueue_text("event-2", TEST_GROUP, 0, "开始")
+        self.outbox.mark_sent(sequence)
+        notifier = NotificationClient(
+            f"http://127.0.0.1:{self.client.server.port}",
+            bearer_token=TOKEN,
+        )
+        await notifier.start()
+        try:
+            self.assertTrue(
+                await notifier.wait_for_delivery(
+                    "event-2", expected_total=1, timeout_seconds=1
+                )
+            )
+            self.assertFalse(
+                await notifier.wait_for_delivery(
+                    "event-missing", expected_total=1, timeout_seconds=0.01
+                )
+            )
+        finally:
+            await notifier.close()
+
+
     async def test_test_notifier_rejects_production_tier_and_group(self):
         wrong_tier = await self.post(
             self.request_payload(recipient=TEST_GROUP, tier="production")

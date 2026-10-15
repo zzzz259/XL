@@ -266,6 +266,23 @@ class ProactiveOutbox:
             ).fetchone()
         return int(row["total"])
 
+    def event_status(self, event_key: str) -> dict[str, int]:
+        if not isinstance(event_key, str) or not event_key:
+            raise ValueError("event_key must be a non-empty string")
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) AS sent,
+                    COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending
+                FROM messages
+                WHERE event_key = ?
+                """,
+                (event_key,),
+            ).fetchone()
+        return {key: int(row[key]) for key in ("total", "sent", "pending")}
+
     def health(self) -> dict:
         return {
             "ok": self.database_path.is_file(),
