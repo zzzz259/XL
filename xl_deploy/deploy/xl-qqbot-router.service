@@ -1,5 +1,5 @@
 [Unit]
-Description=XL QQ Bot router and loopback deployment-control API
+Description=XL QQ Bot single Gateway and tier event router
 After=network-online.target
 Wants=network-online.target
 

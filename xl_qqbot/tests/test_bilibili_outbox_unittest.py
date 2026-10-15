@@ -25,6 +25,18 @@ class NoDirectSender:
         raise AssertionError("Bilibili proactive images must enter the router outbox")
 
 
+class RecordingNotificationClient:
+    def __init__(self, failure=None):
+        self.calls = []
+        self.failure = failure
+
+    async def enqueue(self, **request):
+        if self.failure is not None:
+            raise self.failure
+        self.calls.append(request)
+        return []
+
+
 class FakeClient:
     def __init__(self):
         self.opus_feed = [{"opus_id": 101, "content": "feed title"}]
@@ -173,6 +185,54 @@ class BilibiliOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.recipient for item in pending], ["g1", "g2"])
         self.assertEqual(self.state.last_bvid, "BV1")
         self.assertEqual(pending[0].event_key, "bilibili:video:123:BV1")
+
+    async def test_remote_notification_is_accepted_before_opus_cursor_advances(self):
+        notification_client = RecordingNotificationClient()
+        watcher = BilibiliWatcher(
+            self.config,
+            NoDirectSender(),
+            notification_client=notification_client,
+        )
+
+        await watcher._tick_opus(
+            self.client, self.config.bilibili.targets[0], self.state
+        )
+
+        self.assertEqual(self.state.last_opus_id, 101)
+        self.assertEqual(len(notification_client.calls), 1)
+        request = notification_client.calls[0]
+        self.assertEqual(request["event_key"], "bilibili:opus:123:101:notice")
+        self.assertEqual(request["tier"], "main")
+        self.assertEqual(
+            [item["recipient"] for item in request["messages"]], ["g1", "g2"]
+        )
+
+    async def test_remote_notification_failure_keeps_opus_cursor(self):
+        watcher = BilibiliWatcher(
+            self.config,
+            NoDirectSender(),
+            notification_client=RecordingNotificationClient(
+                failure=OSError("notification service unavailable")
+            ),
+        )
+
+        with self.assertRaises(OSError):
+            await watcher._tick_opus(
+                self.client, self.config.bilibili.targets[0], self.state
+            )
+
+        self.assertEqual(self.state.last_opus_id, 100)
+
+    async def test_production_bilibili_scope_excludes_test_and_debug_groups(self):
+        self.config = Config(
+            **{
+                **self.config.__dict__,
+                "groups": GroupsConfig(debug=["g2"], test=["g1"]),
+            }
+        )
+        watcher = BilibiliWatcher(self.config, NoDirectSender())
+
+        self.assertEqual(watcher._target_groups(), [])
 
 
 if __name__ == "__main__":

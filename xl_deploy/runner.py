@@ -18,6 +18,11 @@ ALLOWED_UNITS = frozenset(
         "xl-qqbot-test.service",
         "xl-qqbot-prod.service",
         "xl-qqbot-router.service",
+        "xl-qqbot-test-notify.service",
+        "xl-qqbot-main-notify.service",
+        "xl-qqbot-control.service",
+        "xl-qqbot-test-jobs.service",
+        "xl-qqbot-main-jobs.service",
         "xl-updata-server.service",
         "xl-updata-server-test.service",
         "xl-deploy-poll.service",
@@ -29,15 +34,28 @@ BOT_UNITS = frozenset(
         "xl-qqbot-test.service",
         "xl-qqbot-prod.service",
         "xl-qqbot-router.service",
+        "xl-qqbot-test-notify.service",
+        "xl-qqbot-main-notify.service",
+        "xl-qqbot-control.service",
+        "xl-qqbot-test-jobs.service",
+        "xl-qqbot-main-jobs.service",
     }
 )
 BACKEND_UNITS = frozenset({"xl-updata-server.service", "xl-updata-server-test.service"})
 BRANCH_UNITS = {
     "debug": (),
-    "test": ("xl-qqbot-test.service", "xl-updata-server-test.service"),
+    "test": (
+        "xl-qqbot-test.service",
+        "xl-qqbot-test-notify.service",
+        "xl-qqbot-test-jobs.service",
+        "xl-updata-server-test.service",
+    ),
     "main": (
         "xl-qqbot-prod.service",
         "xl-qqbot-router.service",
+        "xl-qqbot-main-notify.service",
+        "xl-qqbot-control.service",
+        "xl-qqbot-main-jobs.service",
         "xl-updata-server.service",
         "xl-deploy-poll.service",
     ),
@@ -242,15 +260,27 @@ class CommandRunner:
                 "xl-qqbot-test.service": 8782,
                 "xl-qqbot-prod.service": 8783,
                 "xl-qqbot-router.service": 8784,
+                "xl-qqbot-control.service": 8784,
+                "xl-qqbot-main-notify.service": 8787,
+                "xl-qqbot-test-notify.service": 8786,
             }.get(unit)
             if port is not None:
                 headers = {}
+                path = "/health"
                 if unit == "xl-qqbot-router.service":
+                    port = 8785
+                    path = "/gateway/health"
+                if unit in {
+                    "xl-qqbot-router.service",
+                    "xl-qqbot-control.service",
+                    "xl-qqbot-test-notify.service",
+                    "xl-qqbot-main-notify.service",
+                }:
                     if not self.health_token:
-                        raise RuntimeError("router health token is not configured")
+                        raise RuntimeError("internal service health token is not configured")
                     headers["Authorization"] = f"Bearer {self.health_token}"
                 request = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/health", headers=headers
+                    f"http://127.0.0.1:{port}{path}", headers=headers
                 )
                 self._wait_for_http_health(request, unit)
             elif unit in BACKEND_UNITS:

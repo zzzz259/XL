@@ -24,7 +24,13 @@ class DeploymentTarget:
             tiers: tuple[str, ...] = ()
             notice: tuple[str, ...] = ()
             if qqbot_changed:
-                units.append("xl-qqbot-test.service")
+                units.extend(
+                    (
+                        "xl-qqbot-test.service",
+                        "xl-qqbot-test-notify.service",
+                        "xl-qqbot-test-jobs.service",
+                    )
+                )
                 tiers = ("debug", "test")
                 notice = ("debug", "test")
             if backend_changed:
@@ -37,7 +43,15 @@ class DeploymentTarget:
             tiers: tuple[str, ...] = ()
             notice: tuple[str, ...] = ()
             if qqbot_changed:
-                units.extend(("xl-qqbot-prod.service", "xl-qqbot-router.service"))
+                units.extend(
+                    (
+                        "xl-qqbot-prod.service",
+                        "xl-qqbot-router.service",
+                        "xl-qqbot-main-notify.service",
+                        "xl-qqbot-control.service",
+                        "xl-qqbot-main-jobs.service",
+                    )
+                )
                 # The router owns the shared gateway and forwards for every tier.
                 tiers = ("debug", "test", "production")
                 notice = ("main",)

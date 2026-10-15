@@ -24,6 +24,20 @@ class NoDirectSender:
         raise AssertionError("proactive game messages must use the router outbox")
 
 
+class RecordingNotificationClient:
+    def __init__(self, failure=None):
+        self.calls = []
+        self.failure = failure
+
+    async def enqueue(self, **request):
+        if self.failure is not None:
+            raise self.failure
+        self.calls.append(request)
+        return [
+            {"recipient": item["recipient"], "ordinal": item["ordinal"], "sequence": i + 1}
+            for i, item in enumerate(request["messages"])
+        ]
+
 def make_config(root, groups=("g1",)):
     outbox_dir = root / "outbox"
     outbox_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +213,48 @@ class WatcherOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(source_dir.exists())
         self.assertEqual(self.watcher.notice.consumed_events, 1)
         self.assertEqual(self.outbox.count(), 1)  # start notice already committed
+
+    async def test_remote_notification_is_durably_accepted_before_event_offset_advances(self):
+        notification_client = RecordingNotificationClient()
+        watcher = Watcher(
+            self.config,
+            NoDirectSender(),
+            notification_client=notification_client,
+        )
+        (self.root / "update_events.jsonl").write_text(
+            json.dumps({"event": "start", "version": 100}) + "\n",
+            encoding="utf-8",
+        )
+
+        await watcher._tick()
+
+        self.assertEqual(watcher.proactive_outbox, None)
+        self.assertEqual(watcher.notice.consumed_events, 1)
+        self.assertEqual(len(notification_client.calls), 1)
+        request = notification_client.calls[0]
+        self.assertEqual(request["event_key"], "game-update:1:start:100")
+        self.assertEqual(request["tier"], "main")
+        self.assertEqual(request["messages"][0]["recipient"], "g1")
+        self.assertEqual(request["messages"][0]["kind"], "text")
+
+    async def test_remote_notification_failure_does_not_consume_update_event(self):
+        notification_client = RecordingNotificationClient(
+            failure=OSError("notification service is unavailable")
+        )
+        watcher = Watcher(
+            self.config,
+            NoDirectSender(),
+            notification_client=notification_client,
+        )
+        (self.root / "update_events.jsonl").write_text(
+            json.dumps({"event": "start", "version": 100}) + "\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(OSError):
+            await watcher._tick()
+
+        self.assertEqual(watcher.notice.consumed_events, 0)
 
 
 if __name__ == "__main__":
