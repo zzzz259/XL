@@ -63,6 +63,15 @@ deployment_control_port = 8784
 # 可用 python -c "import secrets; print(secrets.token_urlsafe(32))" 生成。
 deployment_token = ""
 
+[server_status]
+# 游戏服务器状态采样，仅 Router 运行；默认关闭。凭据 provider 尚未配置时不会发起请求。
+enabled = false
+# 常规状态探测间隔；候选变化会按 confirm_delay_seconds 快速复查。
+interval_seconds = 30
+confirm_delay_seconds = 3
+# 仅可选 debug/test，production 不接收此功能播报。
+recipient_tiers = ["debug", "test"]
+
 [bilibili]
 # B 站 UP 主动态/视频监视。enabled=false 可关闭。
 enabled = true
