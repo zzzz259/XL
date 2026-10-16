@@ -90,6 +90,11 @@ class GroupsConfig:
 
 
 @dataclass(frozen=True)
+class InstanceConfig:
+    instance_id: str = "default"
+
+
+@dataclass(frozen=True)
 class RouterConfig:
     """事件路由器：[router] 各级别服务端口与转发超时。"""
 
@@ -99,6 +104,8 @@ class RouterConfig:
     forward_timeout: float = 8.0
     deployment_control_port: int = 8784
     deployment_token: str = ""
+    group_instances: dict[str, str] = field(default_factory=dict)
+    instance_ports: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -139,6 +146,7 @@ class Config:
     notification: NotificationConfig = field(default_factory=NotificationConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     server_status: ServerStatusConfig = field(default_factory=ServerStatusConfig)
+    instance: InstanceConfig = field(default_factory=InstanceConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -182,6 +190,11 @@ def load_config(path: str = "config.toml") -> Config:
 
     with open(path, "rb") as f:
         raw = tomllib.load(f)
+
+    instance_raw = raw.get("instance", {})
+    instance_id = str(instance_raw.get("id", "default")).strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", instance_id):
+        raise ValueError("[instance] id must be a lowercase identifier")
 
     bot = raw.get("bot", {})
     appid = str(bot.get("appid", "")).strip()
@@ -280,6 +293,37 @@ def load_config(path: str = "config.toml") -> Config:
     )
 
     router = raw.get("router", {})
+    raw_group_instances = router.get("group_instances", {})
+    raw_instance_ports = router.get("instance_ports", {})
+    if not isinstance(raw_group_instances, dict):
+        raise ValueError("[router.group_instances] must be a table")
+    if not isinstance(raw_instance_ports, dict):
+        raise ValueError("[router.instance_ports] must be a table")
+    group_instances = {
+        str(group).strip(): str(target_instance).strip()
+        for group, target_instance in raw_group_instances.items()
+    }
+    if len(group_instances) != len(raw_group_instances):
+        raise ValueError("[router.group_instances] group IDs must be unique")
+    if any(not group or not target for group, target in group_instances.items()):
+        raise ValueError("[router.group_instances] group and instance IDs cannot be empty")
+    instance_ports: dict[str, int] = {}
+    for raw_id, raw_port in raw_instance_ports.items():
+        target_instance = str(raw_id).strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", target_instance):
+            raise ValueError(f"[router.instance_ports] invalid instance ID: {target_instance!r}")
+        if isinstance(raw_port, bool) or not isinstance(raw_port, int):
+            raise ValueError(f"[router.instance_ports.{target_instance}] port must be an integer")
+        if not 1 <= raw_port <= 65535:
+            raise ValueError(f"[router.instance_ports.{target_instance}] port is out of range")
+        instance_ports[target_instance] = raw_port
+    if len(set(instance_ports.values())) != len(instance_ports):
+        raise ValueError("[router.instance_ports] ports must be unique")
+    unknown_instances = set(group_instances.values()) - set(instance_ports)
+    if unknown_instances:
+        raise ValueError(
+            f"[router.group_instances] unknown instance without a worker: {sorted(unknown_instances)!r}"
+        )
     router_config = RouterConfig(
         debug_port=int(router.get("debug_port", RouterConfig.debug_port)),
         test_port=int(router.get("test_port", RouterConfig.test_port)),
@@ -289,6 +333,8 @@ def load_config(path: str = "config.toml") -> Config:
             router.get("deployment_control_port", RouterConfig.deployment_control_port)
         ),
         deployment_token=str(router.get("deployment_token", "")).strip(),
+        group_instances=group_instances,
+        instance_ports=instance_ports,
     )
     if router_config.forward_timeout <= 0:
         raise ValueError("[router] forward_timeout 必须 > 0")
@@ -396,4 +442,5 @@ def load_config(path: str = "config.toml") -> Config:
         notification=notification_config,
         gateway=gateway_config,
         server_status=server_status,
+        instance=InstanceConfig(instance_id=instance_id),
     )

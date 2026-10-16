@@ -92,3 +92,126 @@ interval_seconds = 0
             load_config(path)
     finally:
         os.unlink(path)
+
+
+def test_load_config_parses_instance_identity():
+    path = write_toml(
+        '''
+[bot]
+appid = "123"
+secret = "secret"
+
+[instance]
+id = "test-blue"
+
+[watch]
+outbox_dir = "/tmp/outbox"
+'''
+    )
+    try:
+        cfg = load_config(path)
+        assert cfg.instance.instance_id == "test-blue"
+    finally:
+        os.unlink(path)
+
+
+def test_gateway_config_routes_groups_to_explicit_instance_ports():
+    path = write_toml(
+        '''
+[bot]
+appid = "123"
+secret = "secret"
+
+[watch]
+outbox_dir = "/tmp/outbox"
+
+[router.group_instances]
+"group-one" = "test-blue"
+"group-two" = "test-green"
+
+[router.instance_ports]
+test-blue = 8812
+test-green = 8813
+'''
+    )
+    try:
+        cfg = load_config(path)
+        assert cfg.router.group_instances == {
+            "group-one": "test-blue",
+            "group-two": "test-green",
+        }
+        assert cfg.router.instance_ports == {"test-blue": 8812, "test-green": 8813}
+    finally:
+        os.unlink(path)
+
+
+def test_gateway_config_rejects_group_route_without_instance_worker():
+    path = write_toml(
+        '''
+[bot]
+appid = "123"
+secret = "secret"
+
+[watch]
+outbox_dir = "/tmp/outbox"
+
+[router.group_instances]
+"group-one" = "missing"
+
+[router.instance_ports]
+test-blue = 8812
+'''
+    )
+    try:
+        with pytest.raises(ValueError, match="unknown instance"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_gateway_config_rejects_duplicate_instance_ports():
+    path = write_toml(
+        '''
+[bot]
+appid = "123"
+secret = "secret"
+
+[watch]
+outbox_dir = "/tmp/outbox"
+
+[router.instance_ports]
+test-blue = 8812
+test-green = 8812
+'''
+    )
+    try:
+        with pytest.raises(ValueError, match="ports must be unique"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_gateway_config_rejects_duplicate_group_after_normalization():
+    path = write_toml(
+        '''
+[bot]
+appid = "123"
+secret = "secret"
+
+[watch]
+outbox_dir = "/tmp/outbox"
+
+[router.group_instances]
+"group-one" = "test-blue"
+" group-one " = "test-green"
+
+[router.instance_ports]
+test-blue = 8812
+test-green = 8813
+'''
+    )
+    try:
+        with pytest.raises(ValueError, match="group IDs must be unique"):
+            load_config(path)
+    finally:
+        os.unlink(path)
