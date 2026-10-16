@@ -216,6 +216,21 @@ class StatusMonitorRuntimeTests(unittest.TestCase):
                     root, status_section='[server_status]\ninterval_seconds=0\n'
                 )
 
+    def test_enabled_monitor_requires_credentials_file(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(ValueError, "credentials_file"):
+                self._write_config(root, status_section='[server_status]\nenabled=true\n')
+
+    def test_enabled_monitor_loads_credentials_file_setting(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            config = self._write_config(
+                root,
+                status_section='[server_status]\nenabled=true\ncredentials_file="probe.toml"\n',
+            )
+            self.assertEqual(config.server_status.credentials_file, "probe.toml")
+
     def test_disabled_monitor_never_calls_provider_factory(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)
@@ -227,13 +242,28 @@ class StatusMonitorRuntimeTests(unittest.TestCase):
             )
             self.assertIsNone(monitor)
 
+    def test_enabled_monitor_without_provider_fails_instead_of_silently_disabling(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            config = self._write_config(
+                root,
+                status_section=(
+                    '[server_status]\nenabled=true\ncredentials_file="probe.toml"\n'
+                ),
+            )
+            with self.assertRaisesRegex(RuntimeError, "probe provider"):
+                build_status_monitor(config, ProactiveOutbox(root / "outbox"), None)
+
     def test_enabled_monitor_uses_separate_history_and_debug_test_groups(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)
             config = self._write_config(
                 root,
                 groups='[groups]\ndebug=["debug-group", "shared"]\ntest=["test-group", "shared"]\n',
-                status_section='[server_status]\nenabled=true\nrecipient_tiers=["debug", "test"]\n',
+                status_section=(
+                    '[server_status]\nenabled=true\ncredentials_file="probe.toml"\n'
+                    'recipient_tiers=["debug", "test"]\n'
+                ),
             )
             outbox = ProactiveOutbox(root / "outbox")
             monitor = build_status_monitor(

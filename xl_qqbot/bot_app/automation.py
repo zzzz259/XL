@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from .bilibili import BilibiliWatcher
 from .config import Config, UpdateSourceConfig, load_config
 from .notification_service import NotificationClient
-from .status_monitor import Probe
 from .status_monitor_runtime import build_status_monitor
+from .status_probe import build_login_preflight_probe
 from .watcher import Watcher
 
 _logger = logging.getLogger(__name__)
@@ -110,7 +110,9 @@ async def _amain(config: Config, instance_id: str) -> None:
         config,
         instance_id=instance_id,
         notification_client=client,
-        probe_factory=None,
+        probe_factory=lambda instance_config: build_login_preflight_probe(
+            instance_config.server_status.credentials_file
+        ),
     )
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):

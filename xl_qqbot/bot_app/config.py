@@ -133,6 +133,7 @@ class ServerStatusConfig:
     enabled: bool = False
     interval_seconds: int = 30
     confirm_delay_seconds: int = 3
+    credentials_file: str = ""
     recipient_tiers: tuple[str, ...] = ("debug", "test")
 
 
@@ -446,10 +447,14 @@ def load_config(path: str = "config.toml") -> Config:
         )
     if not isinstance(status_raw.get("enabled", False), bool):
         raise ValueError("[server_status] enabled 必须是布尔值")
+    credentials_file = str(status_raw.get("credentials_file", "")).strip()
+    if status_raw.get("enabled", False) and not credentials_file:
+        raise ValueError("[server_status] enabled=true 时必须配置 credentials_file")
     server_status = ServerStatusConfig(
         enabled=status_raw.get("enabled", False),
         interval_seconds=status_interval,
         confirm_delay_seconds=status_confirm_delay,
+        credentials_file=credentials_file,
         recipient_tiers=status_tiers,
     )
 

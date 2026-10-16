@@ -96,8 +96,9 @@ production_port = 8787
 # default = 8788
 
 [server_status]
-# 游戏服务器状态采样；由每个实例自己的配置开关控制。默认关闭。无 provider 时不会发起请求。
+# 游戏服务器状态采样；由每个实例自己的配置开关控制。凭据文件仅放 open_id/token/channel，权限设为 600。
 enabled = false
+credentials_file = ""
 # 常规状态探测间隔；候选变化会按 confirm_delay_seconds 快速复查。
 interval_seconds = 30
 confirm_delay_seconds = 3
