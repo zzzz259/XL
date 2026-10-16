@@ -202,10 +202,6 @@ def load_config(path: str = "config.toml") -> Config:
     bot = raw.get("bot", {})
     appid = str(bot.get("appid", "")).strip()
     secret = str(bot.get("secret", "")).strip()
-    if not appid:
-        raise ValueError("[bot] appid 不能为空，请按 config.toml.example 填写凭据")
-    if not secret:
-        raise ValueError("[bot] secret 不能为空，请按 config.toml.example 填写凭据")
 
     watch = raw.get("watch", {})
     outbox_dir = str(watch.get("outbox_dir", "")).strip()
@@ -481,3 +477,9 @@ def load_config(path: str = "config.toml") -> Config:
         server_status=server_status,
         instance=InstanceConfig(instance_id=instance_id),
     )
+
+
+def require_gateway_credentials(config: Config) -> None:
+    """Require the QQ application credential only in the Gateway process."""
+    if not config.bot.appid or not config.bot.secret:
+        raise ValueError("Gateway requires [bot] appid and secret credentials")

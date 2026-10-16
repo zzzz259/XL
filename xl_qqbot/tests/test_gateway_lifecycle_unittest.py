@@ -165,6 +165,31 @@ class GatewayControlApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GatewayRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_config_can_omit_gateway_only_bot_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.toml"
+            path.write_text(
+                '[instance]\nid = "test-a"\n[watch]\noutbox_dir = "outbox"\n',
+                encoding="utf-8",
+            )
+            config = load_config(path)
+
+        self.assertEqual(config.bot.appid, "")
+        self.assertEqual(config.bot.secret, "")
+
+    async def test_gateway_runtime_requires_bot_api_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.toml"
+            path.write_text(
+                '[watch]\noutbox_dir = "outbox"\n'
+                '[gateway]\ncontrol_token = "gateway-lifecycle-token-012345678901234567"\n',
+                encoding="utf-8",
+            )
+            config = load_config(path)
+
+        with self.assertRaisesRegex(ValueError, "Gateway requires"):
+            GatewayRuntime(config, sender_factory=lambda _config: object())
+
     async def test_runtime_starts_one_gateway_client_and_no_business_jobs(self):
         with tempfile.TemporaryDirectory() as directory:
             config = make_config(Path(directory))

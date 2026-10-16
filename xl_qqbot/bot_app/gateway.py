@@ -19,7 +19,7 @@ import botpy
 from aiohttp import web
 from botpy.connection import ConnectionState
 
-from .config import Config
+from .config import Config, require_gateway_credentials
 from .deploy_control import DeploymentControl
 from .groups import GroupStore, learn_group_from_event
 from .sender import QQSender
@@ -696,6 +696,7 @@ class GatewayRuntime:
     """Run only the single QQ Gateway client and its minimal control endpoint."""
 
     def __init__(self, config: Config, *, client_factory=None, sender_factory=None):
+        require_gateway_credentials(config)
         self.config = config
         self.tiers = GroupTier(config.groups)
         maintenance_path = Path(config.watch.data_dir) / "maintenance.json"

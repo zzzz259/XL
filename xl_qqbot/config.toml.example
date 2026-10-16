@@ -1,5 +1,6 @@
 [bot]
-# QQ 开放平台机器人凭据（必填），创建机器人在 https://bot.open.qq.com
+# QQ 开放平台凭据只需配置在 Gateway（或旧单进程模式）；Bot worker/notifier/jobs 可留空。
+# 创建机器人在 https://bot.open.qq.com
 appid = ""
 secret = ""
 

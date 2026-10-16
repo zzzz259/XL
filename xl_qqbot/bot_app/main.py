@@ -14,7 +14,7 @@ from botpy.connection import ConnectionState
 from botpy.message import GroupMessage
 
 from .bilibili import BilibiliWatcher
-from .config import load_config
+from .config import load_config, require_gateway_credentials
 from .groups import GroupStore, learn_group_from_event
 from .matcher import CharacterMatcher
 from .proactive_dispatcher import ProactiveDispatcher
@@ -119,6 +119,7 @@ async def _run_event_client(
 
 
 async def _amain(config) -> None:
+    require_gateway_credentials(config)
     sender = QQSender(config)
     mute = ServiceMute()
     # 群分级仅供共享 router 路由和 test 来源隔离使用。
