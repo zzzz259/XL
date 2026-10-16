@@ -17,17 +17,17 @@ from .config import Config, load_config
 from .groups import GroupStore
 from .proactive_dispatcher import ProactiveDispatcher
 from .proactive_outbox import ProactiveOutbox
-from .sender import QQSender
-from .tiers import GroupTier
+from .gateway import gateway_transport_for_config
 
 _logger = logging.getLogger(__name__)
-_SERVICE_TIERS = {
-    "test": frozenset({"debug", "test"}),
-    "production": frozenset({"main", "production"}),
-}
 _EVENT_KEY_RE = re.compile(r"[A-Za-z0-9._:-]{1,200}")
 _STOP_KEY = web.AppKey("notification_stop_event", asyncio.Event)
 _DISPATCH_TASK_KEY = web.AppKey("notification_dispatch_task", asyncio.Task)
+
+
+def QQSender(config, instance_id=None):
+    """Compatibility name for the instance's shared Gateway transport client."""
+    return gateway_transport_for_config(config, instance_id)
 
 
 class NotificationDeliveryError(RuntimeError):
@@ -75,13 +75,15 @@ class NotificationClient:
             return False
         return response.status == 200 and isinstance(body, dict) and body.get("ok") is True
 
-    async def enqueue(self, *, event_key: str, tier: str, messages: list[dict]) -> list[dict]:
+    async def enqueue(self, *, event_key: str, instance_id: str | None = None,
+                      tier: str | None = None, messages: list[dict]) -> list[dict]:
         if self._session is None or self._session.closed:
             raise RuntimeError("notification client is not started")
         try:
             async with self._session.post(
                 f"{self.base_url}/notifications",
-                json={"event_key": event_key, "tier": tier, "messages": messages},
+                json={"event_key": event_key, "instance_id": instance_id or tier,
+                      "messages": messages},
                 headers={"Authorization": f"Bearer {self.bearer_token}"},
             ) as response:
                 body = await response.json()
@@ -155,13 +157,12 @@ class NotificationClient:
 
 
 class NotificationService:
-    """Validate tier scope and persist every item before acknowledging intake."""
+    """Validate instance ownership and persist each item before acknowledging."""
 
-    def __init__(self, *, tier: str, allowed_groups, outbox: ProactiveOutbox):
-        if tier not in _SERVICE_TIERS:
-            raise ValueError("notification service tier must be test or production")
-        self.tier = tier
-        self.allowed_tiers = _SERVICE_TIERS[tier]
+    def __init__(self, *, instance_id: str, allowed_groups, outbox: ProactiveOutbox):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", instance_id):
+            raise ValueError("notification service instance_id is invalid")
+        self.instance_id = instance_id
         self.allowed_groups = frozenset(
             group for group in allowed_groups if isinstance(group, str) and group
         )
@@ -171,12 +172,12 @@ class NotificationService:
         if not isinstance(payload, dict):
             return 400, {"ok": False, "error": "expected object"}
         event_key = payload.get("event_key")
-        tier = payload.get("tier")
+        instance_id = payload.get("instance_id")
         messages = payload.get("messages")
         if not isinstance(event_key, str) or _EVENT_KEY_RE.fullmatch(event_key) is None:
             return 400, {"ok": False, "error": "invalid event_key"}
-        if tier not in self.allowed_tiers:
-            return 403, {"ok": False, "error": "tier is outside service scope"}
+        if instance_id != self.instance_id:
+            return 403, {"ok": False, "error": "instance is outside service scope"}
         if not isinstance(messages, list) or not messages or len(messages) > 100:
             return 400, {"ok": False, "error": "messages must contain 1 to 100 items"}
 
@@ -297,7 +298,7 @@ def build_notification_app(
         dispatcher_task = request.app.get(_DISPATCH_TASK_KEY)
         ready = dispatcher_task is not None and not dispatcher_task.done()
         return web.json_response(
-            {"ok": ready, "ready": ready, "tier": service.tier},
+            {"ok": ready, "ready": ready, "instance_id": service.instance_id},
             status=200 if ready else 503,
         )
 
@@ -342,29 +343,18 @@ def build_notification_app(
     return app
 
 
-def allowed_notification_groups(config: Config, tier: str) -> frozenset[str]:
-    """Resolve configured and learned groups, then enforce the service tier scope."""
-    if tier not in _SERVICE_TIERS:
-        raise ValueError("notification service tier must be test or production")
+def allowed_notification_groups(config: Config, instance_id: str | None = None) -> frozenset[str]:
+    """Resolve only groups explicitly owned/configured by this Bot instance."""
     configured_groups = set(config.target.group_openids)
     if not configured_groups:
         configured_groups.update(GroupStore(config.watch.data_dir).openids())
-    configured_groups.update(config.groups.debug)
-    configured_groups.update(config.groups.test)
-    group_tiers = GroupTier(config.groups)
-    return frozenset(
-        group
-        for group in configured_groups
-        if group_tiers.tier_of(group) in _SERVICE_TIERS[tier]
-    )
+    return frozenset(configured_groups)
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="xl_qqbot tier notification service")
-    parser.add_argument(
-        "--tier", required=True, choices=("test", "production"),
-        help="notification scope served by this process",
-    )
+    parser = argparse.ArgumentParser(description="xl_qqbot instance notification service")
+    parser.add_argument("--instance-id")
+    parser.add_argument("--tier", choices=("test", "production"), help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -373,22 +363,24 @@ def main(argv=None) -> None:
     config = load_config("config.toml")
     if len(config.notification.api_token) < 32:
         raise ValueError("[notification] api_token must be configured with 32+ characters")
-    port = (
+    instance_id = args.instance_id or args.tier or config.instance.instance_id
+    port = config.notification.instance_ports.get(
+        instance_id,
         config.notification.test_port
-        if args.tier == "test"
-        else config.notification.production_port
+        if instance_id == "test"
+        else config.notification.production_port,
     )
-    data_dir = Path(config.watch.data_dir) / "notifications" / args.tier
+    data_dir = Path(config.watch.data_dir) / "notifications" / instance_id
     outbox = ProactiveOutbox(data_dir)
     service = NotificationService(
-        tier=args.tier,
-        allowed_groups=allowed_notification_groups(config, args.tier),
+        instance_id=instance_id,
+        allowed_groups=allowed_notification_groups(config, instance_id),
         outbox=outbox,
     )
     app = build_notification_app(
         service,
         bearer_token=config.notification.api_token,
-        sender=QQSender(config),
+        sender=QQSender(config, instance_id),
     )
     web.run_app(app, host="127.0.0.1", port=port)
 

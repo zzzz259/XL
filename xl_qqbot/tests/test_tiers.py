@@ -188,20 +188,20 @@ async def test_character_push_is_not_filtered_by_legacy_feature_gate(tmp_path):
     await watcher._tick()
 
     assert sender.calls == []  # 交付由持久 outbox dispatcher 负责
-    assert [item.recipient for item in watcher.proactive_outbox.list_pending()] == [PROD_G]
-    assert not os.path.exists(vdir)  # main watcher 仅投递至 production 群
+    assert {item.recipient for item in watcher.proactive_outbox.list_pending()} == {PROD_G, TEST_G}
+    assert not os.path.exists(vdir)
 
 
 @pytest.mark.asyncio
-async def test_main_character_push_only_sends_to_production_group(tmp_path):
+async def test_character_push_uses_all_instance_configured_groups(tmp_path):
     config, vdir = make_watcher_env(tmp_path, manual_groups=[PROD_G, DEBUG_G])
     sender = FakeSender()
     watcher = Watcher(config, sender, tiers=GroupTier(config.groups))
     await watcher._tick()
 
     assert sender.calls == []
-    assert [item.recipient for item in watcher.proactive_outbox.list_pending()] == [PROD_G]
-    assert not os.path.exists(vdir)  # main watcher 仅投递至 production 群
+    assert {item.recipient for item in watcher.proactive_outbox.list_pending()} == {PROD_G, DEBUG_G}
+    assert not os.path.exists(vdir)
 
 
 @pytest.mark.asyncio
@@ -218,9 +218,9 @@ async def test_update_notice_is_not_filtered_by_legacy_feature_gate(tmp_path):
     assert sender.calls == []
     queued = watcher.proactive_outbox.list_pending()
     notices = [item for item in queued if item.event_key.startswith("game-update:")]
-    assert [(item.recipient, item.kind) for item in notices] == [
-        (PROD_G, "text")
-    ]
+    assert {(item.recipient, item.kind) for item in notices} == {
+        (PROD_G, "text"), (DEBUG_G, "text")
+    }
     assert watcher.notice.consumed_events == 1  # 事件已消费不重复播报
     assert watcher.mute.muted  # 播报后进入更新静音（与现有语义一致）
 
@@ -303,10 +303,7 @@ async def test_bilibili_watch_sends_to_allowed_groups(tmp_path):
         for item in watcher.proactive_outbox.list_pending()
         if item.kind == "text"
     ]
-    # Bilibili automation belongs to the production tier; debug/test groups
-    # must not receive production notices.
-    assert text_groups == [PROD_G]
-    assert DEBUG_G not in text_groups
+    assert set(text_groups) == {PROD_G, DEBUG_G}
     assert watcher.state.target(DEFAULT_BILI_MID).last_opus_id == 102
 
 

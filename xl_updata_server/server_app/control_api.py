@@ -71,6 +71,7 @@ def _handler_type(config: ServerConfig, coordinator: UpdateCoordinator, token: s
                     {
                         "ok": True,
                         "environment": config.environment,
+                        "instance_id": config.instance_id,
                         "cdn_poll_enabled": config.cdn_poll_enabled,
                     },
                 )

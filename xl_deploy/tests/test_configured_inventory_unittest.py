@@ -12,6 +12,13 @@ from xl_deploy.transaction import DeploymentPaths, DeploymentTransaction
 SHA = '2' * 40
 
 
+def token_for(instance_id):
+    return f'test-token-for-{instance_id}-01234567890123456789'
+
+
+CONTROL_TOKEN = 'test-control-token-012345678901234567890123'
+
+
 def mapping():
     return {'instances': [
         {'instance_id': name, 'watch_ref': 'test', 'config_path': f'{name}/config.toml',
@@ -61,14 +68,34 @@ class ConfiguredInventoryTests(unittest.TestCase):
             if not instance.config_path.exists():
                 instance.config_path.write_text(
                     f'[instance]\nid = "{instance.instance_id}"\n[watch]\ndata_dir = "data"\noutbox_dir = "data/outbox"\n'
-                    f'[router.instance_ports]\n"{instance.instance_id}" = {instance.listen_ports['bot']}\n', encoding='utf-8')
+                    f'[router.instance_ports]\n"{instance.instance_id}" = {instance.listen_ports['bot']}\n'
+                    f'[gateway]\ncontrol_token = "{CONTROL_TOKEN}"\n'
+                    f'[gateway.instance_tokens]\n"{instance.instance_id}" = "{token_for(instance.instance_id)}"\n', encoding='utf-8')
         inventory.gateway.config_path.parent.mkdir(parents=True, exist_ok=True)
         if not inventory.gateway.config_path.exists():
             inventory.gateway.config_path.write_text(
-                f'[watch]\ndata_dir = "data"\n[gateway]\ncontrol_port = {inventory.gateway.listen_port}\n[router.group_instances]\n' +
+                f'[watch]\ndata_dir = "data"\n[gateway]\ncontrol_port = {inventory.gateway.listen_port}\ncontrol_token = "{CONTROL_TOKEN}"\n[router.group_instances]\n' +
                 ''.join(f'"{g}" = "{i}"\n' for g, i in inventory.group_routes.items()) +
-                '[router.instance_ports]\n' + ''.join(f'"{i.instance_id}" = {i.listen_ports['bot']}\n' for i in inventory.instances), encoding='utf-8')
+                '[router.instance_ports]\n' + ''.join(f'"{i.instance_id}" = {i.listen_ports['bot']}\n' for i in inventory.instances) +
+                '[gateway.instance_tokens]\n' + ''.join(f'"{i.instance_id}" = "{token_for(i.instance_id)}"\n' for i in inventory.instances), encoding='utf-8')
         return inventory
+
+    def test_inventory_requires_a_distinct_gateway_token_for_each_bot_instance(self):
+        inventory = self.inventory()
+        config_text = inventory.gateway.config_path.read_text(encoding='utf-8')
+        config_text = config_text.split('[gateway.instance_tokens]')[0] + '[gateway.instance_tokens]\n'
+        inventory.gateway.config_path.write_text(config_text, encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'gateway instance tokens'):
+            inventory.validate_runtime_configs()
+
+    def test_inventory_rejects_transport_token_equal_to_shared_control_token(self):
+        inventory = self.inventory()
+        gateway_config = inventory.gateway.config_path
+        config_text = gateway_config.read_text(encoding='utf-8')
+        config_text = config_text.replace(CONTROL_TOKEN, token_for('test-a'), 1)
+        gateway_config.write_text(config_text, encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'gateway instance tokens'):
+            inventory.validate_runtime_configs()
 
     def transaction(self, inventory):
         releases = self.root / 'releases'; releases.mkdir()
@@ -170,6 +197,33 @@ class ConfiguredInventoryTests(unittest.TestCase):
         runtime = load_runtime_config(target)
         self.assertIsNotNone(getattr(runtime, 'inventory', None))
         self.assertEqual(len(runtime.inventory.instances), 2)
+
+    def test_read_only_inventory_dry_run_lists_all_instances_without_secrets(self):
+        from xl_deploy.__main__ import render_inventory_dry_run
+        inventory = self.inventory()
+        output = render_inventory_dry_run(inventory)
+        self.assertIn('read-only inventory check: valid', output)
+        self.assertIn('gateway unit=xl-gateway.service', output)
+        self.assertIn('instance_id=test-a watch_ref=test', output)
+        self.assertIn('instance_id=test-b watch_ref=test', output)
+        self.assertIn('groups=1', output)
+        self.assertNotIn('token', output.lower())
+        self.assertNotIn('g-a', output)
+        self.assertNotIn('g-b', output)
+
+    def test_dry_run_cli_skips_poller_and_secret_loading(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        from xl_deploy import __main__
+
+        inventory = self.inventory()
+        output = StringIO()
+        with patch.object(__main__, 'load_runtime_config', return_value=SimpleNamespace(inventory=inventory)), \
+                patch.object(__main__, 'build_poller', side_effect=AssertionError('poller must not run')), \
+                redirect_stdout(output):
+            self.assertEqual(__main__.main(['--config', 'unused.toml', '--dry-run-inventory']), 0)
+        self.assertIn('read-only inventory check: valid', output.getvalue())
 
     def test_poller_passes_inventory_to_both_plan_builds(self):
         from xl_deploy.poller import BranchPoller, PollCursorStore
@@ -399,5 +453,3 @@ class ConfiguredInventoryTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
-
-

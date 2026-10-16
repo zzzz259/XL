@@ -106,15 +106,17 @@ class RouterConfig:
     deployment_token: str = ""
     group_instances: dict[str, str] = field(default_factory=dict)
     instance_ports: dict[str, int] = field(default_factory=dict)
+    group_routing_configured: bool = False
 
 
 @dataclass(frozen=True)
 class NotificationConfig:
-    """Ports and shared bearer credential for tier notification APIs."""
+    """Ports and shared bearer credential for instance notification APIs."""
 
     api_token: str = ""
     test_port: int = 8786
     production_port: int = 8787
+    instance_ports: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,7 @@ class GatewayConfig:
 
     control_port: int = 8785
     control_token: str = ""
+    instance_tokens: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)
@@ -335,6 +338,9 @@ def load_config(path: str = "config.toml") -> Config:
         deployment_token=str(router.get("deployment_token", "")).strip(),
         group_instances=group_instances,
         instance_ports=instance_ports,
+        group_routing_configured=(
+            "group_instances" in router or "instance_ports" in router
+        ),
     )
     if router_config.forward_timeout <= 0:
         raise ValueError("[router] forward_timeout 必须 > 0")
@@ -351,6 +357,19 @@ def load_config(path: str = "config.toml") -> Config:
         raise ValueError("[router] deployment_token 必须至少 32 个字符")
 
     notification_raw = raw.get("notification", {})
+    notification_instances = notification_raw.get("instance_ports", {})
+    if not isinstance(notification_instances, dict):
+        raise ValueError("[notification.instance_ports] 必须是表")
+    notification_instance_ports = {
+        str(instance_id).strip(): int(port)
+        for instance_id, port in notification_instances.items()
+    }
+    if any(
+        not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", instance_id)
+        or not 1 <= port <= 65535
+        for instance_id, port in notification_instance_ports.items()
+    ):
+        raise ValueError("[notification.instance_ports] 实例 ID 或端口无效")
     notification_config = NotificationConfig(
         api_token=str(notification_raw.get("api_token", "")).strip(),
         test_port=int(notification_raw.get("test_port", NotificationConfig.test_port)),
@@ -359,15 +378,17 @@ def load_config(path: str = "config.toml") -> Config:
                 "production_port", NotificationConfig.production_port
             )
         ),
+        instance_ports=notification_instance_ports,
     )
     notification_ports = {
         notification_config.test_port,
         notification_config.production_port,
+        *notification_config.instance_ports.values(),
     }
     if any(port < 1 or port > 65535 for port in notification_ports):
         raise ValueError("[notification] 端口必须在 1 到 65535 之间")
     reserved_ports = service_ports | {router_config.deployment_control_port, 8785}
-    if len(notification_ports) != 2 or notification_ports & reserved_ports:
+    if len(notification_ports) != 2 + len(notification_config.instance_ports) or notification_ports & reserved_ports:
         raise ValueError("[notification] 端口不能与 Gateway、Router 或 worker 服务端口重复")
     if notification_config.api_token and len(notification_config.api_token) < 32:
         raise ValueError("[notification] api_token 必须至少 32 个字符")
@@ -376,6 +397,10 @@ def load_config(path: str = "config.toml") -> Config:
     gateway_config = GatewayConfig(
         control_port=int(gateway_raw.get("control_port", GatewayConfig.control_port)),
         control_token=str(gateway_raw.get("control_token", "")).strip(),
+        instance_tokens={
+            str(instance_id).strip(): str(token).strip()
+            for instance_id, token in dict(gateway_raw.get("instance_tokens", {})).items()
+        },
     )
     if gateway_config.control_port < 1 or gateway_config.control_port > 65535:
         raise ValueError("[gateway] control_port 必须在 1 到 65535 之间")
@@ -384,6 +409,20 @@ def load_config(path: str = "config.toml") -> Config:
         raise ValueError("[gateway] control_port 不能与其他服务端口重复")
     if gateway_config.control_token and len(gateway_config.control_token) < 32:
         raise ValueError("[gateway] control_token 必须至少 32 个字符")
+    if any(
+        not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", instance_id)
+        or len(token) < 32
+        for instance_id, token in gateway_config.instance_tokens.items()
+    ):
+        raise ValueError("[gateway.instance_tokens] 实例 ID 或 token 无效")
+    if len(set(gateway_config.instance_tokens.values())) != len(gateway_config.instance_tokens):
+        raise ValueError("[gateway.instance_tokens] 每个实例必须使用不同 token")
+    if gateway_config.control_token in gateway_config.instance_tokens.values():
+        raise ValueError("[gateway.instance_tokens] 不能复用 Gateway 控制 token")
+    if set(gateway_config.instance_tokens) - set(router_config.instance_ports):
+        raise ValueError("[gateway.instance_tokens] 必须对应已配置 worker 实例")
+    if router_config.group_routing_configured and set(router_config.instance_ports) - set(gateway_config.instance_tokens):
+        raise ValueError("[gateway.instance_tokens] 显式群路由要求每个实例配置独立 token")
     internal_tokens = tuple(
         token
         for token in (
@@ -401,8 +440,6 @@ def load_config(path: str = "config.toml") -> Config:
     if not isinstance(raw_tiers, list):
         raise ValueError("[server_status] recipient_tiers 必须是数组")
     status_tiers = tuple(dict.fromkeys(str(tier).strip() for tier in raw_tiers))
-    if not status_tiers or any(tier not in ("debug", "test") for tier in status_tiers):
-        raise ValueError("[server_status] recipient_tiers 只允许 debug/test 且不能为空")
     status_interval = int(status_raw.get("interval_seconds", 30))
     status_confirm_delay = int(status_raw.get("confirm_delay_seconds", 3))
     if status_interval < 1:

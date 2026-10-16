@@ -119,9 +119,9 @@ class DeploymentServiceTests(unittest.IsolatedAsyncioTestCase):
             {"ok": True, "results": {PRODUCTION_GROUP: True}},
         )
         self.assertEqual(len(self.test_notifications.calls), 2)
-        self.assertEqual(self.test_notifications.calls[0]["tier"], "test")
+        self.assertEqual(self.test_notifications.calls[0]["instance_id"], "test")
         self.assertEqual(len(self.main_notifications.calls), 1)
-        self.assertEqual(self.main_notifications.calls[0]["tier"], "main")
+        self.assertEqual(self.main_notifications.calls[0]["instance_id"], "main")
         self.assertEqual(
             self.test_notifications.delivery_request,
             ("deployment:tx-test-start", 1, 30),
@@ -137,6 +137,31 @@ class DeploymentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status, 401)
         self.assertEqual(self.gateway.calls, [])
+
+    async def test_instance_announcement_routes_only_to_configured_owner(self):
+        copy_a = FakeNotificationClient()
+        copy_b = FakeNotificationClient()
+        app = build_deployment_service_app(
+            bearer_token=TOKEN,
+            tiers=GroupTier(GroupsConfig()),
+            target_groups=["group-a", "group-b"],
+            gateway_client=self.gateway,
+            test_notification_client=copy_a,
+            main_notification_client=copy_b,
+            group_instances={"group-a": "copy-a", "group-b": "copy-b"},
+            instance_notification_clients={"copy-a": copy_a, "copy-b": copy_b},
+        )
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post(
+                "/deployment/announce",
+                json={"instance_id": "copy-b", "phase": "complete", "notification_id": "n1"},
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual([item["recipient"] for item in copy_b.calls[0]["messages"]], ["group-b"])
+        self.assertEqual(copy_b.calls[0]["instance_id"], "copy-b")
+        self.assertEqual(copy_a.calls, [])
 
     async def test_maintenance_and_drained_proxy_to_gateway(self):
         maintenance = await self.post(

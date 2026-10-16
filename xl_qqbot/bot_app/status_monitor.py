@@ -178,6 +178,7 @@ class StatusMonitor:
         confirm_delay_seconds: float = 3,
         sleeper: Sleeper = asyncio.sleep,
         notification_client=None,
+        instance_id: str = "default",
     ):
         if interval_seconds <= 0 or confirm_delay_seconds <= 0:
             raise ValueError("sampling intervals must be positive")
@@ -185,6 +186,7 @@ class StatusMonitor:
         self.history = history
         self.outbox = outbox
         self.notification_client = notification_client
+        self.instance_id = instance_id
         self.recipients = tuple(dict.fromkeys(r for r in recipients if r))
         self.interval_seconds = interval_seconds
         self.confirm_delay_seconds = confirm_delay_seconds
@@ -238,7 +240,7 @@ class StatusMonitor:
         if self.notification_client is not None:
             await self.notification_client.enqueue(
                 event_key=event_key,
-                tier="test",
+                instance_id=self.instance_id,
                 messages=[
                     {
                         "recipient": recipient,

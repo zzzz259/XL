@@ -16,6 +16,7 @@ from bot_app.config import (
     TargetConfig,
     UploadConfig,
     WatchConfig,
+    load_config,
 )
 from bot_app.deploy_control import DeploymentControl
 from bot_app.gateway import (
@@ -30,6 +31,7 @@ from bot_app.tiers import GroupTier
 
 
 TOKEN = "gateway-lifecycle-token-012345678901234567"
+INSTANCE_TOKEN = "instance-copy-a-token-012345678901234567"
 
 
 def make_config(root, port=8785):
@@ -79,6 +81,88 @@ class GatewayControlApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health.status, 503)
         self.assertTrue((await drained.json())["drained"])
 
+    async def test_gateway_outbound_transport_requires_auth_and_instance_identity(self):
+        class Sender:
+            def __init__(self):
+                self.sent = []
+
+            async def start(self):
+                return None
+
+            async def close(self):
+                return None
+
+            async def send_text(self, group, text, reply_to=""):
+                self.sent.append((group, text, reply_to))
+                return True
+
+        sender = Sender()
+        control = DeploymentControl(
+            Path(self.temp_dir.name) / "instances.json", instance_ids=("copy-a", "copy-b")
+        )
+        app = build_gateway_control_app(
+            control, bearer_token=TOKEN, sender=sender,
+            instance_tokens={"copy-a": INSTANCE_TOKEN, "copy-b": "instance-copy-b-token-012345678901234567"},
+            group_instances={"group-a": "copy-a", "group-b": "copy-b"},
+        )
+        async with TestClient(TestServer(app)) as client:
+            payload = {
+                "instance_id": "copy-a",
+                "recipient": "group-a",
+                "kind": "text",
+                "text": "raw outbound text",
+                "reply_to": "message-1",
+            }
+            self.assertEqual((await client.post("/gateway/messages", json=payload)).status, 401)
+            headers = {
+                "Authorization": f"Bearer {INSTANCE_TOKEN}",
+                "X-Instance-ID": "copy-a",
+            }
+            wrong = await client.post(
+                "/gateway/messages",
+                json={**payload, "instance_id": "copy-b"},
+                headers=headers,
+            )
+            unowned_group = await client.post(
+                "/gateway/messages",
+                json={**payload, "recipient": "group-b"},
+                headers=headers,
+            )
+            sent = await client.post("/gateway/messages", json=payload, headers=headers)
+
+        self.assertEqual(wrong.status, 403)
+        self.assertEqual(unowned_group.status, 403)
+        self.assertEqual(sent.status, 200)
+        self.assertEqual(sender.sent, [("group-a", "raw outbound text", "message-1")])
+
+    async def test_explicit_routes_require_distinct_per_instance_tokens(self):
+        control = DeploymentControl(
+            Path(self.temp_dir.name) / "token-instances.json", instance_ids=("copy-a", "copy-b")
+        )
+        with self.assertRaisesRegex(ValueError, "per-instance tokens"):
+            build_gateway_control_app(
+                control,
+                bearer_token=TOKEN,
+                sender=object(),
+                group_instances={"group-a": "copy-a", "group-b": "copy-b"},
+            )
+        with self.assertRaisesRegex(ValueError, "distinct"):
+            build_gateway_control_app(
+                control,
+                bearer_token=TOKEN,
+                sender=object(),
+                instance_tokens={"copy-a": INSTANCE_TOKEN, "copy-b": INSTANCE_TOKEN},
+                group_instances={"group-a": "copy-a", "group-b": "copy-b"},
+            )
+        with self.assertRaisesRegex(ValueError, "different from the control token"):
+            build_gateway_control_app(
+                control,
+                bearer_token=TOKEN,
+                sender=object(),
+                instance_tokens={"copy-a": TOKEN, "copy-b": INSTANCE_TOKEN},
+                group_instances={"group-a": "copy-a", "group-b": "copy-b"},
+            )
+
 
 class GatewayRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_starts_one_gateway_client_and_no_business_jobs(self):
@@ -97,7 +181,16 @@ class GatewayRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 clients.append(client)
                 return client
 
-            runtime = GatewayRuntime(config, client_factory=client_factory)
+            class FakeSender:
+                async def start(self):
+                    return None
+
+                async def close(self):
+                    return None
+
+            runtime = GatewayRuntime(
+                config, client_factory=client_factory, sender_factory=lambda _config: FakeSender()
+            )
             task = asyncio.create_task(runtime.run())
             await asyncio.wait_for(started.wait(), timeout=2)
             runtime.stop()
@@ -111,6 +204,42 @@ class GatewayRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GatewayForwardingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parser_preserves_empty_instance_route_table_as_configured(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.toml"
+            path.write_text(
+                '[bot]\nappid="1"\nsecret="2"\n[watch]\noutbox_dir="outbox"\n'
+                '[router.group_instances]\n',
+                encoding="utf-8",
+            )
+            config = load_config(path)
+
+        self.assertTrue(config.router.group_routing_configured)
+        self.assertEqual(config.router.group_instances, {})
+
+    async def test_empty_configured_instance_routes_drop_unowned_groups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            received = []
+
+            class Forwarder:
+                async def forward(self, instance_id, payload):
+                    received.append((instance_id, payload))
+                    return True
+
+            groups = GroupStore(str(root / "data"))
+            router = object.__new__(RouterClient)
+            router._group_store = groups
+            router._tiers = GroupTier(GroupsConfig(debug=["debug-group"], test=["test-group"]))
+            router._forwarder = Forwarder()
+            router._update_status_path = root / "update_status.json"
+            router._group_instances = {}
+
+            await router._route("new_business_event", {"group_openid": "unowned-group"})
+
+            self.assertEqual(received, [])
+            self.assertNotIn("unowned-group", groups.openids())
+
     async def test_event_is_learned_and_forwarded_with_tier_envelope(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -129,6 +258,7 @@ class GatewayForwardingTests(unittest.IsolatedAsyncioTestCase):
             )
             router._forwarder = Forwarder()
             router._update_status_path = root / "update_status.json"
+            router._group_instances = None
 
             await router._route(
                 "new_business_event",

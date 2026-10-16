@@ -20,13 +20,13 @@ class GatewayControlClientTests(unittest.IsolatedAsyncioTestCase):
             payload = await request.json()
             self.calls.append(("maintenance", payload))
             return web.json_response(
-                {"ok": True, "tier": payload["tier"], "enabled": payload["enabled"], "tiers": {payload["tier"]: payload["enabled"]}}
+                {"ok": True, "instance_id": payload["instance_id"], "enabled": payload["enabled"]}
             )
 
         async def drained(request):
-            tier = request.query["tier"]
-            self.calls.append(("drained", tier))
-            return web.json_response({"ok": True, "tier": tier, "drained": True, "active": 0})
+            instance_id = request.query["instance_id"]
+            self.calls.append(("drained", instance_id))
+            return web.json_response({"ok": True, "instance_id": instance_id, "drained": True, "active": 0})
 
         app = web.Application()
         app.router.add_get("/gateway/health", health)
@@ -49,12 +49,12 @@ class GatewayControlClientTests(unittest.IsolatedAsyncioTestCase):
         state = await self.gateway.set_maintenance("test", True)
         drain = await self.gateway.drained("test")
 
-        self.assertTrue(state["tiers"]["test"])
+        self.assertEqual(state["instance_id"], "test")
         self.assertTrue(drain["drained"])
         self.assertEqual(
             self.calls,
             [
-                ("maintenance", {"tier": "test", "enabled": True}),
+                ("maintenance", {"instance_id": "test", "enabled": True}),
                 ("drained", "test"),
             ],
         )

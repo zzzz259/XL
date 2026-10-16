@@ -186,7 +186,7 @@ class BilibiliOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.state.last_bvid, "BV1")
         self.assertEqual(pending[0].event_key, "bilibili:video:123:BV1")
 
-    async def test_remote_notification_is_accepted_before_opus_cursor_advances(self):
+    async def test_remote_notification_uses_instance_identity_before_cursor_advances(self):
         notification_client = RecordingNotificationClient()
         watcher = BilibiliWatcher(
             self.config,
@@ -202,7 +202,7 @@ class BilibiliOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(notification_client.calls), 1)
         request = notification_client.calls[0]
         self.assertEqual(request["event_key"], "bilibili:opus:123:101:notice")
-        self.assertEqual(request["tier"], "main")
+        self.assertEqual(request["instance_id"], "default")
         self.assertEqual(
             [item["recipient"] for item in request["messages"]], ["g1", "g2"]
         )
@@ -223,7 +223,7 @@ class BilibiliOutboxTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.state.last_opus_id, 100)
 
-    async def test_production_bilibili_scope_excludes_test_and_debug_groups(self):
+    async def test_bilibili_scope_uses_this_instances_configured_groups(self):
         self.config = Config(
             **{
                 **self.config.__dict__,
@@ -232,7 +232,7 @@ class BilibiliOutboxTests(unittest.IsolatedAsyncioTestCase):
         )
         watcher = BilibiliWatcher(self.config, NoDirectSender())
 
-        self.assertEqual(watcher._target_groups(), [])
+        self.assertEqual(watcher._target_groups(), ["g1", "g2"])
 
 
 if __name__ == "__main__":

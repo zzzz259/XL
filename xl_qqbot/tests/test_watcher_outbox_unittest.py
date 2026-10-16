@@ -233,7 +233,7 @@ class WatcherOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(notification_client.calls), 1)
         request = notification_client.calls[0]
         self.assertEqual(request["event_key"], "game-update:1:start:100")
-        self.assertEqual(request["tier"], "main")
+        self.assertEqual(request["instance_id"], "default")
         self.assertEqual(request["messages"][0]["recipient"], "g1")
         self.assertEqual(request["messages"][0]["kind"], "text")
 

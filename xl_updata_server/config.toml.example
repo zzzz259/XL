@@ -1,5 +1,6 @@
 [server]
-environment = "main" # test 或 main；test 会强制关闭 CDN 定时轮询
+environment = "main" # 旧配置兼容标签，不参与功能开关
+instance_id = "default" # 当前 updater 实例的显式身份
 timezone = "Asia/Shanghai"
 normal_interval_seconds = 3600
 burst_interval_seconds = 60
@@ -8,12 +9,12 @@ burst_duration_seconds = 1200
 burst_anchor = "2026-10-09T10:00:00+08:00"
 
 [polling]
-enabled = true # main 可配置关闭；environment=test 时无论此值如何都不做 CDN 定时轮询
+enabled = true # 对任何实例直接生效；需要停用时设为 false
 
 [api]
 enabled = true # 本机控制接口；启动前需由 systemd EnvironmentFile 提供 token
 host = "127.0.0.1"
-port = 8790 # test 使用 8791
+port = 8790 # 每个实例配置独立监听端口
 token_env = "XL_UPDATE_API_TOKEN"
 
 [paths]

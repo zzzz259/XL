@@ -44,7 +44,8 @@ class WarningPipeline:
 def make_config(environment="main", polling=True):
     return SimpleNamespace(
         environment=environment,
-        cdn_poll_enabled=polling and environment == "main",
+        instance_id=environment,
+        cdn_poll_enabled=polling,
         normal_interval_seconds=3600,
         burst_interval_seconds=60,
         burst_duration_seconds=1200,
@@ -99,6 +100,20 @@ class TestUpdateCoordinator(unittest.TestCase):
 
         self.assertEqual(pipeline.calls, 1)
         self.assertEqual(coordinator.get_job(job_id)["status"], "succeeded")
+
+    def test_test_environment_scheduled_run_obeys_enabled_polling(self):
+        pipeline = ImmediatePipeline()
+        coordinator = UpdateCoordinator(
+            make_config("test", polling=True),
+            pipeline,
+            StateStore(self.database),
+            clock=lambda: self.now,
+        )
+
+        result = coordinator.run_scheduled_if_due(self.now)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(pipeline.calls, 1)
 
     def test_stopping_coordinator_rejects_new_manual_runs(self):
         coordinator = UpdateCoordinator(

@@ -175,7 +175,7 @@ class StatusMonitorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(notification_client.calls), 1)
         request = notification_client.calls[0]
-        self.assertEqual(request["tier"], "test")
+        self.assertEqual(request["instance_id"], "default")
         self.assertEqual(
             [item["recipient"] for item in request["messages"]], ["debug", "test"]
         )
@@ -204,13 +204,13 @@ class StatusMonitorRuntimeTests(unittest.TestCase):
             self.assertEqual(config.server_status.interval_seconds, 30)
             self.assertEqual(config.server_status.confirm_delay_seconds, 3)
 
-    def test_invalid_production_tier_and_intervals_are_rejected(self):
+    def test_legacy_recipient_tiers_do_not_gate_and_invalid_intervals_are_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)
-            with self.assertRaisesRegex(ValueError, "recipient_tiers"):
-                self._write_config(
-                    root, status_section='[server_status]\nrecipient_tiers=["production"]\n'
-                )
+            config = self._write_config(
+                root, status_section='[server_status]\nrecipient_tiers=["production"]\n'
+            )
+            self.assertEqual(config.server_status.recipient_tiers, ("production",))
             with self.assertRaisesRegex(ValueError, "interval_seconds"):
                 self._write_config(
                     root, status_section='[server_status]\ninterval_seconds=0\n'

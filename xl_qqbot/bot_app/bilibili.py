@@ -39,7 +39,6 @@ import aiohttp
 from .config import DEFAULT_BILI_MID, BilibiliTarget, Config
 from .groups import GroupStore
 from .proactive_outbox import ProactiveOutbox
-from .tiers import GroupTier
 
 _logger = logging.getLogger(__name__)
 
@@ -603,7 +602,6 @@ class BilibiliWatcher:
             if notification_client is not None
             else ProactiveOutbox(config.watch.data_dir)
         )
-        self.tiers = GroupTier(config.groups)
         self.group_store = GroupStore(config.watch.data_dir)
         self.state = BilibiliStateStore(config.watch.data_dir)
         self.tmp_dir = os.path.join(config.watch.data_dir, "bili_tmp")
@@ -898,15 +896,13 @@ class BilibiliWatcher:
     def _target_groups(self) -> List[str]:
         manual = self.config.target.group_openids
         groups = set(manual) if manual else self.group_store.openids()
-        return sorted(
-            group for group in groups if self.tiers.tier_of(group) == "production"
-        )
+        return sorted(groups)
 
     async def _enqueue_text(self, event_key: str, groups: List[str], text: str) -> None:
         if self.notification_client is not None:
             await self.notification_client.enqueue(
                 event_key=event_key,
-                tier="main",
+                instance_id=self.config.instance.instance_id,
                 messages=[
                     {
                         "recipient": group,
@@ -929,7 +925,7 @@ class BilibiliWatcher:
         if self.notification_client is not None:
             await self.notification_client.enqueue(
                 event_key=event_key,
-                tier="main",
+                instance_id=self.config.instance.instance_id,
                 messages=[
                     {
                         "recipient": group,

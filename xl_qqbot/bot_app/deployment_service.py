@@ -36,10 +36,17 @@ def build_deployment_service_app(
     gateway_client,
     test_notification_client,
     main_notification_client,
+    group_instances: dict[str, str] | None = None,
+    instance_notification_clients: dict[str, NotificationClient] | None = None,
 ) -> web.Application:
     """Build the 8784 control API while keeping Gateway and queue state remote."""
     if not isinstance(bearer_token, str) or len(bearer_token) < 32:
         raise ValueError("deployment bearer token must be at least 32 characters")
+    group_instances = dict(group_instances or {})
+    instance_notification_clients = dict(instance_notification_clients or {})
+    if not instance_notification_clients:
+        instance_notification_clients = {"test": test_notification_client, "main": main_notification_client}
+    notification_clients = tuple(dict.fromkeys(instance_notification_clients.values()))
 
     @web.middleware
     async def authenticate(request: web.Request, handler):
@@ -59,8 +66,7 @@ def build_deployment_service_app(
     async def health(_request: web.Request) -> web.Response:
         dependencies = await asyncio.gather(
             gateway_client.health(),
-            test_notification_client.health(),
-            main_notification_client.health(),
+            *(client.health() for client in notification_clients),
             return_exceptions=True,
         )
         ready = all(result is True for result in dependencies)
@@ -78,9 +84,12 @@ def build_deployment_service_app(
                 {"ok": False, "error": "expected object"}, status=400
             )
         tier = payload.get("tier")
+        instance_id = payload.get("instance_id")
         phase = payload.get("phase")
         notification_id = payload.get("notification_id")
-        if tier not in _ANNOUNCE_TIERS or phase not in (*_ANNOUNCEMENTS, "release_note"):
+        if (not isinstance(instance_id, str) or instance_id not in instance_notification_clients) and tier not in _ANNOUNCE_TIERS:
+            return web.json_response({"ok": False, "error": "invalid instance"}, status=400)
+        if phase not in (*_ANNOUNCEMENTS, "release_note"):
             return web.json_response(
                 {"ok": False, "error": "invalid tier or phase"}, status=400
             )
@@ -105,14 +114,17 @@ def build_deployment_service_app(
             configured_groups = (
                 target_groups() if callable(target_groups) else target_groups
             )
-            notice_groups = sorted(
-                {
-                    group
-                    for group in configured_groups
-                    if tiers.tier_of(group)
-                    == ("production" if tier == "main" else tier)
-                }
-            )
+            scope = instance_id if instance_id is not None else tier
+            owner = scope
+            if instance_id is None:
+                owner = "main" if tier == "main" else "test"
+            if group_instances:
+                notice_groups = sorted(group for group in configured_groups if group_instances.get(group) == scope)
+            else:
+                notice_groups = sorted(
+                    group for group in configured_groups
+                    if tiers.tier_of(group) == ("production" if tier == "main" else tier)
+                )
         except Exception:
             _logger.exception("部署公告目标群解析失败 tier=%s", tier)
             return web.json_response(
@@ -122,9 +134,9 @@ def build_deployment_service_app(
         if not notice_groups:
             return web.json_response({"ok": False, "results": {}})
 
-        notification_client = (
-            main_notification_client if tier == "main" else test_notification_client
-        )
+        notification_client = instance_notification_clients.get(owner)
+        if notification_client is None:
+            return web.json_response({"ok": False, "error": "notification instance unavailable"}, status=503)
         messages = [
             {
                 "recipient": group,
@@ -138,7 +150,7 @@ def build_deployment_service_app(
             event_key = f"deployment:{notification_id}"
             queued = await notification_client.enqueue(
                 event_key=event_key,
-                tier=tier,
+                instance_id=owner,
                 messages=messages,
             )
             if len(queued) != len(messages):
@@ -171,37 +183,42 @@ def build_deployment_service_app(
                 {"ok": False, "error": "expected object"}, status=400
             )
         tier = payload.get("tier")
+        instance_id = payload.get("instance_id")
         enabled = payload.get("enabled")
-        if tier not in (*_TIERS, "main") or not isinstance(enabled, bool):
+        if (
+            (not isinstance(instance_id, str) or instance_id not in instance_notification_clients)
+            and tier not in (*_TIERS, "main")
+        ) or not isinstance(enabled, bool):
             return web.json_response(
                 {"ok": False, "error": "invalid tier or enabled"}, status=400
             )
         try:
-            result = await gateway_client.set_maintenance(tier, enabled)
+            owner = instance_id or tier
+            result = await gateway_client.set_maintenance(owner, enabled)
         except Exception:
             _logger.exception("Gateway 维护状态更新失败 tier=%s", tier)
             return web.json_response(
                 {"ok": False, "error": "gateway unavailable"}, status=503
             )
-        affected_tiers = _TIERS if tier == "main" else (tier,)
-        states = result.get("tiers", result) if isinstance(result, dict) else {}
+        affected_tiers = _TIERS if instance_id is None and tier == "main" else (owner,)
+        states = result.get("instances", result.get("tiers", result)) if isinstance(result, dict) else {}
         return web.json_response(
             {
                 "ok": True,
-                "tier": tier,
+                "instance_id": owner,
                 "enabled": enabled,
-                "tiers": {
-                    item: states.get(item, enabled) for item in affected_tiers
-                },
+                "instances": {item: states.get(item, enabled) for item in affected_tiers},
             }
         )
 
     async def drained(request: web.Request) -> web.Response:
         tier = request.query.get("tier", "")
-        if tier not in (*_TIERS, "main"):
+        instance_id = request.query.get("instance_id", "")
+        if instance_id not in instance_notification_clients and tier not in (*_TIERS, "main"):
             return web.json_response({"ok": False, "error": "invalid tier"}, status=400)
         try:
-            result = await gateway_client.drained(tier)
+            owner = instance_id or tier
+            result = await gateway_client.drained(owner)
         except Exception:
             _logger.exception("Gateway drain 状态查询失败 tier=%s", tier)
             return web.json_response(
@@ -210,7 +227,7 @@ def build_deployment_service_app(
         return web.json_response(
             {
                 "ok": True,
-                "tier": tier,
+                "instance_id": owner,
                 "drained": result.get("drained") is True,
                 "active": int(result.get("active", 0)),
             }
@@ -249,13 +266,22 @@ def main(argv=None) -> None:
         f"http://127.0.0.1:{config.gateway.control_port}",
         bearer_token=config.gateway.control_token,
     )
-    test_notification_client = NotificationClient(
-        f"http://127.0.0.1:{config.notification.test_port}",
-        bearer_token=config.notification.api_token,
+    notification_ports = config.notification.instance_ports or {
+        "test": config.notification.test_port,
+        "main": config.notification.production_port,
+    }
+    instance_notification_clients = {
+        instance_id: NotificationClient(
+            f"http://127.0.0.1:{port}",
+            bearer_token=config.notification.api_token,
+        )
+        for instance_id, port in notification_ports.items()
+    }
+    test_notification_client = instance_notification_clients.get(
+        "test", next(iter(instance_notification_clients.values()))
     )
-    main_notification_client = NotificationClient(
-        f"http://127.0.0.1:{config.notification.production_port}",
-        bearer_token=config.notification.api_token,
+    main_notification_client = instance_notification_clients.get(
+        "main", next(iter(instance_notification_clients.values()))
     )
     app = build_deployment_service_app(
         bearer_token=config.router.deployment_token,
@@ -264,20 +290,20 @@ def main(argv=None) -> None:
         gateway_client=gateway_client,
         test_notification_client=test_notification_client,
         main_notification_client=main_notification_client,
+        group_instances=config.router.group_instances,
+        instance_notification_clients=instance_notification_clients,
     )
 
     async def start_clients(_app: web.Application) -> None:
         await asyncio.gather(
             gateway_client.start(),
-            test_notification_client.start(),
-            main_notification_client.start(),
+            *(client.start() for client in instance_notification_clients.values()),
         )
 
     async def close_clients(_app: web.Application) -> None:
         await asyncio.gather(
             gateway_client.close(),
-            test_notification_client.close(),
-            main_notification_client.close(),
+            *(client.close() for client in instance_notification_clients.values()),
         )
 
     app.on_startup.append(start_clients)

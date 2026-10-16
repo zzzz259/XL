@@ -19,18 +19,24 @@ from .query_handler import QueryHandler
 from .querier import CharacterQuerier
 from .rerun_schedule_querier import RerunScheduleQuerier
 from .selection import SelectionStore
-from .sender import QQSender
+from .gateway import gateway_transport_for_config
 
 _logger = logging.getLogger(__name__)
 
 TIERS = ("debug", "test", "production")
 
 QUERY_HANDLER_KEY = web.AppKey("query_handler", QueryHandler)
+INSTANCE_ID_KEY = web.AppKey("instance_id", str)
 
 
-def build_app(config: Config) -> web.Application:
-    """组装 aiohttp 应用（on_startup 登录 sender，on_cleanup 关闭）。"""
-    sender = QQSender(config)
+def QQSender(config, instance_id=None):
+    """Compatibility factory name; implementation is the Gateway transport client."""
+    return gateway_transport_for_config(config, instance_id)
+
+
+def build_app(config: Config, instance_id: str | None = None) -> web.Application:
+    """Assemble an instance worker that sends through the shared Gateway."""
+    sender = QQSender(config) if instance_id is None else QQSender(config, instance_id)
     handler = QueryHandler(
         CharacterQuerier(config.watch.character_data, config.watch.versions_dir),
         CharacterMatcher(config.watch.character_data, config.watch.data_dir),
@@ -50,6 +56,7 @@ def build_app(config: Config) -> web.Application:
 
     app = web.Application()
     app[QUERY_HANDLER_KEY] = handler
+    app[INSTANCE_ID_KEY] = instance_id or config.instance.instance_id
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     app.router.add_post("/event", _handle_event)
@@ -72,13 +79,14 @@ async def _handle_event(request: web.Request) -> web.Response:
 
 
 async def _handle_health(request: web.Request) -> web.Response:
-    return web.Response(text="ok")
+    return web.json_response({"ok": True, "instance_id": request.app[INSTANCE_ID_KEY]})
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="xl_qqbot 级别服务进程")
-    parser.add_argument("--tier", required=True, choices=TIERS, help="本进程服务的群级别")
-    parser.add_argument("--port", required=True, type=int, help="监听端口（127.0.0.1）")
+    parser = argparse.ArgumentParser(description="xl_qqbot instance worker process")
+    parser.add_argument("--instance-id")
+    parser.add_argument("--tier", choices=TIERS, help=argparse.SUPPRESS)
+    parser.add_argument("--port", type=int, help="loopback listen port")
     return parser.parse_args(argv)
 
 
@@ -92,13 +100,13 @@ def _setup_logging() -> None:
     logging.getLogger().setLevel(logging.INFO)
 
 
-async def _amain_service(config: Config, tier: str, port: int) -> None:
-    app = build_app(config)
+async def _amain_service(config: Config, instance_id: str, port: int) -> None:
+    app = build_app(config, instance_id)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", port)
     await site.start()
-    _logger.info("级别服务启动 tier=%s listen=127.0.0.1:%s", tier, port)
+    _logger.info("Bot instance worker started instance_id=%s listen=127.0.0.1:%s", instance_id, port)
     try:
         await asyncio.Event().wait()  # 常驻
     finally:
@@ -109,7 +117,12 @@ def main(argv=None) -> None:
     _setup_logging()
     args = parse_args(argv)
     config = load_config("config.toml")
-    asyncio.run(_amain_service(config, args.tier, args.port))
+    instance_id = args.instance_id or args.tier or config.instance.instance_id
+    port = args.port or config.router.instance_ports.get(
+        instance_id,
+        config.router.test_port if instance_id == "test" else config.router.production_port,
+    )
+    asyncio.run(_amain_service(config, instance_id, port))
 
 
 if __name__ == "__main__":

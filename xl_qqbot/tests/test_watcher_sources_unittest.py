@@ -95,7 +95,7 @@ class WatcherSourceRoutingTests(unittest.IsolatedAsyncioTestCase):
             source=source,
         )
 
-    async def test_test_source_events_are_queued_only_to_test_and_debug_groups(self):
+    async def test_test_source_events_are_queued_to_this_instances_configured_groups(self):
         (self.test_dir.parent / "update_events.jsonl").write_text(
             json.dumps({"event": "start", "version": 77}) + "\n",
             encoding="utf-8",
@@ -104,10 +104,10 @@ class WatcherSourceRoutingTests(unittest.IsolatedAsyncioTestCase):
         await self._watcher("test")._tick()
 
         pending = self.outbox.list_pending()
-        self.assertEqual({item.recipient for item in pending}, {"test", "debug"})
+        self.assertEqual({item.recipient for item in pending}, {"test", "debug", "prod"})
         self.assertTrue(all(item.event_key.startswith("test:game-update:") for item in pending))
 
-    async def test_main_source_keeps_legacy_event_key_and_production_reach(self):
+    async def test_main_source_keeps_legacy_event_key_and_uses_instance_group_list(self):
         (self.main_dir.parent / "update_events.jsonl").write_text(
             json.dumps({"event": "start", "version": 77}) + "\n",
             encoding="utf-8",
@@ -116,7 +116,7 @@ class WatcherSourceRoutingTests(unittest.IsolatedAsyncioTestCase):
         await self._watcher("main")._tick()
 
         pending = self.outbox.list_pending()
-        self.assertEqual({item.recipient for item in pending}, {"prod"})
+        self.assertEqual({item.recipient for item in pending}, {"prod", "debug", "test"})
         self.assertTrue(all(item.event_key == "game-update:1:start:77" for item in pending))
         self.assertEqual(self._watcher("main").notice.consumed_events, 1)
         self.assertEqual(self._watcher("test").notice.consumed_events, 0)
@@ -132,13 +132,13 @@ class WatcherSourceRoutingTests(unittest.IsolatedAsyncioTestCase):
         pending = self.outbox.list_pending()
         main_keys = {item.event_key for item in pending if item.recipient == "prod"}
         test_keys = {item.event_key for item in pending if item.recipient == "test"}
-        self.assertEqual(main_keys, {"game-update:1:start:77"})
+        self.assertEqual(main_keys, {"game-update:1:start:77", "test:game-update:1:start:77"})
         self.assertEqual(
             test_keys,
-            {"test:game-update:1:start:77"},
+            {"game-update:1:start:77", "test:game-update:1:start:77"},
         )
         self.assertEqual(
-            len([item for item in pending if item.recipient == "test"]), 1
+            len([item for item in pending if item.recipient == "test"]), 2
         )
 
     async def test_test_finish_queues_lifecycle_and_card_in_order(self):
@@ -168,8 +168,8 @@ class WatcherSourceRoutingTests(unittest.IsolatedAsyncioTestCase):
                 ],
             )
         self.assertEqual(
-            [item.recipient for item in pending if item.kind == "image"],
-            ["debug", "test"],
+            {item.recipient for item in pending if item.kind == "image"},
+            {"debug", "test", "prod"},
         )
 
 

@@ -84,10 +84,10 @@ class TierServiceMappingTests(unittest.TestCase):
 
     def test_new_units_are_branch_pinned_isolated_and_loopback_components(self):
         expected = {
-            "xl-qqbot-test-notify.service": ("test", "--tier test"),
-            "xl-qqbot-test-jobs.service": ("test", "--tier test"),
-            "xl-qqbot-main-notify.service": ("main", "--tier production"),
-            "xl-qqbot-main-jobs.service": ("main", "--tier production"),
+            "xl-qqbot-test-notify.service": ("test", "--instance-id test"),
+            "xl-qqbot-test-jobs.service": ("test", "--instance-id test"),
+            "xl-qqbot-main-notify.service": ("main", "--instance-id main"),
+            "xl-qqbot-main-jobs.service": ("main", "--instance-id main"),
             "xl-qqbot-control.service": ("main", "-m bot_app.deployment_service"),
         }
         for unit, (branch, command) in expected.items():

@@ -35,14 +35,14 @@ class TestEnvironmentConfig(unittest.TestCase):
         self.assertFalse(config.api_enabled)
         self.assertEqual(config.api_host, "127.0.0.1")
 
-    def test_test_environment_forces_cdn_polling_off_even_when_enabled(self):
+    def test_test_environment_obeys_configured_cdn_polling(self):
         config = self.load_text(
             '[server]\nenvironment = "test"\n'
             '[polling]\nenabled = true\n'
         )
 
         self.assertEqual(config.environment, "test")
-        self.assertFalse(config.cdn_poll_enabled)
+        self.assertTrue(config.cdn_poll_enabled)
 
     def test_main_environment_respects_polling_disable_setting(self):
         config = self.load_text(

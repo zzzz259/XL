@@ -174,6 +174,17 @@ class DeploymentInventory:
         expected_ports = {i.instance_id: i.listen_ports['bot'] for i in self.instances
                           if i.enabled and 'bot' in i.units}
         check(router.get('instance_ports', {}) == expected_ports, 'gateway instance ports')
+        gateway_settings = gateway.get('gateway', {})
+        gateway_control_token = gateway_settings.get('control_token')
+        gateway_tokens = gateway_settings.get('instance_tokens', {})
+        check(isinstance(gateway_tokens, dict), 'gateway instance tokens')
+        check(set(gateway_tokens) == set(expected_ports), 'gateway instance tokens')
+        check(all(isinstance(token, str) and len(token) >= 32 for token in gateway_tokens.values()),
+              'gateway instance tokens')
+        check(len(set(gateway_tokens.values())) == len(gateway_tokens), 'gateway instance tokens')
+        check(isinstance(gateway_control_token, str) and len(gateway_control_token) >= 32,
+              'gateway control token')
+        check(gateway_control_token not in gateway_tokens.values(), 'gateway instance tokens')
         for instance in self.instances:
             if not instance.enabled:
                 continue
@@ -181,6 +192,11 @@ class DeploymentInventory:
             backend = 'backend' in instance.units
             identity = values.get('server', {}).get('instance_id') if backend else values.get('instance', {}).get('id')
             check(identity == instance.instance_id, 'instance_id')
+            if not backend and 'bot' in instance.units:
+                local_gateway = values.get('gateway', {})
+                local_token = local_gateway.get('instance_tokens', {}).get(instance.instance_id)
+                check(local_token == gateway_tokens.get(instance.instance_id), 'instance gateway token')
+                check(local_gateway.get('control_token') == gateway_control_token, 'gateway control token')
             mutable = values.get('paths' if backend else 'watch', {})
             owned_path(mutable.get('data_dir', 'data' if backend else './data'), instance, 'data_dir')
             if not backend:

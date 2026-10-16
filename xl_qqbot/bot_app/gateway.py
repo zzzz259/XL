@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hmac
 import logging
+import os
+import re
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +22,7 @@ from botpy.connection import ConnectionState
 from .config import Config
 from .deploy_control import DeploymentControl
 from .groups import GroupStore, learn_group_from_event
+from .sender import QQSender
 from .tiers import GroupTier
 from .updater import read_update_status
 
@@ -155,18 +160,18 @@ class GatewayControlClient:
         return result.get("ready") is True
 
     async def set_maintenance(self, tier: str, enabled: bool) -> dict:
-        if tier not in {"debug", "test", "production", "main"}:
-            raise ValueError("Gateway tier is not allowlisted")
+        if not isinstance(tier, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tier):
+            raise ValueError("Gateway instance_id is invalid")
         if not isinstance(enabled, bool):
             raise TypeError("Gateway maintenance state must be a boolean")
         return await self._request(
-            "POST", "/gateway/maintenance", {"tier": tier, "enabled": enabled}
+            "POST", "/gateway/maintenance", {"instance_id": tier, "enabled": enabled}
         )
 
     async def drained(self, tier: str) -> dict:
-        if tier not in {"debug", "test", "production", "main"}:
-            raise ValueError("Gateway tier is not allowlisted")
-        return await self._request("GET", f"/gateway/drained?tier={tier}")
+        if not isinstance(tier, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tier):
+            raise ValueError("Gateway instance_id is invalid")
+        return await self._request("GET", f"/gateway/drained?instance_id={tier}")
 
     async def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         if self._session is None or self._session.closed:
@@ -184,6 +189,97 @@ class GatewayControlClient:
         if response.status != 200 or not isinstance(body, dict) or body.get("ok") is not True:
             raise RuntimeError("Gateway control API rejected the request")
         return body
+
+
+class GatewayTransportClient:
+    """Instance-side client for the single QQ outbound transport."""
+
+    def __init__(self, base_url: str, *, bearer_token: str, instance_id: str):
+        if not isinstance(base_url, str) or not base_url.startswith("http://127.0.0.1:"):
+            raise ValueError("Gateway transport must use a loopback HTTP URL")
+        if not isinstance(bearer_token, str) or len(bearer_token) < 32:
+            raise ValueError("Gateway transport token must be at least 32 characters")
+        if not isinstance(instance_id, str) or not instance_id:
+            raise ValueError("Gateway transport instance_id is required")
+        self.base_url = base_url.rstrip("/")
+        self.bearer_token = bearer_token
+        self.instance_id = instance_id
+        self._session: aiohttp.ClientSession | None = None
+
+    async def start(self) -> None:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=120),
+                headers={
+                    "Authorization": f"Bearer {self.bearer_token}",
+                    "X-Instance-ID": self.instance_id,
+                },
+            )
+
+    async def close(self) -> None:
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+
+    async def _send(self, payload: dict) -> bool:
+        if self._session is None or self._session.closed:
+            raise RuntimeError("Gateway transport client is not started")
+        payload = {**payload, "instance_id": self.instance_id}
+        try:
+            async with self._session.post(
+                f"{self.base_url}/gateway/messages", json=payload
+            ) as response:
+                body = await response.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+            raise RuntimeError("Gateway transport request failed") from error
+        return response.status == 200 and isinstance(body, dict) and body.get("sent") is True
+
+    async def send_text(self, group_openid: str, text: str, reply_to: str = "") -> bool:
+        return await self._send({
+            "recipient": group_openid,
+            "kind": "text",
+            "text": text,
+            "reply_to": reply_to,
+        })
+
+    async def send_image(
+        self, file_path: str, content: str, group_openids: list[str], reply_to: str = ""
+    ) -> dict[str, bool]:
+        return await self._send_image(file_path, content, group_openids, reply_to, False)
+
+    async def send_schedule_image(
+        self, file_path: str, content: str, group_openids: list[str], reply_to: str = ""
+    ) -> dict[str, bool]:
+        return await self._send_image(file_path, content, group_openids, reply_to, True)
+
+    async def _send_image(self, file_path, content, groups, reply_to, force_multipart):
+        path = Path(file_path)
+        data = path.read_bytes()
+        if len(data) > 20 * 1024 * 1024:
+            raise ValueError("image payload exceeds the 20 MiB transport limit")
+        encoded = base64.b64encode(data).decode("ascii")
+        results = {}
+        for group in groups:
+            results[group] = await self._send({
+                "recipient": group,
+                "kind": "image",
+                "text": content,
+                "reply_to": reply_to,
+                "media_base64": encoded,
+                "media_name": path.name,
+                "force_multipart": bool(force_multipart),
+            })
+        return results
+
+
+def gateway_transport_for_config(config: Config, instance_id: str | None = None):
+    instance_id = instance_id or config.instance.instance_id
+    return GatewayTransportClient(
+        f"http://127.0.0.1:{config.gateway.control_port}",
+        bearer_token=config.gateway.instance_tokens.get(
+            instance_id, config.gateway.control_token
+        ),
+        instance_id=instance_id,
+    )
 
 
 def install_raw_parsers() -> None:
@@ -317,8 +413,9 @@ TierForwarder = InstanceForwarder
 
 def worker_ports(config: Config) -> dict[str, int]:
     """Return explicit instance endpoints, with legacy tier aliases as fallback."""
-    if config.router.instance_ports:
-        return dict(config.router.instance_ports)
+    explicit_ports = getattr(config.router, "instance_ports", {})
+    if explicit_ports:
+        return dict(explicit_ports)
     return {
         "debug": config.router.test_port,
         "test": config.router.test_port,
@@ -344,7 +441,7 @@ class RouterClient(botpy.Client):
         self._forwarder = forwarder
         self._update_status_path = update_status_path
         self._deployment_control = deployment_control
-        self._group_instances = dict(group_instances or {})
+        self._group_instances = dict(group_instances) if group_instances is not None else None
 
     async def on_ready(self):
         _logger.info("Gateway ready")
@@ -371,8 +468,8 @@ class RouterClient(botpy.Client):
             _logger.warning("Gateway event lacks group_openid: %s", event_type)
             return
         received_at = datetime.now(timezone.utc).isoformat()
-        group_instances = getattr(self, "_group_instances", {})
-        if group_instances:
+        group_instances = getattr(self, "_group_instances", None)
+        if group_instances is not None:
             event = create_instance_gateway_event(
                 event_type, data, group_instances, received_at=received_at
             )
@@ -402,17 +499,40 @@ class RouterClient(botpy.Client):
 
 
 def build_gateway_control_app(
-    control: DeploymentControl, *, bearer_token: str
+    control: DeploymentControl, *, bearer_token: str, sender=None,
+    media_dir: Path | None = None, instance_tokens: dict[str, str] | None = None,
+    group_instances: dict[str, str] | None = None,
 ) -> web.Application:
     """Internal authenticated health/maintenance/drain API for the Gateway."""
     if not isinstance(bearer_token, str) or len(bearer_token) < 32:
         raise ValueError("Gateway control token must be at least 32 characters")
+    instance_tokens = dict(instance_tokens or {})
+    if group_instances is not None:
+        group_instances = dict(group_instances)
+        routed_instances = set(group_instances.values())
+        if not routed_instances.issubset(instance_tokens):
+            raise ValueError("explicit group routes require per-instance tokens")
+        routed_tokens = [instance_tokens[instance_id] for instance_id in routed_instances]
+        if len(set(routed_tokens)) != len(routed_tokens):
+            raise ValueError("explicit group routes require distinct per-instance tokens")
+        if any(token == bearer_token for token in routed_tokens):
+            raise ValueError("per-instance tokens must be different from the control token")
 
     @web.middleware
     async def authenticate(request: web.Request, handler):
         scheme, separator, value = request.headers.get("Authorization", "").partition(" ")
         supplied = value.encode() if separator and scheme.lower() == "bearer" else b""
-        if not hmac.compare_digest(supplied, bearer_token.encode()):
+        instance_id = request.headers.get("X-Instance-ID", "")
+        expected_token = (
+            instance_tokens.get(instance_id, bearer_token)
+            if request.path == "/gateway/messages"
+            else bearer_token
+        )
+        if (
+            request.path == "/gateway/messages"
+            and instance_tokens
+            and instance_id not in instance_tokens
+        ) or not hmac.compare_digest(supplied, expected_token.encode()):
             return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
         return await handler(request)
 
@@ -430,10 +550,15 @@ def build_gateway_control_app(
         if not isinstance(payload, dict):
             return web.json_response({"ok": False, "error": "expected object"}, status=400)
         instance_id = payload.get("instance_id")
+        authenticated_instance = request.headers.get("X-Instance-ID", "")
+        if (instance_tokens or group_instances is not None) and instance_id != authenticated_instance:
+            return web.json_response({"ok": False, "error": "instance identity mismatch"}, status=403)
         legacy_tier = payload.get("tier")
         enabled = payload.get("enabled")
-        if instance_id is not None:
+        if instance_id in control.scope_ids:
             scopes = (instance_id,)
+        elif instance_id == "main" and control.scope_ids == ("debug", "test", "production"):
+            scopes = control.scope_ids
         elif legacy_tier in ("debug", "test", "production"):
             scopes = (legacy_tier,)
         elif legacy_tier == "main" and control.scope_ids == ("debug", "test", "production"):
@@ -461,8 +586,10 @@ def build_gateway_control_app(
 
     async def drained(request: web.Request) -> web.Response:
         instance_id = request.query.get("instance_id", "")
-        if instance_id:
+        if instance_id in control.scope_ids:
             scopes = (instance_id,)
+        elif instance_id == "main" and control.scope_ids == ("debug", "test", "production"):
+            scopes = control.scope_ids
         else:
             legacy_tier = request.query.get("tier", "")
             scopes = (legacy_tier,) if legacy_tier in control.scope_ids else ()
@@ -475,17 +602,100 @@ def build_gateway_control_app(
             {"ok": True, "instance_ids": scopes, "drained": active == 0, "active": active}
         )
 
-    app = web.Application(middlewares=[authenticate])
+    async def send_message(request: web.Request) -> web.Response:
+        if sender is None:
+            return web.json_response({"ok": False, "error": "transport unavailable"}, status=503)
+        try:
+            payload = await request.json()
+        except (ValueError, web.HTTPException):
+            return web.json_response({"ok": False, "error": "invalid json"}, status=400)
+        if not isinstance(payload, dict):
+            return web.json_response({"ok": False, "error": "expected object"}, status=400)
+        instance_id = payload.get("instance_id")
+        recipient = payload.get("recipient")
+        kind = payload.get("kind")
+        text = payload.get("text", "")
+        reply_to = payload.get("reply_to", "")
+        if instance_id not in control.scope_ids:
+            return web.json_response({"ok": False, "error": "unknown instance"}, status=403)
+        authenticated_instance = request.headers.get("X-Instance-ID", "")
+        if (instance_tokens or group_instances is not None) and instance_id != authenticated_instance:
+            return web.json_response({"ok": False, "error": "instance identity mismatch"}, status=403)
+        if not isinstance(recipient, str) or not recipient:
+            return web.json_response({"ok": False, "error": "invalid recipient"}, status=400)
+        if group_instances is not None and group_instances.get(recipient) != instance_id:
+            return web.json_response({"ok": False, "error": "recipient is not owned by instance"}, status=403)
+        if not isinstance(text, str) or len(text) > 4000:
+            return web.json_response({"ok": False, "error": "invalid text"}, status=400)
+        if not isinstance(reply_to, str) or len(reply_to) > 200:
+            return web.json_response({"ok": False, "error": "invalid reply_to"}, status=400)
+        if kind == "text":
+            if not text.strip():
+                return web.json_response({"ok": False, "error": "empty text"}, status=400)
+            try:
+                sent = await sender.send_text(recipient, text, reply_to)
+            except Exception:
+                _logger.exception("Gateway text transport failed instance=%s", instance_id)
+                return web.json_response({"ok": False, "error": "transport failed"}, status=503)
+            return web.json_response({"ok": True, "sent": sent is True})
+        if kind != "image":
+            return web.json_response({"ok": False, "error": "unsupported message kind"}, status=400)
+        encoded = payload.get("media_base64")
+        media_name = payload.get("media_name")
+        if not isinstance(encoded, str) or len(encoded) > 28_000_000:
+            return web.json_response({"ok": False, "error": "invalid media"}, status=400)
+        try:
+            media = base64.b64decode(encoded, validate=True)
+        except (ValueError, base64.binascii.Error):
+            return web.json_response({"ok": False, "error": "invalid media"}, status=400)
+        if not media or len(media) > 20 * 1024 * 1024:
+            return web.json_response({"ok": False, "error": "media size out of range"}, status=400)
+        safe_name = Path(media_name if isinstance(media_name, str) else "image.bin").name
+        directory = media_dir
+        if directory is None:
+            return web.json_response({"ok": False, "error": "media storage unavailable"}, status=503)
+        directory.mkdir(parents=True, exist_ok=True)
+        fd, media_path = tempfile.mkstemp(prefix="gateway-", suffix="-" + safe_name, dir=directory)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(media)
+            try:
+                if payload.get("force_multipart") is True:
+                    result = await sender.send_schedule_image(media_path, text, [recipient], reply_to)
+                else:
+                    result = await sender.send_image(media_path, text, [recipient], reply_to)
+            except Exception:
+                _logger.exception("Gateway image transport failed instance=%s", instance_id)
+                return web.json_response({"ok": False, "error": "transport failed"}, status=503)
+            sent = isinstance(result, dict) and result.get(recipient) is True
+            return web.json_response({"ok": True, "sent": sent})
+        finally:
+            try:
+                Path(media_path).unlink()
+            except OSError:
+                _logger.warning("Gateway temporary media cleanup failed")
+
+    app = web.Application(middlewares=[authenticate], client_max_size=30 * 1024 * 1024)
     app.router.add_get("/gateway/health", health)
     app.router.add_post("/gateway/maintenance", maintenance)
     app.router.add_get("/gateway/drained", drained)
+    app.router.add_post("/gateway/messages", send_message)
+    if sender is not None:
+        async def start_sender(_app):
+            await sender.start()
+
+        async def close_sender(_app):
+            await sender.close()
+
+        app.on_startup.append(start_sender)
+        app.on_cleanup.append(close_sender)
     return app
 
 
 class GatewayRuntime:
     """Run only the single QQ Gateway client and its minimal control endpoint."""
 
-    def __init__(self, config: Config, *, client_factory=None):
+    def __init__(self, config: Config, *, client_factory=None, sender_factory=None):
         self.config = config
         self.tiers = GroupTier(config.groups)
         maintenance_path = Path(config.watch.data_dir) / "maintenance.json"
@@ -504,6 +714,7 @@ class GatewayRuntime:
         self.update_status_path = Path(config.watch.outbox_dir).parent / "update_status.json"
         self.stop_event = asyncio.Event()
         self.client_factory = client_factory or self._make_client
+        self.sender = (sender_factory or QQSender)(config)
         self._gateway_task: asyncio.Task | None = None
         self._deployment_runner: web.AppRunner | None = None
 
@@ -514,12 +725,25 @@ class GatewayRuntime:
             self.forwarder,
             self.update_status_path,
             self.control,
-            group_instances=self.config.router.group_instances,
+            group_instances=(
+                self.config.router.group_instances
+                if self.config.router.group_routing_configured or self.config.router.instance_ports
+                else None
+            ),
         )
 
     async def run(self) -> None:
         app = build_gateway_control_app(
-            self.control, bearer_token=self.config.gateway.control_token
+            self.control,
+            bearer_token=self.config.gateway.control_token,
+            sender=self.sender,
+            media_dir=Path(self.config.watch.data_dir) / "gateway-media",
+            instance_tokens=self.config.gateway.instance_tokens,
+            group_instances=(
+                self.config.router.group_instances
+                if self.config.router.group_routing_configured or self.config.router.instance_ports
+                else None
+            ),
         )
         self._deployment_runner = web.AppRunner(app)
         await self._deployment_runner.setup()

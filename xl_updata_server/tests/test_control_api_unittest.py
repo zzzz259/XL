@@ -54,6 +54,7 @@ class TestControlAPI(unittest.TestCase):
             api_host="127.0.0.1",
             api_port=0,
             environment="test",
+            instance_id="test-copy",
             cdn_poll_enabled=False,
         )
         self.server = build_control_server(config, self.coordinator, TOKEN, port_override=0)
@@ -89,7 +90,7 @@ class TestControlAPI(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(
             body,
-            {"ok": True, "environment": "test", "cdn_poll_enabled": False},
+            {"ok": True, "environment": "test", "instance_id": "test-copy", "cdn_poll_enabled": False},
         )
 
     def test_status_requires_bearer_and_returns_no_secrets(self):

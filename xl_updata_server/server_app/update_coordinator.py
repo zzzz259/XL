@@ -178,6 +178,7 @@ class UpdateCoordinator:
         with self._metadata_lock:
             snapshot = {
                 "environment": self.config.environment,
+                "instance_id": self.config.instance_id,
                 "cdn_poll_enabled": self.config.cdn_poll_enabled,
                 "running": not self._idle.is_set(),
                 "active_job_id": self._active_job_id,

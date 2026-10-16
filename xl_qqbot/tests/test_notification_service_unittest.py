@@ -46,7 +46,7 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.data_dir = Path(self.temp_dir.name) / "notification-data"
         self.outbox = ProactiveOutbox(self.data_dir)
         self.service = NotificationService(
-            tier="test",
+            instance_id="test",
             allowed_groups={DEBUG_GROUP, TEST_GROUP},
             outbox=self.outbox,
         )
@@ -63,10 +63,10 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         self.temp_dir.cleanup()
 
-    def request_payload(self, *, recipient=TEST_GROUP, tier="test", messages=None):
+    def request_payload(self, *, recipient=TEST_GROUP, instance_id="test", messages=None):
         return {
             "event_key": "event-1",
-            "tier": tier,
+            "instance_id": instance_id,
             "messages": messages
             or [
                 {
@@ -126,22 +126,20 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertFalse(
                 await notifier.wait_for_delivery(
-                    "event-missing", expected_total=1, timeout_seconds=0.01
+                    "event-missing", expected_total=1, timeout_seconds=0.5
                 )
             )
         finally:
             await notifier.close()
 
 
-    async def test_test_notifier_rejects_production_tier_and_group(self):
-        wrong_tier = await self.post(
-            self.request_payload(recipient=TEST_GROUP, tier="production")
+    async def test_instance_notifier_rejects_wrong_instance_and_unowned_group(self):
+        wrong_instance = await self.post(
+            self.request_payload(recipient=TEST_GROUP, instance_id="copy-b")
         )
-        wrong_group = await self.post(
-            self.request_payload(recipient=PRODUCTION_GROUP, tier="test")
-        )
+        wrong_group = await self.post(self.request_payload(recipient=PRODUCTION_GROUP))
 
-        self.assertEqual(wrong_tier.status, 403)
+        self.assertEqual(wrong_instance.status, 403)
         self.assertEqual(wrong_group.status, 403)
         self.assertEqual(self.outbox.count(), 0)
 
@@ -210,7 +208,7 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.data_dir / message.media_path).read_bytes(), b"schedule-image")
 
     async def test_invalid_json_contract_is_rejected_without_queue_writes(self):
-        response = await self.post({"event_key": "event-1", "tier": "test"})
+        response = await self.post({"event_key": "event-1", "instance_id": "test"})
 
         self.assertEqual(response.status, 400)
         self.assertEqual(self.outbox.count(), 0)
@@ -223,7 +221,7 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
         try:
             queued = await client.enqueue(
                 event_key="client-event-1",
-                tier="test",
+                instance_id="test",
                 messages=[
                     {
                         "recipient": TEST_GROUP,

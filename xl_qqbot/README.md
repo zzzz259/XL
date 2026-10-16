@@ -5,14 +5,14 @@ Linux 常驻 QQ 群机器人，基于腾讯官方 QQ 机器人平台和 `qq-botp
 ## 功能与架构
 
 - 群内 `@机器人 + 角色名` 查询角色资料，支持中文名、别名、英文名和拼音匹配；歧义时让提问者选择候选。
-- 群内 `@机器人 复刻` / `复刻表` 等查询服务端已发布的普通首次复刻排期图；按群所属环境路由，不使用内置功能权限门禁。
+- 群内 `@机器人 复刻` / `复刻表` 等查询服务端已发布的普通首次复刻排期图；Gateway 按显式群组归属交给唯一 Bot 实例。
 - Watcher 轮询 `xl_updata_server` 的 outbox，逐群分发新增图鉴，整批成功后清理该版本 outbox；失败项保留重试状态。
 - BilibiliWatcher 监视配置的多个 UP 主。`full` 模式发布图文详情/原图和视频通知；`notice` 只发布通知。接口、SESSDATA 和状态文件说明见[配置与运维](docs/配置与运维.md)。
-- 一个 Gateway 进程持有唯一 QQ Gateway 登录；它只做群识别、tier 分流和原始事件转发。debug/test 群进入 test worker（8782），main 群进入 production worker（8783）。业务事件解析留在各自 worker。
-- test/main 各自有后台任务进程和持久通知服务。后台任务产生更新、状态或 B 站消息后写入本 tier 通知队列；通知服务负责 FIFO、重试和 QQ API 发送。worker 的群内即时回复仍由 worker 自己调用 QQ HTTP API。
-- 部署控制 API 是独立 `bot_app.deployment_service` 进程（8784），Gateway 协作 API 是 8785；test/main 通知 API 分别为 8786/8787。所有内部端口只绑定 `127.0.0.1`。
-- `debug` 只做 CI，不部署运行服务；`test` release 运行 test worker/通知/后台任务；`main` release 运行正式 worker、唯一 Gateway、main 通知、部署控制和 main 后台任务。部署与回滚细节见[配置与运维](docs/配置与运维.md)和 [xl_deploy 运维指南](../xl_deploy/README.md)。
-- `bot_app.main` 保留旧的一体化兼容入口；新部署使用独立 service units。
+- 一个 Gateway 进程持有唯一 QQ Gateway 登录，也拥有唯一 QQ HTTP 出站 sender。它只按 `router.group_instances` 将原始事件交给唯一实例，并转发实例发来的原始出站载荷；不执行业务规则。
+- Bot worker、通知服务、后台 jobs 和 updater 都显式配置 `instance_id`。每个实例独立配置开关、目标群、端口、数据根目录和持久通知队列；同一份代码可以运行任意多个实例。
+- Bilibili、游戏状态监控和 updater 定时轮询由对应实例的配置开关控制。部署分支只决定代码快照，不改变功能集合或消息授权。
+- 所有内部端口只绑定 `127.0.0.1`。实例部署清单和现有部署布局见[配置与运维](docs/配置与运维.md)及 [xl_deploy 运维指南](../xl_deploy/README.md)。
+- `bot_app.main` 是旧版单进程兼容入口，包含自己的 QQ 登录和 HTTP sender，不能与 Gateway 同时运行；多实例部署只使用 `GatewayRuntime` 与实例 worker/service units。
 
 ## 本地环境、配置和测试
 

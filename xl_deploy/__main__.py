@@ -155,9 +155,21 @@ def build_poller(config_path: str | Path) -> BranchPoller:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Poll GitHub branches and deploy verified updates")
     parser.add_argument("--config", default="/home/admin/xl_deploy/config.toml")
+    parser.add_argument(
+        "--dry-run-inventory",
+        action="store_true",
+        help="validate configured instance/runtime ownership and print a redacted summary",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
+        if args.dry_run_inventory:
+            runtime = load_runtime_config(args.config)
+            if runtime.inventory is None:
+                print("No [inventory] configured; legacy fixed test/main mapping is active.")
+            else:
+                print(render_inventory_dry_run(runtime.inventory))
+            return 0
         results = build_poller(args.config).poll_all()
     except Exception as exc:  # noqa: BLE001 - avoid logging credentials from nested transport errors.
         LOGGER.error("deployment poll failed (%s)", type(exc).__name__)
@@ -168,6 +180,30 @@ def main(argv: list[str] | None = None) -> int:
         if result.status in {"error", "ci_failed", "recovery_pending"} or result.status.startswith("deployment_"):
             failed = True
     return 1 if failed else 0
+
+
+def render_inventory_dry_run(inventory: DeploymentInventory) -> str:
+    """Validate external runtime mappings and return a summary without secrets."""
+    inventory.validate_runtime_configs()
+    lines = ["read-only inventory check: valid"]
+    lines.append(
+        f"gateway unit={inventory.gateway.unit} watch_ref={inventory.gateway.watch_ref} "
+        f"port={inventory.gateway.listen_port} groups={len(inventory.group_routes)} "
+        f"data_roots={len(inventory.gateway.data_roots)}"
+    )
+    for instance in inventory.instances:
+        if not instance.enabled:
+            lines.append(f"disabled instance_id={instance.instance_id}")
+            continue
+        units = ",".join(f"{role}={unit}" for role, unit in sorted(instance.units.items()))
+        ports = ",".join(f"{role}={port}" for role, port in sorted(instance.listen_ports.items()))
+        lines.append(
+            f"instance_id={instance.instance_id} watch_ref={instance.watch_ref} "
+            f"units={units} ports={ports} groups={len(instance.groups)} "
+            f"data_roots={len(instance.data_roots)}"
+        )
+    lines.append("No service, pointer, external config, or data was changed.")
+    return "\n".join(lines)
 
 
 def _section(config: dict, name: str) -> dict:

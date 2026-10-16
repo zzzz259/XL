@@ -14,7 +14,7 @@ from .outbox import (
 )
 from .proactive_outbox import ProactiveOutbox
 from .sender import QQSender
-from .tiers import GroupTier, TIER_RANK
+from .tiers import GroupTier
 from .updater import NoticeStateStore, ServiceMute, read_new_events
 
 _logger = logging.getLogger(__name__)
@@ -135,7 +135,7 @@ class Watcher:
         if self.notification_client is not None:
             await self.notification_client.enqueue(
                 event_key=event_key,
-                tier="main" if self.source.name == "main" else "test",
+                instance_id=self.config.instance.instance_id,
                 messages=[
                     {
                         "recipient": group_openid,
@@ -213,7 +213,7 @@ class Watcher:
                 if recipients:
                     await self.notification_client.enqueue(
                         event_key=event_key,
-                        tier="main" if self.source.name == "main" else "test",
+                        instance_id=self.config.instance.instance_id,
                         messages=[
                             {
                                 "recipient": group_openid,
@@ -256,19 +256,7 @@ class Watcher:
         return f"{self._source_prefix}game-update:{event.line_number}:{event.event}:{event.version}"
 
     def _eligible_groups(self) -> list[str]:
-        groups = self._target_groups()
-        if self.source.name == "main":
-            return [
-                group for group in groups
-                if self.tiers.tier_of(group) == "production"
-            ]
-        minimum_rank = TIER_RANK[self.source.minimum_tier]
-        if minimum_rank == TIER_RANK["production"]:
-            return groups
-        return [
-            group for group in groups
-            if TIER_RANK[self.tiers.tier_of(group)] >= minimum_rank
-        ]
+        return self._target_groups()
 
     def _target_groups(self) -> list[str]:
         manual = self.config.target.group_openids

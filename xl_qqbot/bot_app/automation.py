@@ -1,4 +1,4 @@
-"""Tier-specific background jobs for xl_qqbot automation processes."""
+"""Instance-scoped background jobs for xl_qqbot automation processes."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _logger = logging.getLogger(__name__)
 
 @dataclass
 class AutomationRuntime:
-    tier: str
+    instance_id: str
     watchers: tuple[Watcher, ...]
     status_monitor: object | None
     bilibili_watcher: BilibiliWatcher | None
@@ -48,26 +48,15 @@ class AutomationRuntime:
 def build_automation_runtime(
     config: Config,
     *,
-    tier: str,
+    instance_id: str | None = None,
     notification_client: NotificationClient,
     probe_factory=None,
 ) -> AutomationRuntime:
-    if tier not in ("test", "production"):
-        raise ValueError("automation tier must be test or production")
-    if tier == "production" and config.server_status.enabled:
-        raise ValueError("production automation cannot enable server_status")
-
+    instance_id = instance_id or config.instance.instance_id
     configured_sources = config.watch.update_sources or (
         UpdateSourceConfig(name="main", outbox_dir=config.watch.outbox_dir),
     )
-    if tier == "test":
-        sources = tuple(source for source in configured_sources if source.name != "main")
-    else:
-        sources = tuple(source for source in configured_sources if source.name == "main")
-        if not sources:
-            sources = (
-                UpdateSourceConfig(name="main", outbox_dir=config.watch.outbox_dir),
-            )
+    sources = tuple(configured_sources)
 
     watchers = tuple(
         Watcher(
@@ -78,23 +67,19 @@ def build_automation_runtime(
         )
         for source in sources
     )
-    status_monitor = (
-        build_status_monitor(
-            config,
-            outbox=None,
-            probe_factory=probe_factory,
-            notification_client=notification_client,
-        )
-        if tier == "test"
-        else None
+    status_monitor = build_status_monitor(
+        config,
+        outbox=None,
+        probe_factory=probe_factory,
+        notification_client=notification_client,
     )
     bilibili_watcher = (
         BilibiliWatcher(config, sender=None, notification_client=notification_client)
-        if tier == "production" and config.bilibili.enabled
+        if config.bilibili.enabled
         else None
     )
     return AutomationRuntime(
-        tier=tier,
+        instance_id=instance_id,
         watchers=watchers,
         status_monitor=status_monitor,
         bilibili_watcher=bilibili_watcher,
@@ -103,16 +88,18 @@ def build_automation_runtime(
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="xl_qqbot tier automation runner")
-    parser.add_argument("--tier", required=True, choices=("test", "production"))
+    parser = argparse.ArgumentParser(description="xl_qqbot instance automation runner")
+    parser.add_argument("--instance-id")
+    parser.add_argument("--tier", choices=("test", "production"), help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
-async def _amain(config: Config, tier: str) -> None:
-    port = (
+async def _amain(config: Config, instance_id: str) -> None:
+    port = config.notification.instance_ports.get(
+        instance_id,
         config.notification.test_port
-        if tier == "test"
-        else config.notification.production_port
+        if instance_id == "test"
+        else config.notification.production_port,
     )
     client = NotificationClient(
         f"http://127.0.0.1:{port}",
@@ -121,7 +108,7 @@ async def _amain(config: Config, tier: str) -> None:
     await client.start()
     runtime = build_automation_runtime(
         config,
-        tier=tier,
+        instance_id=instance_id,
         notification_client=client,
         probe_factory=None,
     )
@@ -145,7 +132,8 @@ def main(argv=None) -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     logging.getLogger().setLevel(logging.INFO)
-    asyncio.run(_amain(config, args.tier))
+    instance_id = args.instance_id or config.instance.instance_id
+    asyncio.run(_amain(config, instance_id))
 
 
 if __name__ == "__main__":

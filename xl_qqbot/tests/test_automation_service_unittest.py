@@ -61,38 +61,53 @@ class AutomationRuntimeTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_test_runtime_contains_test_updates_and_optional_status_only(self):
+    def test_instance_runtime_contains_all_configured_updates_and_optional_status(self):
         config = make_config(self.root, status_enabled=True)
         runtime = build_automation_runtime(
             config,
-            tier="test",
+            instance_id="instance-a",
             notification_client=FakeNotificationClient(),
             probe_factory=lambda _config: lambda: StatusSample(True, 0, True, 1, False),
         )
 
-        self.assertEqual([watcher.source.name for watcher in runtime.watchers], ["test"])
-        self.assertIsNone(runtime.bilibili_watcher)
+        self.assertEqual([watcher.source.name for watcher in runtime.watchers], ["main", "test"])
+        self.assertIsNotNone(runtime.bilibili_watcher)
         self.assertIsNotNone(runtime.status_monitor)
 
-    def test_production_runtime_contains_main_update_and_bilibili_only(self):
-        config = make_config(self.root)
+    def test_any_instance_may_enable_server_status_monitoring(self):
+        config = make_config(self.root, status_enabled=True)
         runtime = build_automation_runtime(
-            config, tier="production", notification_client=FakeNotificationClient()
+            config,
+            instance_id="production-copy",
+            notification_client=FakeNotificationClient(),
+            probe_factory=lambda _config: lambda: StatusSample(True, 0, True, 1, False),
+        )
+        self.assertIsNotNone(runtime.status_monitor)
+
+    def test_arbitrary_instance_can_enable_bilibili_and_server_status(self):
+        config = make_config(self.root, status_enabled=True)
+        runtime = build_automation_runtime(
+            config,
+            instance_id="test-copy-2",
+            notification_client=FakeNotificationClient(),
+            probe_factory=lambda _config: lambda: StatusSample(True, 0, True, 1, False),
         )
 
-        self.assertEqual([watcher.source.name for watcher in runtime.watchers], ["main"])
+        self.assertEqual(runtime.instance_id, "test-copy-2")
         self.assertIsNotNone(runtime.bilibili_watcher)
-        self.assertIsNone(runtime.status_monitor)
+        self.assertIsNotNone(runtime.status_monitor)
 
-    def test_production_runtime_rejects_server_status_monitoring(self):
-        config = make_config(self.root, status_enabled=True)
+    def test_instances_use_all_configured_sources_without_branch_filtering(self):
+        config = make_config(self.root)
+        runtime = build_automation_runtime(
+            config,
+            instance_id="copy-a",
+            notification_client=FakeNotificationClient(),
+        )
 
-        with self.assertRaisesRegex(ValueError, "production.*server_status"):
-            build_automation_runtime(
-                config,
-                tier="production",
-                notification_client=FakeNotificationClient(),
-            )
+        self.assertEqual(
+            [watcher.source.name for watcher in runtime.watchers], ["main", "test"]
+        )
 
 
 if __name__ == "__main__":

@@ -49,6 +49,7 @@ class ServerConfig:
     rerun_schedule_history_through_gacha_id: int = 24000087
     rerun_schedule_forecast_limit: int = 20
     rerun_schedule_overrides: tuple[dict, ...] = ()
+    instance_id: str = "default"
 
 
 def _read_int(section: dict, key: str, default: int) -> int:
@@ -81,8 +82,11 @@ def load_config(path: str | Path) -> ServerConfig:
     environment = str(server.get("environment", "main")).strip()
     if environment not in {"test", "main"}:
         raise ValueError("server.environment must be 'test' or 'main'")
+    instance_id = str(server.get("instance_id", environment)).strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", instance_id):
+        raise ValueError("server.instance_id must be a lowercase instance identifier")
     configured_polling = _read_bool(polling, "enabled", True)
-    cdn_poll_enabled = environment == "main" and configured_polling
+    cdn_poll_enabled = configured_polling
 
     api_enabled = _read_bool(api, "enabled", False)
     api_host = str(api.get("host", "127.0.0.1")).strip()
@@ -201,4 +205,5 @@ def load_config(path: str | Path) -> ServerConfig:
         ),
         rerun_schedule_forecast_limit=_read_int(rerun, "forecast_limit", 20),
         rerun_schedule_overrides=tuple(parsed_overrides),
+        instance_id=instance_id,
     )

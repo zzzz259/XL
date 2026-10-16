@@ -9,64 +9,111 @@ deployable only after GitHub Actions workflow **XL CI** succeeds for that exact
 branch and 40-character SHA. Pending/failed CI does not advance the saved
 cursor. Changes outside a branch's service mapping are recorded as no-ops.
 
-## Branch and service map
+## Branch snapshots and legacy service map
 
 | Branch | Immutable pointer | Services affected |
 |---|---|---|
 | `debug` | `/home/admin/xl_deploy/current/debug` | CI/integration only; no runtime units |
-| `test` | `/home/admin/xl_deploy/current/test` | `xl-qqbot-test.service`, `xl-qqbot-test-notify.service`, `xl-qqbot-test-jobs.service`, and/or `xl-updata-server-test.service` |
-| `main` | `/home/admin/xl_deploy/current/main` | `xl-qqbot-prod.service`, shared `xl-qqbot-router.service`, `xl-qqbot-main-notify.service`, `xl-qqbot-control.service`, `xl-qqbot-main-jobs.service`, and/or `xl-updata-server.service` |
+| `test` | `/home/admin/xl_deploy/current/test` | Inventory mode: every enabled instance with `watch_ref = "test"` whose role is affected. Legacy mode: fixed test units below. |
+| `main` | `/home/admin/xl_deploy/current/main` | Inventory mode: every enabled instance with `watch_ref = "main"` whose role is affected. Legacy mode: fixed main units below. |
 
-The Bot remains two existing projects: `xl_qqbot` and `xl_updata_server`.
-Inside `xl_qqbot`, one Gateway process owns the QQ login and forwards raw event
-envelopes to the test worker (`8782`) or production worker (`8783`). The test
-branch does not own or restart the shared Gateway. Test Bot changes restart its
-query worker, test notification service, and test jobs, pausing/draining only
-debug/test tiers. Main Bot changes restart the production worker, shared
-Gateway, main notifier, deployment control, and main jobs; because the Gateway
-login is shared, that transaction pauses/drains all tiers, while notices still
-go only to the main groups. Debug runtime changes are CI-verified no-ops.
+The intended runtime architecture is one transport-only Gateway plus one or
+more Bot instances. A Gateway routes raw events by explicit group-to-instance
+ownership and relays authenticated outbound envelopes to the QQ API. Bot
+instances own their feature configuration, recipient groups, queues, and data.
+Branch labels represent code snapshots and do not grant or deny features.
 
-| Loopback port | Process | Purpose |
+The controller supports an optional, hand-maintained `[inventory.gateway]` and
+`[[inventory.instances]]` configuration. It can deploy multiple instances that
+watch the same branch snapshot; each instance retains its own config, data
+roots, groups, listener ports, and systemd units. The fixed map below applies
+only when `[inventory]` is absent, for migration compatibility.
+
+Copy the inventory example from [config.toml.example](config.toml.example).
+Give every instance a stable `instance_id`, select its code snapshot with
+`watch_ref` (`test` or `main`), and assign unique units, ports, group IDs,
+external config paths, and non-overlapping mutable data roots. Configure the
+Gateway once with its own unit, code ref, config, data root, and port. Its
+`[router].group_instances` and worker port map must match the inventory exactly.
+Every referenced unit must already be installed as a systemd user unit and
+must load the corresponding external config and `current/<watch_ref>` release.
+Each routed Bot instance must have a distinct transport token in both the
+Gateway config and its Bot config; the dry-run checks token IDs and matching
+values without printing them.
+
+Validate a prepared inventory without loading GitHub/router bearer tokens or
+changing services, pointers, configs, or data. It reads the referenced runtime
+TOML files to check identity, ports, routes, and owned paths, but prints no
+credential values:
+
+```bash
+python -m xl_deploy --config /path/to/config.toml --dry-run-inventory
+```
+
+The read-only summary reports instance IDs, refs, units, ports, counts of owned
+groups/data roots, and fails if the referenced Bot/Gateway configs disagree or
+mutable runtime paths escape their declared roots. It intentionally omits group
+IDs and credential values. If no inventory exists, it reports that legacy
+test/main mapping is active.
+
+Before enabling inventory mode, retain the old test/main configs and data in
+place, translate each existing worker/updater into one explicit inventory
+entry, and review that group ownership, service units, listener ports, mutable
+paths, and Gateway routes match. The controller validates the inventory and
+the referenced runtime configs before any maintenance, drain, or service stop;
+it does not rewrite configs, move data, create units, or infer ownership. Add a
+new instance by provisioning its unit and config, declaring its unique roots,
+ports and groups, reviewing the dry-run, then allowing the next code update for
+its `watch_ref` to preflight and start it. Inventory-only edits do not force a
+code redeployment or bootstrap new units. An operator can run the validation
+locally; there is no remote discovery step.
+
+`debug` remains CI-only. The controller polls debug/test/main in the existing
+fast-forward sequence; test/main are code snapshot refs, not product tiers.
+Runtime instances must watch `test` or `main`; `debug` is rejected as a runtime
+watch ref so it cannot silently remain undeployed.
+
+| Legacy loopback port | Process | Purpose |
 |---:|---|---|
-| 8782 | `xl-qqbot-test.service` | debug/test query worker |
-| 8783 | `xl-qqbot-prod.service` | main query worker |
-| 8784 | `xl-qqbot-control.service` | deployment announcements and maintenance API |
-| 8785 | `xl-qqbot-router.service` | single Gateway plus event forwarding and drain API |
-| 8786 | `xl-qqbot-test-notify.service` | test/debug durable notification queue and sender |
-| 8787 | `xl-qqbot-main-notify.service` | main durable notification queue and sender |
-| 8790 | `xl-updata-server.service` | main data update API |
-| 8791 | `xl-updata-server-test.service` | test data update API |
+| 8782 | `xl-qqbot-test.service` | legacy test worker |
+| 8783 | `xl-qqbot-prod.service` | legacy main worker |
+| 8784 | `xl-qqbot-control.service` | legacy deployment control API |
+| 8785 | `xl-qqbot-router.service` | legacy single Gateway |
+| 8786 | `xl-qqbot-test-notify.service` | legacy test notifier |
+| 8787 | `xl-qqbot-main-notify.service` | legacy main notifier |
+| 8790 | `xl-updata-server.service` | legacy main updater |
+| 8791 | `xl-updata-server-test.service` | legacy test updater |
 
 All Bot-internal endpoints bind only to `127.0.0.1`; keep them closed to public
-ingress. `8781` is an old debug field with no debug worker in this topology.
-Test and main configs, queue databases, image spools, status files, downloads,
-versions, character output and Bot data roots remain separate. Notifications
-are accepted only for the owning tier (`debug`/`test` or `main`/`production`)
-and acknowledged after durable queue insertion. Bot workers still send
-immediate query replies through the QQ HTTP API; the notifier handles proactive
-jobs and deployment announcements.
+ingress. `8781` is an old debug field in this topology. Existing test and main
+configs and data roots remain separate. New outbound messages are authenticated
+and tagged with their owning instance ID, and are relayed through the Gateway;
+durable queues remain instance-owned.
 
-Test and main `xl_updata_server` configurations and bearer secrets remain
-separate. The test server's `environment = "test"` policy disables scheduled
-CDN polling; GitHub deployment itself never starts a game update. Both backend
-services are placed in `xl-updata.slice`, capped at one CPU core in aggregate.
+Existing test and main `xl_updata_server` configurations and bearer secrets
+remain separate. Each updater's `[polling].enabled` value directly controls its
+scheduled polling; environment labels do not override the setting. GitHub
+deployment itself never starts a game update. Both backend services are placed
+in `xl-updata.slice`, capped at one CPU core in aggregate.
 
-The test Bot's external `config.toml` must retain the same `[groups].debug` and
-`[groups].test` IDs and feature-level settings as the router's classification.
-The worker recomputes `GroupTier` from that configuration for every request;
-the router preserves the group ID and routes by the original tier. Copying
-only the test group list would accidentally evaluate debug groups as the
-default tier.
+Legacy group/tier fields may still be read as migration inputs. Inventory
+mode maps each group directly to exactly one instance ID and rejects duplicate
+ownership. Compatibility fields do not authorize or disable features.
 
-Point the test worker and test jobs' `[watch]` data root, `character_data`,
+In legacy mode, point the test worker and test jobs' `[watch]` data root, `character_data`,
 `versions_dir`, and `outbox_dir` at the test backend's data tree. Main worker and
 main jobs use the main backend tree. Each jobs process sends proactive messages
 to its matching notifier, whose separate FIFO and media spool live below that
 release's configured `watch.data_dir/notifications/{test,production}`. Test
-updates therefore queue only to debug/test; main updates and Bilibili notices
-queue only to main/production. A manual test-server run uses the ordinary
-update pipeline and writes events and artifacts only to test data.
+updates therefore queue only to the configured test groups; main updates and
+Bilibili notices queue only to the configured main groups. A manual test-server
+run uses the ordinary update pipeline and writes events and artifacts only to
+test data.
+
+In inventory mode, repeat these paths per instance and ensure each configured
+Bot outbox and update-source outbox is within that instance's declared data
+roots. The controller verifies those ownership boundaries before service
+changes.
 
 Code is stored in `/home/admin/xl_deploy/releases/<sha>-<transaction-id>`;
 each runtime branch (`test` and `main`) has an independent atomic `current`
@@ -82,22 +129,20 @@ against its external config and checks the corresponding loopback `/healthz`
 after startup. A missing or unloadable native renderer dependency therefore
 fails staging while the active release remains untouched.
 
-The deployment-control API is a separate `xl-qqbot-control.service` process on
+In the legacy fixed-unit topology, the deployment-control API is a separate
+`xl-qqbot-control.service` process on
 `127.0.0.1:8784`; it retains the controller's announce, maintenance, and drain
 contracts. It calls the Gateway coordination API on `8785` and the test/main
 notifier APIs on `8786`/`8787`. The Gateway API tracks readiness and in-flight
 requests so deployments can pause and drain before stopping workers. None of
 these services is exposed outside loopback.
 
-Test worker deployment does not replace the shared Gateway or deployment
-control plane: those services are owned by the main release. A test update can
-validate the test worker/notifier/jobs path while the production Gateway still
-runs its previous release. Before promoting a Gateway/control-plane change to
-main, complete the one-time controller/bootstrap cutover below and verify the
-installed control, Gateway, notifier, jobs, and worker units and their external
-configuration. A start notice is a deployment gate only after every target
-group's delivery is acknowledged; durable queue insertion alone does not prove
-that QQ received it.
+These fixed ports and release ownership apply only when `[inventory]` is absent.
+In inventory mode, deployment control, Gateway, notifier, jobs, worker, and
+updater units are selected from the hand-maintained inventory and updated when
+their configured code snapshot changes. A start notice is a deployment gate
+only after every target group's delivery is acknowledged; durable queue
+insertion alone does not prove that QQ received it.
 
 ## Update server control API
 
@@ -132,7 +177,13 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8791/api/v1/updates/run-onc
 Invoke-RestMethod -Uri http://127.0.0.1:8791/api/v1/status -Headers $headers
 ```
 
-## Manual setup and cutover
+## Manual setup and cutover for the legacy topology
+
+The commands in this section install only the fixed legacy test/main units.
+Inventory mode requires operators to install the unit names declared in
+`[inventory.gateway]` and `[[inventory.instances]]` with each instance's
+external config and `current/<watch_ref>` paths. Do not mix the legacy install
+commands with inventory-defined units.
 
 Run as the existing `admin` user. Do not use `sudo`. Begin with read-only
 inventory; it makes no changes:
@@ -274,20 +325,21 @@ systemctl --user enable --now xl-deploy-poll.timer
 
 ## Update order, recovery, and notices
 
-For QQ bot tiers, the controller first asks the deployment-control service to
-durably enqueue
+For inventory-managed Bot instances, the controller first asks deployment
+control to durably enqueue for each selected `instance_id`
 `检测到更新，正在更新bot，期间将暂停服务` before pausing/draining and stopping
-affected services. A successful response means the selected tier Notification
-Service durably accepted the message; it does not mean QQ has already delivered it. Deployment
+affected services. A successful response means each selected instance's
+Notification Service durably accepted the message; it does not mean QQ has
+already delivered it. Deployment
 continues during the 02:00–08:00 Asia/Shanghai send curfew, while the queued
 start/completion/release/rollback messages wait for 08:00. It stages and
 preflights the immutable release first, switches only that branch pointer,
 starts services and checks readiness, then resumes routing. Backend-only
-updates also notify and pause/drain their corresponding service tiers:
-test-backend updates affect `debug` and `test`; main-backend updates affect
-`production`. Only after health checks pass does it durably enqueue
+updates also pause/drain the configured instance when that backend service is
+part of a Bot instance. A backend-only instance has no Bot announcement or
+Gateway maintenance scope. Only after health checks pass does it durably enqueue
 `更新完毕`; any new non-empty project announcement follows in the destination
-tier's notifier FIFO.
+instance's notifier FIFO.
 
 Optional version announcements are maintained in
 `xl_deploy/announcements/<change-id>.md` in the same candidate commit as the
@@ -299,7 +351,7 @@ otherwise healthy deployment; only the lifecycle messages are sent. GitHub
 Release notes are not used as deployment announcements.
 
 Each notification request carries an idempotency key derived from the durable
-deployment transaction ID and phase (plus tier). Replaying a transaction journal
+deployment transaction ID and phase (plus instance ID). Replaying a transaction journal
 therefore does not add duplicate queue rows. If the selected notifier cannot
 persist a notice, the control API rejects the request and the deploy transaction
 must not proceed past the start-notice gate. Queue delivery remains at-least-once: a crash

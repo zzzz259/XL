@@ -68,6 +68,26 @@ assetbundle_key = "yunguihaowan1234"
         self.assertEqual(config.rerun_schedule_history_through_gacha_id, 8)
         self.assertEqual(config.rerun_schedule_overrides[0]["gacha_id"], 77)
 
+    def test_polling_setting_is_authoritative_for_test_environment(self):
+        config = self._load('environment = "test"\ninstance_id = "test-copy-2"\n')
+        self.assertTrue(config.cdn_poll_enabled)
+        self.assertEqual(config.instance_id, "test-copy-2")
+
+    def test_polling_can_be_disabled_for_any_environment(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        path = Path(temp_dir.name) / "config.toml"
+        path.write_text(
+            '[server]\nenvironment="main"\ninstance_id="worker-a"\n'
+            '[polling]\nenabled=false\n[paths]\ndata_dir="data"\n'
+            '[cdn]\ncategories=["Arts", "Data"]\n'
+            '[security]\nassetbundle_key="yunguihaowan1234"\n',
+            encoding="utf-8",
+        )
+        config = load_config(path)
+        self.assertFalse(config.cdn_poll_enabled)
+        self.assertEqual(config.instance_id, "worker-a")
+
 
 def test_load_config_parses_intervals_and_anchor(tmp_path):
     config_path = tmp_path / "config.toml"

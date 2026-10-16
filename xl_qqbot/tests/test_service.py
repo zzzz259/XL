@@ -82,7 +82,7 @@ async def test_health_endpoint(tmp_path, monkeypatch):
     try:
         resp = await client.get("/health")
         assert resp.status == 200
-        assert await resp.text() == "ok"
+        assert (await resp.json())["ok"] is True
     finally:
         await client.close()
 
@@ -184,11 +184,11 @@ async def test_startup_logs_in_sender_and_cleanup_closes(tmp_path, monkeypatch):
 
 # ---------- 启动参数 ----------
 
-def test_parse_args_requires_tier_and_port():
-    args = parse_args(["--tier", "debug", "--port", "8781"])
-    assert args.tier == "debug" and args.port == 8781
+def test_parse_args_accepts_instance_identity_and_optional_legacy_alias():
+    args = parse_args(["--instance-id", "copy-a", "--port", "8801"])
+    assert args.instance_id == "copy-a" and args.port == 8801
 
-    with pytest.raises(SystemExit):
-        parse_args(["--port", "8781"])  # 缺 --tier
+    legacy = parse_args(["--tier", "debug", "--port", "8781"])
+    assert legacy.tier == "debug" and legacy.port == 8781
     with pytest.raises(SystemExit):
         parse_args(["--tier", "verbose", "--port", "1"])  # 非法级别
