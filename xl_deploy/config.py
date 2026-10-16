@@ -224,7 +224,7 @@ class DeploymentInventory:
                     check(api.get('host') == '127.0.0.1' and api.get('enabled') is True, 'backend loopback API')
                     actual = api.get('port')
                 elif role == 'control':
-                    actual = bot_values.get('router', {}).get('deployment_control_port')
+                    actual = router.get('deployment_control_port')
                 else:
                     section = 'notification' if role == 'notify' else 'router'
                     actual = bot_values.get(section, {}).get('instance_ports', {}).get(instance.instance_id)

@@ -5,7 +5,7 @@ Wants=network-online.target xl-qqbot-router.service xl-qqbot-test-notify.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/admin/xl_qqbot
+WorkingDirectory=/home/admin/xl_gateway
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/admin/xl_deploy/current/main/xl_qqbot
 ExecStart=/home/admin/xl_deploy/current/main/.venvs/xl-qqbot-control.service/bin/python -P -m bot_app.deployment_service

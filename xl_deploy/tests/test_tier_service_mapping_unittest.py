@@ -95,7 +95,12 @@ class TierServiceMappingTests(unittest.TestCase):
                 content = (DEPLOY / unit).read_text(encoding="utf-8")
                 self.assertIn(f"current/{branch}/", content)
                 self.assertIn(command, content)
-                self.assertIn(f"/home/admin/xl_qqbot{'-test' if branch == 'test' else ''}", content)
+                expected_directory = (
+                    "/home/admin/xl_gateway"
+                    if unit == "xl-qqbot-control.service"
+                    else f"/home/admin/xl_qqbot{'-test' if branch == 'test' else ''}"
+                )
+                self.assertIn(expected_directory, content)
                 if unit != "xl-qqbot-control.service":
                     self.assertIn(
                         f"xl-qqbot-{'test' if branch == 'test' else 'main'}", unit

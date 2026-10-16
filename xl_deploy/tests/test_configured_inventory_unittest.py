@@ -74,7 +74,8 @@ class ConfiguredInventoryTests(unittest.TestCase):
         inventory.gateway.config_path.parent.mkdir(parents=True, exist_ok=True)
         if not inventory.gateway.config_path.exists():
             inventory.gateway.config_path.write_text(
-                f'[watch]\ndata_dir = "data"\n[gateway]\ncontrol_port = {inventory.gateway.listen_port}\ncontrol_token = "{CONTROL_TOKEN}"\n[router.group_instances]\n' +
+                f'[watch]\ndata_dir = "data"\n[gateway]\ncontrol_port = {inventory.gateway.listen_port}\ncontrol_token = "{CONTROL_TOKEN}"\n'
+                '[router]\ndeployment_control_port = 8814\n[router.group_instances]\n' +
                 ''.join(f'"{g}" = "{i}"\n' for g, i in inventory.group_routes.items()) +
                 '[router.instance_ports]\n' + ''.join(f'"{i.instance_id}" = {i.listen_ports['bot']}\n' for i in inventory.instances) +
                 '[gateway.instance_tokens]\n' + ''.join(f'"{i.instance_id}" = "{token_for(i.instance_id)}"\n' for i in inventory.instances), encoding='utf-8')
@@ -148,6 +149,18 @@ class ConfiguredInventoryTests(unittest.TestCase):
         values['instances'][0]['listen_ports']['backend'] = 8831
         with self.assertRaisesRegex(ValueError, 'separate backend_config_path'):
             self.inventory(values)
+
+    def test_deployment_control_unit_uses_shared_gateway_control_config(self):
+        values = mapping()
+        values['instances'][0]['units']['control'] = 'xl-control.service'
+        values['instances'][0]['listen_ports']['control'] = 8814
+        inventory = self.inventory(values)
+        bot_config = inventory.instances[0].config_path
+        text = bot_config.read_text(encoding='utf-8').replace(
+            '[router.instance_ports]', '[router]\ndeployment_control_port = 9999\n[router.instance_ports]')
+        bot_config.write_text(text, encoding='utf-8')
+
+        inventory.validate_runtime_configs()
 
     def test_backend_healthcheck_uses_the_updater_config(self):
         from xl_deploy.runner import CommandRunner

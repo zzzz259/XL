@@ -41,6 +41,9 @@ not claim that root. Each Bot's update sources must point only to outboxes in
 that same instance's roots. Configure the
 Gateway once with its own unit, code ref, config, data root, and port. Its
 `[router].group_instances` and worker port map must match the inventory exactly.
+The shared deployment-control API uses the Gateway's external config directory;
+it can address every configured instance without adding another Bot instance
+token or copying one Bot's business configuration into another.
 Every referenced unit must already be installed as a systemd user unit and
 must load the corresponding external config and `current/<watch_ref>` release.
 Each routed Bot instance must have a distinct transport token in both the

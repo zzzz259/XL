@@ -85,6 +85,8 @@ def test_runtime_services_use_stable_instance_ids_and_gateway_config_root():
         assert "--tier" not in content
     gateway = read("xl_deploy/deploy/xl-qqbot-router.service")
     assert "WorkingDirectory=/home/admin/xl_gateway" in gateway
+    control = read("xl_deploy/deploy/xl-qqbot-control.service")
+    assert "WorkingDirectory=/home/admin/xl_gateway" in control
 
 
 def test_sample_configuration_has_no_live_secrets_or_assetbundle_key():
