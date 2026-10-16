@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
-from types import MappingProxyType
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
+from types import MappingProxyType
 from urllib.parse import urlparse
 
 
@@ -104,7 +104,7 @@ class DeploymentInventory:
         try:
             instances = []
             if not isinstance(values['instances'], (list, tuple)):
-                raise ValueError('instances must be an array')
+                raise ValueError('instances must be an array')  # noqa: TRY004 - invalid config value
             for item in values['instances']:
                 if any(not isinstance(item.get(field), (list, tuple)) for field in ('data_roots', 'groups')):
                     raise ValueError('data_roots and groups must be arrays')
@@ -119,7 +119,7 @@ class DeploymentInventory:
             if set(gateway) != {'unit', 'watch_ref', 'config_path', 'listen_port', 'data_roots'}:
                 raise ValueError('invalid gateway inventory fields')
             if not isinstance(gateway['data_roots'], (list, tuple)):
-                raise ValueError('gateway data_roots must be an array')
+                raise ValueError('gateway data_roots must be an array')  # noqa: TRY004 - invalid config value
             result = cls(tuple(instances), GatewayDeployment(
                 gateway['unit'], gateway['watch_ref'], path(gateway['config_path']), gateway['listen_port'],
                 tuple(path(p) for p in gateway['data_roots'])))

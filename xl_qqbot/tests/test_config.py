@@ -132,6 +132,10 @@ outbox_dir = "/tmp/outbox"
 [router.instance_ports]
 test-blue = 8812
 test-green = 8813
+
+[gateway.instance_tokens]
+test-blue = "test-blue-instance-token-00000000"
+test-green = "test-green-instance-token-000000"
 '''
     )
     try:

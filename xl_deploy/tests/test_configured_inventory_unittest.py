@@ -215,6 +215,7 @@ class ConfiguredInventoryTests(unittest.TestCase):
         from contextlib import redirect_stdout
         from io import StringIO
         from unittest.mock import patch
+
         from xl_deploy import __main__
 
         inventory = self.inventory()
@@ -227,7 +228,7 @@ class ConfiguredInventoryTests(unittest.TestCase):
 
     def test_poller_passes_inventory_to_both_plan_builds(self):
         from xl_deploy.poller import BranchPoller, PollCursorStore
-        inv = self.inventory(); tx, runner, router = self.transaction(inv)
+        inv = self.inventory(); tx, runner, _router = self.transaction(inv)
         github = SimpleNamespace(latest_sha=lambda branch: SHA, ci_result=lambda branch, sha: 'success')
         runner.changed_paths = lambda base, head: ('xl_qqbot/bot_app/service.py',)
         runner.read_text_at_commit = lambda sha, path: ''
@@ -301,7 +302,7 @@ class ConfiguredInventoryTests(unittest.TestCase):
         self.assertEqual(tx.state.load().phase, 'preflight_failed')
 
     def test_failed_health_rolls_back_both_instances(self):
-        inv = self.inventory(); tx, runner, router = self.transaction(inv)
+        inv = self.inventory(); tx, runner, _router = self.transaction(inv)
         health_count = 0
         def health(units):
             nonlocal health_count
@@ -328,14 +329,14 @@ class ConfiguredInventoryTests(unittest.TestCase):
         self.assertNotIn('--expect-environment', commands[1])
 
     def test_empty_forged_plan_is_rejected_before_noop(self):
-        inv = self.inventory(); tx, runner, router = self.transaction(inv)
+        inv = self.inventory(); tx, _runner, _router = self.transaction(inv)
         plan = SimpleNamespace(branch='test', sha=SHA, changed_paths=('xl_qqbot/bot_app/service.py',),
                                impacted_units=(), impacted_tiers=(), announcement_scope=())
         with self.assertRaises(ValueError): tx.execute(plan)
 
     def test_operator_loader_and_legacy_runtime_default(self):
-        from xl_deploy.operator_inventory import load_inventory
         from xl_deploy.__main__ import load_runtime_config
+        from xl_deploy.operator_inventory import load_inventory
         source = Path('xl_deploy/config.toml.example').read_text(encoding='utf-8')
         target = self.root / 'deploy.toml'; target.write_text(source, encoding='utf-8')
         self.assertEqual(load_inventory(target).instances[1].instance_id, 'test-b')
@@ -378,7 +379,7 @@ class ConfiguredInventoryTests(unittest.TestCase):
             inv.validate(releases_root=self.root / 'gateway' / 'data' / 'releases')
 
     def test_gateway_preflight_uses_its_declared_roots(self):
-        inv = self.inventory(); tx, runner, router = self.transaction(inv)
+        inv = self.inventory(); tx, runner, _router = self.transaction(inv)
         plan = plan_deployment('main', SHA, ['xl_qqbot/bot_app/gateway.py'], inventory=inv)
         old = tx.paths.releases_root / ('1' * 40)
         tx.state.set_current(old, current_path=tx.paths.current_path / 'main')

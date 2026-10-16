@@ -7,11 +7,12 @@ import logging
 import os
 import stat
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from xl_deploy.config import GitHubConfig, DeploymentInventory
+import tomllib
+
+from xl_deploy.config import DeploymentInventory, GitHubConfig
 from xl_deploy.github import GitHubClient
 from xl_deploy.poller import BranchPoller, PollCursorStore
 from xl_deploy.router_client import RouterControlClient, validate_loopback_url
