@@ -53,7 +53,7 @@ class FakeState:
 
 
 class FakeTransaction:
-    def __init__(self, current, status="completed", recovery_status="nothing_to_recover", journal=None):
+    def __init__(self, current, status="success", recovery_status="nothing_to_recover", journal=None):
         self.paths = type("Paths", (), {"current_path": Path("/deploy/current")})()
         self.state = FakeState(current, journal)
         self.status = status
@@ -80,7 +80,7 @@ class FakeReleaseGitHub(FakeGitHub):
 
 
 def make_poller(
-    tmp_path, *, paths, ci="success", status="completed", cursor=OLD_SHA,
+    tmp_path, *, paths, ci="success", status="success", cursor=OLD_SHA,
     current=None, branch="debug",
 ):
     current = current or tmp_path / f"{OLD_SHA}-previous"

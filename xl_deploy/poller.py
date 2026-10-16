@@ -208,7 +208,7 @@ class BranchPoller:
             plan = plan_deployment(branch, latest_sha, changed_paths, release_note=release_note, inventory=self.inventory)
 
         result = transaction.execute(plan)
-        if result.status != "completed":
+        if result.status != "success":
             return PollResult(branch, f"deployment_{result.status}", latest_sha, result.message)
         self.cursors.set_cursor(branch, latest_sha)
         return PollResult(branch, "deployed", latest_sha)

@@ -307,7 +307,7 @@ class ConfiguredInventoryTests(unittest.TestCase):
         seen = []
         def execute(plan):
             seen.append(plan)
-            return SimpleNamespace(status='completed', message='')
+            return SimpleNamespace(status='success', message='')
         tx.execute = execute
         poller = BranchPoller(github, runner, lambda branch: tx, PollCursorStore(self.root / 'cursors'), inventory=inv)
         self.assertEqual(poller.poll_branch('test').status, 'deployed')
