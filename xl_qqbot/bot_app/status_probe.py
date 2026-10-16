@@ -27,11 +27,19 @@ class _RejectRedirects(HTTPRedirectHandler):
 def _load_credentials(path: str | Path) -> dict[str, str]:
     credentials_path = Path(path)
     try:
-        raw = tomllib.loads(credentials_path.read_text(encoding="utf-8"))
+        content = credentials_path.read_text(encoding="utf-8")
     except OSError as error:
         raise ValueError("server status credentials file is unavailable") from error
-    except tomllib.TOMLDecodeError as error:
-        raise ValueError("server status credentials file is invalid TOML") from error
+
+    try:
+        if content.lstrip().startswith("{"):
+            raw = json.loads(content)
+        else:
+            raw = tomllib.loads(content)
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ValueError("server status credentials file is invalid JSON or TOML") from error
+    if not isinstance(raw, dict):
+        raise ValueError("server status credentials file must contain an object")
 
     credentials = {
         key: raw.get(key)

@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from bot_app.status_monitor import Status, classify_sample
-from bot_app.status_probe import _RejectRedirects, build_login_preflight_probe
+from bot_app.status_probe import _RejectRedirects, _load_credentials, build_login_preflight_probe
 
 
 class LoginPreflightProbeTests(unittest.IsolatedAsyncioTestCase):
@@ -100,6 +100,19 @@ class LoginPreflightProbeTests(unittest.IsolatedAsyncioTestCase):
     def test_missing_credentials_fail_before_monitor_startup(self):
         with self.assertRaisesRegex(ValueError, "credentials file is unavailable"):
             build_login_preflight_probe(Path(self.temp_dir.name) / "missing.toml")
+
+    def test_json_credentials_file_is_supported(self):
+        credentials_path = Path(self.temp_dir.name) / "probe.json"
+        credentials_path.write_text(
+            json.dumps({"open_id": "account-id", "token": "opaque-token", "channel": "channel-a"}),
+            encoding="utf-8",
+        )
+        if os.name == "posix":
+            credentials_path.chmod(0o600)
+        self.assertEqual(
+            _load_credentials(credentials_path),
+            {"open_id": "account-id", "token": "opaque-token", "channel": "channel-a"},
+        )
 
     def test_login_probe_rejects_redirects_to_prevent_credential_forwarding(self):
         handler = _RejectRedirects()
