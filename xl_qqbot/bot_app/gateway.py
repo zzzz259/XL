@@ -165,23 +165,38 @@ class GatewayControlClient:
         if not isinstance(enabled, bool):
             raise TypeError("Gateway maintenance state must be a boolean")
         return await self._request(
-            "POST", "/gateway/maintenance", {"instance_id": tier, "enabled": enabled}
+            "POST",
+            "/gateway/maintenance",
+            {"instance_id": tier, "enabled": enabled},
+            instance_id=tier,
         )
 
     async def drained(self, tier: str) -> dict:
         if not isinstance(tier, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tier):
             raise ValueError("Gateway instance_id is invalid")
-        return await self._request("GET", f"/gateway/drained?instance_id={tier}")
+        return await self._request(
+            "GET", f"/gateway/drained?instance_id={tier}", instance_id=tier
+        )
 
-    async def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        *,
+        instance_id: str | None = None,
+    ) -> dict:
         if self._session is None or self._session.closed:
             raise RuntimeError("Gateway control client is not started")
+        headers = {"Authorization": f"Bearer {self.bearer_token}"}
+        if instance_id is not None:
+            headers["X-Instance-ID"] = instance_id
         try:
             async with self._session.request(
                 method,
                 f"{self.base_url}{path}",
                 json=payload,
-                headers={"Authorization": f"Bearer {self.bearer_token}"},
+                headers=headers,
             ) as response:
                 body = await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:

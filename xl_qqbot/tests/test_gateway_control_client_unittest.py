@@ -18,15 +18,35 @@ class GatewayControlClientTests(unittest.IsolatedAsyncioTestCase):
 
         async def maintenance(request):
             payload = await request.json()
-            self.calls.append(("maintenance", payload))
+            instance_id = payload["instance_id"]
+            if request.headers.get("X-Instance-ID") != instance_id:
+                return web.json_response(
+                    {"ok": False, "error": "instance identity mismatch"},
+                    status=403,
+                )
+            self.calls.append(("maintenance", payload, request.headers["X-Instance-ID"]))
             return web.json_response(
-                {"ok": True, "instance_id": payload["instance_id"], "enabled": payload["enabled"]}
+                {"ok": True, "instance_id": instance_id, "enabled": payload["enabled"]}
             )
 
         async def drained(request):
             instance_id = request.query["instance_id"]
-            self.calls.append(("drained", instance_id))
-            return web.json_response({"ok": True, "instance_id": instance_id, "drained": True, "active": 0})
+            if request.headers.get("X-Instance-ID") != instance_id:
+                return web.json_response(
+                    {"ok": False, "error": "instance identity mismatch"},
+                    status=403,
+                )
+            self.calls.append(
+                ("drained", instance_id, request.headers["X-Instance-ID"])
+            )
+            return web.json_response(
+                {
+                    "ok": True,
+                    "instance_id": instance_id,
+                    "drained": True,
+                    "active": 0,
+                }
+            )
 
         app = web.Application()
         app.router.add_get("/gateway/health", health)
@@ -54,8 +74,8 @@ class GatewayControlClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.calls,
             [
-                ("maintenance", {"instance_id": "test", "enabled": True}),
-                ("drained", "test"),
+                ("maintenance", {"instance_id": "test", "enabled": True}, "test"),
+                ("drained", "test", "test"),
             ],
         )
 
