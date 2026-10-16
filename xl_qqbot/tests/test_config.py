@@ -42,30 +42,38 @@ outbox_dir = "/tmp/outbox"
         os.unlink(path)
 
 
-def test_missing_appid():
+def test_worker_config_can_omit_appid():
     path = write_toml(
         """
 [bot]
 secret = "secret"
+
+[watch]
+outbox_dir = "/tmp/outbox"
 """
     )
     try:
-        with pytest.raises(ValueError, match="appid"):
-            load_config(path)
+        cfg = load_config(path)
+        assert cfg.bot.appid == ""
+        assert cfg.bot.secret == "secret"
     finally:
         os.unlink(path)
 
 
-def test_missing_secret():
+def test_worker_config_can_omit_secret():
     path = write_toml(
         """
 [bot]
 appid = "123"
+
+[watch]
+outbox_dir = "/tmp/outbox"
 """
     )
     try:
-        with pytest.raises(ValueError, match="secret"):
-            load_config(path)
+        cfg = load_config(path)
+        assert cfg.bot.appid == "123"
+        assert cfg.bot.secret == ""
     finally:
         os.unlink(path)
 
