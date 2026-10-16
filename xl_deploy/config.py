@@ -86,6 +86,7 @@ class GatewayDeployment:
     watch_ref: str
     config_path: Path
     listen_port: int
+    data_roots: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
@@ -115,10 +116,13 @@ class DeploymentInventory:
                     MappingProxyType(dict(item['units'])), MappingProxyType(dict(item['listen_ports'])),
                     tuple(item['groups']), item.get('enabled', True)))
             gateway = values['gateway']
-            if set(gateway) != {'unit', 'watch_ref', 'config_path', 'listen_port'}:
+            if set(gateway) != {'unit', 'watch_ref', 'config_path', 'listen_port', 'data_roots'}:
                 raise ValueError('invalid gateway inventory fields')
+            if not isinstance(gateway['data_roots'], (list, tuple)):
+                raise ValueError('gateway data_roots must be an array')
             result = cls(tuple(instances), GatewayDeployment(
-                gateway['unit'], gateway['watch_ref'], path(gateway['config_path']), gateway['listen_port']))
+                gateway['unit'], gateway['watch_ref'], path(gateway['config_path']), gateway['listen_port'],
+                tuple(path(p) for p in gateway['data_roots'])))
         except (KeyError, TypeError, AttributeError) as exc:
             raise ValueError('incomplete or invalid deployment inventory') from exc
         result.validate()
@@ -157,7 +161,13 @@ class DeploymentInventory:
         def check(condition, label):
             if not condition:
                 raise ValueError(f'inventory runtime config mismatch: {label}')
+        def owned_path(value, owner, label):
+            check(isinstance(value, str) and bool(value.strip()), label)
+            candidate = Path(value).expanduser()
+            candidate = (candidate if candidate.is_absolute() else owner.config_path.parent / candidate).resolve()
+            check(any(candidate.is_relative_to(root.resolve()) for root in owner.data_roots), label)
         gateway = read(self.gateway.config_path)
+        owned_path(gateway.get('watch', {}).get('data_dir', './data'), self.gateway, 'gateway data_dir')
         router = gateway.get('router', {})
         check(router.get('group_instances', {}) == self.group_routes, 'gateway group routes')
         check(gateway.get('gateway', {}).get('control_port') == self.gateway.listen_port, 'gateway port')
@@ -171,11 +181,16 @@ class DeploymentInventory:
             backend = 'backend' in instance.units
             identity = values.get('server', {}).get('instance_id') if backend else values.get('instance', {}).get('id')
             check(identity == instance.instance_id, 'instance_id')
-            data = values.get('paths' if backend else 'watch', {}).get('data_dir')
-            check(isinstance(data, str) and bool(data), 'data_dir')
-            data_path = Path(data).expanduser()
-            data_path = (data_path if data_path.is_absolute() else instance.config_path.parent / data_path).resolve()
-            check(data_path in instance.data_roots, 'data_dir')
+            mutable = values.get('paths' if backend else 'watch', {})
+            owned_path(mutable.get('data_dir', 'data' if backend else './data'), instance, 'data_dir')
+            if not backend:
+                owned_path(mutable.get('outbox_dir'), instance, 'outbox_dir')
+                sources = mutable.get('update_sources')
+                if sources is not None:
+                    check(isinstance(sources, list) and bool(sources), 'update_sources')
+                    for source in sources:
+                        check(isinstance(source, dict), 'update source')
+                        owned_path(source.get('outbox_dir'), instance, 'update source outbox_dir')
             for role, expected_port in instance.listen_ports.items():
                 if role == 'backend':
                     api = values.get('api', {})
@@ -201,16 +216,19 @@ class DeploymentInventory:
             if not isinstance(value, str) or not _UNIT.fullmatch(value): raise ValueError('invalid inventory service unit')
             unique(value, units, 'unit')
         def ref(value):
-            if value not in {'debug', 'test', 'main'}: raise ValueError('unsupported inventory watch_ref')
+            if value not in {'test', 'main'}: raise ValueError('unsupported inventory watch_ref; debug is CI-only')
         def external(value):
             value = value.resolve()
-            if releases_root is not None and value.is_relative_to(releases_root.resolve()):
+            if releases_root is not None and (value.is_relative_to(releases_root.resolve())
+                                              or releases_root.resolve().is_relative_to(value)):
                 raise ValueError('inventory config/data must remain outside immutable releases')
             if any(value.is_relative_to(other) or other.is_relative_to(value) for other in paths):
                 raise ValueError('duplicate or overlapping inventory path')
             paths.append(value)
         ref(self.gateway.watch_ref); unit(self.gateway.unit); port(self.gateway.listen_port)
         external(self.gateway.config_path)
+        if not self.gateway.data_roots: raise ValueError('gateway data_roots must be nonempty')
+        for value in self.gateway.data_roots: external(value)
         for instance in self.instances:
             if not isinstance(instance.instance_id, str) or not _NAME.fullmatch(instance.instance_id):
                 raise ValueError('invalid instance_id')

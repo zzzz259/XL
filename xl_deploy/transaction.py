@@ -164,8 +164,9 @@ class DeploymentTransaction:
                 for instance in selected:
                     for data in instance.data_roots:
                         self.runner.preflight(plan, candidate, instance.config_path, data)
-                if not selected:
-                    self.runner.preflight(plan, candidate, self.inventory.gateway.config_path, self.paths.data_path)
+                if self.inventory.gateway.unit in units:
+                    for data in self.inventory.gateway.data_roots:
+                        self.runner.preflight(plan, candidate, self.inventory.gateway.config_path, data)
             journal = self._update(journal, phase="preflight_passed")
         except Exception as exc:
             self._update(

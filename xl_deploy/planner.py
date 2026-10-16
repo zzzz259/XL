@@ -118,7 +118,7 @@ def configured_target(branch, paths, inventory):
     inventory.validate()
     if branch == 'debug':
         return DeploymentTarget((), (), ())
-    bot = any(_is_runtime_path(p, 'xl_qqbot') and p != 'xl_qqbot/bot_app/gateway.py' for p in paths)
+    bot = any(_is_runtime_path(p, 'xl_qqbot') for p in paths)
     backend = any(_is_runtime_path(p, 'xl_updata_server') for p in paths)
     gateway = inventory.gateway.watch_ref == branch and any(
         p in {*(f'xl_qqbot/bot_app/{name}.py' for name in

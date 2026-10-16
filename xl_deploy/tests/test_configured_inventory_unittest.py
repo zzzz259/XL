@@ -19,7 +19,7 @@ def mapping():
          'listen_ports': {'bot': port}, 'groups': [group]}
         for name, port, group in [('test-a', 8811, 'g-a'), ('test-b', 8812, 'g-b')]]
         , 'gateway': {'unit': 'xl-gateway.service', 'watch_ref': 'main',
-                      'config_path': 'gateway/config.toml', 'listen_port': 8810}}
+                      'config_path': 'gateway/config.toml', 'listen_port': 8810, 'data_roots': ['gateway/data']}}
 
 
 class Pointer:
@@ -60,12 +60,12 @@ class ConfiguredInventoryTests(unittest.TestCase):
             instance.config_path.parent.mkdir(parents=True, exist_ok=True)
             if not instance.config_path.exists():
                 instance.config_path.write_text(
-                    f'[instance]\nid = "{instance.instance_id}"\n[watch]\ndata_dir = "data"\n'
+                    f'[instance]\nid = "{instance.instance_id}"\n[watch]\ndata_dir = "data"\noutbox_dir = "data/outbox"\n'
                     f'[router.instance_ports]\n"{instance.instance_id}" = {instance.listen_ports['bot']}\n', encoding='utf-8')
         inventory.gateway.config_path.parent.mkdir(parents=True, exist_ok=True)
         if not inventory.gateway.config_path.exists():
             inventory.gateway.config_path.write_text(
-                f'[gateway]\ncontrol_port = {inventory.gateway.listen_port}\n[router.group_instances]\n' +
+                f'[watch]\ndata_dir = "data"\n[gateway]\ncontrol_port = {inventory.gateway.listen_port}\n[router.group_instances]\n' +
                 ''.join(f'"{g}" = "{i}"\n' for g, i in inventory.group_routes.items()) +
                 '[router.instance_ports]\n' + ''.join(f'"{i.instance_id}" = {i.listen_ports['bot']}\n' for i in inventory.instances), encoding='utf-8')
         return inventory
@@ -294,6 +294,108 @@ class ConfiguredInventoryTests(unittest.TestCase):
             with self.subTest(name=name):
                 plan = plan_deployment('main', SHA, [f'xl_qqbot/bot_app/{name}.py'], inventory=inv)
                 self.assertIn('xl-gateway.service', plan.impacted_units)
+
+
+    def test_shared_gateway_module_selects_all_matching_consumers(self):
+        values = mapping()
+        values['instances'][0]['units'].update(notify='xl-a-notify.service', jobs='xl-a-jobs.service')
+        values['instances'][0]['listen_ports']['notify'] = 8813
+        values['instances'][1]['watch_ref'] = 'main'
+        inv = self.inventory(values)
+        for branch, expected in (
+            ('test', ('xl-test-a.service', 'xl-a-notify.service', 'xl-a-jobs.service')),
+            ('main', ('xl-test-b.service', 'xl-gateway.service'))):
+            with self.subTest(branch=branch):
+                plan = plan_deployment(branch, SHA, ['xl_qqbot/bot_app/gateway.py'], inventory=inv)
+                self.assertEqual(plan.impacted_units, expected)
+                self.assertEqual(plan.impacted_units.count('xl-gateway.service'), int(branch == 'main'))
+
+    def test_debug_runtime_watch_refs_are_rejected(self):
+        for owner in ('instance', 'gateway'):
+            with self.subTest(owner=owner):
+                values = mapping()
+                (values['instances'][0] if owner == 'instance' else values['gateway'])['watch_ref'] = 'debug'
+                with self.assertRaisesRegex(ValueError, 'watch_ref'):
+                    config.DeploymentInventory.from_mapping(values, base_dir=self.root)
+
+    def test_gateway_data_root_cannot_contain_release_tree(self):
+        inv = self.inventory()
+        with self.assertRaises(ValueError):
+            inv.validate(releases_root=self.root / 'gateway' / 'data' / 'releases')
+
+    def test_gateway_preflight_uses_its_declared_roots(self):
+        inv = self.inventory(); tx, runner, router = self.transaction(inv)
+        plan = plan_deployment('main', SHA, ['xl_qqbot/bot_app/gateway.py'], inventory=inv)
+        old = tx.paths.releases_root / ('1' * 40)
+        tx.state.set_current(old, current_path=tx.paths.current_path / 'main')
+        tx.execute(plan)
+        self.assertEqual([e[2] for e in runner.events if e[0] == 'preflight'],
+                         [self.root / 'gateway' / 'data'])
+
+    def test_gateway_roots_must_be_nonempty_disjoint_and_external(self):
+        for roots in ([], 'gateway/data', ['test-a/data'], ['test-a/data/child'],
+                      ['gateway'], ['gateway/data', 'gateway/data/child']):
+            with self.subTest(roots=roots):
+                values = mapping(); values['gateway']['data_roots'] = roots
+                with self.assertRaises(ValueError):
+                    config.DeploymentInventory.from_mapping(values, base_dir=self.root)
+        values = mapping(); values['gateway']['data_roots'] = ['releases/gateway']
+        inv = config.DeploymentInventory.from_mapping(values, base_dir=self.root)
+        with self.assertRaises(ValueError): inv.validate(releases_root=self.root / 'releases')
+
+    def test_nested_mutable_paths_and_separate_declared_outbox_are_valid(self):
+        values = mapping()
+        values['instances'][0]['data_roots'].append('test-a/outbox')
+        inv = self.inventory(values)
+        file = inv.instances[0].config_path
+        content = file.read_text(encoding='utf-8').replace('data_dir = "data"', 'data_dir = "data/state"')
+        content = content.replace('outbox_dir = "data/outbox"', 'outbox_dir = "outbox"')
+        content += '\n[[watch.update_sources]]\nname = "main"\noutbox_dir = "outbox"\n'
+        content += '\n[[watch.update_sources]]\nname = "preview"\noutbox_dir = "data/preview"\n'
+        file.write_text(content, encoding='utf-8')
+        gateway = inv.gateway.config_path
+        gateway.write_text(gateway.read_text(encoding='utf-8').replace('data_dir = "data"', 'data_dir = "data/state"'), encoding='utf-8')
+        inv.validate_runtime_configs()
+
+    def test_every_update_source_requires_an_owned_outbox(self):
+        inv = self.inventory(); file = inv.instances[0].config_path
+        original = file.read_text(encoding='utf-8')
+        for extra in ('outbox_dir = "../test-b/data"', '', 'outbox_dir = ""', 'outbox_dir = 12'):
+            with self.subTest(extra=extra):
+                file.write_text(original + '\n[[watch.update_sources]]\nname = "main"\noutbox_dir = "data/outbox"\n'
+                                + '\n[[watch.update_sources]]\nname = "preview"\n' + extra + '\n', encoding='utf-8')
+                with self.assertRaises(ValueError): inv.validate_runtime_configs()
+
+    def test_gateway_requires_declared_data_roots(self):
+        values = mapping()
+        values['gateway'].pop('data_roots', None)
+        with self.assertRaises(ValueError):
+            config.DeploymentInventory.from_mapping(values, base_dir=self.root)
+
+    def test_mutable_path_escape_is_rejected_before_pause_or_stop(self):
+        for owner, field in (('bot', 'data_dir'), ('bot', 'outbox_dir'),
+                             ('bot', 'source'), ('gateway', 'data_dir')):
+            for destination in ('../test-b/data/shared', '../undeclared', '../releases/mutable'):
+                with self.subTest(owner=owner, field=field, destination=destination), tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+                    previous = self.root
+                    self.root = Path(directory)
+                    self.addCleanup(setattr, self, 'root', previous)
+                    inv = self.inventory(); tx, runner, router = self.transaction(inv)
+                    file = inv.gateway.config_path if owner == 'gateway' else inv.instances[0].config_path
+                    content = file.read_text(encoding='utf-8')
+                    if field == 'source':
+                        content += f'\n[[watch.update_sources]]\nname = "main"\noutbox_dir = "{destination}"\n'
+                    elif f'{field} =' in content:
+                        original = 'data' if field == 'data_dir' else 'data/outbox'
+                        content = content.replace(f'{field} = "{original}"', f'{field} = "{destination}"')
+                    else:
+                        content += f'\n[watch]\n{field} = "{destination}"\n'
+                    file.write_text(content, encoding='utf-8')
+                    with self.assertRaises(ValueError):
+                        tx.execute(plan_deployment('test', SHA, ['xl_qqbot/bot_app/service.py'], inventory=inv))
+                    self.assertFalse(any(e[0] == 'stop' for e in runner.events))
+                    self.assertEqual(router.events, [])
+                    self.root = previous
 
 
 if __name__ == '__main__': unittest.main()

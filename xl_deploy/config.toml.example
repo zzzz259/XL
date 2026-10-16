@@ -34,6 +34,9 @@ unit = "xl-qqbot-router.service"
 watch_ref = "main"
 config_path = "/home/admin/xl_gateway/config.toml"
 listen_port = 8785
+data_roots = ["/home/admin/xl_gateway/data"]
+# Runtime watch.data_dir must remain within these roots.
+# debug is a CI-only ref; runtime watch_ref must be test or main.
 
 [[inventory.instances]]
 instance_id = "test-a"
@@ -53,6 +56,8 @@ groups = ["REPLACE_TEST_B_GROUP"]
 units = { bot = "xl-test-b.service", notify = "xl-test-b-notify.service", jobs = "xl-test-b-jobs.service" }
 listen_ports = { bot = 8821, notify = 8822 }
 # Add main instances, control or backend roles explicitly as needed. Each entry
-# owns one config and its data roots. A backend-only entry uses units.backend
+# owns one config and its data roots. Bot watch.data_dir, watch.outbox_dir and
+# every watch.update_sources outbox_dir must remain within that instance's roots.
+# A backend-only entry uses units.backend
 # and listen_ports.backend, with its matching backend config path.
 # Match gateway [router.group_instances] and service config IDs/ports to this file.
