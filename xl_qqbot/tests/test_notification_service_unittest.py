@@ -2,6 +2,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import quote
 
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -154,6 +155,21 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.status, 200)
         self.assertEqual(second.status, 200)
         self.assertEqual(first_body["queued"], second_body["queued"])
+        self.assertEqual(self.outbox.count(), 1)
+
+    async def test_unicode_event_key_is_accepted_and_status_is_queryable(self):
+        event_key = "test:game-card:134359843258232660:unknown:10000224_雾铃_角色档案_长图.png"
+        payload = self.request_payload()
+        payload["event_key"] = event_key
+
+        response = await self.post(payload)
+        status_response = await self.client.get(
+            f"/notifications/{quote(event_key, safe='')}",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(status_response.status, 200)
         self.assertEqual(self.outbox.count(), 1)
 
     async def test_messages_for_one_group_are_queued_in_ordinal_fifo_order(self):
