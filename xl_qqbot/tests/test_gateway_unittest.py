@@ -160,3 +160,66 @@ class TestGatewayEvent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class InstanceRouteTests(unittest.TestCase):
+    def test_instance_event_preserves_raw_event_and_identifies_single_owner(self):
+        from bot_app.gateway import create_instance_gateway_event
+
+        raw = {"group_openid": "group-two", "custom": {"unparsed": [1, 2]}}
+        event = create_instance_gateway_event(
+            "unrecognized_event",
+            raw,
+            {"group-one": "alpha", "group-two": "beta"},
+            received_at="2026-10-16T00:00:00+00:00",
+        )
+        self.assertEqual(event.instance_id, "beta")
+        self.assertEqual(event.to_payload()["data"], raw)
+        self.assertEqual(event.to_payload()["instance_id"], "beta")
+        self.assertNotIn("tier", event.to_payload())
+
+    def test_instance_event_drops_unmapped_group(self):
+        from bot_app.gateway import create_instance_gateway_event
+
+        event = create_instance_gateway_event(
+            "group_message",
+            {"group_openid": "unmapped"},
+            {"group-one": "alpha"},
+            received_at="2026-10-16T00:00:00+00:00",
+        )
+        self.assertIsNone(event)
+
+class InstanceRouterClientTests(unittest.TestCase):
+    def test_router_forwards_raw_event_only_to_explicit_instance(self):
+        router = object.__new__(_RouterClient)
+        router._group_instances = {"group-one": "alpha", "group-two": "beta"}
+        router._forwarder = type("Forwarder", (), {"forward": AsyncMock()})()
+        router._group_store = None
+        router._deployment_control = None
+        router._update_status_path = None
+        router._tiers = None
+
+        asyncio.run(
+            router._route("group_message_create", {
+                "group_openid": "group-two",
+                "text": "opaque payload",
+                "extra": {"unparsed": True},
+            })
+        )
+
+        args = router._forwarder.forward.await_args
+        self.assertEqual(args.args[0], "beta")
+        self.assertEqual(args.args[1]["data"]["extra"], {"unparsed": True})
+        self.assertNotIn("tier", args.args[1])
+
+    def test_router_drops_unmapped_group_without_learning_it(self):
+        router = object.__new__(_RouterClient)
+        router._group_instances = {"group-one": "alpha"}
+        router._forwarder = type("Forwarder", (), {"forward": AsyncMock()})()
+        router._group_store = None
+        router._deployment_control = None
+        router._update_status_path = None
+        router._tiers = None
+
+        asyncio.run(router._route("group_message_create", {"group_openid": "unknown"}))
+
+        router._forwarder.forward.assert_not_awaited()

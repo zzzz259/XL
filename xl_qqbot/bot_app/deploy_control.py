@@ -26,13 +26,19 @@ _ANNOUNCEMENTS = {
 
 
 class DeploymentControl:
-    """Persistent per-tier maintenance state and in-flight forward accounting."""
+    """Persistent per-instance maintenance state and in-flight accounting."""
 
-    def __init__(self, maintenance_path: str | Path):
+    def __init__(
+        self, maintenance_path: str | Path, *, instance_ids: Iterable[str] | None = None
+    ):
         self.path = Path(maintenance_path)
         self._condition = asyncio.Condition()
-        self._maintenance = {tier: False for tier in _TIERS}
-        self._active = {tier: 0 for tier in _TIERS}
+        self._legacy_tier_state = instance_ids is None
+        self._scopes = tuple(instance_ids) if instance_ids is not None else _TIERS
+        if not self._scopes or len(set(self._scopes)) != len(self._scopes):
+            raise ValueError("maintenance scope IDs must be nonempty and unique")
+        self._maintenance = {scope: False for scope in self._scopes}
+        self._active = {scope: 0 for scope in self._scopes}
         self.ready = False
         self._load()
 
@@ -51,27 +57,28 @@ class DeploymentControl:
             payload = json.loads(contents)
             if not isinstance(payload, dict):
                 raise TypeError("top-level value must be an object")
-            tiers = payload.get("tiers")
-            if not isinstance(tiers, dict):
-                raise TypeError("'tiers' must be an object")
-            if set(tiers) != set(_TIERS):
-                missing = sorted(set(_TIERS) - set(tiers))
-                unknown = sorted(set(tiers) - set(_TIERS))
+            state_key = "tiers" if self._legacy_tier_state else "instances"
+            scopes = payload.get(state_key)
+            if not isinstance(scopes, dict):
+                raise TypeError(f"{state_key!r} must be an object")
+            if set(scopes) != set(self._scopes):
+                missing = sorted(set(self._scopes) - set(scopes))
+                unknown = sorted(set(scopes) - set(self._scopes))
                 raise ValueError(
-                    f"tier keys must be exactly {_TIERS}; "
+                    f"scope keys must be exactly {self._scopes}; "
                     f"missing={missing}, unknown={unknown}"
                 )
-            if any(not isinstance(value, bool) for value in tiers.values()):
-                raise ValueError("every tier state must be a boolean")
+            if any(not isinstance(value, bool) for value in scopes.values()):
+                raise ValueError("every scope state must be a boolean")
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             raise RuntimeError(
                 f"invalid maintenance state at {self.path}: {exc}"
             ) from exc
 
         # Do not expose partially validated state if any persisted tier is invalid.
-        self._maintenance = {tier: tiers[tier] for tier in _TIERS}
+        self._maintenance = {scope: scopes[scope] for scope in self._scopes}
 
-    def _save(self, tiers: dict[str, bool]) -> None:
+    def _save(self, scopes: dict[str, bool]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = None
         try:
@@ -84,7 +91,8 @@ class DeploymentControl:
                 delete=False,
             ) as temporary:
                 temporary_path = Path(temporary.name)
-                json.dump({"tiers": tiers}, temporary, sort_keys=True)
+                state_key = "tiers" if self._legacy_tier_state else "instances"
+                json.dump({state_key: scopes}, temporary, sort_keys=True)
                 temporary.flush()
                 os.fsync(temporary.fileno())
             os.replace(temporary_path, self.path)
@@ -92,61 +100,69 @@ class DeploymentControl:
             if temporary_path is not None and temporary_path.exists():
                 temporary_path.unlink()
 
-    def is_maintained(self, tier: str) -> bool:
-        self._validate_tier(tier)
-        return self._maintenance[tier]
+    def is_maintained(self, instance_id: str) -> bool:
+        self._validate_scope(instance_id)
+        return self._maintenance[instance_id]
 
-    async def set_maintenance(self, tier: str, enabled: bool) -> None:
-        await self.set_maintenance_many((tier,), enabled)
+    async def set_maintenance(self, instance_id: str, enabled: bool) -> None:
+        await self.set_maintenance_many((instance_id,), enabled)
 
-    async def set_maintenance_many(self, tiers: Iterable[str], enabled: bool) -> None:
-        tiers = tuple(dict.fromkeys(tiers))
-        if not tiers:
-            raise ValueError("at least one service tier is required")
-        for tier in tiers:
-            self._validate_tier(tier)
+    async def set_maintenance_many(self, instance_ids: Iterable[str], enabled: bool) -> None:
+        instance_ids = tuple(dict.fromkeys(instance_ids))
+        if not instance_ids:
+            raise ValueError("at least one maintenance scope is required")
+        for instance_id in instance_ids:
+            self._validate_scope(instance_id)
         if not isinstance(enabled, bool):
             raise TypeError("maintenance state must be a boolean")
         async with self._condition:
             updated = dict(self._maintenance)
-            updated.update({tier: enabled for tier in tiers})
+            updated.update({instance_id: enabled for instance_id in instance_ids})
             self._save(updated)
             self._maintenance = updated
             self._condition.notify_all()
 
-    async def begin_forward(self, tier: str) -> bool:
-        self._validate_tier(tier)
+    async def begin_forward(self, instance_id: str) -> bool:
+        self._validate_scope(instance_id)
         async with self._condition:
-            if self._maintenance[tier]:
+            if self._maintenance[instance_id]:
                 return False
-            self._active[tier] += 1
+            self._active[instance_id] += 1
             return True
 
-    async def end_forward(self, tier: str) -> None:
-        self._validate_tier(tier)
+    async def end_forward(self, instance_id: str) -> None:
+        self._validate_scope(instance_id)
         async with self._condition:
-            if self._active[tier] <= 0:
-                raise RuntimeError(f"no active forward to finish for tier {tier}")
-            self._active[tier] -= 1
+            if self._active[instance_id] <= 0:
+                raise RuntimeError(f"no active forward to finish for instance {instance_id}")
+            self._active[instance_id] -= 1
             self._condition.notify_all()
 
-    def active_forwards(self, tier: str) -> int:
-        self._validate_tier(tier)
-        return self._active[tier]
+    def active_forwards(self, instance_id: str) -> int:
+        self._validate_scope(instance_id)
+        return self._active[instance_id]
 
-    async def wait_drained(self, tier: str, timeout: float) -> bool:
-        self._validate_tier(tier)
+    async def wait_drained(self, instance_id: str, timeout: float) -> bool:
+        self._validate_scope(instance_id)
         try:
             async with self._condition:
-                if self._active[tier] == 0:
+                if self._active[instance_id] == 0:
                     return True
                 await asyncio.wait_for(
-                    self._condition.wait_for(lambda: self._active[tier] == 0),
+                    self._condition.wait_for(lambda: self._active[instance_id] == 0),
                     timeout=max(0.0, timeout),
                 )
             return True
         except asyncio.TimeoutError:
             return False
+
+    def _validate_scope(self, instance_id: str) -> None:
+        if instance_id not in self._scopes:
+            raise ValueError(f"unknown maintenance instance: {instance_id}")
+
+    @property
+    def scope_ids(self) -> tuple[str, ...]:
+        return self._scopes
 
     @staticmethod
     def _validate_tier(tier: str) -> None:

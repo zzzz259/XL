@@ -27,21 +27,28 @@ _logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class GatewayEvent:
     event_type: str
-    tier: str
     received_at: str
-    muted: bool
     data: dict
+    instance_id: str | None = None
+    tier: str | None = None
+    muted: bool = False
 
     def to_payload(self) -> dict:
         """Serialize the current envelope while retaining the legacy worker key."""
-        return {
+        payload = {
             "event_type": self.event_type,
             "type": self.event_type,
-            "tier": self.tier,
             "received_at": self.received_at,
-            "muted": self.muted,
             "data": self.data,
         }
+        if self.instance_id is not None:
+            payload["instance_id"] = self.instance_id
+        if self.tier is not None:
+            payload["tier"] = self.tier
+            payload["muted"] = self.muted
+        elif self.muted:
+            payload["muted"] = True
+        return payload
 
 
 def create_gateway_event(
@@ -59,10 +66,36 @@ def create_gateway_event(
         return None
     return GatewayEvent(
         event_type=event_type,
-        tier=tiers.tier_of(data["group_openid"]),
         received_at=received_at,
-        muted=bool(muted),
         data=data,
+        tier=tiers.tier_of(data["group_openid"]),
+        muted=bool(muted),
+    )
+
+
+def create_instance_gateway_event(
+    event_type: str,
+    data: object,
+    group_instances: dict[str, str],
+    *,
+    received_at: str,
+) -> GatewayEvent | None:
+    """Create an untouched raw event addressed to its sole configured instance."""
+    if not isinstance(event_type, str) or not event_type.strip():
+        return None
+    if not isinstance(data, dict):
+        return None
+    group_openid = data.get("group_openid")
+    if not isinstance(group_openid, str) or not group_openid:
+        return None
+    instance_id = group_instances.get(group_openid)
+    if not instance_id:
+        return None
+    return GatewayEvent(
+        event_type=event_type,
+        received_at=received_at,
+        data=data,
+        instance_id=instance_id,
     )
 
 
@@ -218,8 +251,8 @@ async def run_gateway_client(
         backoff = min(backoff * 2, 300)
 
 
-class TierForwarder:
-    """Forward raw Gateway envelopes to the worker assigned to each tier."""
+class InstanceForwarder:
+    """Forward raw Gateway envelopes to the configured Bot instance."""
 
     def __init__(
         self,
@@ -238,20 +271,20 @@ class TierForwarder:
                 timeout=aiohttp.ClientTimeout(total=self._timeout)
             )
 
-    def port_of(self, tier: str) -> int | None:
-        return self._ports.get(tier)
+    def port_of(self, instance_id: str) -> int | None:
+        return self._ports.get(instance_id)
 
-    async def forward(self, tier: str, payload: dict) -> bool:
-        port = self.port_of(tier)
+    async def forward(self, instance_id: str, payload: dict) -> bool:
+        port = self.port_of(instance_id)
         event_type = payload.get("event_type", payload.get("type"))
         if port is None:
-            _logger.error("tier %s has no worker port; drop event %r", tier, event_type)
+            _logger.error("instance %s has no worker port; drop event %r", instance_id, event_type)
             return False
         if (
             self._deployment_control is not None
-            and not await self._deployment_control.begin_forward(tier)
+            and not await self._deployment_control.begin_forward(instance_id)
         ):
-            _logger.info("tier %s is in maintenance; skip forwarding", tier)
+            _logger.info("instance %s is in maintenance; skip forwarding", instance_id)
             return False
         try:
             await self._ensure_session()
@@ -260,27 +293,32 @@ class TierForwarder:
             ) as response:
                 if response.status != 200:
                     _logger.error(
-                        "worker returned HTTP %s for tier=%s event=%s",
+                        "worker returned HTTP %s for instance=%s event=%s",
                         response.status,
-                        tier,
+                        instance_id,
                         event_type,
                     )
                     return False
                 return True
         except (aiohttp.ClientError, asyncio.TimeoutError) as error:
-            _logger.error("worker forward failed tier=%s error=%s", tier, error)
+            _logger.error("worker forward failed instance=%s error=%s", instance_id, error)
             return False
         finally:
             if self._deployment_control is not None:
-                await self._deployment_control.end_forward(tier)
+                await self._deployment_control.end_forward(instance_id)
 
     async def close(self) -> None:
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
 
+TierForwarder = InstanceForwarder
+
+
 def worker_ports(config: Config) -> dict[str, int]:
-    """Debug and test groups share the test worker; production stays separate."""
+    """Return explicit instance endpoints, with legacy tier aliases as fallback."""
+    if config.router.instance_ports:
+        return dict(config.router.instance_ports)
     return {
         "debug": config.router.test_port,
         "test": config.router.test_port,
@@ -289,7 +327,7 @@ def worker_ports(config: Config) -> dict[str, int]:
 
 
 class RouterClient(botpy.Client):
-    """The single QQ Gateway connection and tier event ingress."""
+    """The single QQ Gateway connection and raw event transport."""
 
     def __init__(
         self,
@@ -298,6 +336,7 @@ class RouterClient(botpy.Client):
         forwarder: TierForwarder,
         update_status_path: Path,
         deployment_control: DeploymentControl,
+        group_instances: dict[str, str] | None = None,
     ):
         super().__init__(intents=botpy.Intents(public_messages=True))
         self._group_store = group_store
@@ -305,6 +344,7 @@ class RouterClient(botpy.Client):
         self._forwarder = forwarder
         self._update_status_path = update_status_path
         self._deployment_control = deployment_control
+        self._group_instances = dict(group_instances or {})
 
     async def on_ready(self):
         _logger.info("Gateway ready")
@@ -317,7 +357,6 @@ class RouterClient(botpy.Client):
         await self._route("group_at", data)
 
     async def on_group_add_robot(self, data: dict):
-        learn_group_from_event(data, self._group_store)
         await self._route("group_add_robot", data)
 
     async def on_raw_gateway_event(self, event_type: str, data: dict):
@@ -331,24 +370,31 @@ class RouterClient(botpy.Client):
         if not group_openid:
             _logger.warning("Gateway event lacks group_openid: %s", event_type)
             return
-        learn_group_from_event(data, self._group_store)
-        event = create_gateway_event(
-            event_type,
-            data,
-            self._tiers,
-            muted=self._muted_now(),
-            received_at=datetime.now(timezone.utc).isoformat(),
-        )
+        received_at = datetime.now(timezone.utc).isoformat()
+        group_instances = getattr(self, "_group_instances", {})
+        if group_instances:
+            event = create_instance_gateway_event(
+                event_type, data, group_instances, received_at=received_at
+            )
+        else:
+            learn_group_from_event(data, self._group_store)
+            event = create_gateway_event(
+                event_type,
+                data,
+                self._tiers,
+                muted=self._muted_now(),
+                received_at=received_at,
+            )
         if event is None:
             _logger.warning("Gateway event could not form envelope: %s", event_type)
             return
         _logger.info(
-            "forward Gateway event type=%s tier=%s group=%s",
+            "forward Gateway event type=%s instance=%s group=%s",
             event.event_type,
-            event.tier,
+            event.instance_id or event.tier,
             group_openid,
         )
-        await self._forwarder.forward(event.tier, event.to_payload())
+        await self._forwarder.forward(event.instance_id or event.tier, event.to_payload())
 
     def _muted_now(self) -> bool:
         status = read_update_status(self._update_status_path)
@@ -383,33 +429,50 @@ def build_gateway_control_app(
             return web.json_response({"ok": False, "error": "invalid json"}, status=400)
         if not isinstance(payload, dict):
             return web.json_response({"ok": False, "error": "expected object"}, status=400)
-        tier = payload.get("tier")
+        instance_id = payload.get("instance_id")
+        legacy_tier = payload.get("tier")
         enabled = payload.get("enabled")
-        if tier not in ("debug", "test", "production", "main") or not isinstance(enabled, bool):
-            return web.json_response({"ok": False, "error": "invalid tier or enabled"}, status=400)
-        affected = ("debug", "test", "production") if tier == "main" else (tier,)
+        if instance_id is not None:
+            scopes = (instance_id,)
+        elif legacy_tier in ("debug", "test", "production"):
+            scopes = (legacy_tier,)
+        elif legacy_tier == "main" and control.scope_ids == ("debug", "test", "production"):
+            scopes = control.scope_ids
+        else:
+            scopes = ()
+        if not scopes or any(scope not in control.scope_ids for scope in scopes) or not isinstance(enabled, bool):
+            return web.json_response({"ok": False, "error": "invalid instance or enabled"}, status=400)
         try:
-            await control.set_maintenance_many(affected, enabled)
+            await control.set_maintenance_many(scopes, enabled)
         except OSError:
-            _logger.exception("Gateway maintenance persistence failed tier=%s", tier)
+            _logger.exception("Gateway maintenance persistence failed instances=%s", scopes)
             return web.json_response({"ok": False, "error": "state persistence failed"}, status=500)
         return web.json_response(
             {
                 "ok": True,
-                "tier": tier,
+                "instance_ids": scopes,
                 "enabled": enabled,
-                "tiers": {item: control.is_maintained(item) for item in affected},
+                "instances": {item: control.is_maintained(item) for item in scopes},
+                "tiers": {item: control.is_maintained(item) for item in scopes}
+                if control._legacy_tier_state
+                else {},
             }
         )
 
     async def drained(request: web.Request) -> web.Response:
-        tier = request.query.get("tier", "")
-        if tier not in ("debug", "test", "production", "main"):
-            return web.json_response({"ok": False, "error": "invalid tier"}, status=400)
-        affected = ("debug", "test", "production") if tier == "main" else (tier,)
-        active = sum(control.active_forwards(item) for item in affected)
+        instance_id = request.query.get("instance_id", "")
+        if instance_id:
+            scopes = (instance_id,)
+        else:
+            legacy_tier = request.query.get("tier", "")
+            scopes = (legacy_tier,) if legacy_tier in control.scope_ids else ()
+            if legacy_tier == "main" and control.scope_ids == ("debug", "test", "production"):
+                scopes = control.scope_ids
+        if not scopes or any(scope not in control.scope_ids for scope in scopes):
+            return web.json_response({"ok": False, "error": "invalid instance"}, status=400)
+        active = sum(control.active_forwards(item) for item in scopes)
         return web.json_response(
-            {"ok": True, "tier": tier, "drained": active == 0, "active": active}
+            {"ok": True, "instance_ids": scopes, "drained": active == 0, "active": active}
         )
 
     app = web.Application(middlewares=[authenticate])
@@ -425,9 +488,14 @@ class GatewayRuntime:
     def __init__(self, config: Config, *, client_factory=None):
         self.config = config
         self.tiers = GroupTier(config.groups)
-        self.control = DeploymentControl(
-            Path(config.watch.data_dir) / "maintenance.json"
-        )
+        maintenance_path = Path(config.watch.data_dir) / "maintenance.json"
+        if config.router.instance_ports:
+            self.control = DeploymentControl(
+                maintenance_path,
+                instance_ids=tuple(config.router.instance_ports),
+            )
+        else:
+            self.control = DeploymentControl(maintenance_path)
         self.forwarder = TierForwarder(
             worker_ports(config),
             timeout=config.router.forward_timeout,
@@ -446,6 +514,7 @@ class GatewayRuntime:
             self.forwarder,
             self.update_status_path,
             self.control,
+            group_instances=self.config.router.group_instances,
         )
 
     async def run(self) -> None:

@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import tempfile
+import unittest
+from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -448,3 +451,22 @@ async def test_health_reflects_router_readiness(tmp_path):
         assert await response.json() == {"ok": True, "ready": True}
     finally:
         await client.close()
+
+
+class InstanceMaintenanceScopeTests(unittest.TestCase):
+    def test_instance_maintenance_scopes_are_independent(self):
+        path = Path.cwd() / ".pytest-tmp" / f"maintenance-{id(self)}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        control = DeploymentControl(
+            path, instance_ids=("test-blue", "test-green")
+        )
+
+        async def exercise():
+            await control.set_maintenance("test-blue", True)
+            self.assertTrue(control.is_maintained("test-blue"))
+            self.assertFalse(control.is_maintained("test-green"))
+            self.assertFalse(await control.begin_forward("test-blue"))
+            self.assertTrue(await control.begin_forward("test-green"))
+            await control.end_forward("test-green")
+
+        asyncio.run(exercise())
