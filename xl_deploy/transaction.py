@@ -69,9 +69,11 @@ class DeploymentTransaction:
         paths: DeploymentPaths,
         *,
         drain_timeout_seconds: float = 30,
+        inventory=None,
     ) -> None:
         if drain_timeout_seconds <= 0:
             raise ValueError("drain timeout must be positive")
+        self.inventory = inventory
         self.state = state
         self.runner = runner
         self.router = router
@@ -91,6 +93,15 @@ class DeploymentTransaction:
         units = tuple(getattr(plan, "impacted_units", ()))
         tiers = tuple(getattr(plan, "impacted_tiers", ()))
         scope = tuple(getattr(plan, "announcement_scope", ()))
+        if self.inventory is not None:
+            from xl_deploy.planner import plan_deployment
+            self.inventory.validate(releases_root=self.paths.releases_root)
+            self.inventory.validate_runtime_configs()
+            expected = plan_deployment(branch, sha, plan.changed_paths, inventory=self.inventory)
+            if (units, tiers, scope) != (expected.impacted_units, expected.impacted_tiers, expected.announcement_scope):
+                raise ValueError('deployment plan does not match configured inventory')
+            if any(unit not in self.inventory.allowed_units for unit in units):
+                raise ValueError('unit is not in inventory allowlist')
         if not units:
             return DeploymentResult("no_op", sha, "No impacted services")
         existing = self.state.load()
@@ -98,7 +109,8 @@ class DeploymentTransaction:
             raise RuntimeError(
                 "a pending deployment must be recovered before a new update"
             )
-        _validate_units(units)
+        if self.inventory is None:
+            _validate_units(units)
         self._validate_paths()
         branch_pointer = self._branch_pointer(branch)
         previous = self.state.get_current(current_path=branch_pointer)
@@ -144,9 +156,16 @@ class DeploymentTransaction:
                 )
             journal = self._update(journal, phase="staged")
             self.events.append(("preflight", sha))
-            self.runner.preflight(
-                plan, candidate, self.paths.config_path, self.paths.data_path
-            )
+            if self.inventory is None:
+                self.runner.preflight(plan, candidate, self.paths.config_path, self.paths.data_path)
+            else:
+                selected = [i for i in self.inventory.instances
+                            if i.enabled and any(u in units for u in i.units.values())]
+                for instance in selected:
+                    for data in instance.data_roots:
+                        self.runner.preflight(plan, candidate, instance.config_path, data)
+                if not selected:
+                    self.runner.preflight(plan, candidate, self.inventory.gateway.config_path, self.paths.data_path)
             journal = self._update(journal, phase="preflight_passed")
         except Exception as exc:
             self._update(

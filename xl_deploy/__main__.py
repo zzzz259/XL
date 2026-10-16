@@ -11,7 +11,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from xl_deploy.config import GitHubConfig
+from xl_deploy.config import GitHubConfig, DeploymentInventory
 from xl_deploy.github import GitHubClient
 from xl_deploy.poller import BranchPoller, PollCursorStore
 from xl_deploy.router_client import RouterControlClient, validate_loopback_url
@@ -37,6 +37,7 @@ class PollerRuntimeConfig:
     test_backend_data: Path
     router_base_url: str
     router_token_file: Path
+    inventory: DeploymentInventory | None = None
 
 
 def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
@@ -63,6 +64,8 @@ def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
             test_backend_data=_path(config_file, deployment["test_backend_data"]),
             router_base_url=str(router["base_url"]),
             router_token_file=_path(config_file, router["token_file"]),
+            inventory=(DeploymentInventory.from_mapping(values["inventory"], base_dir=config_file.parent)
+                       if "inventory" in values else None),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("deployment configuration is incomplete or invalid") from exc
@@ -79,6 +82,8 @@ def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
         except ValueError:
             continue
         raise ValueError("backend config and data paths must remain outside immutable releases")
+    if result.inventory is not None:
+        result.inventory.validate(releases_root=result.releases_root)
     validate_loopback_url(result.router_base_url)
     return result
 
@@ -98,7 +103,10 @@ def read_secret(path: str | Path) -> str:
 
 def build_poller(config_path: str | Path) -> BranchPoller:
     runtime = load_runtime_config(config_path)
-    _validate_backend_runtime_configs(runtime)
+    if runtime.inventory is None:
+        _validate_backend_runtime_configs(runtime)
+    else:
+        runtime.inventory.validate_runtime_configs()
     try:
         github_token = os.environ["GITHUB_TOKEN"].strip()
     except KeyError as exc:
@@ -107,8 +115,9 @@ def build_poller(config_path: str | Path) -> BranchPoller:
         GitHubConfig(owner=runtime.github_owner, repo=runtime.github_repo, token=github_token)
     )
     router_token = read_secret(runtime.router_token_file)
-    router = RouterControlClient(runtime.router_base_url, router_token)
+    router = RouterControlClient(runtime.router_base_url, router_token, inventory=runtime.inventory)
     runner = CommandRunner(
+        inventory=runtime.inventory,
         repository=runtime.repository,
         health_token=router_token,
         backend_config_path=runtime.backend_config,
@@ -132,13 +141,14 @@ def build_poller(config_path: str | Path) -> BranchPoller:
             config_path=config_path,
             data_path=data_path,
         )
-        return DeploymentTransaction(state, runner, router, paths)
+        return DeploymentTransaction(state, runner, router, paths, inventory=runtime.inventory)
 
     return BranchPoller(
         github,
         runner,
         transaction_for,
         PollCursorStore(runtime.state_dir / "poll-cursors.json"),
+        inventory=runtime.inventory,
     )
 
 

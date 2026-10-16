@@ -96,3 +96,10 @@ class AnnouncementSelector:
             and parts[2].endswith(".md")
             and parts[2] not in {"", ".", ".."}
         )
+
+
+def instance_announcement_scope(inventory, instance_ids):
+    """Gateway delivery resolves these stable IDs to configured group routes."""
+    selected = set(instance_ids)
+    return tuple(i.instance_id for i in inventory.instances
+                 if i.enabled and i.instance_id in selected and i.groups)

@@ -73,6 +73,7 @@ class CommandRunner:
     def __init__(
         self,
         *,
+        inventory=None,
         repository: Path | str | None = None,
         executor: Callable[..., Any] | None = None,
         health_token: str | None = None,
@@ -84,6 +85,11 @@ class CommandRunner:
     ) -> None:
         if health_timeout_seconds <= 0 or health_poll_interval_seconds <= 0:
             raise ValueError("health-check timeouts must be positive")
+        self.inventory = inventory
+        if inventory is not None:
+            inventory.validate()
+        self.allowed_units = inventory.allowed_units if inventory is not None else ALLOWED_UNITS
+        self._prepared_candidates = set()
         self.repository = Path(repository).resolve() if repository is not None else None
         self._executor = executor or _subprocess_executor
         self.health_token = health_token
@@ -98,7 +104,7 @@ class CommandRunner:
     def systemctl(self, action: str, units: Sequence[str]) -> None:
         if action not in {"start", "stop"}:
             raise ValueError("systemctl action is not allowlisted")
-        if not units or any(unit not in ALLOWED_UNITS for unit in units):
+        if not units or any(unit not in self.allowed_units for unit in units):
             raise ValueError("systemd unit is not in the deployment allowlist")
         if len(set(units)) != len(units):
             raise ValueError("duplicate systemd unit is not allowed")
@@ -168,20 +174,31 @@ class CommandRunner:
         if not impacted_units or len(set(impacted_units)) != len(impacted_units):
             raise ValueError("preflight requires unique impacted systemd units")
         try:
-            units = BRANCH_UNITS[plan.branch]
+            units = (self.inventory.units_for_ref(plan.branch) if self.inventory is not None
+                     else BRANCH_UNITS[plan.branch])
         except KeyError as exc:
             raise ValueError("preflight branch is not supported") from exc
         if any(unit not in units for unit in impacted_units):
             raise ValueError("impacted units do not belong to the deployment branch")
+        if self.inventory is not None:
+            self.inventory.validate()
+            self.inventory.validate_runtime_configs()
+            for instance in self.inventory.instances:
+                for external in (instance.config_path, *instance.data_roots):
+                    _assert_outside(release_path, external, 'instance config/data')
+            _assert_outside(release_path, self.inventory.gateway.config_path, 'gateway config')
+            if release_path.resolve() in self._prepared_candidates:
+                return
         venv_root = release_path / ".venvs"
         if venv_root.is_symlink() or (venv_root.exists() and not venv_root.is_dir()):
             raise ValueError("candidate .venvs path must be a real directory")
         for unit in units:
-            if unit not in ALLOWED_UNITS:
+            if unit not in self.allowed_units:
                 raise ValueError("systemd unit is not in the deployment allowlist")
-            if unit in BOT_UNITS:
+            role = self.inventory.owner(unit)[1] if self.inventory is not None else None
+            if (role is not None and role != 'backend') or (role is None and unit in BOT_UNITS):
                 requirements = release_path / "xl_qqbot" / "requirements.txt"
-            elif unit in BACKEND_UNITS:
+            elif role == 'backend' or (role is None and unit in BACKEND_UNITS):
                 requirements = release_path / "xl_updata_server" / "requirements.txt"
             elif unit == "xl-deploy-poll.service":
                 requirements = None
@@ -189,7 +206,7 @@ class CommandRunner:
                 raise ValueError("systemd unit has no dependency manifest mapping")
             if requirements is not None and not requirements.is_file():
                 raise RuntimeError("candidate is missing a required dependency manifest")
-            environment_path = service_venv_path(release_path, unit)
+            environment_path = service_venv_path(release_path, unit, allowed_units=self.allowed_units)
             if environment_path.exists() or environment_path.is_symlink():
                 raise RuntimeError("service venv path already exists in candidate release")
             python = environment_path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -201,7 +218,7 @@ class CommandRunner:
                     [str(python), "-m", "pip", "install", "--requirement", str(requirements)],
                     cwd=release_path,
                 )
-            if unit in BACKEND_UNITS:
+            if role == 'backend' or (role is None and unit in BACKEND_UNITS):
                 renderer_directory = release_path / "xl_updata_server" / "renderer"
                 if not (renderer_directory / "package.json").is_file():
                     raise RuntimeError("candidate backend is missing the renderer package manifest")
@@ -213,17 +230,18 @@ class CommandRunner:
                     ["node", "-e", "require('canvas')"],
                     cwd=renderer_directory,
                 )
-                if self.backend_config_path is not None:
-                    config_path = self._backend_config_for_unit(unit)
-                    environment = "test" if unit == "xl-updata-server-test.service" else "main"
-                    python = service_venv_path(release_path, unit) / (
+                if self.backend_config_path is not None or role == 'backend':
+                    owner = self.inventory.owner(unit)[0] if self.inventory is not None else None
+                    config_path = owner.config_path if owner is not None else self._backend_config_for_unit(unit)
+                    environment = owner.watch_ref if owner is not None else ("test" if unit == "xl-updata-server-test.service" else "main")
+                    python = service_venv_path(release_path, unit, allowed_units=self.allowed_units) / (
                         "Scripts/python.exe" if os.name == "nt" else "bin/python"
                     )
                     self._executor(
                         [
                             str(python), str(release_path / "xl_updata_server" / "run_server.py"),
                             "--healthcheck", "--config", str(config_path),
-                            "--expect-environment", environment,
+                            *(["--expect-environment", environment] if owner is None else []),
                         ],
                         cwd=release_path / "xl_updata_server",
                     )
@@ -244,6 +262,8 @@ class CommandRunner:
         for source in sources:
             compile(source.read_text(encoding="utf-8"), str(source), "exec")
 
+        self._prepared_candidates.add(release_path.resolve())
+
     def stop(self, units: Sequence[str]) -> None:
         self.systemctl("stop", units)
 
@@ -252,9 +272,12 @@ class CommandRunner:
 
     def health_check(self, units: Sequence[str]) -> None:
         for unit in units:
-            if unit not in ALLOWED_UNITS:
+            if unit not in self.allowed_units:
                 raise ValueError("systemd unit is not in the deployment allowlist")
             self._executor(["systemctl", "--user", "is-active", "--quiet", unit])
+            if self.inventory is not None:
+                self._inventory_health_check(unit)
+                continue
             port = {
                 "xl-qqbot-debug.service": 8781,
                 "xl-qqbot-test.service": 8782,
@@ -286,6 +309,29 @@ class CommandRunner:
             elif unit in BACKEND_UNITS:
                 self._backend_health_check(unit)
 
+    def _inventory_health_check(self, unit):
+        instance, role = self.inventory.owner(unit)
+        if role == 'jobs':
+            return
+        if instance is None:
+            port, endpoint = self.inventory.gateway.listen_port, '/gateway/health'
+        else:
+            port = instance.listen_ports[role]
+            endpoint = '/healthz' if role == 'backend' else '/health'
+        headers = {}
+        if role in {'gateway', 'notify', 'control'}:
+            if not self.health_token:
+                raise RuntimeError('internal service health token is not configured')
+            headers['Authorization'] = f'Bearer {self.health_token}'
+        if role == 'backend':
+            release = self.deployment_root / 'current' / instance.watch_ref
+            python = service_venv_path(release, unit, allowed_units=self.allowed_units) / (
+                'Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+            self._executor([str(python), str(release / 'xl_updata_server' / 'run_server.py'),
+                            '--healthcheck', '--config', str(instance.config_path)], cwd=release / 'xl_updata_server')
+        self._wait_for_http_health(urllib.request.Request(
+            f'http://127.0.0.1:{port}{endpoint}', headers=headers), unit)
+
     def _backend_health_check(self, unit: str) -> None:
         is_test = unit == "xl-updata-server-test.service"
         config_path = self._backend_config_for_unit(unit)
@@ -295,7 +341,7 @@ class CommandRunner:
         environment = "test" if is_test else "main"
         port = 8791 if is_test else 8790
         release = self.deployment_root / "current" / branch
-        service_python = service_venv_path(release, unit) / (
+        service_python = service_venv_path(release, unit, allowed_units=self.allowed_units) / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
         )
         entrypoint = release / "xl_updata_server" / "run_server.py"
@@ -348,8 +394,8 @@ def _validated_sha(sha: object) -> str:
     return sha.lower()
 
 
-def service_venv_path(release_path: Path | str, unit: str) -> Path:
-    if unit not in ALLOWED_UNITS:
+def service_venv_path(release_path: Path | str, unit: str, *, allowed_units=ALLOWED_UNITS) -> Path:
+    if unit not in allowed_units:
         raise ValueError("systemd unit is not in the deployment allowlist")
     return Path(release_path) / ".venvs" / unit
 

@@ -120,7 +120,9 @@ class BranchPoller:
         cursors: PollCursorStore,
         *,
         announcement_selector: AnnouncementSelector | None = None,
+        inventory=None,
     ):
+        self.inventory = inventory
         self.github = github
         self.runner = runner
         self.transaction_for_branch = transaction_for_branch
@@ -192,7 +194,7 @@ class BranchPoller:
             return PollResult(branch, "ci_failed", latest_sha, ci_result)
 
         changed_paths = self.runner.changed_paths(cursor, latest_sha)
-        plan = plan_deployment(branch, latest_sha, changed_paths)
+        plan = plan_deployment(branch, latest_sha, changed_paths, inventory=self.inventory)
         if not plan.impacted_units:
             self.cursors.set_cursor(branch, latest_sha)
             return PollResult(branch, "no_op", latest_sha)
@@ -203,7 +205,7 @@ class BranchPoller:
                 read_text=self.runner.read_text_at_commit,
                 commit_sha=latest_sha,
             )
-            plan = plan_deployment(branch, latest_sha, changed_paths, release_note=release_note)
+            plan = plan_deployment(branch, latest_sha, changed_paths, release_note=release_note, inventory=self.inventory)
 
         result = transaction.execute(plan)
         if result.status != "completed":

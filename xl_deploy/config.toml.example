@@ -24,3 +24,35 @@ base_url = "http://127.0.0.1:8784"
 token_file = "/home/admin/.config/xl_deploy/router.token"
 
 # Branches are fixed in code: debug, test, main. The timer invokes one poll pass.
+
+# Optional hand-maintained inventory. Without this section the legacy fixed
+# test/main unit mapping remains available for existing installations.
+# Units must already exist and use current/<watch_ref> plus their external config.
+# instance_id is a stable identity; watch_ref selects code, not capabilities.
+[inventory.gateway]
+unit = "xl-qqbot-router.service"
+watch_ref = "main"
+config_path = "/home/admin/xl_gateway/config.toml"
+listen_port = 8785
+
+[[inventory.instances]]
+instance_id = "test-a"
+watch_ref = "test"
+config_path = "/home/admin/xl_instances/test-a/config.toml"
+data_roots = ["/home/admin/xl_instances/test-a/data"]
+groups = ["REPLACE_TEST_A_GROUP"]
+units = { bot = "xl-test-a.service", notify = "xl-test-a-notify.service", jobs = "xl-test-a-jobs.service" }
+listen_ports = { bot = 8811, notify = 8812 }
+
+[[inventory.instances]]
+instance_id = "test-b"
+watch_ref = "test"
+config_path = "/home/admin/xl_instances/test-b/config.toml"
+data_roots = ["/home/admin/xl_instances/test-b/data"]
+groups = ["REPLACE_TEST_B_GROUP"]
+units = { bot = "xl-test-b.service", notify = "xl-test-b-notify.service", jobs = "xl-test-b-jobs.service" }
+listen_ports = { bot = 8821, notify = 8822 }
+# Add main instances, control or backend roles explicitly as needed. Each entry
+# owns one config and its data roots. A backend-only entry uses units.backend
+# and listen_ports.backend, with its matching backend config path.
+# Match gateway [router.group_instances] and service config IDs/ports to this file.

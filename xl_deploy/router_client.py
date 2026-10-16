@@ -30,6 +30,7 @@ class RouterControlClient:
         base_url: str,
         token: str,
         *,
+        inventory=None,
         transport: Callable[..., Any] | None = None,
         timeout_seconds: float = 5,
         poll_interval_seconds: float = 0.25,
@@ -37,6 +38,7 @@ class RouterControlClient:
         validate_loopback_url(base_url)
         if not token.strip() or timeout_seconds <= 0 or poll_interval_seconds <= 0:
             raise ValueError("router token and positive timeouts are required")
+        self.inventory = inventory
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.transport = transport or _open_without_redirects
@@ -55,11 +57,11 @@ class RouterControlClient:
             return self.announce_release_note(scope, text, notification_id=base_id)
         results: dict[str, bool] = {}
         for tier in scope:
-            safe_tier = _tier(tier)
+            safe_tier = self._scope(tier)
             payload = self._post(
                 "/deployment/announce",
                 {
-                    "tier": safe_tier,
+                    self._scope_key: safe_tier,
                     "phase": phase,
                     "notification_id": f"{base_id}:{safe_tier}",
                 },
@@ -73,11 +75,11 @@ class RouterControlClient:
         base_id = _notification_id(notification_id)
         results: dict[str, bool] = {}
         for tier in scope:
-            safe_tier = _tier(tier)
+            safe_tier = self._scope(tier)
             payload = self._post(
                 "/deployment/announce",
                 {
-                    "tier": safe_tier,
+                    self._scope_key: safe_tier,
                     "phase": "release_note",
                     "notification_id": f"{base_id}:{safe_tier}",
                     "text": text,
@@ -89,22 +91,22 @@ class RouterControlClient:
     def pause(self, tiers: Sequence[str]) -> None:
         for tier in tiers:
             self._post(
-                "/deployment/maintenance", {"tier": _tier(tier), "enabled": True}
+                "/deployment/maintenance", {self._scope_key: self._scope(tier), "enabled": True}
             )
 
     def resume(self, tiers: Sequence[str]) -> None:
         for tier in tiers:
             self._post(
-                "/deployment/maintenance", {"tier": _tier(tier), "enabled": False}
+                "/deployment/maintenance", {self._scope_key: self._scope(tier), "enabled": False}
             )
 
     def drain(self, tiers: Sequence[str], timeout_seconds: float) -> bool:
         deadline = time.monotonic() + max(0, timeout_seconds)
-        encoded_tiers = tuple(_tier(tier) for tier in tiers)
+        encoded_tiers = tuple(self._scope(tier) for tier in tiers)
         while True:
             all_drained = True
             for tier in encoded_tiers:
-                query = urlencode({"tier": tier})
+                query = urlencode({self._scope_key: tier})
                 result = self._get(f"/deployment/drained?{query}")
                 all_drained = all_drained and result.get("drained") is True
             if all_drained:
@@ -113,6 +115,17 @@ class RouterControlClient:
             if remaining <= 0:
                 return False
             time.sleep(min(self.poll_interval_seconds, remaining))
+
+    @property
+    def _scope_key(self):
+        return 'instance_id' if self.inventory is not None else 'tier'
+
+    def _scope(self, value):
+        if self.inventory is None:
+            return _tier(value)
+        if value not in {i.instance_id for i in self.inventory.instances if i.enabled}:
+            raise ValueError('instance_id is not in deployment inventory')
+        return value
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
