@@ -31,8 +31,9 @@ def build_status_monitor(
     if not status_config.enabled:
         return None
     if probe_factory is None:
-        _logger.warning("服务器状态监控已配置开启，但未注入凭据/探针 provider；保持停用")
-        return None
+        raise RuntimeError(
+            "server status monitoring is enabled but no probe provider was injected"
+        )
 
     recipients = select_status_recipients(
         config.target.group_openids
