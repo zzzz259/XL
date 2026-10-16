@@ -3,6 +3,10 @@
 appid = ""
 secret = ""
 
+[instance]
+# 当前 Bot 进程的唯一实例 ID；与 Gateway 的 [router.instance_ports] 键对应。
+id = "default"
+
 [watch]
 # 上游 xl_updata_server 产出的 outbox 根目录
 outbox_dir = "/home/admin/xl_updata_server/data/outbox"
@@ -61,6 +65,14 @@ deployment_control_port = 8784
 # 使用至少 32 个随机字符；需与 gateway.control_token、notification.api_token 相同。
 # 可用 python -c "import secrets; print(secrets.token_urlsafe(32))" 生成。
 deployment_token = ""
+
+# 直接指定群组唯一归属的实例。重复群组键会被 TOML 拒绝。
+[router.group_instances]
+# "<group_openid>" = "<instance_id>"
+
+# 每个实例的本机事件入口端口；必须覆盖 group_instances 中的全部目标。
+[router.instance_ports]
+# default = 8812
 
 [gateway]
 # Gateway 的维护/排空协作 API，仅监听 127.0.0.1。
