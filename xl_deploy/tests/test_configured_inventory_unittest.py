@@ -68,7 +68,7 @@ class ConfiguredInventoryTests(unittest.TestCase):
             if not instance.config_path.exists():
                 instance.config_path.write_text(
                     f'[instance]\nid = "{instance.instance_id}"\n[watch]\ndata_dir = "data"\noutbox_dir = "data/outbox"\n'
-                    f'[router.instance_ports]\n"{instance.instance_id}" = {instance.listen_ports['bot']}\n'
+                    f'[router.instance_ports]\n"{instance.instance_id}" = {instance.listen_ports["bot"]}\n'
                     f'[gateway]\ncontrol_token = "{CONTROL_TOKEN}"\n'
                     f'[gateway.instance_tokens]\n"{instance.instance_id}" = "{token_for(instance.instance_id)}"\n', encoding='utf-8')
         inventory.gateway.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +77,7 @@ class ConfiguredInventoryTests(unittest.TestCase):
                 f'[watch]\ndata_dir = "data"\n[gateway]\ncontrol_port = {inventory.gateway.listen_port}\ncontrol_token = "{CONTROL_TOKEN}"\n'
                 '[router]\ndeployment_control_port = 8814\n[router.group_instances]\n' +
                 ''.join(f'"{g}" = "{i}"\n' for g, i in inventory.group_routes.items()) +
-                '[router.instance_ports]\n' + ''.join(f'"{i.instance_id}" = {i.listen_ports['bot']}\n' for i in inventory.instances) +
+                '[router.instance_ports]\n' + ''.join(f'"{i.instance_id}" = {i.listen_ports["bot"]}\n' for i in inventory.instances) +
                 '[gateway.instance_tokens]\n' + ''.join(f'"{i.instance_id}" = "{token_for(i.instance_id)}"\n' for i in inventory.instances), encoding='utf-8')
         return inventory
 
