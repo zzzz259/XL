@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/admin/xl_qqbot
+WorkingDirectory=/home/admin/xl_gateway
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/admin/xl_qqbot/.venv/bin/python -m bot_app.router
 Restart=on-failure

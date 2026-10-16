@@ -113,6 +113,65 @@ class ConfiguredInventoryTests(unittest.TestCase):
         self.assertEqual(inventory.group_routes, {'g-a': 'test-a', 'g-b': 'test-b'})
         self.assertNotEqual(inventory.instances[0].config_path, inventory.instances[1].config_path)
 
+    def test_bot_instance_can_own_a_separate_updater_config_and_nested_state(self):
+        values = mapping()
+        instance = values['instances'][0]
+        instance['backend_config_path'] = 'test-a/updater.toml'
+        instance['units']['backend'] = 'xl-test-a-updater.service'
+        instance['listen_ports']['backend'] = 8831
+        instance['data_roots'] = ['test-a/data']
+        inventory = self.inventory(values)
+
+        bot_config = inventory.instances[0].config_path
+        bot_config.write_text(
+            bot_config.read_text(encoding='utf-8').replace('data_dir = "data"', 'data_dir = "data/bot-state"'),
+            encoding='utf-8')
+        backend_config = inventory.instances[0].backend_config_path
+        backend_config.parent.mkdir(parents=True, exist_ok=True)
+        backend_config.write_text(
+            '[server]\ninstance_id = "test-a"\n[paths]\ndata_dir = "data"\n'
+            '[api]\nenabled = true\nhost = "127.0.0.1"\nport = 8831\n', encoding='utf-8')
+
+        inventory.validate_runtime_configs()
+
+    def test_backend_config_path_must_be_unique_and_outside_other_roots(self):
+        values = mapping()
+        values['instances'][0]['backend_config_path'] = 'test-b/config.toml'
+        values['instances'][0]['units']['backend'] = 'xl-test-a-updater.service'
+        values['instances'][0]['listen_ports']['backend'] = 8831
+        with self.assertRaises(ValueError):
+            self.inventory(values)
+
+    def test_bot_and_backend_units_require_separate_runtime_configs(self):
+        values = mapping()
+        values['instances'][0]['units']['backend'] = 'xl-test-a-updater.service'
+        values['instances'][0]['listen_ports']['backend'] = 8831
+        with self.assertRaisesRegex(ValueError, 'separate backend_config_path'):
+            self.inventory(values)
+
+    def test_backend_healthcheck_uses_the_updater_config(self):
+        from xl_deploy.runner import CommandRunner
+
+        values = mapping()
+        values['instances'][0]['backend_config_path'] = 'test-a/updater.toml'
+        values['instances'][0]['units']['backend'] = 'xl-test-a-updater.service'
+        values['instances'][0]['listen_ports']['backend'] = 8831
+        inventory = self.inventory(values)
+        instance = inventory.instances[0]
+        instance.backend_config_path.parent.mkdir(parents=True, exist_ok=True)
+        instance.backend_config_path.write_text(
+            '[server]\ninstance_id = "test-a"\n[paths]\ndata_dir = "data"\n'
+            '[api]\nenabled = true\nhost = "127.0.0.1"\nport = 8831\n', encoding='utf-8')
+        inventory.validate_runtime_configs()
+        commands = []
+        runner = CommandRunner(inventory=inventory, executor=lambda args, **_kwargs: commands.append(args),
+                               deployment_root=self.root / 'deploy')
+        runner._wait_for_http_health = lambda *_args: None
+
+        runner._inventory_health_check('xl-test-a-updater.service')
+
+        self.assertIn(str(instance.backend_config_path), commands[0])
+
     def test_duplicate_resources_are_rejected(self):
         for field, value in [('listen_ports', {'bot': 8811}), ('config_path', 'test-a/config.toml'),
                              ('data_roots', ['test-a/data/child']), ('groups', ['g-a']),

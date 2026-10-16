@@ -27,12 +27,18 @@ The controller supports an optional, hand-maintained `[inventory.gateway]` and
 `[[inventory.instances]]` configuration. It can deploy multiple instances that
 watch the same branch snapshot; each instance retains its own config, data
 roots, groups, listener ports, and systemd units. The fixed map below applies
-only when `[inventory]` is absent, for migration compatibility.
+only when `[inventory]` is absent, for migration compatibility. A Bot instance
+may also declare `backend_config_path` when it owns an updater service; this
+keeps the Bot and updater TOML files separate while assigning both services to
+one logical instance.
 
 Copy the inventory example from [config.toml.example](config.toml.example).
 Give every instance a stable `instance_id`, select its code snapshot with
 `watch_ref` (`test` or `main`), and assign unique units, ports, group IDs,
-external config paths, and non-overlapping mutable data roots. Configure the
+external config paths, and exclusively owned mutable data roots. Bot and
+updater paths can be nested under the same instance root; another instance may
+not claim that root. Each Bot's update sources must point only to outboxes in
+that same instance's roots. Configure the
 Gateway once with its own unit, code ref, config, data root, and port. Its
 `[router].group_instances` and worker port map must match the inventory exactly.
 Every referenced unit must already be installed as a systemd user unit and
@@ -57,9 +63,10 @@ IDs and credential values. If no inventory exists, it reports that legacy
 test/main mapping is active.
 
 Before enabling inventory mode, retain the old test/main configs and data in
-place, translate each existing worker/updater into one explicit inventory
-entry, and review that group ownership, service units, listener ports, mutable
-paths, and Gateway routes match. The controller validates the inventory and
+place, translate each Bot and its updater into one explicit inventory entry
+(using `backend_config_path` for the separate updater TOML), and review that
+group ownership, service units, listener ports, mutable paths, and Gateway
+routes match. The controller validates the inventory and
 the referenced runtime configs before any maintenance, drain, or service stop;
 it does not rewrite configs, move data, create units, or infer ownership. Add a
 new instance by provisioning its unit and config, declaring its unique roots,

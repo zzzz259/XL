@@ -9,7 +9,7 @@ WorkingDirectory=/home/admin/xl_qqbot-test
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/home/admin/xl_qqbot-test
 # 共享主项目 venv，PYTHONPATH 指向本 worktree 源码
-ExecStart=/home/admin/xl_qqbot/.venv/bin/python -m bot_app.service --instance-id test --port 8782
+ExecStart=/home/admin/xl_qqbot/.venv/bin/python -m bot_app.service --instance-id test-bot --port 8782
 Restart=on-failure
 RestartSec=10
 CPUQuota=30%

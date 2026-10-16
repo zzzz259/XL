@@ -78,6 +78,7 @@ class InstanceDeployment:
     listen_ports: Mapping[str, int]
     groups: tuple[str, ...]
     enabled: bool = True
+    backend_config_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -108,13 +109,14 @@ class DeploymentInventory:
             for item in values['instances']:
                 if any(not isinstance(item.get(field), (list, tuple)) for field in ('data_roots', 'groups')):
                     raise ValueError('data_roots and groups must be arrays')
-                if set(item) - {'instance_id', 'watch_ref', 'config_path', 'data_roots', 'units', 'listen_ports', 'groups', 'enabled'}:
+                if set(item) - {'instance_id', 'watch_ref', 'config_path', 'backend_config_path', 'data_roots', 'units', 'listen_ports', 'groups', 'enabled'}:
                     raise ValueError('unknown instance inventory field')
                 instances.append(InstanceDeployment(
                     item['instance_id'], item['watch_ref'], path(item['config_path']),
                     tuple(path(p) for p in item['data_roots']),
                     MappingProxyType(dict(item['units'])), MappingProxyType(dict(item['listen_ports'])),
-                    tuple(item['groups']), item.get('enabled', True)))
+                    tuple(item['groups']), item.get('enabled', True),
+                    path(item['backend_config_path']) if 'backend_config_path' in item else None))
             gateway = values['gateway']
             if set(gateway) != {'unit', 'watch_ref', 'config_path', 'listen_port', 'data_roots'}:
                 raise ValueError('invalid gateway inventory fields')
@@ -188,18 +190,23 @@ class DeploymentInventory:
         for instance in self.instances:
             if not instance.enabled:
                 continue
-            values = read(instance.config_path)
-            backend = 'backend' in instance.units
-            identity = values.get('server', {}).get('instance_id') if backend else values.get('instance', {}).get('id')
-            check(identity == instance.instance_id, 'instance_id')
-            if not backend and 'bot' in instance.units:
-                local_gateway = values.get('gateway', {})
+            bot_roles = set(instance.units) & {'bot', 'notify', 'jobs', 'control'}
+            backend_only = 'backend' in instance.units and not bot_roles
+            bot_values = read(instance.config_path) if bot_roles else None
+            backend_path = instance.backend_config_path or (instance.config_path if backend_only else None)
+            backend_values = read(backend_path) if backend_path is not None and 'backend' in instance.units else None
+            if bot_values is not None:
+                check(bot_values.get('instance', {}).get('id') == instance.instance_id, 'instance_id')
+            if backend_values is not None:
+                check(backend_values.get('server', {}).get('instance_id') == instance.instance_id, 'backend instance_id')
+            if bot_values is not None and 'bot' in instance.units:
+                local_gateway = bot_values.get('gateway', {})
                 local_token = local_gateway.get('instance_tokens', {}).get(instance.instance_id)
                 check(local_token == gateway_tokens.get(instance.instance_id), 'instance gateway token')
                 check(local_gateway.get('control_token') == gateway_control_token, 'gateway control token')
-            mutable = values.get('paths' if backend else 'watch', {})
-            owned_path(mutable.get('data_dir', 'data' if backend else './data'), instance, 'data_dir')
-            if not backend:
+            if bot_values is not None:
+                mutable = bot_values.get('watch', {})
+                owned_path(mutable.get('data_dir', './data'), instance, 'data_dir')
                 owned_path(mutable.get('outbox_dir'), instance, 'outbox_dir')
                 sources = mutable.get('update_sources')
                 if sources is not None:
@@ -207,16 +214,20 @@ class DeploymentInventory:
                     for source in sources:
                         check(isinstance(source, dict), 'update source')
                         owned_path(source.get('outbox_dir'), instance, 'update source outbox_dir')
+            if backend_values is not None:
+                paths = backend_values.get('paths', {})
+                owned_path(paths.get('data_dir', 'data'), instance, 'backend data_dir')
             for role, expected_port in instance.listen_ports.items():
                 if role == 'backend':
-                    api = values.get('api', {})
+                    check(backend_values is not None, 'backend config path')
+                    api = backend_values.get('api', {})
                     check(api.get('host') == '127.0.0.1' and api.get('enabled') is True, 'backend loopback API')
                     actual = api.get('port')
                 elif role == 'control':
-                    actual = values.get('router', {}).get('deployment_control_port')
+                    actual = bot_values.get('router', {}).get('deployment_control_port')
                 else:
                     section = 'notification' if role == 'notify' else 'router'
-                    actual = values.get(section, {}).get('instance_ports', {}).get(instance.instance_id)
+                    actual = bot_values.get(section, {}).get('instance_ports', {}).get(instance.instance_id)
                 check(actual == expected_port, f'{role} port')
 
     def validate(self, *, releases_root: Path | None = None) -> None:
@@ -251,6 +262,10 @@ class DeploymentInventory:
             unique(instance.instance_id, ids, 'instance_id'); ref(instance.watch_ref)
             if type(instance.enabled) is not bool: raise ValueError('enabled must be boolean')
             if not instance.units or set(instance.units) - _ROLES: raise ValueError('invalid inventory service roles')
+            if instance.backend_config_path is not None and 'backend' not in instance.units:
+                raise ValueError('backend_config_path requires a backend unit')
+            if 'backend' in instance.units and (set(instance.units) & {'bot', 'notify', 'jobs', 'control'}) and instance.backend_config_path is None:
+                raise ValueError('Bot and backend units require a separate backend_config_path')
             if set(instance.listen_ports) - set(instance.units): raise ValueError('port requires enabled unit role')
             for role in set(instance.units) - {'jobs'}:
                 if role not in instance.listen_ports: raise ValueError('HTTP service requires a listen port')
@@ -258,6 +273,8 @@ class DeploymentInventory:
             for value in instance.listen_ports.values(): port(value)
             if not instance.data_roots: raise ValueError('instance data_roots must be nonempty')
             external(instance.config_path)
+            if instance.backend_config_path is not None:
+                external(instance.backend_config_path)
             for value in instance.data_roots: external(value)
             for group in instance.groups:
                 if not isinstance(group, str) or not group.strip() or group != group.strip(): raise ValueError('invalid inventory group')

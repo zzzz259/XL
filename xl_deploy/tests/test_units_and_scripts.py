@@ -42,6 +42,9 @@ def test_user_units_use_fixed_release_paths_and_keep_runtime_data_external():
     assert "WorkingDirectory=/home/admin/xl_qqbot-test" in read(
         "xl_deploy/deploy/xl-qqbot-test.service"
     )
+    assert "WorkingDirectory=/home/admin/xl_gateway" in read(
+        "xl_deploy/deploy/xl-qqbot-router.service"
+    )
 
 
 def test_poller_timer_runs_every_minute_as_a_user_unit():
@@ -66,6 +69,22 @@ def test_runtime_bot_units_exclude_checkout_cwd_from_import_resolution():
     ):
         content = read(f"xl_deploy/deploy/{filename}")
         assert "-P -m bot_app." in content
+
+
+def test_runtime_services_use_stable_instance_ids_and_gateway_config_root():
+    for filename, instance_id in (
+        ("xl-qqbot-prod.service", "stable-bot"),
+        ("xl-qqbot-main-notify.service", "stable-bot"),
+        ("xl-qqbot-main-jobs.service", "stable-bot"),
+        ("xl-qqbot-test.service", "test-bot"),
+        ("xl-qqbot-test-notify.service", "test-bot"),
+        ("xl-qqbot-test-jobs.service", "test-bot"),
+    ):
+        content = read(f"xl_deploy/deploy/{filename}")
+        assert f"--instance-id {instance_id}" in content
+        assert "--tier" not in content
+    gateway = read("xl_deploy/deploy/xl-qqbot-router.service")
+    assert "WorkingDirectory=/home/admin/xl_gateway" in gateway
 
 
 def test_sample_configuration_has_no_live_secrets_or_assetbundle_key():

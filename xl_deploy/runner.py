@@ -184,7 +184,10 @@ class CommandRunner:
             self.inventory.validate()
             self.inventory.validate_runtime_configs()
             for instance in self.inventory.instances:
-                for external in (instance.config_path, *instance.data_roots):
+                configs = (instance.config_path, instance.backend_config_path)
+                for external in (*configs, *instance.data_roots):
+                    if external is None:
+                        continue
                     _assert_outside(release_path, external, 'instance config/data')
             _assert_outside(release_path, self.inventory.gateway.config_path, 'gateway config')
             if release_path.resolve() in self._prepared_candidates:
@@ -232,7 +235,11 @@ class CommandRunner:
                 )
                 if self.backend_config_path is not None or role == 'backend':
                     owner = self.inventory.owner(unit)[0] if self.inventory is not None else None
-                    config_path = owner.config_path if owner is not None else self._backend_config_for_unit(unit)
+                    config_path = (
+                        owner.backend_config_path or owner.config_path
+                        if owner is not None
+                        else self._backend_config_for_unit(unit)
+                    )
                     environment = owner.watch_ref if owner is not None else ("test" if unit == "xl-updata-server-test.service" else "main")
                     python = service_venv_path(release_path, unit, allowed_units=self.allowed_units) / (
                         "Scripts/python.exe" if os.name == "nt" else "bin/python"
@@ -328,7 +335,8 @@ class CommandRunner:
             python = service_venv_path(release, unit, allowed_units=self.allowed_units) / (
                 'Scripts/python.exe' if os.name == 'nt' else 'bin/python')
             self._executor([str(python), str(release / 'xl_updata_server' / 'run_server.py'),
-                            '--healthcheck', '--config', str(instance.config_path)], cwd=release / 'xl_updata_server')
+                            '--healthcheck', '--config', str(instance.backend_config_path or instance.config_path)],
+                           cwd=release / 'xl_updata_server')
         self._wait_for_http_health(urllib.request.Request(
             f'http://127.0.0.1:{port}{endpoint}', headers=headers), unit)
 

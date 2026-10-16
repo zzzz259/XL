@@ -29,6 +29,10 @@ token_file = "/home/admin/.config/xl_deploy/router.token"
 # test/main unit mapping remains available for existing installations.
 # Units must already exist and use current/<watch_ref> plus their external config.
 # instance_id is a stable identity; watch_ref selects code, not capabilities.
+# config_path is the Bot config; backend_config_path is optional and applies
+# when this same logical instance owns an updater unit with a separate TOML.
+# All roots listed for an instance are exclusively owned by that instance;
+# paths nested under one of its roots (such as bot-state) are allowed.
 [inventory.gateway]
 unit = "xl-qqbot-router.service"
 watch_ref = "main"
@@ -56,8 +60,12 @@ groups = ["REPLACE_TEST_B_GROUP"]
 units = { bot = "xl-test-b.service", notify = "xl-test-b-notify.service", jobs = "xl-test-b-jobs.service" }
 listen_ports = { bot = 8821, notify = 8822 }
 # Add main instances, control or backend roles explicitly as needed. Each entry
-# owns one config and its data roots. Bot watch.data_dir, watch.outbox_dir and
-# every watch.update_sources outbox_dir must remain within that instance's roots.
-# A backend-only entry uses units.backend
-# and listen_ports.backend, with its matching backend config path.
+# owns its Bot config and data roots; optionally pair a separate updater config
+# using backend_config_path. For example:
+# backend_config_path = "/home/admin/xl_instances/test-a/updater.toml"
+# units = { bot = "xl-test-a.service", backend = "xl-test-a-updater.service" }
+# listen_ports = { bot = 8811, backend = 8831 }
+# Bot watch.data_dir, watch.outbox_dir, every update_sources outbox_dir, and
+# updater paths.data_dir must stay within roots of that same instance. A
+# backend-only entry keeps its backend TOML in config_path.
 # Match gateway [router.group_instances] and service config IDs/ports to this file.
