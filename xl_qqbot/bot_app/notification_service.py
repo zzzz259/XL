@@ -20,7 +20,7 @@ from .proactive_outbox import ProactiveOutbox
 from .gateway import gateway_transport_for_config
 
 _logger = logging.getLogger(__name__)
-_EVENT_KEY_RE = re.compile(r"[A-Za-z0-9._:-]{1,200}")
+_EVENT_KEY_RE = re.compile(r"[\w.:_-]{1,200}")
 _STOP_KEY = web.AppKey("notification_stop_event", asyncio.Event)
 _DISPATCH_TASK_KEY = web.AppKey("notification_dispatch_task", asyncio.Task)
 
