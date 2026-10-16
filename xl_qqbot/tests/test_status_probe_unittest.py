@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,8 @@ class LoginPreflightProbeTests(unittest.IsolatedAsyncioTestCase):
             'open_id = "account-id"\ntoken = "opaque-token"\nchannel = "channel-a"\n',
             encoding="utf-8",
         )
+        if os.name == "posix":
+            self.credentials_path.chmod(0o600)
 
     @staticmethod
     def _http_response(payload):
