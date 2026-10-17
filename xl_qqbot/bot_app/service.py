@@ -113,11 +113,21 @@ async def _amain_service(config: Config, instance_id: str, port: int) -> None:
         await runner.cleanup()
 
 
+def resolve_instance_id(args, config: Config) -> str:
+    """Prefer the configured runtime identity; tier remains a legacy fallback."""
+    if args.instance_id:
+        return args.instance_id
+    configured_instance_id = config.instance.instance_id
+    if configured_instance_id != "default":
+        return configured_instance_id
+    return args.tier or configured_instance_id
+
+
 def main(argv=None) -> None:
     _setup_logging()
     args = parse_args(argv)
     config = load_config("config.toml")
-    instance_id = args.instance_id or args.tier or config.instance.instance_id
+    instance_id = resolve_instance_id(args, config)
     port = args.port or config.router.instance_ports.get(
         instance_id,
         config.router.test_port if instance_id == "test" else config.router.production_port,
