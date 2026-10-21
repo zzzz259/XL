@@ -99,6 +99,11 @@ production_port = 8787
 # 游戏服务器状态采样；由每个实例自己的配置开关控制。凭据文件仅放 open_id/token/channel，权限设为 600。
 enabled = false
 credentials_file = ""
+# Opt-in: credentials_file must point to a private initialized renewal state.json.
+# Keep false for legacy three-field JSON/TOML credentials.
+refresh_enabled = false
+# "direct" explicitly bypasses environment proxies; alternatively a loopback HTTP proxy.
+refresh_proxy = "direct"
 # 常规状态探测间隔；候选变化会按 confirm_delay_seconds 快速复查。
 interval_seconds = 30
 confirm_delay_seconds = 3
