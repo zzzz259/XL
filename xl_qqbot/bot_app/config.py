@@ -134,6 +134,8 @@ class ServerStatusConfig:
     interval_seconds: int = 30
     confirm_delay_seconds: int = 3
     credentials_file: str = ""
+    refresh_enabled: bool = False
+    refresh_proxy: str = "direct"
     recipient_tiers: tuple[str, ...] = ("debug", "test")
 
 
@@ -450,11 +452,23 @@ def load_config(path: str = "config.toml") -> Config:
     credentials_file = str(status_raw.get("credentials_file", "")).strip()
     if status_raw.get("enabled", False) and not credentials_file:
         raise ValueError("[server_status] enabled=true 时必须配置 credentials_file")
+    refresh_enabled = status_raw.get("refresh_enabled", False)
+    if not isinstance(refresh_enabled, bool):
+        raise ValueError("[server_status] refresh_enabled must be boolean")
+    refresh_proxy = status_raw.get("refresh_proxy", "direct")
+    if not isinstance(refresh_proxy, str):
+        raise ValueError("[server_status] refresh_proxy must be direct or a loopback HTTP proxy")
+    if refresh_enabled:
+        from starfall_refresh.http import HTTP
+
+        HTTP(refresh_proxy)  # Validate transport without networking.
     server_status = ServerStatusConfig(
         enabled=status_raw.get("enabled", False),
         interval_seconds=status_interval,
         confirm_delay_seconds=status_confirm_delay,
         credentials_file=credentials_file,
+        refresh_enabled=refresh_enabled,
+        refresh_proxy=refresh_proxy,
         recipient_tiers=status_tiers,
     )
 

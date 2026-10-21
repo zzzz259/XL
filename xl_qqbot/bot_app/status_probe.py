@@ -6,10 +6,9 @@ import asyncio
 import json
 import os
 import socket
+import tomllib
 from pathlib import Path
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-
-import tomllib
 
 from .status_monitor import StatusSample
 
@@ -159,13 +158,14 @@ def build_login_preflight_probe(
     *,
     timeout: float = REQUEST_TIMEOUT_SECONDS,
 ):
-    """Load protected credentials once and return an async, session-free probe."""
+    """Validate at startup, then reread protected credentials for every sample."""
     if timeout <= 0:
         raise ValueError("server status probe timeout must be positive")
-    credentials = _load_credentials(credentials_path)
+    _load_credentials(credentials_path)
 
     async def probe() -> StatusSample:
         try:
+            credentials = await asyncio.to_thread(_load_credentials, credentials_path)
             return await asyncio.to_thread(_sample, credentials, timeout)
         except TimeoutError:
             return StatusSample(False, None, False, None, False, "TIMEOUT")
