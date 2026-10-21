@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -26,15 +27,52 @@ JOURNAL_PHASES = frozenset({
 })
 
 
+def _code_path(value):
+    """Resolve aliases before filtering; selected code paths must be interpretable."""
+    path = Path(value)
+    if not path.is_absolute():
+        raise ValueError('code-bearing path is not absolute')
+    try:
+        return str(path.resolve(strict=True))
+    except (OSError, RuntimeError):
+        raise ValueError('code-bearing path cannot be resolved') from None
+
+
+def _argument_paths(arguments):
+    paths = []
+    for argument in arguments:
+        value = argument.partition('=')[2] if '=' in argument else argument
+        if Path(value).is_absolute():
+            paths.append(str(Path(value).resolve()))
+    return paths
+
+
+def _environment_paths(items, cwd):
+    paths = []
+    for item in items:
+        key, _, value = item.partition('=')
+        if key in {'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV'}:
+            for entry in value.split(os.pathsep):
+                paths.append(_code_path(entry or cwd))
+    return paths
+
+
 def process_paths(directory):
-    """Read code-bearing process evidence without returning secret environment keys."""
-    paths = [os.readlink(directory / name) for name in ('cwd', 'exe')]
-    paths.append((directory / 'cmdline').read_bytes().decode('utf-8', errors='strict'))
+    """Return only absolute dependency paths, never raw argv or secret environment."""
+    cwd = _code_path(os.readlink(directory / 'cwd'))
+    paths = [cwd, _code_path(os.readlink(directory / 'exe'))]
+    arguments = (directory / 'cmdline').read_bytes().decode('utf-8', errors='strict').split('\0')
+    paths.extend(_argument_paths(arguments))
+    selected = []
     for item in (directory / 'environ').read_bytes().split(b'\0'):
         key, _, value = item.partition(b'=')
         if key in {b'PYTHONPATH', b'PYTHONHOME', b'VIRTUAL_ENV'}:
-            paths.append(value.decode('utf-8', errors='strict'))
-    paths.append((directory / 'maps').read_text(encoding='utf-8'))
+            selected.append(key.decode() + '=' + value.decode('utf-8', errors='strict'))
+    paths.extend(_environment_paths(selected, cwd))
+    for line in (directory / 'maps').read_text(encoding='utf-8').splitlines():
+        fields = line.split(None, 5)
+        if len(fields) == 6 and Path(fields[5]).is_absolute():
+            paths.append(str(Path(fields[5]).resolve()))
     return paths
 
 
@@ -46,17 +84,21 @@ class ReleaseStorage:
         self.root = state.releases_root
         self.current_root = Path(current_root).absolute()
         self.authority_path = state.state_dir / 'release-storage.json'
-        self.units = tuple(units)
+        # Controller interpreter dependencies exist even between oneshot runs;
+        # retention evidence is deliberately separate from restart ownership.
+        self.units = tuple(sorted(set(units) | {'xl-deploy-poll.service'}))
         self.live_references = live_references or self._live_references
 
     def _git(self, *args):
         return subprocess.run(['git', *map(str, args)], cwd=self.repository,
                               text=True, capture_output=True, check=True).stdout
 
-    def _direct(self, value):
+    def _direct(self, value, *, pinned_legacy=()):
         path = Path(value)
+        known_name = NAME.fullmatch(path.name) or (
+            str(path) in pinned_legacy and re.fullmatch(r'[0-9a-f]{40}-[a-z0-9][a-z0-9-]{0,63}', path.name))
         if (not path.is_absolute() or path.parent != self.root or path.is_symlink()
-                or path.resolve() != path or not path.is_dir() or not NAME.fullmatch(path.name)):
+                or path.resolve() != path or not path.is_dir() or not known_name):
             raise ValueError(f'unsafe release path: {path}')
         return path
 
@@ -70,8 +112,9 @@ class ReleaseStorage:
         for key in ('pins', 'rollback'):
             if not isinstance(data[key], list) or any(not isinstance(p, str) for p in data[key]):
                 raise ValueError('invalid protected references')
+        for key in ('pins', 'rollback'):
             for path in data[key]:
-                self._direct(path)
+                self._direct(path, pinned_legacy=data['pins'])
         for name, record in data['releases'].items():
             if (not NAME.fullmatch(name) or not isinstance(record, dict)
                     or set(record) != {'branch', 'sha', 'created_at'}
@@ -121,19 +164,15 @@ class ReleaseStorage:
             return report
         for value in list(report['candidates']):
             latest = self._snapshot(include_legacy)
+            for key in ('protected', 'retained', 'candidates'):
+                report[key] = latest[key]
             if latest['blocked']:
                 report['blocked'] = latest['blocked']
                 break
             if value not in latest['candidates']:
                 continue
             try:
-                changes = subprocess.run(['git', '-C', value, 'status', '--porcelain', '-z',
-                                          '--untracked-files=normal'], check=True,
-                                         text=True, capture_output=True).stdout.split('\0')
-                if any(change and change != '?? .venvs/' for change in changes):
-                    raise ValueError('worktree has source changes or unknown untracked data')
-                if (Path(value) / '.venvs').is_symlink():
-                    raise ValueError('venv root must not be a symlink')
+                self._validate_disposable(Path(value))
                 # One --force allows generated .venvs only; Git still refuses
                 # locked worktrees (which require --force twice).
                 self._git('worktree', 'remove', '--force', value)
@@ -141,10 +180,41 @@ class ReleaseStorage:
                 data = self._authority()
                 data['releases'].pop(Path(value).name, None)
                 self._save_authority(data)
+                report['candidates'].pop(value, None)
             except Exception as exc:  # noqa: BLE001 - stop on uncertain state.
                 report['blocked'].append(f'removal failed: {type(exc).__name__}')
                 break
         return report
+
+    def _validate_disposable(self, path):
+        def git_output(*args):
+            return subprocess.run(['git', '-C', str(path), *args], check=True,
+                                  text=True, capture_output=True).stdout
+        if git_output('status', '--porcelain', '-z', '--untracked-files=no'):
+            raise ValueError('worktree has source changes')
+        files = []
+        for options in ((), ('--ignored',)):
+            files.extend(git_output('ls-files', '--others', '--exclude-standard',
+                                    '-z', *options).split('\0'))
+        generated = (Path('.venvs'), Path('xl_updata_server/renderer/node_modules'))
+        checked = set()
+        for value in filter(None, files):
+            relative = Path(value.rstrip('/'))
+            candidate = path / relative
+            root = next((root for root in generated if relative == root or root in relative.parents), None)
+            if root is not None:
+                generated_path = path / root
+                if root not in checked and (not generated_path.is_dir() or generated_path.is_symlink()
+                        or generated_path.resolve() != generated_path.absolute()):
+                    raise ValueError('generated root must be a real directory')
+                checked.add(root)
+                continue
+            if (relative.parent.name == '__pycache__' and candidate.is_file()
+                    and candidate.suffix in {'.pyc', '.pyo'} and not candidate.is_symlink()
+                    and candidate.resolve() == candidate.absolute()
+                    and relative.parts[0] in {'xl_deploy', 'xl_qqbot', 'xl_updata_server', 'xl_updata_tool'}):
+                continue
+            raise ValueError('worktree has unknown untracked or ignored data')
 
     def _snapshot(self, include_legacy):
         report = {'protected': {}, 'retained': {}, 'candidates': {}, 'blocked': []}
@@ -170,7 +240,7 @@ class ReleaseStorage:
                     registrations[Path(row['worktree'])] = row
             releases = {}
             for path in self.root.iterdir():
-                path = self._direct(path)
+                path = self._direct(path, pinned_legacy=data['pins'])
                 row = registrations.get(path)
                 if (row is None or row.get('HEAD') != path.name[:40]
                         or 'locked' in row or 'prunable' in row):
@@ -188,7 +258,7 @@ class ReleaseStorage:
                     raise ValueError('worktree belongs to another repository')
                 releases[path] = data['releases'].get(path.name)
             def protect(value, reason):
-                path = self._direct(value)
+                path = self._direct(value, pinned_legacy=data['pins'])
                 if path not in releases:
                     raise ValueError('protected reference is not a registered release')
                 report['protected'].setdefault(str(path), []).append(reason)
@@ -247,6 +317,37 @@ class ReleaseStorage:
             report['candidates'] = {}
         return report
 
+    def _service_references(self):
+        references = []
+        for unit in self.units:
+            result = subprocess.run(['systemctl', '--user', 'show', unit, '--property=LoadState',
+                                     '--property=ActiveState', '--property=MainPID',
+                                     '--property=ExecStart', '--property=WorkingDirectory',
+                                     '--property=Environment'],
+                                    text=True, capture_output=True, check=True)
+            values = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+            if not {'LoadState', 'ActiveState', 'MainPID', 'ExecStart', 'WorkingDirectory', 'Environment'} <= values.keys():
+                raise RuntimeError('incomplete systemd evidence')
+            if values['ActiveState'] in {'active', 'activating', 'reloading'} and int(values['MainPID']) <= 0:
+                raise RuntimeError('active unit has no inspectable process')
+            cwd = values['WorkingDirectory']
+            if cwd:
+                references.append(_code_path(cwd))
+            command = values['ExecStart']
+            # Do not guess systemd escape encodings that could hide an alias.
+            if '\\x' in command:
+                raise ValueError('escaped systemd code paths require explicit inspection')
+            executables = re.findall(r'(?:\{|\s)path=([^;]+?)\s*;', command)
+            if command and not executables:
+                raise ValueError('systemd executable paths cannot be interpreted')
+            for executable in executables:
+                references.append(_code_path(executable.strip()))
+            for arguments in re.findall(r'argv\[\]=(.*?)\s*;', command):
+                references.extend(_argument_paths(shlex.split(arguments, posix=os.name != 'nt')))
+            references.extend(_environment_paths(
+                shlex.split(values['Environment'], posix=os.name != 'nt'), cwd))
+        return references
+
     def _live_references(self):
         """Inspect all owned processes and configured services, including shared Gateway.
 
@@ -256,29 +357,14 @@ class ReleaseStorage:
         proc = Path('/proc')
         if os.name != 'posix' or not proc.is_dir() or not self.units:
             raise RuntimeError('Linux /proc and service inventory are required')
-        references = []
-        pattern = re.compile(re.escape(str(self.root)) + r'/[^/\s\x00;:"\'=]+')
-        def extract(text):
-            references.extend(Path(match.group(0)) for match in pattern.finditer(text))
-        for unit in sorted(self.units):
-            result = subprocess.run(['systemctl', '--user', 'show', unit, '--property=LoadState',
-                                     '--property=ActiveState', '--property=MainPID',
-                                     '--property=ExecStart', '--property=WorkingDirectory'],
-                                    text=True, capture_output=True, check=True)
-            values = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
-            if not {'LoadState', 'ActiveState', 'MainPID', 'ExecStart', 'WorkingDirectory'} <= values.keys():
-                raise RuntimeError('incomplete systemd evidence')
-            if values['ActiveState'] in {'active', 'activating', 'reloading'} and int(values['MainPID']) <= 0:
-                raise RuntimeError('active unit has no inspectable process')
-            extract(result.stdout)
+        references = self._service_references()
         for directory in proc.iterdir():
             if not directory.name.isdigit():
                 continue
             try:
                 if directory.stat().st_uid != os.getuid():
                     continue
-                for evidence in process_paths(directory):
-                    extract(evidence)
+                references.extend(process_paths(directory))
             except FileNotFoundError:
                 if directory.exists():
                     # Kernel threads/zombies have no executable; ensure no runnable code.

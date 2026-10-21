@@ -449,7 +449,10 @@ python -m xl_deploy --config /home/admin/xl_deploy/config.toml --cleanup-release
 `removed` 记录已经删除的目录。dry run 同样取得部署锁以获得一致视图，只读发布内容。
 清理同时验证当前分支指针、journal 的 previous/candidate（包括已完成日志的最近
 回滚句柄）、人工保护路径，以及 systemd 的 ExecStart/WorkingDirectory 和全部同用户
-进程的 cwd、exe、argv、maps、PYTHONPATH/PYTHONHOME/VIRTUAL_ENV。只从选定环境键
+进程的 cwd、exe、argv、maps、PYTHONPATH/PYTHONHOME/VIRTUAL_ENV。保留证据始终额外
+检查 `xl-deploy-poll.service`，即使它处于 inactive，或 inventory 没有给它重启权限。
+路径列表先拆分，绝对路径先解析符号链接别名，再判断是否属于发布目录；外部 cwd
+和外部 Python 解释器不会掩盖 PYTHONPATH/ExecStart 中的旧发布别名。只从选定环境键
 提取发布引用，不输出环境或完整命令行。Gateway 的工作目录可能在外部数据目录，
 不能只检查 cwd。`/proc` 不可读或 systemd 证据不完整时拒绝执行。
 
@@ -457,7 +460,14 @@ python -m xl_deploy --config /home/admin/xl_deploy/config.toml --cleanup-release
 legacy 显式纳入后仍有 24 小时下限（使用目录 mtime；不声称是准确部署时间）。
 仅处理指定根的直接子目录；必须匹配 SHA/UUID 名称、真实目录、Git 注册、HEAD 和
 Git common-dir。未知目录、目录符号链接、路径越界、缺失/损坏的权威文件均阻止清理。
-有源文件改动或未知未跟踪内容的 worktree 也拒绝删除；允许生成的 `.venvs`，删除由
+已有控制平面等自定义名称只能以完整 SHA 前缀加安全后缀、真实直接子目录、有效
+worktree 注册和明确 `pins` 条目获得兼容，始终受保护，永不成为清理候选；去掉 pin
+后会阻止清理，而不是转为可删除目录。
+有源文件改动或未知未跟踪/被 Git 忽略的内容的 worktree 也拒绝删除。清理显式枚举
+两类文件；仅允许预检生成的 `.venvs/`、`xl_updata_server/renderer/node_modules/`
+以及运行时源码根下 `__pycache__` 中的普通 `.pyc/.pyo` 文件。这两个生成目录专供
+可再生成的依赖，不可放入人工数据；生成目录根或缓存路径有别名也拒绝清理。
+忽略规则不会授权删除 `*.db`、`data/`、`logs/` 或缓存目录中的其他内容。删除由
 `git worktree remove` 执行，避免遗留注册。不会使用裸 `rm -rf` 或 worktree prune。
 
 自动清理只在健康部署及通知全部完成、journal 已为 completed 后执行，沿用同一
