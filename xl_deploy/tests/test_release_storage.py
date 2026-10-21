@@ -26,6 +26,8 @@ def source(tmp_path):
     repo = tmp_path / 'source'
     repo.mkdir()
     git(repo, 'init')
+    (repo / '.gitignore').write_text('*.db\nlogs/\nxl_updata_server/data/\n'
+                                    '__pycache__/\nxl_updata_server/renderer/node_modules/\n')
     for name in ('xl_deploy/a.py', 'xl_qqbot/a.py', 'xl_updata_server/a.py',
                  'xl_updata_tool/tools/lua/tool.jar', 'xl_updata_tool/tools/windows.exe',
                  'xl_gacha_web/a.py', 'xl_gacha_android/a.js', 'README.md'):
@@ -203,14 +205,14 @@ def test_process_legacy_cwd_protects_pythonpath_without_leaking_secrets(tmp_path
     directory.mkdir(parents=True)
     (directory / 'cmdline').write_bytes(b'python\0/home/admin/control/start.py\0')
     (directory / 'environ').write_bytes(
-        b'API_TOKEN=do-not-return-this\0PYTHONPATH=/releases/older:/external\0')
-    (directory / 'maps').write_text('mapped /releases/oldest/lib.so\n')
+        f'API_TOKEN=do-not-return-this\0PYTHONPATH={tmp_path}\0'.encode())
+    (directory / 'maps').write_text(f'000-001 r--p 000 00:00 0 {tmp_path}/mapped.so\n')
     # os.readlink is the only OS-specific boundary: process cwd is outside release.
     from unittest.mock import patch
-    with patch('xl_deploy.release_storage.os.readlink', side_effect=['/legacy/gateway', '/bin/python']):
+    with patch('xl_deploy.release_storage.os.readlink', side_effect=[str(tmp_path), sys.executable]):
         paths = process_paths(directory)
-    assert '/releases/older:/external' in paths
-    assert any('/releases/oldest/lib.so' in path for path in paths)
+    assert str(tmp_path) in paths
+    assert any('mapped.so' in path for path in paths)
     assert not any('do-not-return-this' in path for path in paths)
 
 
@@ -227,6 +229,8 @@ def test_live_evidence_changes_before_apply_prevents_removal(storage):
     report = manager.cleanup(apply=True)
     assert not report['blocked']
     assert paths[2].exists() and paths[3].exists() and paths[4].exists()
+    assert str(paths[2]) in report['protected']
+    assert str(paths[2]) not in report['candidates']
 
 
 def test_unknown_journal_phase_blocks_cleanup(storage):
@@ -252,6 +256,128 @@ def test_report_tracks_removal_even_if_metadata_write_fails(storage, monkeypatch
     assert removed in paths[2:4]
     assert not removed.exists()
     assert sum(path.exists() for path in paths[2:4]) == 1
+
+
+@pytest.mark.parametrize('relative', ['operator.db', 'xl_updata_server/data/account.db',
+                                     'logs/operator.log'])
+def test_ignored_operator_data_blocks_removal(storage, relative):
+    manager, paths, authority = storage
+    authority['pins'] = []
+    authority['rollback'] = []
+    manager.authority_path.write_text(json.dumps(authority))
+    for path in paths[2:4]:
+        data = path / relative
+        data.parent.mkdir(parents=True, exist_ok=True)
+        data.write_text('preserve operator data')
+    report = manager.cleanup(apply=True)
+    assert report['blocked']
+    assert all((path / relative).read_text() == 'preserve operator data' for path in paths[2:4])
+
+
+def test_generated_renderer_and_python_cache_are_disposable(storage):
+    manager, paths, authority = storage
+    authority['pins'] = []
+    authority['rollback'] = []
+    manager.authority_path.write_text(json.dumps(authority))
+    for relative in ('xl_updata_server/renderer/node_modules/package/index.js',
+                     'xl_deploy/__pycache__/a.cpython-313.pyc',
+                     '.venvs/bot/lib/site-packages/pkg/__pycache__/module.cpython-313.pyc'):
+        file = paths[2] / relative
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(b'generated')
+    report = manager.cleanup(apply=True)
+    assert not report['blocked']
+    assert not paths[2].exists()
+
+
+def test_poll_service_remains_retention_dependency_without_restart_ownership(storage):
+    from xl_deploy.release_storage import ReleaseStorage
+    manager, _, _ = storage
+    declared = {'xl-custom-bot.service', 'xl-custom-gateway.service'}
+    storage = ReleaseStorage(manager.repository, manager.state, manager.current_root, units=declared)
+    assert 'xl-deploy-poll.service' in storage.units
+    assert declared == {'xl-custom-bot.service', 'xl-custom-gateway.service'}
+
+
+def make_alias(alias, target):
+    if os.name == 'nt':
+        result = subprocess.run(['cmd', '/c', 'mklink', '/J', str(alias), str(target)],
+                                check=False, capture_output=True)
+        assert result.returncode == 0, result.stderr
+    else:
+        alias.symlink_to(target, target_is_directory=True)
+
+
+def test_alias_only_pythonpath_preserves_old_release(storage, tmp_path):
+    from unittest.mock import patch
+
+    from xl_deploy.release_storage import process_paths
+    manager, paths, authority = storage
+    authority['pins'] = []
+    authority['rollback'] = []
+    manager.authority_path.write_text(json.dumps(authority))
+    alias = tmp_path / 'old-code-alias'
+    make_alias(alias, paths[2])
+    directory = tmp_path / 'fake-proc'
+    directory.mkdir()
+    (directory / 'cmdline').write_bytes(b'python\0-m\0xl_qqbot\0')
+    (directory / 'environ').write_bytes(
+        f'API_TOKEN=secret\0PYTHONPATH={alias}{os.pathsep}{tmp_path}\0'.encode())
+    (directory / 'maps').write_text('')
+    def live():
+        with patch('xl_deploy.release_storage.os.readlink', side_effect=[str(tmp_path), sys.executable]):
+            return [Path(path) for path in process_paths(directory)]
+    manager.live_references = live
+    report = manager.cleanup(apply=True)
+    assert not report['blocked']
+    assert paths[2].exists()
+    assert str(paths[2]) in report['protected']
+
+
+def test_inactive_poll_exec_alias_preserves_old_release(storage, tmp_path, monkeypatch):
+    manager, paths, authority = storage
+    authority['pins'] = []
+    authority['rollback'] = []
+    manager.authority_path.write_text(json.dumps(authority))
+    alias = tmp_path / 'old-poll-alias'
+    make_alias(alias, paths[2])
+    python = alias / '.venvs/poll/bin/python'
+    python.parent.mkdir(parents=True)
+    python.write_text('generated interpreter')
+    original_run = subprocess.run
+    inspected = []
+    def run(args, **kwargs):
+        if args[0] != 'systemctl':
+            return original_run(args, **kwargs)
+        inspected.append(args[3])
+        assert args[3] == 'xl-deploy-poll.service'
+        output = (f'LoadState=loaded\nActiveState=inactive\nMainPID=0\n'
+                  f'ExecStart={{ path={python} ; argv[]={python} -m xl_deploy ; }}\n'
+                  f'WorkingDirectory={tmp_path}\nEnvironment=\n')
+        return subprocess.CompletedProcess(args, 0, output, '')
+    monkeypatch.setattr(subprocess, 'run', run)
+    manager.live_references = manager._service_references
+    report = manager.cleanup(apply=True)
+    assert not report['blocked']
+    assert inspected and paths[2].exists()
+    assert str(paths[2]) in report['protected']
+
+
+@pytest.mark.parametrize('suffix', ['control-bootstrap', 'control-plane-source'])
+def test_custom_legacy_name_requires_permanent_explicit_pin(storage, suffix):
+    manager, paths, authority = storage
+    sha = paths[0].name[:40]
+    legacy = paths[0].parent / f'{sha}-{suffix}'
+    git(manager.repository, 'worktree', 'add', '--detach', legacy, sha)
+    assert manager.cleanup(apply=True, include_legacy=True)['blocked']
+    assert legacy.exists()
+    authority['pins'].append(str(legacy))
+    manager.authority_path.write_text(json.dumps(authority))
+    report = manager.cleanup(apply=True, include_legacy=True)
+    assert not report['blocked']
+    assert str(legacy) in report['protected']
+    assert str(legacy) not in report['candidates']
+    assert legacy.exists()
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='Windows directory symlinks require privileges')
