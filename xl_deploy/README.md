@@ -393,3 +393,80 @@ blocks another transaction until recovery resolves it.
 systemctl --user status xl-deploy-poll.timer xl-deploy-poll.service
 journalctl --user -u xl-deploy-poll.service --since today
 ```
+# 发布目录、保留与清理
+
+新候选仍然是独立、detached 的 Git worktree，以完整 SHA 标识。创建时先使用
+`--no-checkout`，再设置非 cone 稀疏规则，最后 checkout。发布目录包含仓库根文件、
+`xl_deploy`、`xl_qqbot`、`xl_updata_server` 和 `xl_updata_tool/tools/lua`；不会先落地
+Windows 工具或抽卡客户端再删除。Lua jar、服务器 renderer 和依赖清单保留。
+服务器还复用 `xl_updata_tool/app/features/characters/parser`；其无 Qt 解析器、
+platform 诊断基础设施、shared 的 Lua/契约模块及包入口也在白名单内。
+预检仍准备该分支所有服务的环境，因为它们共用 `current/<branch>` 指针。
+
+保留策略的权威文件为 `<state_dir>/release-storage.json`，模板见
+`release-storage.json.example`。它与 journal、锁和 poll cursor 一样放在发布目录外。
+字段 `pins` 和 `rollback` 是绝对发布目录路径数组，分别记录人工固定版本和人工恢复
+流程、备份或旧控制平面仍可能引用的版本。不要仅凭目录时间猜测可删除的版本。
+`releases` 记录新部署的目录名及 `{ "branch": "test", "sha": "完整40位SHA",
+"created_at": 1792500000 }`；时间为 Unix 秒。文件不存在时部署可以继续，但清理
+始终拒绝执行；文件损坏时新部署在停止服务之前失败，供管理员核查。
+
+首次启用时先核对 Git worktree 注册、全部 current 指针、运行中的共享 Gateway/
+control/poller、旧 unit 的代码路径，以及人工回滚脚本和备份；将这些人工引用放入
+`pins`/`rollback`。已有 journal 必须有效。未记录分支和创建时间的旧版本被视为
+legacy，普通自动清理始终保留。不要为旧版本编造分支归属；已确认的分支可补录
+至少最近三个版本，未知版本需通过独立的 `--include-legacy` 选项纳入人工清理。
+初始空结构可按下面方式创建（执行前填好需要的保护路径；只创建，不覆盖已有文件）：
+
+```python
+import json
+import os
+from pathlib import Path
+from xl_deploy.state import DeploymentState
+
+state = DeploymentState('/home/admin/xl_deploy/state',
+                        releases_root='/home/admin/xl_deploy/releases')
+authority = {'schema': 1, 'pins': [], 'rollback': [], 'releases': {}}
+with state.lock():
+    path = state.state_dir / 'release-storage.json'
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+        json.dump(authority, stream, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+```
+
+维护命令无需 GitHub token 或 router token；先审核 JSON，再使用相同选项执行：
+
+```sh
+python -m xl_deploy --config /home/admin/xl_deploy/config.toml --cleanup-releases
+python -m xl_deploy --config /home/admin/xl_deploy/config.toml --cleanup-releases --include-legacy
+python -m xl_deploy --config /home/admin/xl_deploy/config.toml --cleanup-releases --include-legacy --apply
+```
+
+报告中的 `protected`、`retained`、`candidates` 都把绝对路径映射到原因，`blocked`
+非空时退出码为 1，整个待清理集合不执行删除；执行中发现状态变化则立即停止，
+`removed` 记录已经删除的目录。dry run 同样取得部署锁以获得一致视图，只读发布内容。
+清理同时验证当前分支指针、journal 的 previous/candidate（包括已完成日志的最近
+回滚句柄）、人工保护路径，以及 systemd 的 ExecStart/WorkingDirectory 和全部同用户
+进程的 cwd、exe、argv、maps、PYTHONPATH/PYTHONHOME/VIRTUAL_ENV。只从选定环境键
+提取发布引用，不输出环境或完整命令行。Gateway 的工作目录可能在外部数据目录，
+不能只检查 cwd。`/proc` 不可读或 systemd 证据不完整时拒绝执行。
+
+每个已记录分支至少保留最近三个发布，同时保护所有小于 24 小时的版本和所有引用。
+legacy 显式纳入后仍有 24 小时下限（使用目录 mtime；不声称是准确部署时间）。
+仅处理指定根的直接子目录；必须匹配 SHA/UUID 名称、真实目录、Git 注册、HEAD 和
+Git common-dir。未知目录、目录符号链接、路径越界、缺失/损坏的权威文件均阻止清理。
+有源文件改动或未知未跟踪内容的 worktree 也拒绝删除；允许生成的 `.venvs`，删除由
+`git worktree remove` 执行，避免遗留注册。不会使用裸 `rm -rf` 或 worktree prune。
+
+自动清理只在健康部署及通知全部完成、journal 已为 completed 后执行，沿用同一
+deployment.lock，且每次删除前重新读取全部保护证据；错误记录进 journal evidence，
+不会回滚健康版本。未完成/失败/待重试通知的部署不会触发自动清理。首次旧版本清理
+仍需人工审核 dry run，并显式启用 legacy。
+
+升级稳定控制平面时，先备份控制平面源码、服务定义与恢复入口，保存旧路径为 pin/
+rollback，在部署锁保护下从审核 SHA 准备独立的稳定代码目录及环境，再只重载/重启
+部署控制平面本身。先验证它能读取现有 inventory/journal/current、恢复与 dry run，
+再让普通 test 部署使用新逻辑。这个维护操作不移动 `current/main`，也不重启共享
+Gateway 或生产业务服务；不要把维护升级等同于一次 main 部署。

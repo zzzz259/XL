@@ -35,6 +35,21 @@ def test_runtime_config_resolves_all_paths_relative_to_config_file(tmp_path):
     assert config.router_base_url == "http://127.0.0.1:8784"
 
 
+def test_cleanup_cli_defaults_dry_run_without_github_or_router_secrets(tmp_path, monkeypatch, capsys):
+    from xl_deploy.__main__ import main
+    from xl_deploy.release_storage import ReleaseStorage
+    calls = []
+    def cleanup(self, **kwargs):
+        calls.append(kwargs)
+        return {"blocked": [], "candidates": {'old': ['expired']}, "protected": {}, "retained": {}}
+    monkeypatch.setattr(ReleaseStorage, 'cleanup', cleanup)
+    monkeypatch.delenv('GITHUB_TOKEN', raising=False)
+    assert main(['--config', str(write_config(tmp_path)), '--cleanup-releases']) == 0
+    import json
+    assert json.loads(capsys.readouterr().out)['candidates'] == {'old': ['expired']}
+    assert calls == [{"apply": False, "include_legacy": False}]
+
+
 def test_runtime_config_rejects_non_loopback_router_control_url(tmp_path):
     path = write_config(tmp_path)
     path.write_text(path.read_text(encoding="utf-8").replace("127.0.0.1", "0.0.0.0"), encoding="utf-8")

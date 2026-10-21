@@ -119,9 +119,22 @@ class CommandRunner:
         release_path.parent.mkdir(parents=True, exist_ok=True)
         self._executor(["git", "fetch", "--no-tags", "origin", sha], cwd=self.repository)
         self._executor(
-            ["git", "worktree", "add", "--detach", str(release_path), sha],
+            ["git", "worktree", "add", "--detach", "--no-checkout", str(release_path), sha],
             cwd=self.repository,
         )
+        # Non-cone patterns include root files without bringing in sibling tools.
+        self._executor(
+            ["git", "sparse-checkout", "set", "--no-cone", "/*", "!/*/",
+             "/xl_deploy/", "/xl_qqbot/", "/xl_updata_server/",
+             "/xl_updata_tool/tools/lua/", "/xl_updata_tool/app/__init__.py",
+             "/xl_updata_tool/app/features/__init__.py",
+             "/xl_updata_tool/app/features/characters/__init__.py",
+             "/xl_updata_tool/app/features/characters/parser/",
+             "/xl_updata_tool/app/platform/", "/xl_updata_tool/app/shared/__init__.py",
+             "/xl_updata_tool/app/shared/contracts.py", "/xl_updata_tool/app/shared/lua.py"],
+            cwd=release_path,
+        )
+        self._executor(["git", "checkout", "--detach", sha], cwd=release_path)
         return release_path
 
     def changed_paths(self, base_sha: str, head_sha: str) -> tuple[str, ...]:
