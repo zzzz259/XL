@@ -8,7 +8,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from bot_app.status_monitor import Status, classify_sample
-from bot_app.status_probe import _RejectRedirects, _load_credentials, build_login_preflight_probe
+from bot_app.status_probe import (
+    _load_credentials,
+    _RejectRedirects,
+    build_login_preflight_probe,
+)
 
 
 class LoginPreflightProbeTests(unittest.IsolatedAsyncioTestCase):
@@ -127,6 +131,16 @@ class LoginPreflightProbeTests(unittest.IsolatedAsyncioTestCase):
                 "https://attacker.example/login",
             )
         )
+
+    async def test_legacy_probe_reloads_replaced_credentials_without_restart(self):
+        probe = build_login_preflight_probe(self.credentials_path)
+        self.credentials_path.write_text(
+            'open_id = "account-id"\ntoken = "replacement-token"\nchannel = "channel-a"\n',
+            encoding="utf-8",
+        )
+        with patch("bot_app.status_probe._sample") as sample:
+            await probe()
+        self.assertEqual(sample.call_args.args[0]["token"], "replacement-token")
 
 
 if __name__ == "__main__":
