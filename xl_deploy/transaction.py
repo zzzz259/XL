@@ -70,10 +70,12 @@ class DeploymentTransaction:
         *,
         drain_timeout_seconds: float = 30,
         inventory=None,
+        release_storage=None,
     ) -> None:
         if drain_timeout_seconds <= 0:
             raise ValueError("drain timeout must be positive")
         self.inventory = inventory
+        self.release_storage = release_storage
         self.state = state
         self.runner = runner
         self.router = router
@@ -155,6 +157,8 @@ class DeploymentTransaction:
                     "staging did not produce the exact immutable candidate directory"
                 )
             journal = self._update(journal, phase="staged")
+            if self.release_storage is not None:
+                self.release_storage.record(plan, candidate)
             self.events.append(("preflight", sha))
             if self.inventory is None:
                 self.runner.preflight(plan, candidate, self.paths.config_path, self.paths.data_path)
@@ -413,6 +417,17 @@ class DeploymentTransaction:
             error=None,
             evidence={"deployment_health": "passed"},
         )
+        if self.release_storage is not None:
+            # A healthy completed rollout must never roll back due to retention.
+            try:
+                report = self.release_storage.cleanup_locked(apply=True)
+                self._update(journal, evidence={"release_cleanup":
+                    "blocked" if report['blocked'] else f"removed:{len(report['removed'])}"})
+            except Exception as exc:  # noqa: BLE001 - best effort maintenance only.
+                try:
+                    self._update(journal, evidence={"release_cleanup": f"failed:{type(exc).__name__}"})
+                except Exception:  # noqa: BLE001, S110 - evidence IO cannot undo success.
+                    pass
         return DeploymentResult("success", journal.sha)
 
     def _rollback(self, journal: Journal, cause: BaseException) -> DeploymentResult:

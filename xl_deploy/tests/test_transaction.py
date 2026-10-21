@@ -513,8 +513,37 @@ def test_command_runner_stages_exact_sha_as_argv_without_branch_interpolation(tm
     assert result == candidate
     assert commands == [
         ["git", "fetch", "--no-tags", "origin", NEW_SHA],
-        ["git", "worktree", "add", "--detach", str(candidate), NEW_SHA],
+        ["git", "worktree", "add", "--detach", "--no-checkout", str(candidate), NEW_SHA],
+        ["git", "sparse-checkout", "set", "--no-cone", "/*", "!/*/",
+         "/xl_deploy/", "/xl_qqbot/", "/xl_updata_server/", "/xl_updata_tool/tools/lua/",
+         "/xl_updata_tool/app/__init__.py", "/xl_updata_tool/app/features/__init__.py",
+         "/xl_updata_tool/app/features/characters/__init__.py",
+         "/xl_updata_tool/app/features/characters/parser/", "/xl_updata_tool/app/platform/",
+         "/xl_updata_tool/app/shared/__init__.py", "/xl_updata_tool/app/shared/contracts.py",
+         "/xl_updata_tool/app/shared/lua.py"],
+        ["git", "checkout", "--detach", NEW_SHA],
     ]
+
+
+def test_storage_cleanup_failure_keeps_healthy_deployment_under_lock(tmp_path):
+    transaction = make_transaction(tmp_path)
+    calls = []
+    class Storage:
+        def record(self, plan, path):
+            calls.append('record')
+        def cleanup_locked(self, *, apply):
+            assert apply
+            with pytest.raises(RuntimeError, match='lock'), transaction.state.lock(blocking=False):
+                pass
+            assert transaction.state.load().phase == 'completed'
+            calls.append('cleanup')
+            raise RuntimeError('unreadable process')
+    transaction.release_storage = Storage()
+    result = transaction.execute(make_plan())
+    assert result.status == 'success'
+    assert calls == ['record', 'cleanup']
+    assert transaction.state.load().phase == 'completed'
+    assert transaction.state.load().evidence['release_cleanup'] == 'failed:RuntimeError'
 
 
 def test_failed_preflight_keeps_unique_artifact_and_same_sha_can_retry(tmp_path):
