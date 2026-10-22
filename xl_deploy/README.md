@@ -456,6 +456,16 @@ python -m xl_deploy --config /home/admin/xl_deploy/config.toml --cleanup-release
 提取发布引用，不输出环境或完整命令行。Gateway 的工作目录可能在外部数据目录，
 不能只检查 cwd。`/proc` 不可读或 systemd 证据不完整时拒绝执行。
 
+普通用户的清理检查不需要新增 capability。系统用户会话监督进程有时不可读取
+cwd/environ；唯一例外是由系统级 `user@UID.service` 的 MainPID、ExecStart 和
+ControlGroup 共同证明的 systemd 用户管理器及其直接 `(sd-pam)` 子进程。验证要求
+系统二进制及其父目录归 root 所有且不可由组/其他用户写入，UID、父子关系、
+comm/status/stat 和精确 cgroup 一致（仅单元 cgroup 或其 `init.scope`，子进程必须与
+管理器同组），并在跳过前重新校验含启动时间的身份指纹。只读取这些监督进程的
+无凭据元数据，不读取其 cwd/exe/environ。任一验证不成立就不授予例外；应用或
+人工启动进程仍完整检查，不可读时继续阻止清理。不要给普通 poller 增加权限、
+对 Python 设置全局文件 capability，或改用 root 执行清理来绕过此限制。
+
 每个已记录分支至少保留最近三个发布，同时保护所有小于 24 小时的版本和所有引用。
 legacy 显式纳入后仍有 24 小时下限（使用目录 mtime；不声称是准确部署时间）。
 仅处理指定根的直接子目录；必须匹配 SHA/UUID 名称、真实目录、Git 注册、HEAD 和
