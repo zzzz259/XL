@@ -4,6 +4,8 @@ Linux 后台更新服务，不启动桌面 GUI。生产版按计划抓取游戏�
 
 ## 运行环境
 
+抽卡公共配置新增独立只读 JSON 分发，见[生成/HTTPS安装/权限/续期](docs/gacha-config-hosting.md)和[客户端配置协议](../docs/gacha-architecture.md)；不开放控制 API。
+
 - 生产目标：Alibaba Cloud Linux 3 / systemd user service。
 - Python 3.11 或 3.12；独立使用本子项目 `.venv`。
 - Java 21，用于 Lua 反编译。

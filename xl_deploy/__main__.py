@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import stat
@@ -14,8 +15,9 @@ from pathlib import Path
 from xl_deploy.config import DeploymentInventory, GitHubConfig
 from xl_deploy.github import GitHubClient
 from xl_deploy.poller import BranchPoller, PollCursorStore
+from xl_deploy.release_storage import ReleaseStorage
 from xl_deploy.router_client import RouterControlClient, validate_loopback_url
-from xl_deploy.runner import CommandRunner
+from xl_deploy.runner import ALLOWED_UNITS, CommandRunner
 from xl_deploy.state import DeploymentState
 from xl_deploy.transaction import DeploymentPaths, DeploymentTransaction
 
@@ -129,6 +131,8 @@ def build_poller(config_path: str | Path) -> BranchPoller:
         releases_root=runtime.releases_root,
         current_path=runtime.current_root,
     )
+    storage = ReleaseStorage(runtime.repository, state, runtime.current_root,
+                             units=runner.allowed_units)
     def transaction_for(branch: str) -> DeploymentTransaction:
         config_path, data_path = (
             (runtime.test_backend_config, runtime.test_backend_data)
@@ -141,7 +145,8 @@ def build_poller(config_path: str | Path) -> BranchPoller:
             config_path=config_path,
             data_path=data_path,
         )
-        return DeploymentTransaction(state, runner, router, paths, inventory=runtime.inventory)
+        return DeploymentTransaction(state, runner, router, paths, inventory=runtime.inventory,
+                                     release_storage=storage)
 
     return BranchPoller(
         github,
@@ -155,14 +160,30 @@ def build_poller(config_path: str | Path) -> BranchPoller:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Poll GitHub branches and deploy verified updates")
     parser.add_argument("--config", default="/home/admin/xl_deploy/config.toml")
+    parser.add_argument('--cleanup-releases', action='store_true', help='report release retention as JSON')
+    parser.add_argument('--apply', action='store_true', help='apply cleanup (requires --cleanup-releases)')
+    parser.add_argument('--include-legacy', action='store_true', help='include verified unrecorded worktrees')
     parser.add_argument(
         "--dry-run-inventory",
         action="store_true",
         help="validate configured instance/runtime ownership and print a redacted summary",
     )
     args = parser.parse_args(argv)
+    if (args.apply or args.include_legacy) and not args.cleanup_releases:
+        parser.error('--apply/--include-legacy require --cleanup-releases')
+    if args.cleanup_releases and args.dry_run_inventory:
+        parser.error('choose one read/maintenance operation')
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
+        if args.cleanup_releases:
+            runtime = load_runtime_config(args.config)
+            state = DeploymentState(runtime.state_dir, releases_root=runtime.releases_root,
+                                    current_path=runtime.current_root)
+            storage = ReleaseStorage(runtime.repository, state, runtime.current_root,
+                units=runtime.inventory.allowed_units if runtime.inventory else ALLOWED_UNITS)
+            report = storage.cleanup(apply=args.apply, include_legacy=args.include_legacy)
+            print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+            return 1 if report['blocked'] else 0
         if args.dry_run_inventory:
             runtime = load_runtime_config(args.config)
             if runtime.inventory is None:

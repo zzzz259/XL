@@ -1,0 +1,55 @@
+.library-panel {margin:18px 0 14px;padding:14px 16px;background:#1c242f;border:1px solid #34404e;border-radius:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.library-main {flex:1;min-width:220px;display:grid;gap:6px}
+.library-main label {font-size:14px;font-weight:650;color:#e9edf2}
+#account-count {font-size:12px;font-weight:400;color:#a6b3c2;margin-left:10px}
+.library-panel select,.local-dialog-body select,.local-dialog-body input {width:100%;min-height:40px;background:#111820;color:#edf1f5;border:1px solid #455365;border-radius:5px;padding:8px 10px;font:inherit;font-size:14px}
+.library-actions {display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:19px}
+.library-actions button {white-space:nowrap;min-height:38px}
+.storage-note {width:100%;color:#abb7c5;font-size:12px;line-height:1.6}
+.storage-note summary {cursor:pointer;display:list-item;padding:0;background:none;border:0;font-size:12px}
+.storage-note p {margin:6px 0;overflow-wrap:anywhere}
+#global-status {margin:10px 0 14px}
+.local-dialog-body {padding:0 26px 24px;display:grid;gap:12px;font-size:14px;line-height:1.6}
+.local-dialog-body p {margin:0}
+.local-dialog-body label {color:#edf1f5;font-weight:600}
+#import-dialog,#image-dialog {color:#edf1f5;background:#1c242f;border:1px solid #455365;border-radius:10px;max-width:620px;width:calc(100% - 28px);max-height:90vh;padding:0}
+#image-dialog {max-width:720px}
+.portal-login{display:grid;gap:10px}
+.portal-login .consent{margin:0}
+.portal-login .field-help{margin:0;line-height:1.65}
+.portal-login .status{margin:0}
+#login-profile-options{display:grid;gap:8px}
+#login-profile-options[hidden]{display:none}
+#login-profile{width:100%;min-height:40px;background:#111820;color:#edf1f5;border:1px solid #455365;border-radius:5px;padding:8px 10px;font:inherit;font-size:14px}
+.manual-login{margin-top:18px;padding-top:12px;border-top:1px solid #34404e}
+.manual-login>summary{cursor:pointer;color:#b8c4d2;font-size:14px}
+.manual-login .intro{margin-top:12px}
+.portal-login label{font-size:14px}
+#import-dialog .dialog-heading,#image-dialog .dialog-heading{padding:20px 26px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+#import-dialog h2,#image-dialog h2{margin:0;font-size:22px}
+.local-dialog-body .status {margin:0}
+#image-previews {display:grid;gap:20px}
+.image-preview {display:grid;gap:8px;padding-top:8px}
+.image-preview img {width:100%;height:auto;border:1px solid #455365;border-radius:4px}
+.image-preview a {color:#eed4a4;font-weight:600}
+.image-preview details summary {cursor:pointer;color:#a6b3c2}
+.results-heading h2 {overflow-wrap:anywhere}
+@media(max-width:600px){
+ .library-panel{margin:10px 0;padding:10px;gap:8px}
+ .library-main{min-width:0;width:100%;flex-basis:100%}
+ .library-panel select,.local-dialog-body input,.local-dialog-body select{font-size:16px}
+ .library-actions{padding-top:0;gap:6px}
+ .library-actions .outline-button,.library-actions .text-button{font-size:12px;padding:7px 9px;min-height:34px}
+ .storage-note summary{font-size:12px}
+ .local-dialog-body{padding:0 16px 18px}
+ .export-buttons{flex-wrap:wrap;gap:6px}
+ .results-heading{align-items:flex-start}
+}
+#browser-environment input {width:100%;min-width:0;margin:8px 0 12px;padding:9px 10px;background:#111820;color:#edf1f5;border:1px solid #455365;border-radius:5px;font:inherit;font-size:14px}
+#environment-results {padding-left:20px;font-size:14px;line-height:1.7;overflow-wrap:anywhere}
+#environment-results small {display:block;color:var(--muted,#a9b7c9);font-size:13px}
+#diagnostic-path {overflow-wrap:anywhere}
+#catalog-panel {border-top:1px solid #34404e;padding-top:8px}
+#catalog-source {width:100%;padding:9px 10px;min-width:0;margin:8px 0;background:#111820;color:#edf1f5;border:1px solid #455365;border-radius:5px;font:inherit}
+.catalog-source-options {margin-top:10px}
+#catalog-status {font-size:13px}

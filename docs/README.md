@@ -13,6 +13,13 @@
 
 ## 子项目
 
+### 抽卡手记
+
+- [用户指南](gacha-user-guide.md)：安装、登录、账号、导入导出、更新、隐私与帮助。
+- [构建与测试](gacha-development.md)：环境、根 CI、Windows artifact、Android 原生验证与签名升级。
+- [数据与配置协议](gacha-architecture.md)：架构、存储、统计、schema1 与失败回退。
+- [公共 HTTPS 运维](../xl_updata_server/docs/gacha-config-hosting.md)：IP证书、目录权限、测试/正式分离、续期与恢复。
+
 ### 更新工具
 
 - [README](../xl_updata_tool/README.md)：用户快速开始、使用流程、源码环境和构建入口。

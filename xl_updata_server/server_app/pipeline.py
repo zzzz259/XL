@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .versioning import VersionWorkspace, publish_version, read_current_pointer, write_current_pointer
-from .rerun_schedule import read_current_schedule
+from .gacha_catalog import publish_catalog, read_published_catalog
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +56,9 @@ class UpdatePipeline:
                     self._carry_forward_schedule(result.version_timestamp)
                 write_current_pointer(self.data_dir, result.version_timestamp)
                 self._sync_current_character_data(result.version_timestamp)
+                catalog_warning = self._sync_current_gacha_catalog(result.version_timestamp)
+                if catalog_warning:
+                    result = replace(result, warnings=tuple(dict.fromkeys((*result.warnings, catalog_warning))))
                 self._carry_forward_cards(result.version_timestamp)
                 if result.schedule_enabled:
                     schedule_warning = self._sync_current_schedule(result.version_timestamp)
@@ -126,6 +129,7 @@ class UpdatePipeline:
         if not (previous_schedule / "current.json").is_file():
             return
         try:
+            from .rerun_schedule import read_current_schedule
             read_current_schedule(previous_schedule)
             shutil.copytree(previous_schedule, current_schedule)
         except (FileExistsError, OSError, ValueError, KeyError, TypeError) as error:
@@ -140,6 +144,22 @@ class UpdatePipeline:
             version_timestamp,
             previous_version,
         )
+
+    def _sync_current_gacha_catalog(self, version_timestamp: int) -> str | None:
+        """Expose only validated artifacts from an already published game version."""
+        source = self.versions_dir / str(version_timestamp) / 'gacha_config'
+        if not (source / 'current.json').is_file():
+            return None
+        try:
+            catalog, _ = read_published_catalog(source)
+            if catalog['version'] != str(version_timestamp):
+                raise ValueError('catalog does not match published game version')
+            publish_catalog(catalog, self.data_dir / 'gacha_config')
+            return None
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            LOGGER.warning('stage=gacha_catalog_publish version=%s status=failed fallback=last_known_good error=%s',
+                           version_timestamp, error)
+            return f'gacha catalog publish: {error}'[:500]
 
     def _sync_current_schedule(self, version_timestamp: int) -> str | None:
         """Mirror the immutable snapshot to data/rerun_schedule for operators."""

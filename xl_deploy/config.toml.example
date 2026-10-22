@@ -12,6 +12,12 @@ repository = "/home/admin/REPLACE_WITH_REVIEWED_REPOSITORY_CHECKOUT"
 state_dir = "/home/admin/xl_deploy/state"
 releases_root = "/home/admin/xl_deploy/releases"
 current_root = "/home/admin/xl_deploy/current"
+# Retention authority is state_dir/release-storage.json (see JSON example/README).
+# Absent/corrupt authority blocks cleanup. Initialize deliberately under the
+# deployment lock, including any manual rollback/pinned release paths.
+# CLI --cleanup-releases defaults to dry run; --apply enables removal.
+# Post-success cleanup holds deployment.lock, excludes legacy releases, keeps
+# three per recorded branch and all releases younger than 24 hours.
 # Existing backend config/data are external to releases and remain in place.
 backend_config = "/home/admin/xl_updata_server/config.toml"
 backend_data = "/home/admin/xl_updata_server/data"
