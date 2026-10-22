@@ -4,8 +4,9 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from gacha_core import gacha
 from test_app import fake_token
+
+from gacha_core import gacha
 
 
 class DirectNetworkTests(unittest.TestCase):

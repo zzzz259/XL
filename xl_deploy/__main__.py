@@ -8,10 +8,9 @@ import logging
 import os
 import stat
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-
-import tomllib
 
 from xl_deploy.config import DeploymentInventory, GitHubConfig
 from xl_deploy.github import GitHubClient

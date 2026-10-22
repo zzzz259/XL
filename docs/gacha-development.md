@@ -31,6 +31,8 @@ python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --outp
 
 原生脚本编译所有实际 Java 源码与 CatalogUpdatesTest，执行纯 JVM WireTest，并输出 DEX 测试 JAR。`android.jar` 中 `org.json` 是编译 stub，不能据此声称运行验证；使用已启动的 API35 模拟器测试真实实现：
 
+原生编译保留 Java8 兼容目标，仅用 `-Xlint:-options` 过滤新版 JDK 的过时目标选项警告；Android API 弃用说明和其他编译诊断仍可见。客户端/配置生产器与部署控制器的 CI lint 固定 Ruff0.17.1、显式 `--target-version py311`，本地按相同版本/参数复现。
+
 ```sh
 adb shell mkdir -p /data/local/tmp/xl-catalog-test
 adb push /outside/repo/native-tests/catalog-tests.jar /data/local/tmp/xl-catalog-test/catalog-tests.jar

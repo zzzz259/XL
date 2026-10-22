@@ -2,6 +2,8 @@
 
 No adb or application installation is performed. Run catalog-tests.jar via
 app_process on an emulator/device; android.jar stubs cannot execute org.json.
+Only obsolete Java8 option warnings are suppressed; Android deprecation notes
+and other compiler diagnostics remain visible.
 """
 
 import argparse
@@ -36,6 +38,7 @@ def main():
             executable(jdk, "javac"),
             "--release",
             "8",
+            "-Xlint:-options",
             "-encoding",
             "UTF-8",
             "-cp",
@@ -53,6 +56,7 @@ def main():
             executable(jdk, "javac"),
             "--release",
             "8",
+            "-Xlint:-options",
             "-encoding",
             "UTF-8",
             "-d",

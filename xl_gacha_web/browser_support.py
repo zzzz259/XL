@@ -11,7 +11,7 @@ import tempfile
 import threading
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -110,7 +110,7 @@ class DiagnosticLog:
         self.lock = threading.Lock()
 
     def emit(self, event, **fields):
-        row = {"time": datetime.now(timezone.utc).isoformat(), "event": str(event)[:64]}
+        row = {"time": datetime.now(UTC).isoformat(), "event": str(event)[:64]}
         for key in (
             "browser",
             "code",

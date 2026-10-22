@@ -2,12 +2,14 @@
 
 import argparse
 import os
+import re
 import shutil
 import struct
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from urllib.parse import urljoin
 
 STATIC_FILES = (
     "app.js",
@@ -36,6 +38,15 @@ def prepare_resources(root, output):
             shutil.copyfile(root / directory / name, target / name)
 
 
+def prepare_instructions(root, output):
+    base = "https://github.com/zzzz259/XL/blob/debug/xl_gacha_web/"
+    text = (root / "README.md").read_text(encoding="utf-8")
+    text = re.sub(
+        r"\]\(([^)]+)\)", lambda match: "](" + urljoin(base, match[1]) + ")", text
+    )
+    (output / "使用说明.md").write_text(text, encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
@@ -44,7 +55,7 @@ def main():
         raise SystemExit(
             "Windows x64 required: run scripts/build_windows.ps1 or the GitHub Actions Windows job."
         )
-    if sys.version_info < (3, 11):
+    if sys.version_info < (3, 11):  # noqa: UP036 - Friendly early error for unsupported build interpreters.
         raise SystemExit("Python 3.11+ required for this build.")
     root = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
@@ -109,7 +120,7 @@ def main():
     app = output / "dist" / "StarfallGacha"
     if (app / "user-data").exists():
         raise SystemExit("Refusing to package a distribution containing user-data.")
-    shutil.copyfile(root / "README.md", app / "使用说明.md")
+    prepare_instructions(root, app)
     license_file = Path(sys.base_prefix) / "LICENSE.txt"
     if license_file.is_file():
         shutil.copyfile(license_file, app / "Python-LICENSE.txt")

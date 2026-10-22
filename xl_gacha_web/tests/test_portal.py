@@ -5,8 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import portal_login
 from test_app import fake_token
+
+import portal_login
 
 
 class CandidateTests(unittest.TestCase):

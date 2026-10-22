@@ -5,8 +5,9 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from app import WebServer
 from test_app import fake_token
+
+from app import WebServer
 
 
 class HTTPTests(unittest.TestCase):

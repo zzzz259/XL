@@ -8,7 +8,7 @@ import re
 import threading
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -387,7 +387,7 @@ class CatalogStore:
                         self.root / "previous.json", json.dumps(self.pointer).encode()
                     )
                 now = time.time()
-                saved = datetime.now(timezone.utc).isoformat()
+                saved = datetime.now(UTC).isoformat()
                 next_pointer = {
                     "manifest": m,
                     "saved_at": saved,
