@@ -21,6 +21,18 @@ def git(repo, *args):
                           cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def process_link_reader(directory, cwd, executable):
+    """Fake only proc links, leaving real dependency symlinks inspectable."""
+    original = os.readlink
+    def readlink(path, *args, **kwargs):
+        if Path(path) == directory / 'cwd':
+            return str(cwd)
+        if Path(path) == directory / 'exe':
+            return str(executable)
+        return original(path, *args, **kwargs)
+    return readlink
+
+
 @pytest.fixture
 def source(tmp_path):
     repo = tmp_path / 'source'
@@ -209,7 +221,8 @@ def test_process_legacy_cwd_protects_pythonpath_without_leaking_secrets(tmp_path
     (directory / 'maps').write_text(f'000-001 r--p 000 00:00 0 {tmp_path}/mapped.so\n')
     # os.readlink is the only OS-specific boundary: process cwd is outside release.
     from unittest.mock import patch
-    with patch('xl_deploy.release_storage.os.readlink', side_effect=[str(tmp_path), sys.executable]):
+    with patch('xl_deploy.release_storage.os.readlink',
+               side_effect=process_link_reader(directory, tmp_path, sys.executable)):
         paths = process_paths(directory)
     assert str(tmp_path) in paths
     assert any('mapped.so' in path for path in paths)
@@ -325,7 +338,8 @@ def test_alias_only_pythonpath_preserves_old_release(storage, tmp_path):
         f'API_TOKEN=secret\0PYTHONPATH={alias}{os.pathsep}{tmp_path}\0'.encode())
     (directory / 'maps').write_text('')
     def live():
-        with patch('xl_deploy.release_storage.os.readlink', side_effect=[str(tmp_path), sys.executable]):
+        with patch('xl_deploy.release_storage.os.readlink',
+                   side_effect=process_link_reader(directory, tmp_path, sys.executable)):
             return [Path(path) for path in process_paths(directory)]
     manager.live_references = live
     report = manager.cleanup(apply=True)
@@ -360,6 +374,56 @@ def test_inactive_poll_exec_alias_preserves_old_release(storage, tmp_path, monke
     report = manager.cleanup(apply=True)
     assert not report['blocked']
     assert inspected and paths[2].exists()
+    assert str(paths[2]) in report['protected']
+
+
+@pytest.mark.parametrize('access', ['direct', 'directory-alias', 'file-alias'])
+@pytest.mark.parametrize('link_kind', [
+    pytest.param('file', marks=pytest.mark.skipif(os.name == 'nt', reason='Windows lacks file-symlink privilege')),
+    'directory-container',
+])
+def test_inactive_poll_symlinked_interpreter_preserves_release(storage, tmp_path, monkeypatch, access, link_kind):
+    manager, paths, authority = storage
+    authority['pins'] = []
+    authority['rollback'] = []
+    manager.authority_path.write_text(json.dumps(authority))
+    venv_python = paths[2] / '.venvs/poll/bin/python'
+    venv_python.parent.mkdir(parents=True)
+    if link_kind == 'file':
+        external = Path(sys.executable)
+        venv_python.symlink_to(external)
+    else:
+        # Real junctions exercise the identical dependency traversal on Windows,
+        # where file symbolic links require a privilege this machine lacks.
+        external = tmp_path / 'external-system-runtime'
+        external.mkdir()
+        make_alias(venv_python, external)
+    executable = venv_python
+    if access == 'directory-alias':
+        alias = tmp_path / 'external-venv'
+        make_alias(alias, venv_python.parent)
+        executable = alias / 'python'
+    elif access == 'file-alias':
+        executable = tmp_path / 'external-python'
+        if link_kind == 'file':
+            executable.symlink_to(venv_python)
+        else:
+            make_alias(executable, venv_python)
+    assert executable.resolve() == external.resolve()
+    assert not executable.resolve().is_relative_to(paths[2])
+    original_run = subprocess.run
+    def run(args, **kwargs):
+        if args[0] != 'systemctl':
+            return original_run(args, **kwargs)
+        output = (f'LoadState=loaded\nActiveState=inactive\nMainPID=0\n'
+                  f'ExecStart={{ path={executable} ; argv[]={executable} -m xl_deploy ; }}\n'
+                  f'WorkingDirectory={tmp_path}\nEnvironment=\n')
+        return subprocess.CompletedProcess(args, 0, output, '')
+    monkeypatch.setattr(subprocess, 'run', run)
+    manager.live_references = manager._service_references
+    report = manager.cleanup(apply=True)
+    assert not report['blocked']
+    assert paths[2].exists()
     assert str(paths[2]) in report['protected']
 
 

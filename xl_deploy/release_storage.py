@@ -38,12 +38,53 @@ def _code_path(value):
         raise ValueError('code-bearing path cannot be resolved') from None
 
 
+def _dependency_paths(value, *, strict=True):
+    """Preserve lexical, intermediate-container and final dependency identities.
+
+    Venv executables commonly resolve to a base Python outside the release. A
+    parent alias or a chain of file aliases must not erase the venv container.
+    """
+    original = Path(value)
+    if not original.is_absolute():
+        raise ValueError('code-bearing path is not absolute')
+    pending, visited, references = [original], set(), {}
+    try:
+        while pending:
+            path = pending.pop()
+            if path in visited:
+                continue
+            visited.add(path)
+            if len(visited) > 64:
+                raise ValueError('code-bearing alias chain is too complex')
+            references[str(path)] = None
+            references[str(path.resolve(strict=strict))] = None
+            for ancestor in (path, *path.parents):
+                remainder = path.relative_to(ancestor)
+                # Resolve the container separately, retaining the executable's
+                # lexical location before following its final symlink.
+                references[str(ancestor.resolve(strict=strict) / remainder)] = None
+                if ancestor.is_symlink() or getattr(ancestor, 'is_junction', lambda: False)():
+                    target = ancestor.readlink()
+                    if os.name == 'nt':
+                        text = str(target)
+                        if text.startswith('\\\\?\\UNC\\'):
+                            target = Path('\\\\' + text[8:])
+                        elif text.startswith('\\\\?\\'):
+                            target = Path(text[4:])
+                    if not target.is_absolute():
+                        target = ancestor.parent / target
+                    pending.append(target / remainder)
+    except (OSError, RuntimeError):
+        raise ValueError('code-bearing path cannot be resolved') from None
+    return list(references)
+
+
 def _argument_paths(arguments):
     paths = []
     for argument in arguments:
         value = argument.partition('=')[2] if '=' in argument else argument
         if Path(value).is_absolute():
-            paths.append(str(Path(value).resolve()))
+            paths.extend(_dependency_paths(value, strict=False))
     return paths
 
 
@@ -53,14 +94,16 @@ def _environment_paths(items, cwd):
         key, _, value = item.partition('=')
         if key in {'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV'}:
             for entry in value.split(os.pathsep):
-                paths.append(_code_path(entry or cwd))
+                paths.extend(_dependency_paths(entry or cwd))
     return paths
 
 
 def process_paths(directory):
     """Return only absolute dependency paths, never raw argv or secret environment."""
-    cwd = _code_path(os.readlink(directory / 'cwd'))
-    paths = [cwd, _code_path(os.readlink(directory / 'exe'))]
+    cwd_link = os.readlink(directory / 'cwd')
+    cwd = _code_path(cwd_link)
+    paths = _dependency_paths(cwd_link)
+    paths.extend(_dependency_paths(os.readlink(directory / 'exe')))
     arguments = (directory / 'cmdline').read_bytes().decode('utf-8', errors='strict').split('\0')
     paths.extend(_argument_paths(arguments))
     selected = []
@@ -72,7 +115,7 @@ def process_paths(directory):
     for line in (directory / 'maps').read_text(encoding='utf-8').splitlines():
         fields = line.split(None, 5)
         if len(fields) == 6 and Path(fields[5]).is_absolute():
-            paths.append(str(Path(fields[5]).resolve()))
+            paths.extend(_dependency_paths(fields[5], strict=False))
     return paths
 
 
@@ -332,7 +375,7 @@ class ReleaseStorage:
                 raise RuntimeError('active unit has no inspectable process')
             cwd = values['WorkingDirectory']
             if cwd:
-                references.append(_code_path(cwd))
+                references.extend(_dependency_paths(cwd))
             command = values['ExecStart']
             # Do not guess systemd escape encodings that could hide an alias.
             if '\\x' in command:
@@ -341,7 +384,7 @@ class ReleaseStorage:
             if command and not executables:
                 raise ValueError('systemd executable paths cannot be interpreted')
             for executable in executables:
-                references.append(_code_path(executable.strip()))
+                references.extend(_dependency_paths(executable.strip()))
             for arguments in re.findall(r'argv\[\]=(.*?)\s*;', command):
                 references.extend(_argument_paths(shlex.split(arguments, posix=os.name != 'nt')))
             references.extend(_environment_paths(
