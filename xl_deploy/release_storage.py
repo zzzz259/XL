@@ -15,6 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from xl_deploy.session_supervision import process_identity, verified_supervisors
 from xl_deploy.state import DeploymentState
 
 NAME = re.compile(r'([0-9a-f]{40})(?:-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\Z')
@@ -401,11 +402,19 @@ class ReleaseStorage:
         if os.name != 'posix' or not proc.is_dir() or not self.units:
             raise RuntimeError('Linux /proc and service inventory are required')
         references = self._service_references()
+        references.extend(self._owned_process_references(proc, os.getuid()))
+        return references
+
+    def _owned_process_references(self, proc, uid):
+        references = []
+        supervisors = verified_supervisors(proc, uid)
         for directory in proc.iterdir():
             if not directory.name.isdigit():
                 continue
             try:
-                if directory.stat().st_uid != os.getuid():
+                if directory.stat().st_uid != uid:
+                    continue
+                if directory.name in supervisors and process_identity(directory) == supervisors[directory.name]:
                     continue
                 references.extend(process_paths(directory))
             except FileNotFoundError:
