@@ -1,0 +1,185 @@
+{
+  "valid": {
+    "schema_version": 1,
+    "version": "123",
+    "cards": {
+      "11": [
+        "角色",
+        5
+      ]
+    },
+    "pools": {
+      "21": "卡池"
+    },
+    "selectors": [
+      1
+    ],
+    "pool_meta": {
+      "21": {
+        "category": "limited",
+        "pity_group": "limited",
+        "featured_ids": [
+          11
+        ],
+        "featured_names": [
+          "角色"
+        ],
+        "hard_pity": 70
+      }
+    }
+  },
+  "invalid_catalogs": [
+    {
+      "schema_version": 1,
+      "version": "123",
+      "cards": {
+        "11": [
+          "角色",
+          5
+        ]
+      },
+      "pools": {
+        "21": "卡池"
+      },
+      "selectors": [
+        1
+      ],
+      "pool_meta": {
+        "21": {
+          "category": "limited",
+          "pity_group": "limited",
+          "featured_ids": [
+            11
+          ],
+          "featured_names": [
+            "角色"
+          ]
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "version": "123",
+      "cards": {
+        "11": [
+          "角色",
+          5
+        ]
+      },
+      "pools": {
+        "21": "卡池"
+      },
+      "selectors": [
+        1
+      ],
+      "pool_meta": {
+        "21": {
+          "category": "limited",
+          "pity_group": "limited",
+          "featured_ids": [
+            11,
+            11
+          ],
+          "featured_names": [
+            "角色",
+            "角色"
+          ],
+          "hard_pity": 70
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "version": "123",
+      "cards": {
+        "11": [
+          "A",
+          5
+        ]
+      },
+      "pools": {
+        "21": "卡池"
+      },
+      "selectors": [
+        1
+      ],
+      "pool_meta": {
+        "21": {
+          "category": "limited",
+          "pity_group": "limited",
+          "featured_ids": [
+            11
+          ],
+          "featured_names": [
+            "角色"
+          ],
+          "hard_pity": 70
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "version": "0",
+      "cards": {
+        "11": [
+          "角色",
+          5
+        ]
+      },
+      "pools": {
+        "21": "卡池"
+      },
+      "selectors": [
+        1
+      ],
+      "pool_meta": {
+        "21": {
+          "category": "limited",
+          "pity_group": "limited",
+          "featured_ids": [
+            11
+          ],
+          "featured_names": [
+            "角色"
+          ],
+          "hard_pity": 70
+        }
+      }
+    },
+    {
+      "schema_version": 1,
+      "version": "01",
+      "cards": {
+        "11": [
+          "角色",
+          5
+        ]
+      },
+      "pools": {
+        "21": "卡池"
+      },
+      "selectors": [
+        1
+      ],
+      "pool_meta": {
+        "21": {
+          "category": "limited",
+          "pity_group": "limited",
+          "featured_ids": [
+            11
+          ],
+          "featured_names": [
+            "角色"
+          ],
+          "hard_pity": 70
+        }
+      }
+    }
+  ],
+  "invalid_sources": [
+    "https://catalog.example/a/../current.json",
+    "https://catalog.example/%2e/current.json",
+    "https://catalog.example/a//current.json",
+    "https://catalog.example:0/current.json"
+  ]
+}

@@ -1,0 +1,51 @@
+package cn.starfall.gacha.local;
+
+import android.app.*;
+import android.content.*;
+import android.net.Uri;
+import android.os.*;
+import android.webkit.*;
+import android.widget.*;
+import org.json.*;
+import java.util.*;
+
+public class LoginActivity extends Activity {
+ static LoginActivity current;
+ final Handler handler=new Handler(Looper.getMainLooper());final ArrayList<WebView> views=new ArrayList<>();
+ LinearLayout layout;boolean accepted=false,remember=false;long deadline;
+ static final String ORIGIN="https://i.haoplay.com.cn";
+ static final String READ="(()=>{if(location.origin!=='https://i.haoplay.com.cn')return null;const v={};for(const k of ['jwt','HP_2070021','HP_2070023','lastjwt'])v[k]=localStorage.getItem(k);return JSON.stringify({provider:localStorage.getItem('provider')||'',values:v});})()";
+ @Override public void onCreate(Bundle b){super.onCreate(b);current=this;remember=getIntent().getBooleanExtra("remember",false);deadline=System.currentTimeMillis()+600000;
+  layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setBackgroundColor(0xff17212d);layout.setOnApplyWindowInsetsListener((v,i)->{v.setPadding(i.getSystemWindowInsetLeft(),i.getSystemWindowInsetTop(),i.getSystemWindowInsetRight(),i.getSystemWindowInsetBottom());return i;});setContentView(layout);
+  TextView title=new TextView(this);title.setText("官网登录 · 登录后自动查询\nhttps://i.haoplay.com.cn");title.setTextColor(0xffeed4a4);title.setPadding(16,12,16,12);layout.addView(title);
+  WebView web=createWebView();
+  Runnable load=()->{if(!isFinishing()){web.loadUrl(ORIGIN+"/?appid=2070021&l=cn");MainActivity.phase("waiting","请在官网正常完成短信或 TapTap 登录。");handler.postDelayed(poll,1000);}};
+  if(!getIntent().getBooleanExtra("reuse",false)){getSharedPreferences("login",MODE_PRIVATE).edit().clear().apply();clearRemoteSessions(load);}else load.run();
+ }
+ WebView createWebView(){WebView w=new WebView(this);views.add(w);layout.addView(w,new LinearLayout.LayoutParams(-1,0,1));
+  WebSettings s=w.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setSupportMultipleWindows(true);s.setAllowFileAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+  CookieManager.getInstance().setAcceptThirdPartyCookies(w,true);
+  w.setWebViewClient(new WebViewClient(){@Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){String scheme=r.getUrl().getScheme();if("https".equals(scheme))return false;
+   if(r.hasGesture()&&("taptap".equals(scheme)||"tap".equals(scheme))){try{startActivity(new Intent(Intent.ACTION_VIEW,r.getUrl()));}catch(Exception ignored){}}return true;}});
+  w.setWebChromeClient(new WebChromeClient(){@Override public boolean onCreateWindow(WebView v,boolean dialog,boolean gesture,android.os.Message msg){if(!gesture)return false;WebView child=createWebView();((WebView.WebViewTransport)msg.obj).setWebView(child);msg.sendToTarget();return true;}
+   @Override public void onCloseWindow(WebView v){if(views.size()>1){views.remove(v);layout.removeView(v);v.destroy();}}
+  });return w;
+ }
+ final Runnable poll=new Runnable(){public void run(){if(isFinishing()||accepted)return;if(System.currentTimeMillis()>deadline){MainActivity.phase("error","等待登录超时，请重新打开官网。");finish();return;}
+  for(WebView w:new ArrayList<>(views)){String u=w.getUrl();if(u==null)continue;Uri uri=Uri.parse(u);if(!"https".equals(uri.getScheme())||!"i.haoplay.com.cn".equals(uri.getHost())||(uri.getPort()!=-1&&uri.getPort()!=443))continue;
+   w.evaluateJavascript(READ,result->{if(accepted||isFinishing()||result==null||"null".equals(result))return;
+    try{Object decoded=new JSONTokener(result).nextValue();if(!(decoded instanceof String))return;JSONObject state=new JSONObject((String)decoded),values=state.getJSONObject("values");String provider=state.optString("provider");
+     for(String key:new String[]{"jwt","HP_2070021","HP_2070023","lastjwt"}){String raw=values.optString(key,"");if(raw.isEmpty()||raw.equals("null"))continue;
+      try{GachaClient.Credential c=GachaClient.credential(raw);if(!provider.isEmpty()&&!c.provider.equals(provider))continue;accepted=true;MainActivity.acceptCredential(c.token);finish();break;}catch(Exception ignored){}}
+    }catch(Exception ignored){}
+   });
+  }handler.postDelayed(this,1000);
+ }};
+ static void clearRemoteSessions(Runnable done){
+  WebStorage.getInstance().getOrigins(origins->{for(Object value:origins.keySet()){String origin=String.valueOf(value);if(!MainActivity.HOST.equals(Uri.parse(origin).getHost()))WebStorage.getInstance().deleteOrigin(origin);}
+   CookieManager.getInstance().removeAllCookies(ok->{CookieManager.getInstance().flush();done.run();});});
+ }
+ @Override public void onBackPressed(){if(views.size()>1){WebView last=views.remove(views.size()-1);layout.removeView(last);last.destroy();return;}finish();}
+ @Override protected void onDestroy(){handler.removeCallbacks(poll);if(!accepted&& !"cancelled".equals(MainActivity.login.optString("phase")))MainActivity.phase("cancelled","已取消官网登录。");
+  for(WebView w:views)w.destroy();views.clear();if(!remember)clearRemoteSessions(()->{});if(current==this)current=null;super.onDestroy();}
+}

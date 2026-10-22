@@ -1,0 +1,1507 @@
+{
+  "version": "134359843258232660",
+  "cards": {
+    "10000101": [
+      "菲尼斯",
+      1
+    ],
+    "10000102": [
+      "露露",
+      2
+    ],
+    "10000103": [
+      "奥菲利亚",
+      2
+    ],
+    "10000104": [
+      "尼莉莎",
+      2
+    ],
+    "10000105": [
+      "慈悲者",
+      3
+    ],
+    "10000107": [
+      "马尔可",
+      3
+    ],
+    "10000108": [
+      "瓦莱沙",
+      3
+    ],
+    "10000109": [
+      "烈风",
+      4
+    ],
+    "10000110": [
+      "罗宾",
+      4
+    ],
+    "10000111": [
+      "米哈尔",
+      4
+    ],
+    "10000113": [
+      "汐",
+      4
+    ],
+    "10000114": [
+      "狄莉丝",
+      4
+    ],
+    "10000115": [
+      "炎狼",
+      5
+    ],
+    "10000116": [
+      "薇",
+      5
+    ],
+    "10000117": [
+      "芙蕾雅",
+      5
+    ],
+    "10000118": [
+      "安妮斯",
+      1
+    ],
+    "10000119": [
+      "茉莉",
+      2
+    ],
+    "10000120": [
+      "莱娜",
+      2
+    ],
+    "10000121": [
+      "赛格丽特",
+      3
+    ],
+    "10000122": [
+      "艾米莉",
+      3
+    ],
+    "10000124": [
+      "欧培拉",
+      3
+    ],
+    "10000125": [
+      "卡莎",
+      4
+    ],
+    "10000126": [
+      "杰西卡",
+      4
+    ],
+    "10000127": [
+      "姬玛",
+      4
+    ],
+    "10000129": [
+      "颂道使",
+      4
+    ],
+    "10000130": [
+      "云雀",
+      4
+    ],
+    "10000131": [
+      "辉夜",
+      5
+    ],
+    "10000132": [
+      "白鸢",
+      5
+    ],
+    "10000133": [
+      "安伦",
+      5
+    ],
+    "10000134": [
+      "蒂娜",
+      1
+    ],
+    "10000135": [
+      "露米娅",
+      2
+    ],
+    "10000136": [
+      "苏西",
+      2
+    ],
+    "10000137": [
+      "埃玛",
+      3
+    ],
+    "10000138": [
+      "朗姆",
+      3
+    ],
+    "10000140": [
+      "赛珂",
+      3
+    ],
+    "10000141": [
+      "龙舌兰",
+      4
+    ],
+    "10000142": [
+      "莱克西",
+      4
+    ],
+    "10000143": [
+      "赦罪人",
+      4
+    ],
+    "10000145": [
+      "星云",
+      4
+    ],
+    "10000146": [
+      "岫",
+      4
+    ],
+    "10000147": [
+      "猎鹰",
+      5
+    ],
+    "10000148": [
+      "舒芙蕾",
+      5
+    ],
+    "10000149": [
+      "缇米",
+      5
+    ],
+    "10000150": [
+      "海蒂",
+      2
+    ],
+    "10000152": [
+      "艾莉亚",
+      4
+    ],
+    "10000153": [
+      "希尔",
+      2
+    ],
+    "10000154": [
+      "月蚀",
+      3
+    ],
+    "10000155": [
+      "鬼魅",
+      4
+    ],
+    "10000170": [
+      "伊涅利丝",
+      5
+    ],
+    "10000151": [
+      "莫妮卡",
+      4
+    ],
+    "10000161": [
+      "黑羽",
+      5
+    ],
+    "10000180": [
+      "鬼侍",
+      5
+    ],
+    "10000139": [
+      "弗拉克",
+      4
+    ],
+    "10000169": [
+      "阿斯特莉亚",
+      5
+    ],
+    "10000162": [
+      "灵遥",
+      5
+    ],
+    "10000182": [
+      "蕾米",
+      4
+    ],
+    "10000195": [
+      "艾瑟儿",
+      5
+    ],
+    "10000156": [
+      "罗亚",
+      5
+    ],
+    "10000159": [
+      "蒙娜",
+      4
+    ],
+    "10000173": [
+      "抚慰师",
+      5
+    ],
+    "10000198": [
+      "列蒂西雅",
+      5
+    ],
+    "10000197": [
+      "奥萨丁",
+      5
+    ],
+    "10000196": [
+      "莉娃",
+      4
+    ],
+    "10000160": [
+      "米亚姆",
+      5
+    ],
+    "10000167": [
+      "尼基塔",
+      5
+    ],
+    "10000128": [
+      "岚",
+      4
+    ],
+    "10000199": [
+      "雪拉シェラ",
+      5
+    ],
+    "10000200": [
+      "蕾姆レム",
+      5
+    ],
+    "10000164": [
+      "菲莉亚",
+      5
+    ],
+    "10000189": [
+      "埃斯特拉",
+      5
+    ],
+    "10000191": [
+      "威士忌",
+      4
+    ],
+    "10000201": [
+      "枭",
+      5
+    ],
+    "10000186": [
+      "鬼王",
+      5
+    ],
+    "10000112": [
+      "鬼姬",
+      4
+    ],
+    "10000171": [
+      "圣光使",
+      5
+    ],
+    "10000202": [
+      "蕾妮希雅",
+      5
+    ],
+    "10000203": [
+      "守护者",
+      5
+    ],
+    "10000204": [
+      "拉斯特",
+      5
+    ],
+    "10000205": [
+      "伊莎贝尔",
+      5
+    ],
+    "10000177": [
+      "渡鸦",
+      5
+    ],
+    "10000178": [
+      "夜莺",
+      4
+    ],
+    "10000206": [
+      "艾拉",
+      5
+    ],
+    "10000207": [
+      "星轨",
+      5
+    ],
+    "10000208": [
+      "风痕",
+      4
+    ],
+    "10000175": [
+      "永夜",
+      5
+    ],
+    "10000194": [
+      "霏",
+      5
+    ],
+    "10000193": [
+      "湄",
+      4
+    ],
+    "10000209": [
+      "燧影",
+      5
+    ],
+    "10000210": [
+      "安瑞丝",
+      5
+    ],
+    "10000106": [
+      "诺玛",
+      4
+    ],
+    "10000176": [
+      "玛德莲",
+      5
+    ],
+    "10000211": [
+      "谢利",
+      5
+    ],
+    "10000212": [
+      "雪莉",
+      5
+    ],
+    "10000213": [
+      "尤娜",
+      4
+    ],
+    "10000214": [
+      "朝雾",
+      5
+    ],
+    "10000215": [
+      "鎺",
+      5
+    ],
+    "10000174": [
+      "司礼者",
+      5
+    ],
+    "10000183": [
+      "云罗",
+      5
+    ],
+    "10000144": [
+      "浮光",
+      5
+    ],
+    "10000216": [
+      "艾格尼丝",
+      5
+    ],
+    "10000217": [
+      "認",
+      5
+    ],
+    "10000220": [
+      "玛琳娜",
+      5
+    ],
+    "10000219": [
+      "莉莉安",
+      5
+    ],
+    "10000218": [
+      "莎尔拉",
+      5
+    ],
+    "10000221": [
+      "阿芙佳朵",
+      5
+    ],
+    "10000222": [
+      "迷迭香",
+      5
+    ],
+    "10000223": [
+      "罗蕾娜",
+      5
+    ],
+    "10000224": [
+      "雾铃",
+      5
+    ]
+  },
+  "pools": {
+    "24000001": "启程招募",
+    "24000002": "常驻招募",
+    "24000003": "寻梦者",
+    "24000004": "离笼之鸟",
+    "24000005": "约定之弦",
+    "24000006": "勤俭的骑士",
+    "24000007": "孤傲锋芒",
+    "24000008": "典雅之姿",
+    "24000009": "灵动剑影",
+    "24000010": "无拘旅者",
+    "24000011": "长夜独行",
+    "24000012": "虔诚圣使",
+    "24000013": "往昔之约",
+    "24000014": "心之所向",
+    "24000015": "志气高扬",
+    "24000016": "狂傲之姿",
+    "24000017": "心之旅人",
+    "24000018": "寻梦者",
+    "24000019": "离笼之鸟",
+    "24000020": "约定之弦",
+    "24000021": "精灵族王女",
+    "24000022": "豹人族少女",
+    "24000023": "名门之约",
+    "24000024": "勤俭的骑士",
+    "24000025": "荒野狂徒",
+    "24000026": "孤傲锋芒",
+    "24000027": "绝代风华",
+    "24000028": "典雅之姿",
+    "24000029": "救赎之光",
+    "24000030": "灵动剑影",
+    "24000031": "焕然新生",
+    "24000032": "永夜破晓",
+    "24000033": "往昔之约",
+    "24000034": "塔中暗影",
+    "24000035": "无拘旅者",
+    "24000036": "寻根溯源",
+    "24000037": "长夜独行",
+    "24000038": "破空之箭",
+    "24000039": "虔诚圣使",
+    "24000040": "历练之路",
+    "24000041": "志气高扬",
+    "24000042": "星之轨迹",
+    "24000043": "心之所向",
+    "24000044": "破夜长枪",
+    "24000045": "狂傲之姿",
+    "24000046": "寻觅真理",
+    "24000047": "心之旅人",
+    "24000048": "长铳鸣霄",
+    "24000049": "名门之约",
+    "24000050": "自由旅者",
+    "24000051": "荒野狂徒",
+    "24000052": "求索之路",
+    "24000053": "绝代风华",
+    "24000054": "焕然新生",
+    "24000055": "永夜破晓",
+    "24000056": "往昔之约",
+    "24000057": "狂气纵横",
+    "24000058": "悲悯仁心",
+    "24000059": "救赎之光",
+    "24000060": "卓绝之剑",
+    "24000061": "塔中暗影",
+    "24000062": "极道剑豪",
+    "24000063": "寻根溯源",
+    "24000064": "循光而行",
+    "24000065": "破空之箭",
+    "24000066": "少年天骄",
+    "24000067": "历练之路",
+    "24000068": "缥缈浮光",
+    "24000069": "星之轨迹",
+    "24000070": "未知前路",
+    "24000071": "破夜长枪",
+    "24000072": "共鸣之弦",
+    "24000073": "寻觅真理",
+    "24000074": "狂气纵横",
+    "24000075": "焕然新生",
+    "24000076": "永夜破晓",
+    "24000077": "往昔之约",
+    "24000078": "命定之星",
+    "24000079": "飘逸舞者",
+    "24000080": "悠然之歌",
+    "24000081": "长铳鸣霄",
+    "24000082": "跨越山海",
+    "24000083": "自由旅者",
+    "24000084": "再会之日",
+    "24000085": "求索之路",
+    "24000086": "信念如一",
+    "24000087": "悲悯仁心",
+    "24000088": "引航者",
+    "24000089": "卓绝之剑"
+  },
+  "selectors": [
+    1,
+    2,
+    24000001,
+    24000002
+  ],
+  "pool_meta": {
+    "24000001": {
+      "category": "beginner",
+      "pity_group": "beginner",
+      "featured_ids": [],
+      "featured_names": [],
+      "hard_pity": null
+    },
+    "24000002": {
+      "category": "normal",
+      "pity_group": "normal",
+      "featured_ids": [],
+      "featured_names": [],
+      "hard_pity": 70
+    },
+    "24000003": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000116
+      ],
+      "featured_names": [
+        "薇"
+      ],
+      "hard_pity": 70
+    },
+    "24000004": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000149
+      ],
+      "featured_names": [
+        "缇米"
+      ],
+      "hard_pity": 70
+    },
+    "24000005": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000170
+      ],
+      "featured_names": [
+        "伊涅利丝"
+      ],
+      "hard_pity": 70
+    },
+    "24000006": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000161
+      ],
+      "featured_names": [
+        "黑羽"
+      ],
+      "hard_pity": 70
+    },
+    "24000007": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000180
+      ],
+      "featured_names": [
+        "鬼侍"
+      ],
+      "hard_pity": 70
+    },
+    "24000008": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000169
+      ],
+      "featured_names": [
+        "阿斯特莉亚"
+      ],
+      "hard_pity": 70
+    },
+    "24000009": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000162
+      ],
+      "featured_names": [
+        "灵遥"
+      ],
+      "hard_pity": 70
+    },
+    "24000010": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000195
+      ],
+      "featured_names": [
+        "艾瑟儿"
+      ],
+      "hard_pity": 70
+    },
+    "24000011": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000156
+      ],
+      "featured_names": [
+        "罗亚"
+      ],
+      "hard_pity": 70
+    },
+    "24000012": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000173
+      ],
+      "featured_names": [
+        "抚慰师"
+      ],
+      "hard_pity": 70
+    },
+    "24000013": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000198
+      ],
+      "featured_names": [
+        "列蒂西雅"
+      ],
+      "hard_pity": 70
+    },
+    "24000014": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000160
+      ],
+      "featured_names": [
+        "米亚姆"
+      ],
+      "hard_pity": 70
+    },
+    "24000015": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000197
+      ],
+      "featured_names": [
+        "奥萨丁"
+      ],
+      "hard_pity": 70
+    },
+    "24000016": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000167
+      ],
+      "featured_names": [
+        "尼基塔"
+      ],
+      "hard_pity": 70
+    },
+    "24000017": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000164
+      ],
+      "featured_names": [
+        "菲莉亚"
+      ],
+      "hard_pity": 70
+    },
+    "24000018": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000116
+      ],
+      "featured_names": [
+        "薇"
+      ],
+      "hard_pity": 70
+    },
+    "24000019": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000149
+      ],
+      "featured_names": [
+        "缇米"
+      ],
+      "hard_pity": 70
+    },
+    "24000020": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000170
+      ],
+      "featured_names": [
+        "伊涅利丝"
+      ],
+      "hard_pity": 70
+    },
+    "24000021": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000199
+      ],
+      "featured_names": [
+        "雪拉シェラ"
+      ],
+      "hard_pity": 70
+    },
+    "24000022": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000200
+      ],
+      "featured_names": [
+        "蕾姆レム"
+      ],
+      "hard_pity": 70
+    },
+    "24000023": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000189
+      ],
+      "featured_names": [
+        "埃斯特拉"
+      ],
+      "hard_pity": 70
+    },
+    "24000024": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000161
+      ],
+      "featured_names": [
+        "黑羽"
+      ],
+      "hard_pity": 70
+    },
+    "24000025": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000201
+      ],
+      "featured_names": [
+        "枭"
+      ],
+      "hard_pity": 70
+    },
+    "24000026": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000180
+      ],
+      "featured_names": [
+        "鬼侍"
+      ],
+      "hard_pity": 70
+    },
+    "24000027": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000186
+      ],
+      "featured_names": [
+        "鬼王"
+      ],
+      "hard_pity": 70
+    },
+    "24000028": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000169
+      ],
+      "featured_names": [
+        "阿斯特莉亚"
+      ],
+      "hard_pity": 70
+    },
+    "24000029": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000171
+      ],
+      "featured_names": [
+        "圣光使"
+      ],
+      "hard_pity": 70
+    },
+    "24000030": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000162
+      ],
+      "featured_names": [
+        "灵遥"
+      ],
+      "hard_pity": 70
+    },
+    "24000031": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000202
+      ],
+      "featured_names": [
+        "蕾妮希雅"
+      ],
+      "hard_pity": 70
+    },
+    "24000032": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000203
+      ],
+      "featured_names": [
+        "守护者"
+      ],
+      "hard_pity": 70
+    },
+    "24000033": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000198
+      ],
+      "featured_names": [
+        "列蒂西雅"
+      ],
+      "hard_pity": 70
+    },
+    "24000034": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000204
+      ],
+      "featured_names": [
+        "拉斯特"
+      ],
+      "hard_pity": 70
+    },
+    "24000035": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000195
+      ],
+      "featured_names": [
+        "艾瑟儿"
+      ],
+      "hard_pity": 70
+    },
+    "24000036": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000205
+      ],
+      "featured_names": [
+        "伊莎贝尔"
+      ],
+      "hard_pity": 70
+    },
+    "24000037": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000156
+      ],
+      "featured_names": [
+        "罗亚"
+      ],
+      "hard_pity": 70
+    },
+    "24000038": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000177
+      ],
+      "featured_names": [
+        "渡鸦"
+      ],
+      "hard_pity": 70
+    },
+    "24000039": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000173
+      ],
+      "featured_names": [
+        "抚慰师"
+      ],
+      "hard_pity": 70
+    },
+    "24000040": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000206
+      ],
+      "featured_names": [
+        "艾拉"
+      ],
+      "hard_pity": 70
+    },
+    "24000041": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000197
+      ],
+      "featured_names": [
+        "奥萨丁"
+      ],
+      "hard_pity": 70
+    },
+    "24000042": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000207
+      ],
+      "featured_names": [
+        "星轨"
+      ],
+      "hard_pity": 70
+    },
+    "24000043": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000160
+      ],
+      "featured_names": [
+        "米亚姆"
+      ],
+      "hard_pity": 70
+    },
+    "24000044": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000175
+      ],
+      "featured_names": [
+        "永夜"
+      ],
+      "hard_pity": 70
+    },
+    "24000045": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000167
+      ],
+      "featured_names": [
+        "尼基塔"
+      ],
+      "hard_pity": 70
+    },
+    "24000046": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000194
+      ],
+      "featured_names": [
+        "霏"
+      ],
+      "hard_pity": 70
+    },
+    "24000047": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000164
+      ],
+      "featured_names": [
+        "菲莉亚"
+      ],
+      "hard_pity": 70
+    },
+    "24000048": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000209
+      ],
+      "featured_names": [
+        "燧影"
+      ],
+      "hard_pity": 70
+    },
+    "24000049": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000189
+      ],
+      "featured_names": [
+        "埃斯特拉"
+      ],
+      "hard_pity": 70
+    },
+    "24000050": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000210
+      ],
+      "featured_names": [
+        "安瑞丝"
+      ],
+      "hard_pity": 70
+    },
+    "24000051": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000201
+      ],
+      "featured_names": [
+        "枭"
+      ],
+      "hard_pity": 70
+    },
+    "24000052": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000176
+      ],
+      "featured_names": [
+        "玛德莲"
+      ],
+      "hard_pity": 70
+    },
+    "24000053": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000186
+      ],
+      "featured_names": [
+        "鬼王"
+      ],
+      "hard_pity": 70
+    },
+    "24000054": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000202
+      ],
+      "featured_names": [
+        "蕾妮希雅"
+      ],
+      "hard_pity": 70
+    },
+    "24000055": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000203
+      ],
+      "featured_names": [
+        "守护者"
+      ],
+      "hard_pity": 70
+    },
+    "24000056": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000198
+      ],
+      "featured_names": [
+        "列蒂西雅"
+      ],
+      "hard_pity": 70
+    },
+    "24000057": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000211
+      ],
+      "featured_names": [
+        "谢利"
+      ],
+      "hard_pity": 70
+    },
+    "24000058": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000212
+      ],
+      "featured_names": [
+        "雪莉"
+      ],
+      "hard_pity": 70
+    },
+    "24000059": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000171
+      ],
+      "featured_names": [
+        "圣光使"
+      ],
+      "hard_pity": 70
+    },
+    "24000060": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000214
+      ],
+      "featured_names": [
+        "朝雾"
+      ],
+      "hard_pity": 70
+    },
+    "24000061": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000204
+      ],
+      "featured_names": [
+        "拉斯特"
+      ],
+      "hard_pity": 70
+    },
+    "24000062": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000215
+      ],
+      "featured_names": [
+        "鎺"
+      ],
+      "hard_pity": 70
+    },
+    "24000063": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000205
+      ],
+      "featured_names": [
+        "伊莎贝尔"
+      ],
+      "hard_pity": 70
+    },
+    "24000064": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000174
+      ],
+      "featured_names": [
+        "司礼者"
+      ],
+      "hard_pity": 70
+    },
+    "24000065": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000177
+      ],
+      "featured_names": [
+        "渡鸦"
+      ],
+      "hard_pity": 70
+    },
+    "24000066": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000183
+      ],
+      "featured_names": [
+        "云罗"
+      ],
+      "hard_pity": 70
+    },
+    "24000067": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000206
+      ],
+      "featured_names": [
+        "艾拉"
+      ],
+      "hard_pity": 70
+    },
+    "24000068": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000144
+      ],
+      "featured_names": [
+        "浮光"
+      ],
+      "hard_pity": 70
+    },
+    "24000069": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000207
+      ],
+      "featured_names": [
+        "星轨"
+      ],
+      "hard_pity": 70
+    },
+    "24000070": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000216
+      ],
+      "featured_names": [
+        "艾格尼丝"
+      ],
+      "hard_pity": 70
+    },
+    "24000071": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000175
+      ],
+      "featured_names": [
+        "永夜"
+      ],
+      "hard_pity": 70
+    },
+    "24000072": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000217
+      ],
+      "featured_names": [
+        "認"
+      ],
+      "hard_pity": 70
+    },
+    "24000073": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000194
+      ],
+      "featured_names": [
+        "霏"
+      ],
+      "hard_pity": 70
+    },
+    "24000074": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000211
+      ],
+      "featured_names": [
+        "谢利"
+      ],
+      "hard_pity": 70
+    },
+    "24000075": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000202
+      ],
+      "featured_names": [
+        "蕾妮希雅"
+      ],
+      "hard_pity": 70
+    },
+    "24000076": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000203
+      ],
+      "featured_names": [
+        "守护者"
+      ],
+      "hard_pity": 70
+    },
+    "24000077": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000198
+      ],
+      "featured_names": [
+        "列蒂西雅"
+      ],
+      "hard_pity": 70
+    },
+    "24000078": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000220
+      ],
+      "featured_names": [
+        "玛琳娜"
+      ],
+      "hard_pity": 70
+    },
+    "24000079": {
+      "category": "collection",
+      "pity_group": "collection",
+      "featured_ids": [
+        10000219
+      ],
+      "featured_names": [
+        "莉莉安"
+      ],
+      "hard_pity": 70
+    },
+    "24000080": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000218
+      ],
+      "featured_names": [
+        "莎尔拉"
+      ],
+      "hard_pity": 70
+    },
+    "24000081": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000209
+      ],
+      "featured_names": [
+        "燧影"
+      ],
+      "hard_pity": 70
+    },
+    "24000082": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000221
+      ],
+      "featured_names": [
+        "阿芙佳朵"
+      ],
+      "hard_pity": 70
+    },
+    "24000083": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000210
+      ],
+      "featured_names": [
+        "安瑞丝"
+      ],
+      "hard_pity": 70
+    },
+    "24000084": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000222
+      ],
+      "featured_names": [
+        "迷迭香"
+      ],
+      "hard_pity": 70
+    },
+    "24000085": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000176
+      ],
+      "featured_names": [
+        "玛德莲"
+      ],
+      "hard_pity": 70
+    },
+    "24000086": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000223
+      ],
+      "featured_names": [
+        "罗蕾娜"
+      ],
+      "hard_pity": 70
+    },
+    "24000087": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000212
+      ],
+      "featured_names": [
+        "雪莉"
+      ],
+      "hard_pity": 70
+    },
+    "24000088": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000224
+      ],
+      "featured_names": [
+        "雾铃"
+      ],
+      "hard_pity": 70
+    },
+    "24000089": {
+      "category": "limited",
+      "pity_group": "limited",
+      "featured_ids": [
+        10000214
+      ],
+      "featured_names": [
+        "朝雾"
+      ],
+      "hard_pity": 70
+    }
+  }
+}

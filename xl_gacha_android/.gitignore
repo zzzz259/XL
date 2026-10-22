@@ -1,0 +1,10 @@
+build/
+*.apk
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+__pycache__/
+*.pyc
+output/
