@@ -59,7 +59,7 @@ adb uninstall cn.starfall.gacha.returnqa
 
 相册/分享检查另需包含 `PASS 20 image album/share checks` 和 `INSTRUMENTATION_CODE: -1`，覆盖真实 MediaStore 落盘/字节、发布目录、原文件导出的 Downloads 路径和字节、临时 provider 读取、单图/多图意图、只读授权、非法 URI 拒绝与过期清理，测试完成前删除自己贡献的相册图片和测试文档。QA provider authority 使用独立包名，避免与正式版冲突。`--assets /outside/repo/release/assets` 可为隔离测试包加入刚构建的页面资源并启用 QA WebView 调试，供合成多页图片界面验证；正式包不启用调试。
 
-Android 15 模拟器可验证系统分享预览，不替代 QQ/微信接收端真机测试。Android 9 保存相册的权限分支需要另行验证。
+Android 15 模拟器可验证系统分享预览，不替代接收端真机测试。2026-10-23 用户确认 0.3.4 相册保存和分享在真机均正常；功能提交 a66209d7 的 CI 检查通过。接收应用/机型没有逐项枚举，Android 9 保存相册的权限分支需要另行验证。
 
 发布构建需要原签名密钥：
 
