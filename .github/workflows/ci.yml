@@ -92,6 +92,8 @@ jobs:
             python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/separate.txt').read_text(); assert 'PASS 12 isolated Android' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
             adb shell am instrument -w -e separateTask false cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration | tee "$RUNNER_TEMP/login-return/same.txt"
             python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/same.txt').read_text(); assert 'PASS 12 isolated Android' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.ImageExportIntegration | tee "$RUNNER_TEMP/login-return/images.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/images.txt').read_text(); assert 'PASS 20 image album/share checks' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
             adb uninstall cn.starfall.gacha.returnqa
 
   gacha-https-config:

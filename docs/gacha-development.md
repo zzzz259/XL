@@ -51,10 +51,15 @@ python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_
 adb install /outside/repo/login-return/login-return-qa.apk
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration
 adb shell am instrument -w -e separateTask false cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.ImageExportIntegration
 adb uninstall cn.starfall.gacha.returnqa
 ```
 
 两次输出都必须包含 `PASS 12 isolated Android` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。同任务、独立任务分别运行，CI 同样检查输出。该测试 APK 使用 Git 外临时开发签名，不能当成正式升级包。
+
+相册/分享检查另需包含 `PASS 20 image album/share checks` 和 `INSTRUMENTATION_CODE: -1`，覆盖真实 MediaStore 落盘/字节、发布目录、原文件导出的 Downloads 路径和字节、临时 provider 读取、单图/多图意图、只读授权、非法 URI 拒绝与过期清理，测试完成前删除自己贡献的相册图片和测试文档。QA provider authority 使用独立包名，避免与正式版冲突。`--assets /outside/repo/release/assets` 可为隔离测试包加入刚构建的页面资源并启用 QA WebView 调试，供合成多页图片界面验证；正式包不启用调试。
+
+Android 15 模拟器可验证系统分享预览，不替代 QQ/微信接收端真机测试。Android 9 保存相册的权限分支需要另行验证。
 
 发布构建需要原签名密钥：
 

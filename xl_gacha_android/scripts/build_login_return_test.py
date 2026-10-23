@@ -22,6 +22,9 @@ def main():
     parser.add_argument("--sdk", required=True, type=Path)
     parser.add_argument("--jdk", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--assets", type=Path, help="Optional generated assets for isolated UI QA"
+    )
     args = parser.parse_args()
     out = args.output.resolve()
     if out.is_relative_to(ROOT.parent):
@@ -60,6 +63,7 @@ def main():
             *[p for p in (ROOT / "src").rglob("*.java") if p != login],
             staged,
             ROOT / "tests/LoginReturnIntegration.java",
+            ROOT / "tests/ImageExportIntegration.java",
         ]
     )
     run(
@@ -82,15 +86,23 @@ def main():
         'package="cn.starfall.gacha.local"', 'package="cn.starfall.gacha.returnqa"'
     )
     manifest = manifest.replace(
+        'android:authorities="cn.starfall.gacha.local.images"',
+        'android:authorities="cn.starfall.gacha.returnqa.images"',
+    )
+    manifest = manifest.replace(
         'android:label="星落抽卡手记"', 'android:label="QQ回跳临时测试"'
     )
     manifest = manifest.replace('android:icon="@drawable/icon"', "")
+    if args.assets:
+        manifest = manifest.replace(
+            "<application ", '<application android:debuggable="true" '
+        )
     manifest = manifest.replace(
         'android:name=".', 'android:name="cn.starfall.gacha.local.'
     )
     manifest = manifest.replace(
         "</manifest>",
-        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
+        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.ImageExportIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
     )
     (out / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
     run(
@@ -107,6 +119,7 @@ def main():
             "28",
             "--target-sdk-version",
             "35",
+            *(["-A", args.assets] if args.assets else []),
         ]
     )
     with zipfile.ZipFile(out / "base.apk", "a", zipfile.ZIP_DEFLATED) as archive:

@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {planPages, makeZip} = require('../static/image-export.js');
+const {planPages, makeZip, deliver} = require('../static/image-export.js');
 
 test('pagination keeps newest first, each event exactly once and respects canvas limits', () => {
   const events = Array.from({length: 320}, (_, i) => ({name: `角色${i}`}));
@@ -25,4 +25,23 @@ test('zip stores independent PNG bytes with readable UTF-8 filenames', async () 
   assert.equal(new TextDecoder().decode(buffer.slice(30, 30 + length)), '抽卡-01.png');
   assert.deepEqual([...buffer.slice(30 + length, 34 + length)], [1,2,3,4]);
   assert.equal(view.getUint32(buffer.length - 22, true), 0x06054b50);
+});
+
+test('sharing selected pages preserves page order and never saves an album copy', async () => {
+  const files=[{name:'01.png'},{name:'02.png'},{name:'03.png'}],calls=[];
+  const bridge={saveImage:async()=>assert.fail('share must not save'),shareImages:async images=>{calls.push(images.map(v=>v.name));}};
+  const result=await deliver(files,new Set([2,0]),'share',bridge);
+  assert.deepEqual(calls,[['01.png','03.png']]);
+  assert.deepEqual(result,{opened:true,count:2});
+});
+
+test('album batch stops on failure and reports only completed pages', async () => {
+  const calls=[],progress=[];
+  const bridge={saveImage:async file=>{calls.push(file.name);if(file.name==='02.png')throw new Error('STORAGE_PERMISSION_DENIED');}};
+  await assert.rejects(deliver([{name:'01.png'},{name:'02.png'},{name:'03.png'}],new Set([0,1,2]),'album',bridge,n=>progress.push(n)),e=>e.message==='STORAGE_PERMISSION_DENIED'&&e.completed===1);
+  assert.deepEqual(calls,['01.png','02.png']);assert.deepEqual(progress,[1]);
+});
+
+test('empty selection does not open a share sheet or save a file', async () => {
+  await assert.rejects(deliver([{name:'01.png'}],new Set(),'share',{shareImages:async()=>assert.fail()}),/请先选择/);
 });

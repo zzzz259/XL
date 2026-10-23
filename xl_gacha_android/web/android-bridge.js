@@ -2,7 +2,12 @@
 (() => {
  const originalFetch=window.fetch.bind(window),pending=new Map();let serial=0;
  function native(action,payload={}){return new Promise((resolve,reject)=>{const id=String(++serial);pending.set(id,{resolve,reject});AndroidHost.request(id,action,JSON.stringify(payload));});}
- window.AndroidBridge={receive(id,status,value){const p=pending.get(id);if(!p)return;pending.delete(id);if(status>=400)p.reject(new Error(value.error||'QUERY_FAILED'));else p.resolve(value);}};
+ window.AndroidBridge={receive(id,status,value){const p=pending.get(id);if(!p)return;pending.delete(id);if(status>=400)p.reject(new Error(value.error||'QUERY_FAILED'));else p.resolve(value);},
+  async saveImage(file){return native('imageAlbum',{name:file.name,data:await imageData(file.blob)});},
+  async shareImages(files){const images=[];for(const file of files){const v=await native('imageStage',{data:await imageData(file.blob)});images.push(v.image);}return native('imageShare',{images});}
+ };
+ async function imageData(blob){if(blob.size>8*1024*1024)throw new Error('IMAGE_INVALID');return base64(blob);}
+ function base64(blob){return new Promise((resolve,reject)=>{const f=new FileReader();f.onload=()=>resolve(String(f.result).split(',')[1]);f.onerror=()=>reject(new Error('FILE_READ_FAILED'));f.readAsDataURL(blob);});}
  let database;
  function db(){return database||(database=new Promise((resolve,reject)=>{const q=indexedDB.open('starfall-local-archives',1);q.onupgradeneeded=()=>{q.result.createObjectStore('accounts',{keyPath:'id'});q.result.createObjectStore('settings');};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(new Error('LOCAL_STORAGE_ERROR'));}));}
  async function all(){const d=await db();const rows=await new Promise((resolve,reject)=>{const q=d.transaction('accounts').objectStore('accounts').getAll();q.onsuccess=()=>resolve(q.result.map(v=>v.report));q.onerror=()=>reject(new Error('LOCAL_STORAGE_ERROR'));});
@@ -73,7 +78,7 @@
  };
  async function exportBlob(a){
   const response=await originalFetch(a.href),blob=await response.blob();
-  const data=await new Promise((resolve,reject)=>{const f=new FileReader();f.onload=()=>resolve(String(f.result).split(',')[1]);f.onerror=reject;f.readAsDataURL(blob);});
+  const data=await base64(blob);
   const result=await native('save',{name:a.download||'星落记录',mime:blob.type||'application/octet-stream',data});
   if(result.saved&&typeof status==='function')status('文件已保存到所选位置。');
  }

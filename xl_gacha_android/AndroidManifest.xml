@@ -1,7 +1,9 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.starfall.gacha.local" android:versionCode="7" android:versionName="0.3.3">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.starfall.gacha.local" android:versionCode="8" android:versionName="0.3.4">
  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
  <uses-permission android:name="android.permission.INTERNET" />
+ <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
  <application android:label="星落抽卡手记" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="false" android:icon="@drawable/icon">
+  <provider android:name=".ImageShareProvider" android:authorities="cn.starfall.gacha.local.images" android:exported="false" android:grantUriPermissions="true" />
   <activity android:name=".LoginReturnActivity" android:label="抽卡手记·继续QQ授权" android:exported="true" android:noHistory="true">
    <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="text/plain"/></intent-filter>
   </activity>
