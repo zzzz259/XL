@@ -1,0 +1,13 @@
+{
+  "provenance": "STATIC_CONFIRMED: protocol-extract.proto and rpc-evidence.json, extracted from version 134359843258232660 client Proto.lua; not a live server capture",
+  "rpc": {
+    "guild_war": {"metadata": 2301, "rank": 2307, "rank_ext": 10033},
+    "illusion": {"metadata": 2001, "rank": 2002},
+    "nightmare": {"metadata": 3001, "rank": 3004}
+  },
+  "initial_index": {"illusion": 1, "nightmare": 0},
+  "illusion_index_evidence": "134359843258232660/RaidBossPlayerRankWindow.lua:116 RequireRankInfo(1); :47 RequireRankInfo(rank), parent reverified in original ZIP",
+  "fixed_boss_rank_actor_hex": "0801103c220141280232014738014003",
+  "fixed_world_boss_rank_hex": "0801103c1a0141280130033a0147",
+  "fixed_guild_rank_hex": "0801100c22014728013003"
+}
