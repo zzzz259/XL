@@ -197,16 +197,16 @@ def allowed_gateway(host, port):
     )
 
 
-def gateway_connection(host, port):
+def gateway_connection(host, port, *, timeout=12):
     if not allowed_gateway(host, port):
         raise GachaError("GATEWAY_NOT_ALLOWED")
     try:
-        return socket.create_connection((host, port), timeout=12)
+        return socket.create_connection((host, port), timeout=timeout)
     except OSError:
         raise GachaError("GATEWAY_NETWORK_ERROR") from None
 
 
-def authenticate(credentials):
+def authenticate(credentials, *, timeout=15):
     payload = {
         "openId": credentials.open_id,
         "token": credentials.token,
@@ -224,7 +224,7 @@ def authenticate(credentials):
     # Explicitly disable environment and Windows system HTTP proxy discovery.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with opener.open(request, timeout=15) as reply:
+        with opener.open(request, timeout=timeout) as reply:
             raw = reply.read(65537)
         if len(raw) > 65536:
             raise GachaError("AUTH_RESPONSE_TOO_LARGE")
