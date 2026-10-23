@@ -67,6 +67,8 @@ jobs:
           python -B -m unittest discover -s tests -p 'test_*.py' -v
       - name: Compile all native sources, execute WireTest and prepare real JSON tests
         run: python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output "$RUNNER_TEMP/native"
+      - name: Build isolated QQ share/session regression APK
+        run: python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output "$RUNNER_TEMP/login-return"
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -84,6 +86,13 @@ jobs:
             adb push "$GITHUB_WORKSPACE/xl_gacha_web/tests/fixtures/catalog-contract.json" /data/local/tmp/xl-catalog-ci/contract.json
             adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.CatalogUpdatesTest /data/local/tmp/xl-catalog-ci/state /data/local/tmp/xl-catalog-ci/contract.json'
             adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.LoginLinksTest'
+            adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.LoginReturnTest'
+            adb install "$RUNNER_TEMP/login-return/login-return-qa.apk"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration | tee "$RUNNER_TEMP/login-return/separate.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/separate.txt').read_text(); assert 'PASS 12 isolated Android' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w -e separateTask false cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration | tee "$RUNNER_TEMP/login-return/same.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/same.txt').read_text(); assert 'PASS 12 isolated Android' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb uninstall cn.starfall.gacha.returnqa
 
   gacha-https-config:
     if: github.event_name != 'pull_request_target'

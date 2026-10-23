@@ -14,7 +14,7 @@ node --test tests/image-export.test.cjs
 python -B scripts/build_portable.py --output E:/builds/starfall-windows
 ```
 
-`scripts/build_windows.ps1` 可创建项目 `.venv` 并安装构建依赖；包管理器网络遵守本机代理策略。脚本要求 Node 验证通过才打包。资源使用明确清单，`data` 只包括图标、catalog、空默认更新源；不会递归打包个人 data 文件。
+`scripts/build_windows.ps1` 可创建项目 `.venv` 并安装构建依赖；包管理器网络遵守本机代理策略。脚本要求 Node 验证通过才打包。资源使用明确清单，`data` 只包括图标、catalog、内置正式更新源；不会递归打包个人 data 文件。
 
 根目录 Actions → **Build Windows portable app** → Run workflow，选择已审查分支，下载 `StarfallGacha-Windows-x64`。根 `.github/workflows/gacha-windows-portable.yml` 是实际入口；子目录 workflow 不会生效。手动流程仅产生构建 artifact，不自动发布 Release。主 `XL CI` 覆盖 Python/JS 测试与共享契约。
 
@@ -38,9 +38,23 @@ adb shell mkdir -p /data/local/tmp/xl-catalog-test
 adb push /outside/repo/native-tests/catalog-tests.jar /data/local/tmp/xl-catalog-test/catalog-tests.jar
 adb push ../xl_gacha_web/tests/fixtures/catalog-contract.json /data/local/tmp/xl-catalog-test/contract.json
 adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-test/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.CatalogUpdatesTest /data/local/tmp/xl-catalog-test/state /data/local/tmp/xl-catalog-test/contract.json'
+adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-test/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.LoginLinksTest'
+adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-test/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.LoginReturnTest'
 ```
 
 该测试不安装 APK、不读取已安装应用账号数据，不做真实登录。命令退出码必须为零。`XL CI` 使用同样原生编译、WireTest、JS 与 Android emulator 检查；首次本机开发可只编译，但须明确尚未运行 Android JSON。
+
+QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
+
+```sh
+python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/login-return
+adb install /outside/repo/login-return/login-return-qa.apk
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration
+adb shell am instrument -w -e separateTask false cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration
+adb uninstall cn.starfall.gacha.returnqa
+```
+
+两次输出都必须包含 `PASS 12 isolated Android` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。同任务、独立任务分别运行，CI 同样检查输出。该测试 APK 使用 Git 外临时开发签名，不能当成正式升级包。
 
 发布构建需要原签名密钥：
 
@@ -53,6 +67,6 @@ python -B build.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/re
 
 ## 服务端与发布门禁
 
-在 `xl_updata_server` 项目环境运行 `python -m pytest -q`；Linux 必须包含 public JSON 的 0644/私有 umask 回归。配置生产器 CLI 和静态服务说明见 HTTPS 文档。测试来源需手动设置 test 地址，默认生产来源为空。所有共享负例在 `xl_gacha_web/tests/fixtures/catalog-contract.json`，由 Python 客户端、producer、Android 实际 JSON 共同执行。
+在 `xl_updata_server` 项目环境运行 `python -m pytest -q`；Linux 必须包含 public JSON 的 0644/私有 umask 回归。配置生产器 CLI 和静态服务说明见 HTTPS 文档。客户端默认正式来源为 `https://8.134.186.234/gacha-config/current.json`；测试来源需明确设置 test 地址。所有共享负例在 `xl_gacha_web/tests/fixtures/catalog-contract.json`，由 Python 客户端、producer、Android 实际 JSON 共同执行。
 
-仓库按 debug → test → main 晋级；CI 通过不等于已部署。服务端稀疏发布、存储保留、回滚与锁见 [xl_deploy 运维](../xl_deploy/README.md)。不要为了引导配置而运行完整游戏 CDN 抓取；先验证独立配置快照再由运营者明确种入 test。Android 完整短信/TapTap 查询仍待真机，编译/协议测试不能替代它。
+仓库按 debug → test → main 晋级；CI 通过不等于已部署。服务端稀疏发布、存储保留、回滚与锁见 [xl_deploy 运维](../xl_deploy/README.md)。不要为了引导配置而运行完整游戏 CDN 抓取；先验证独立配置快照再由运营者明确种入 test。Android 第二个真实账号查询已由用户确认；QQ 授权后的浏览器分享回工具链路仍待真机，编译/协议测试不能替代它。
