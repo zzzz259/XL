@@ -22,6 +22,7 @@ public class MainActivity extends Activity {
  static boolean remember=false;
  static String session="";
  WebView web;ValueCallback<Uri[]> picker;byte[] exportBytes;String exportRequest;
+ byte[] albumBytes;String albumName,albumRequest;
  static JSONObject object(Object... kv){JSONObject j=new JSONObject();try{for(int i=0;i<kv.length;i+=2)j.put((String)kv[i],kv[i+1]);}catch(JSONException ignored){}return j;}
  static synchronized void phase(String name,String message){login=object("phase",name,"message",message,"id",session);}
  static synchronized JSONObject loginStatus(Context c)throws Exception{
@@ -31,6 +32,7 @@ public class MainActivity extends Activity {
   return out.put("profiles",profiles);
  }
  @Override public void onCreate(Bundle b){super.onCreate(b);current=this;getWindow().setStatusBarColor(0xff111820);getWindow().setNavigationBarColor(0xff111820);
+  IO.execute(()->ImageExports.cleanup(getApplicationContext()));
   try{if(updates==null){JSONObject base=new JSONObject(new String(GachaClient.bounded(getAssets().open("catalog.json"),4*1024*1024),StandardCharsets.UTF_8));
     JSONObject source=new JSONObject(new String(GachaClient.bounded(getAssets().open("update-source.json"),16384),StandardCharsets.UTF_8));
     updates=new CatalogUpdates(new File(getFilesDir(),"catalog-cache"),base,source.optString("url",""));}updates.start(false);
@@ -77,9 +79,21 @@ public class MainActivity extends Activity {
       boolean reuse=remember&&!body.optString("profile","").isEmpty();runOnUiThread(()->startActivity(new Intent(MainActivity.this,LoginActivity.class).putExtra("reuse",reuse).putExtra("remember",remember)));result=loginStatus(MainActivity.this);break;
      case "loginCancel":synchronized(MainActivity.class){if("querying".equals(login.optString("phase")))throw GachaClient.error("PORTAL_QUERY_IN_PROGRESS");phase("cancelled","已取消登录。");}runOnUiThread(()->{if(LoginActivity.current!=null)LoginActivity.current.finish();});result=loginStatus(MainActivity.this);break;
      case "loginForget":getSharedPreferences("login",MODE_PRIVATE).edit().clear().apply();runOnUiThread(()->LoginActivity.clearRemoteSessions(()->{}));result=object("deleted",true);break;
+     case "imageStage":result=object("image",ImageExports.stage(MainActivity.this,Base64.decode(body.getString("data"),Base64.DEFAULT)).getLastPathSegment());break;
+     case "imageShare":{
+      JSONArray list=body.getJSONArray("images");ArrayList<String> ids=new ArrayList<>();for(int i=0;i<list.length();i++)ids.add(list.getString(i));Intent intent=ImageExports.shareIntent(MainActivity.this,ids);
+      runOnUiThread(()->{try{startActivity(Intent.createChooser(intent,"分享抽卡记录"));reply(id,200,object("opened",true));}catch(Exception e){reply(id,400,object("error","IMAGE_SHARE_FAILED"));}});return;
+     }
+     case "imageAlbum":{
+      byte[] png=Base64.decode(body.getString("data"),Base64.DEFAULT);ImageExports.validate(png);String name=body.optString("name","星落抽卡记录.png");
+      if(android.os.Build.VERSION.SDK_INT<29&&checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+       runOnUiThread(()->{if(albumRequest!=null){reply(id,409,object("error","SAVE_IN_PROGRESS"));return;}albumBytes=png;albumName=name;albumRequest=id;requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE},103);});
+      }else saveAlbum(id,png,name);return;
+     }
      case "save":
       if(body.getString("data").length()>45*1024*1024)throw GachaClient.error("INPUT_TOO_LARGE");byte[] bytes=Base64.decode(body.getString("data"),Base64.DEFAULT);
       String name=body.optString("name","星落记录").replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]","_");String mime=body.optString("mime","application/octet-stream").split(";")[0];
+      if(android.os.Build.VERSION.SDK_INT>=29){try{Exports.saveDownloads(getApplicationContext(),bytes,name,mime);reply(id,200,object("saved",true));runOnUiThread(()->Toast.makeText(MainActivity.this,"已保存到 下载/Starfall",Toast.LENGTH_LONG).show());}catch(Exception e){reply(id,400,object("error","FILE_SAVE_FAILED"));}return;}
       runOnUiThread(()->{if(exportBytes!=null){reply(id,409,object("error","SAVE_IN_PROGRESS"));return;}exportBytes=bytes;exportRequest=id;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE,name);try{startActivityForResult(i,102);}catch(Exception e){exportBytes=null;exportRequest=null;reply(id,400,object("error","FILE_SAVE_FAILED"));}});return;
      default:throw GachaClient.error("NOT_FOUND");
     }
@@ -87,6 +101,8 @@ public class MainActivity extends Activity {
    }catch(Exception e){String code=e.getMessage();if(code==null||!code.matches("[A-Z_0-9]{1,70}"))code="QUERY_FAILED";reply(id,400,object("error",code));}});
   }
  }
+ void saveAlbum(String id,byte[] png,String name){IO.execute(()->{try{ImageExports.saveGallery(this,png,name);reply(id,200,object("saved",true,"location","相册/星落抽卡手记"));}catch(Exception e){reply(id,400,object("error","FILE_SAVE_FAILED"));}});}
+ @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] granted){super.onRequestPermissionsResult(request,permissions,granted);if(request==103){String id=albumRequest;byte[] png=albumBytes;String name=albumName;albumRequest=null;albumBytes=null;albumName=null;if(id==null)return;if(granted.length>0&&granted[0]==android.content.pm.PackageManager.PERMISSION_GRANTED)saveAlbum(id,png,name);else reply(id,400,object("error","STORAGE_PERMISSION_DENIED"));}}
  static void acceptCredential(String token){MainActivity a=current;if(a==null)return;phase("querying","已获取官网状态，正在查询抽卡记录…");
   IO.execute(()->{try{JSONObject result=GachaClient.query(a.getApplicationContext(),token);
    synchronized(MainActivity.class){login=object("phase","done","message","查询完成，正在保存到本机。","id",session,"raw",result);}
@@ -99,6 +115,6 @@ public class MainActivity extends Activity {
    if(result==RESULT_OK&&data!=null&&data.getData()!=null&&bytes!=null){Uri target=data.getData();IO.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(target)){if(out==null)throw new IOException();out.write(bytes);reply(id,200,object("saved",true));runOnUiThread(()->Toast.makeText(this,"文件已保存",Toast.LENGTH_SHORT).show());}catch(Exception e){reply(id,400,object("error","FILE_SAVE_FAILED"));}});}
    else reply(id,200,object("cancelled",true));}
  }
- @Override public void onBackPressed(){web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){d.close();return true;}return false;})()",value->{if(!"true".equals(value))super.onBackPressed();});}
- @Override protected void onDestroy(){if(current==this)current=null;if(web!=null){web.removeJavascriptInterface("AndroidHost");web.destroy();web=null;}super.onDestroy();}
+ @Override public void onBackPressed(){web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){if(d.dataset.busy!=='true')d.close();return true;}return false;})()",value->{if(!"true".equals(value))super.onBackPressed();});}
+ @Override protected void onDestroy(){if(current==this)current=null;albumBytes=null;albumRequest=null;albumName=null;if(web!=null){web.removeJavascriptInterface("AndroidHost");web.destroy();web=null;}super.onDestroy();}
 }

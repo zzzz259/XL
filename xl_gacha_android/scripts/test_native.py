@@ -47,6 +47,8 @@ def main():
             classes,
             *sorted((ROOT / "src").rglob("*.java")),
             ROOT / "tests/CatalogUpdatesTest.java",
+            ROOT / "tests/LoginLinksTest.java",
+            ROOT / "tests/LoginReturnTest.java",
         ]
     )
     wire = out / "wire"

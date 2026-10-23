@@ -85,11 +85,14 @@ class HTTPTests(unittest.TestCase):
                 time.sleep(0.02)
         self.assertEqual(len(json.loads(body)["checks"]), 5)
 
-    def test_catalog_source_requires_same_origin_and_remains_offline_without_source(
+    def test_catalog_default_source_origin_guard_and_explicit_offline_mode(
         self,
     ):
         status, _, body = self.request("GET", "/api/catalog")
         self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["source"].endswith("/gacha-config/current.json"))
+        self.server.catalog_store.set_source("")
+        status, _, body = self.request("GET", "/api/catalog")
         self.assertEqual(json.loads(body)["phase"], "unconfigured")
         self.assertEqual(
             self.request(

@@ -33,6 +33,13 @@
 .image-preview img {width:100%;height:auto;border:1px solid #455365;border-radius:4px}
 .image-preview a {color:#eed4a4;font-weight:600}
 .image-preview details summary {cursor:pointer;color:#a6b3c2}
+.image-actions {display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.image-actions button {min-height:42px;padding:8px 12px;font-size:14px}
+.image-actions .primary-button {width:auto;flex:1 1 140px;text-align:center}
+.image-choice {display:flex;align-items:center;gap:8px}
+.image-choice input[type=checkbox] {width:22px;min-height:22px;flex:0 0 22px;margin:0;accent-color:#d3b479}
+.image-help,.image-actions span {font-size:13px;color:#aebdcd}
+.mobile-images #image-zip {justify-self:start;min-height:36px;padding:7px 10px;font-size:13px}
 .results-heading h2 {overflow-wrap:anywhere}
 @media(max-width:600px){
  .library-panel{margin:10px 0;padding:10px;gap:8px}

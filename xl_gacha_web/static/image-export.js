@@ -108,12 +108,25 @@ const LongImage = (() => {
     return canvas;
   }
 
-  return {planPages, makeZip, draw};
+  async function deliver(files, selected, action, bridge, progress=()=>{}) {
+    const chosen=files.filter((file,i)=>selected.has(i));
+    if(!chosen.length)throw new Error('请先选择要操作的图片。');
+    if(action==='share'){await bridge.shareImages(chosen);return {opened:true,count:chosen.length};}
+    if(action!=='album')throw new Error('不支持的图片操作。');
+    let completed=0;
+    try {for(const file of chosen){await bridge.saveImage(file);progress(++completed);}}
+    catch(error){error.completed=completed;throw error;}
+    return {saved:true,count:completed};
+  }
+  return {planPages, makeZip, draw, deliver};
 })();
 
 if (typeof module !== 'undefined') module.exports = LongImage;
 if (typeof document !== 'undefined') {
-  let urls = [], generating = false;
+  let urls = [], generating = false, delivering=false;
+  const mobile=Boolean(window.AndroidBridge?.saveImage);
+  if(mobile){$('image-zip').className='outline-button';$('image-zip').textContent='导出全部图片 ZIP';$('image-dialog').classList.add('mobile-images');}
+  $('image-dialog').addEventListener('cancel',e=>{if(delivering)e.preventDefault();});
   $('image-close').addEventListener('click', () => $('image-dialog').close());
   $('image-dialog').addEventListener('close', () => {for(const url of urls) URL.revokeObjectURL(url); urls=[]; $('image-previews').replaceChildren();});
   $('export-image').addEventListener('click', async () => {
@@ -123,7 +136,26 @@ if (typeof document !== 'undefined') {
     $('image-status').textContent = '正在本机生成图片…'; $('image-dialog').showModal();
     try {
       await document.fonts.ready;
-      const pages = LongImage.planPages(report, category), files=[];
+      const pages = LongImage.planPages(report, category), files=[],selected=new Set(),controls=[];
+      const selectionText=node('span',''),toolbar=node('div',undefined,'image-actions');
+      const updateSelection=()=>{selectionText.textContent=`已选 ${selected.size}/${files.length} 张`;};
+      async function perform(action,indices=selected){
+        if(delivering||generating)return;delivering=true;$('image-close').disabled=true;$('image-dialog').dataset.busy='true';
+        for(const c of controls)c.disabled=true;
+        $('image-status').textContent=action==='share'?'正在准备分享图片…':'正在保存到相册…';
+        try {
+          const result=await LongImage.deliver(files,new Set(indices),action,window.AndroidBridge,n=>{$('image-status').textContent=`已保存 ${n} 张到相册…`;});
+          $('image-status').textContent=result.opened?'已打开系统分享，请选择应用并确认发送。':`已保存 ${result.count} 张到相册「星落抽卡手记」。`;
+        }catch(error){
+          const messages={STORAGE_PERMISSION_DENIED:'未获得保存图片权限。允许后可重试，或直接分享。',IMAGE_SHARE_TOO_LARGE:'图片较多，请减少选择后分批分享。',IMAGE_SHARE_FAILED:'无法打开分享面板，请重试。',IMAGE_INVALID:'图片过大或格式异常，请选择较少的记录重新生成。',FILE_SAVE_FAILED:'保存到相册失败，请检查剩余空间后重试。'};
+          $('image-status').textContent=(error.completed?`已保存 ${error.completed} 张，后续保存中止。`:'')+(messages[error.message]||error.message||'图片操作失败，请重试。');
+        }finally{delivering=false;$('image-close').disabled=false;delete $('image-dialog').dataset.busy;for(const c of controls)c.disabled=false;}
+      }
+      function button(text,handler,primary=false){const b=node('button',text,primary?'primary-button':'outline-button');b.type='button';b.disabled=true;b.addEventListener('click',handler);controls.push(b);return b;}
+      if(mobile){
+        toolbar.append(button('全选',()=>{for(let i=0;i<files.length;i++)selected.add(i);for(const c of $('image-previews').querySelectorAll('input[type=checkbox]'))c.checked=true;updateSelection();}),button('取消选择',()=>{selected.clear();for(const c of $('image-previews').querySelectorAll('input[type=checkbox]'))c.checked=false;updateSelection();}),selectionText,button('保存所选到相册',()=>perform('album'),true),button('分享所选',()=>perform('share'),true));
+        $('image-previews').append(toolbar,node('p','分享只使用临时图片，不会额外保存到相册。多图数量和画质由接收应用决定。','image-help'));
+      }
       const base = `星落-${(report.account?.label || '招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;
       for (let i=0;i<pages.length;i++) {
         if (!$('image-dialog').open) break;
@@ -136,7 +168,13 @@ if (typeof document !== 'undefined') {
         const name=`${base}-${String(i+1).padStart(2,'0')}.png`; files.push({name,blob});
         const item=node('div',undefined,'image-preview'), link=node('a',`下载第 ${i+1} 张 PNG（1080 × ${pages[i].height}）`);
         link.href=url; link.download=name; const details=node('details'), img=document.createElement('img');
-        img.src=url; img.alt=`抽卡记录长图 ${i+1}`; details.append(node('summary','展开图片预览'),img); item.append(link,details); $('image-previews').append(item);
+        img.src=url; img.alt=`抽卡记录长图 ${i+1}`; details.append(node('summary','展开图片预览'),img);
+        if(mobile){
+          selected.add(i);const choose=document.createElement('input');choose.type='checkbox';choose.checked=true;choose.setAttribute('aria-label',`选择第 ${i+1} 张图片`);choose.addEventListener('change',()=>{choose.checked?selected.add(i):selected.delete(i);updateSelection();});controls.push(choose);
+          const label=node('label',undefined,'image-choice');label.append(choose,document.createTextNode(`第 ${i+1} 张 · 1080 × ${pages[i].height}`));
+          const actions=node('div',undefined,'image-actions');actions.append(button('保存到相册',()=>perform('album',[i])),button('分享',()=>perform('share',[i])));item.append(label,actions,details);updateSelection();
+        }else item.append(link,details);
+        $('image-previews').append(item);
         $('image-status').textContent=`已生成 ${i+1}/${pages.length} 张图片。`;
         await new Promise(resolve => requestAnimationFrame(resolve));
       }
@@ -150,6 +188,6 @@ if (typeof document !== 'undefined') {
         };
       }
     } catch(error) {$('image-status').textContent=error.message || '图片生成失败。';}
-    finally {generating=false;}
+    finally {generating=false;for(const b of $('image-previews').querySelectorAll('button'))b.disabled=false;}
   });
 }

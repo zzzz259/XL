@@ -10,6 +10,14 @@ Android：内置本地域名 UI → 受约束的原生桥 → GachaClient/Wire�
 
 记录身份由官方验证的 UID/渠道组成，去重根据原始记录 ID/卡池/序号与内容。JSON 保留原始 item_id、pool_id、数量、时间及账号身份；CSV 旧格式无唯一身份时保守处理。配置更新按一份快照重映射原始 ID，保持记录数量/时间；保存的 catalog 指纹变化才触发重算。
 
+## Android 长图保存与分享
+
+共享 `image-export.js` 在内存中生成 PNG，安卓桥提供 `imageAlbum`、`imageStage`、`imageShare` 三个操作。保存到相册与分享独立：前者 Android 10+ 写入本应用贡献的 MediaStore.Images，目录 Pictures/星落抽卡手记，IS_PENDING 完成后发布，失败撤销本次条目；Android 9 按需申请 WRITE_EXTERNAL_STORAGE，仅该系统版本声明权限，写入 Pictures 后触发媒体扫描。JSON/CSV/ZIP 沿用 Downloads/文件选择器。
+
+分享每张 PNG 分别写入内部 cache/shared-images，返回不含账号信息的 UUID 文件 ID。ImageShareProvider 不导出，只允许临时 URI 授权，只读打开精确 UUID PNG，禁止枚举、目录穿越、query/fragment、写入或任意文件路径；存档、配置、登录目录不在提供范围。单图 ACTION_SEND，多图 ACTION_SEND_MULTIPLE，EXTRA_STREAM 和 ClipData 按所选页顺序携带 content URI，仅授予读取权限。
+
+PNG 每张最多 8 MiB，并校验格式、尺寸和像素上限；一次最多 100 张，临时缓存总量最多 128 MiB。启动/准备分享时清理超过 24 小时的文件，不会在分享面板打开后立即删除图片。取消分享不创建相册副本；打开选择器只回报 opened，不声称发送成功。批量相册保存逐张完成，失败停止并报告已保存数量，不回滚此前成功保存的图片。
+
 ## 统计
 
 `analysis.py` 与 `mobile-engine.js` 保持普通、限定、典藏、启程和未知分类一致。保底组来自 catalog 的 `pity_group`，跨池继承只在同组连续历史成立；未知不伪造 UP。平均抽数=可见分类总抽数/五星数；首个五星与断档为下界；序号 80→1 连续。具体用户边界见使用指南，不将可见历史推断当成官方实时状态。
