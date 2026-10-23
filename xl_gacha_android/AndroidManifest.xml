@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.starfall.gacha.local" android:versionCode="4" android:versionName="0.3.0">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.starfall.gacha.local" android:versionCode="6" android:versionName="0.3.2">
  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
  <uses-permission android:name="android.permission.INTERNET" />
  <application android:label="星落抽卡手记" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="false" android:icon="@drawable/icon">

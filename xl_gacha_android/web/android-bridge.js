@@ -88,6 +88,8 @@
   const guide=document.querySelector('.guide-card');if(guide)guide.hidden=true;
   const query=document.querySelector('.query-layout');if(query)query.style.gridTemplateColumns='1fr';
   const p=document.querySelector('.portal-login>.field-help');if(p)p.textContent='在独立的官方登录页面正常登录后自动查询。默认清理官网会话；开启记住登录仅保留最近一次官网登录状态。';
+  const start=document.querySelector('#portal-start');
+  if(start){const other=document.createElement('button');other.type='button';other.className='outline-button';other.textContent='登录其他账号';other.onclick=()=>{if(start.disabled)return;document.querySelector('#login-profile').value='';start.click();};start.after(other);}
   window.mobileReady=true;
  });
 })();

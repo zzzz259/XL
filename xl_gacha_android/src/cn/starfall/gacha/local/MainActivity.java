@@ -80,6 +80,7 @@ public class MainActivity extends Activity {
      case "save":
       if(body.getString("data").length()>45*1024*1024)throw GachaClient.error("INPUT_TOO_LARGE");byte[] bytes=Base64.decode(body.getString("data"),Base64.DEFAULT);
       String name=body.optString("name","星落记录").replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]","_");String mime=body.optString("mime","application/octet-stream").split(";")[0];
+      if(android.os.Build.VERSION.SDK_INT>=29){try{Exports.saveDownloads(getApplicationContext(),bytes,name,mime);reply(id,200,object("saved",true));runOnUiThread(()->Toast.makeText(MainActivity.this,"已保存到 下载/Starfall",Toast.LENGTH_LONG).show());}catch(Exception e){reply(id,400,object("error","FILE_SAVE_FAILED"));}return;}
       runOnUiThread(()->{if(exportBytes!=null){reply(id,409,object("error","SAVE_IN_PROGRESS"));return;}exportBytes=bytes;exportRequest=id;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE,name);try{startActivityForResult(i,102);}catch(Exception e){exportBytes=null;exportRequest=null;reply(id,400,object("error","FILE_SAVE_FAILED"));}});return;
      default:throw GachaClient.error("NOT_FOUND");
     }

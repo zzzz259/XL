@@ -83,6 +83,7 @@ jobs:
             adb push "$RUNNER_TEMP/native/catalog-tests.jar" /data/local/tmp/xl-catalog-ci/catalog-tests.jar
             adb push "$GITHUB_WORKSPACE/xl_gacha_web/tests/fixtures/catalog-contract.json" /data/local/tmp/xl-catalog-ci/contract.json
             adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.CatalogUpdatesTest /data/local/tmp/xl-catalog-ci/state /data/local/tmp/xl-catalog-ci/contract.json'
+            adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.LoginLinksTest'
 
   gacha-https-config:
     if: github.event_name != 'pull_request_target'
