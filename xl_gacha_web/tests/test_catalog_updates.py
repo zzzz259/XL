@@ -46,6 +46,23 @@ def downloads(c):
 
 
 class CatalogUpdateTests(unittest.TestCase):
+    def test_bundled_source_is_ready_without_setup_and_user_override_survives_restart(
+        self,
+    ):
+        default = json.loads(
+            (
+                Path(__file__).resolve().parents[1] / "data" / "update-source.json"
+            ).read_text(encoding="utf-8")
+        )["url"]
+        self.assertTrue(default.startswith("https://"))
+        self.assertTrue(default.endswith("/gacha-config/current.json"))
+        store = CatalogStore(self.root, self.baseline, source=default)
+        self.assertEqual(store.status()["source"], default)
+        custom = "https://custom.example/config/current.json"
+        store.set_source(custom)
+        reopened = CatalogStore(self.root, self.baseline, source=default)
+        self.assertEqual(reopened.status()["source"], custom)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

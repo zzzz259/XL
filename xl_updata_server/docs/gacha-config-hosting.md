@@ -6,7 +6,7 @@
 
 模板对应阿里云 Linux、IP 8.134.186.234、Nginx1.24、Certbot5.4，Certbot安装在 /opt/xl-gacha-certbot。HTTP80为HTTP-01，HTTPS443只读分发；不改变8090容器和loopback控制API。测试 /gacha-config-test/ 指向 /home/admin/xl_updata_server-test/data/gacha_config/，正式 /gacha-config/ 指向 /home/admin/xl_updata_server/data/gacha_config/，二者不可混用。
 
-基础TLS已由运营者验证，应用代码/初始JSON的test发布仍是独立步骤。没有种入配置时artifact路径404正常。客户端默认源为空，测试人员手动填 https://8.134.186.234/gacha-config-test/current.json；正式晋级前不预配置玩家使用test。本文不是上线或证书有效期凭证，现场命令确认当前状态。
+基础TLS已由运营者验证。正式静态目录已用与生产游戏版本一致的已验证公共配置初始化，客户端默认源为 https://8.134.186.234/gacha-config/current.json；测试入口仅供测试人员，不预置给普通用户。初始化公共JSON不等同于main代码晋级：生产updater后续持续自动导出仍需要对应pipeline代码晋级main。本文不是证书有效期凭证，现场命令确认当前状态。
 
 ## 新服务器准备
 
