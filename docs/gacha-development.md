@@ -69,4 +69,4 @@ python -B build.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/re
 
 在 `xl_updata_server` 项目环境运行 `python -m pytest -q`；Linux 必须包含 public JSON 的 0644/私有 umask 回归。配置生产器 CLI 和静态服务说明见 HTTPS 文档。客户端默认正式来源为 `https://8.134.186.234/gacha-config/current.json`；测试来源需明确设置 test 地址。所有共享负例在 `xl_gacha_web/tests/fixtures/catalog-contract.json`，由 Python 客户端、producer、Android 实际 JSON 共同执行。
 
-仓库按 debug → test → main 晋级；CI 通过不等于已部署。服务端稀疏发布、存储保留、回滚与锁见 [xl_deploy 运维](../xl_deploy/README.md)。不要为了引导配置而运行完整游戏 CDN 抓取；先验证独立配置快照再由运营者明确种入 test。Android 第二个真实账号查询已由用户确认；QQ 授权后的浏览器分享回工具链路仍待真机，编译/协议测试不能替代它。
+仓库按 debug → test → main 晋级；CI 通过不等于已部署。服务端稀疏发布、存储保留、回滚与锁见 [xl_deploy 运维](../xl_deploy/README.md)。不要为了引导配置而运行完整游戏 CDN 抓取；先验证独立配置快照再由运营者明确种入 test。Android 第二个真实账号查询已由用户确认；2026-10-23 用户另行确认 QQ 授权后的浏览器分享回工具流程真机可用。模拟器合成测试与用户实际授权验收应分别记录，不泛化为所有机型均已兼容。
