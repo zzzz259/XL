@@ -25,6 +25,20 @@ class LeaderboardCLITests(unittest.TestCase):
         self.assertEqual(result["evidence"], "STATIC_CONFIRMED")
         self.assertFalse(result["network"])
 
+    def test_authorized_sdk_app_is_opt_in_to_leaderboard_parser_only(self):
+        mod = self.module()
+        from test_app import fake_token
+
+        from gacha_core.gacha import parse_credentials
+
+        token = fake_token(appid='2070035')
+        with self.assertRaisesRegex(mod.GachaError, 'WRONG_APP'):
+            parse_credentials(token)
+        credential = parse_credentials(token, supported_app_ids=mod.LEADERBOARD_APP_IDS)
+        self.assertEqual(credential.token, token)
+        with self.assertRaisesRegex(mod.GachaError, 'WRONG_APP'):
+            parse_credentials(fake_token(appid='unrelated'), supported_app_ids=mod.LEADERBOARD_APP_IDS)
+
     def test_first_error_stops_other_modes_and_does_not_print_exception_secret(self):
         mod = self.module()
         with tempfile.TemporaryDirectory() as tmp:

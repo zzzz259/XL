@@ -35,7 +35,7 @@ class WebCredentials:
     device_id: str
 
 
-def parse_credentials(raw: str, *, now=None) -> WebCredentials:
+def parse_credentials(raw: str, *, now=None, supported_app_ids=SUPPORTED_APP_IDS) -> WebCredentials:
     """Accept JWT, HP JSON, or one supported HP application wrapper."""
     if len(raw) > 65536:
         raise GachaError("INPUT_TOO_LARGE")
@@ -45,7 +45,7 @@ def parse_credentials(raw: str, *, now=None) -> WebCredentials:
         wrapper_app = None
         if value.startswith("{"):
             outer = json.loads(value)
-            wrappers = [app for app in SUPPORTED_APP_IDS if f"HP_{app}" in outer]
+            wrappers = [app for app in supported_app_ids if f"HP_{app}" in outer]
             if len(wrappers) > 1:
                 raise GachaError("AMBIGUOUS_CREDENTIAL_INPUT")
             wrapper_app = wrappers[0] if wrappers else None
@@ -59,7 +59,7 @@ def parse_credentials(raw: str, *, now=None) -> WebCredentials:
         body = value.split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
         app_id = str(claims.get("appid"))
-        if app_id not in SUPPORTED_APP_IDS:
+        if app_id not in supported_app_ids:
             raise GachaError("WRONG_APP")
         if wrapper_app is not None and wrapper_app != app_id:
             raise GachaError("APP_ID_MISMATCH")

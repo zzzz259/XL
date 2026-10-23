@@ -11,12 +11,15 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from gacha_core.gacha import GachaError, parse_credentials
+from gacha_core.gacha import SUPPORTED_APP_IDS, GachaError, parse_credentials
 from gacha_core.leaderboards import collect_mode
 from gacha_core.session import GameGatewaySession
 from leaderboard_archive import LeaderboardArchive
 
 MODES = ("guild_war", "illusion", "nightmare")
+# 2070035 is the Starfall SDK application in the authorized test refresh state.
+# Web/gacha callers retain their existing two-application default.
+LEADERBOARD_APP_IDS = SUPPORTED_APP_IDS | {"2070035"}
 SESSION_ERRORS = frozenset({
     "AUTH_REJECTED", "AUTH_ERROR", "AUTH_NETWORK_ERROR", "INVALID_AUTH_RESPONSE",
     "AUTH_RESPONSE_TOO_LARGE", "SERVER_MAINTENANCE", "NO_ALLOWED_GATEWAY",
@@ -101,7 +104,7 @@ def run(argv=None, *, input_stream=None, output=None):
         run_id = args.run_id or uuid.uuid4().hex
         archive = LeaderboardArchive(args.database)
         raw = getpass.getpass("Credential (hidden): ") if stream.isatty() else stream.readline(65538)
-        credentials = parse_credentials(raw)
+        credentials = parse_credentials(raw, supported_app_ids=LEADERBOARD_APP_IDS)
         del raw
         results = []
         fatal = False
