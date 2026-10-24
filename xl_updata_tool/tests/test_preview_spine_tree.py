@@ -10,6 +10,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from app.features.preview.resource_model import PreviewResourceCatalog, SpineSkinRecord, skin_key
+from app.features.preview.portrait_config.model import (
+    AssetRef, PortraitScene, SceneDiagnostic, ScenePart, SpineState,
+)
 from app.features.preview.resource_state import PreviewResourceState
 from app.features.preview.spine_tree import PreviewSpineTree
 
@@ -279,3 +282,141 @@ def test_spine_tree_default_selection_is_single_and_ctrl_allows_multiple(qapp):
     tree._mouse_multi_select = True
     role.child(0).setCheckState(0, Qt.Checked)
     assert set(tree.selected_records()) == {first, second}
+
+
+def test_spine_tree_displays_manifest_skin_once_and_keeps_raw_resources_separate(qapp):
+    raw = _record("10080", "default", "cardspine_10080_4", "raw", "cardspine")
+    scene = PortraitScene(
+        game_version="test",
+        version_timestamp="20261012",
+        entry_config_id="12002183",
+        character_id="10080",
+        skin_id="12002183",
+        prefab=None,
+        source_bundles=("bundle-a",),
+        parts=(),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10080_4.prefab",
+    )
+    tree = PreviewSpineTree()
+
+    tree.set_catalog(PreviewResourceCatalog.from_records([raw], portrait_scenes=(scene,)))
+
+    role = next(
+        tree.topLevelItem(index)
+        for index in range(tree.topLevelItemCount())
+        if tree.topLevelItem(index).data(0, Qt.UserRole).get("role_id") == "10080"
+    )
+    scene_items = [
+        item for item in _walk(role)
+        if (item.data(0, Qt.UserRole) or {}).get("kind") == "portrait_scene"
+    ]
+    raw_root = next(
+        tree.topLevelItem(index)
+        for index in range(tree.topLevelItemCount())
+        if tree.topLevelItem(index).text(0) == "原始 Spine 资源"
+    )
+
+    assert len(scene_items) == 1
+    assert scene_items[0].text(0).startswith("角色立绘 4")
+    assert "完整" in scene_items[0].text(1)
+    assert not (scene_items[0].flags() & Qt.ItemIsUserCheckable)
+    assert raw_root.childCount() == 1
+
+
+def test_spine_tree_hides_raw_event_parts_when_configured_cover_scene_exists(qapp):
+    raw = _record(None, "default", "eventcovers_0005_1", "event", "eventcovers")
+    scene = PortraitScene(
+        game_version="test", version_timestamp="20261012", entry_config_id="70440005",
+        character_id="", skin_id="eventcovers_0005", prefab=None,
+        source_bundles=("bundle-a",), parts=(),
+        prefab_container="assets/eventcovers/eventcovers_0005.prefab",
+    )
+    tree = PreviewSpineTree()
+
+    tree.set_catalog(PreviewResourceCatalog.from_records([raw], portrait_scenes=(scene,)))
+
+    labels = [tree.topLevelItem(index).text(0) for index in range(tree.topLevelItemCount())]
+    assert labels.count("活动封面") == 1
+    assert "原始 Spine 资源" not in labels
+
+
+def test_spine_tree_keeps_unresolved_configured_event_root_under_cover_group(qapp):
+    scene = PortraitScene(
+        game_version="test", version_timestamp="20261012", entry_config_id="70440005",
+        character_id="", skin_id="eventcovers_0005", prefab=None,
+        source_bundles=(), parts=(),
+        diagnostics=(SceneDiagnostic("prefab_asset_missing", "configured root missing"),),
+        prefab_container="",
+    )
+    tree = PreviewSpineTree()
+
+    tree.set_catalog(PreviewResourceCatalog.from_records((), portrait_scenes=(scene,)))
+
+    group = tree.topLevelItem(0)
+    assert group.text(0) == "活动封面"
+    assert group.child(0).text(0) == "活动封面 0005"
+    assert "不完整" in group.child(0).text(1)
+
+
+def test_spine_tree_checks_manifest_scene_separately_from_current_preview_selection(qapp):
+    skeleton = AssetRef("bundle-a", 1)
+    atlas = AssetRef("bundle-a", 2)
+    part = ScenePart(
+        "role", AssetRef("bundle-a", 3), "cardspine_10080_4",
+        spine=SpineState(skeleton, default_animation="idle", skeleton_json=skeleton, atlases=(atlas,)),
+    )
+    scene = PortraitScene(
+        game_version="test", version_timestamp="20261012", entry_config_id="12002183",
+        character_id="10080", skin_id="12002183", prefab=None,
+        source_bundles=("bundle-a",), parts=(part,),
+        available_assets=(part.object_ref, skeleton, atlas),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10080_4.prefab",
+    )
+    tree = PreviewSpineTree()
+    tree.set_catalog(PreviewResourceCatalog.from_records((), portrait_scenes=(scene,)))
+    item = next(
+        item for item in _walk(tree.topLevelItem(0))
+        if (item.data(0, Qt.UserRole) or {}).get("kind") == "portrait_scene"
+    )
+
+    item.setCheckState(0, Qt.Checked)
+
+    assert tree.checked_portrait_scenes() == (scene,)
+    assert tree.selected_portrait_scenes() == ()
+
+
+def test_spine_tree_shows_incomplete_manifest_diagnostic(qapp):
+    scene = PortraitScene(
+        game_version="test",
+        version_timestamp="20261012",
+        entry_config_id="12002183",
+        character_id="10080",
+        skin_id="12002183",
+        prefab=None,
+        source_bundles=("bundle-a",),
+        parts=(),
+        diagnostics=(SceneDiagnostic("missing_asset", "Atlas path ID 12 is unresolved"),),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10080_4.prefab",
+    )
+    state = PreviewResourceState(Path.cwd() / f".task8-scene-read-{uuid4().hex}.json")
+    tree = PreviewSpineTree(state=state)
+
+    tree.set_catalog(PreviewResourceCatalog.from_records((), portrait_scenes=(scene,)))
+
+    item = next(
+        item for item in _walk(tree.topLevelItem(0))
+        if (item.data(0, Qt.UserRole) or {}).get("kind") == "portrait_scene"
+    )
+    assert "不完整" in item.text(1)
+    assert "Atlas path ID 12 is unresolved" in item.toolTip(0)
+    received = []
+    tree.portrait_scenes_changed.connect(received.append)
+
+    tree.setCurrentItem(None)
+    tree.setCurrentItem(item)
+
+    assert received[-1] == (scene,)
+    assert tree.selected_portrait_scenes() == (scene,)
+    assert not state.is_new(item.data(0, Qt.UserRole)["scene_key"])
+    assert "新" not in item.text(1)
+    state.path.unlink(missing_ok=True)

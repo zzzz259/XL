@@ -340,6 +340,7 @@ class PreviewPage(QWidget):
     selection_changed = Signal()
     export_requested = Signal(object)
     spine_selection_changed = Signal(object)
+    portrait_scene_selection_changed = Signal(object)
     export_selected_requested = Signal()
     thumbnail_page_changed = Signal(int)
 
@@ -429,6 +430,7 @@ class PreviewPage(QWidget):
         self.btn_thumbnail_previous.clicked.connect(lambda: self.set_thumbnail_page(self._thumbnail_page - 1))
         self.btn_thumbnail_next.clicked.connect(lambda: self.set_thumbnail_page(self._thumbnail_page + 1))
         self.spine_tree.selection_changed.connect(self._on_spine_selection_changed)
+        self.spine_tree.portrait_scenes_changed.connect(self._on_portrait_scene_selection_changed)
         self._material_state = None
         self._character_state = None
         self._material_catalog = None
@@ -685,6 +687,9 @@ class PreviewPage(QWidget):
     def selected_spine_record_groups(self):
         return self.spine_tree.selected_record_groups()
 
+    def checked_portrait_scenes(self):
+        return self.spine_tree.checked_portrait_scenes()
+
     def selected_spine_skin_names(self):
         return self.spine_tree.selected_skin_names()
 
@@ -750,6 +755,9 @@ class PreviewPage(QWidget):
     def _on_spine_selection_changed(self, records) -> None:
         self.spine_selection_changed.emit(records)
         self.export_requested.emit(records)
+
+    def _on_portrait_scene_selection_changed(self, scenes) -> None:
+        self.portrait_scene_selection_changed.emit(scenes)
 
     def _sync_character_empty_state(self) -> None:
         self.empty_label.sync_visibility()

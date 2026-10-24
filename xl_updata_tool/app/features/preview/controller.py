@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
+from contextlib import nullcontext
 from collections import OrderedDict
 
 from PySide6.QtCore import QPoint, QObject, Qt, QMimeData, QUrl, Signal
@@ -21,6 +23,12 @@ from .export_plan import ExportSettings, build_default_export_plan, build_export
 from .character_names import CharacterNameResolver
 from .spine_adapter import build_spine_export_command, get_animation_metadata, get_animation_names
 from .resource_model import display_skin_key
+from .portrait_config.asset_index import AssetIndex
+from .portrait_scene_export import (
+    build_portrait_scene_export_jobs,
+    prepare_portrait_scene_export_job,
+    scene_resource_family,
+)
 from .output_browser import OutputBrowserCatalog
 from .unread import PreviewUnreadSnapshot, build_preview_unread_snapshot
 
@@ -86,7 +94,7 @@ class PreviewController(QObject):
     def unread_snapshot(self) -> PreviewUnreadSnapshot:
         return build_preview_unread_snapshot(self.service)
 
-    def start_postprocess(self, force: bool = False, shared_dialog=None) -> bool:
+    def start_postprocess(self, force: bool = False, shared_dialog=None, import_result=None) -> bool:
         """Run image discovery/material publishing after AS import."""
         del force  # The publisher is content-addressed and safe to repeat.
         worker = self._postprocess_worker
@@ -94,7 +102,7 @@ class PreviewController(QObject):
             self.status_changed.emit("图片资源预处理已在进行中")
             return False
         self.status_changed.emit("正在处理图片资源：发现 Spine、切割图集…")
-        worker = PreviewPostprocessWorker(self.service, self)
+        worker = PreviewPostprocessWorker(self.service, self, import_result=import_result)
         worker.progress_value.connect(self._on_postprocess_progress)
         worker.detail_progress.connect(self._on_postprocess_detail_progress)
         worker.finished_processing.connect(self._on_postprocess_finished)
@@ -105,7 +113,7 @@ class PreviewController(QObject):
         self._postprocess_dialog = shared_dialog
         if shared_dialog is not None:
             shared_dialog.setLabelText("正在处理图片资源…\n发现 Spine、切割图集和大头照")
-            shared_dialog.setRange(0, 4)
+            shared_dialog.setRange(0, 5)
             shared_dialog.setValue(0)
             shared_dialog.canceled.connect(worker.cancel)
             shared_dialog.show()
@@ -148,9 +156,22 @@ class PreviewController(QObject):
         self._loaded = False
         self._preloaded = False
         material_summary = summary.materials
+        portrait_text = ""
+        portrait = summary.portrait
+        if portrait is not None:
+            if portrait.status in {"complete", "partial"}:
+                state = "完成" if portrait.status == "complete" else "部分完成"
+                portrait_text = (
+                    f"；立绘场景{state} {portrait.complete}，不完整 {portrait.incomplete}"
+                )
+            elif portrait.status == "skipped":
+                portrait_text = f"；立绘场景跳过（{portrait.diagnostic}）"
+            elif portrait.status == "cancelled":
+                portrait_text = "；立绘场景生成已取消，已完成缓存保留"
         self.status_changed.emit(
             f"图片资源预处理完成：Spine {summary.spine.published} 组，"
             f"游戏素材成功 {material_summary.exported}，失败 {material_summary.failed}"
+            f"{portrait_text}"
         )
         self.badge_changed.emit()
         self.processing_finished.emit(was_shared)
@@ -179,6 +200,7 @@ class PreviewController(QObject):
         self.page.context_menu_requested.connect(self.show_context_menu)
         self.page.item_double_clicked.connect(self.open_item)
         self.page.selection_changed.connect(self.update_status)
+        self.page.portrait_scene_selection_changed.connect(self._on_portrait_scene_selected)
         if hasattr(self.page, "export_selected_requested"):
             self.page.export_selected_requested.connect(self._on_export_selected_requested)
         if hasattr(self.page, "character_browser"):
@@ -316,9 +338,28 @@ class PreviewController(QObject):
                 f"资源发现完成：导出 {summary.exported} 项，失败 {summary.failed} 项"
             )
         else:
-            self.status_changed.emit(f"资源发现完成：发现 {len(catalog.skins)} 个皮肤")
+            self.status_changed.emit(
+                f"资源发现完成：场景 {len(catalog.portrait_scenes)} 个，"
+                f"原始 Spine 资源 {len(catalog.skins)} 项"
+            )
         self.badge_changed.emit()
         return catalog
+
+    def _on_portrait_scene_selected(self, scenes) -> None:
+        if not scenes:
+            return
+        scene = scenes[0]
+        errors = [item for item in scene.validate() if item.severity == "error"]
+        if errors:
+            self.status_changed.emit(
+                f"立绘场景 {scene.character_id or '独立资源'} / {scene.skin_id}："
+                f"{len(errors)} 项配置问题；悬停场景行可查看详情"
+            )
+        else:
+            self.status_changed.emit(
+                f"已查看立绘场景 {scene.character_id or '独立资源'} / {scene.skin_id} "
+                f"（版本 {scene.version_timestamp}）"
+            )
 
     def preload_index(self) -> bool:
         """Prepare catalog/state views without starting the full image scan."""
@@ -597,57 +638,120 @@ class PreviewController(QObject):
     def _default_skin_runner(self, spine_cli):
         def run_job(job):
             try:
-                command = build_spine_export_command(job, spine_cli)
-                logger.info(
-                    "SpineViewerCLI 导出开始（模式=%s，资源=%s，格式=%s，动画=%s，皮肤=%s，命令=%s）",
-                    getattr(job, "export_mode", "custom"),
-                    job.record.resource_family,
-                    job.settings.format,
-                    job.settings.animation,
-                    ",".join(job.settings.skins),
-                    subprocess.list2cmdline(command),
+                scene_job = hasattr(job, "scene") and hasattr(job, "sources")
+                temporary_context = (
+                    tempfile.TemporaryDirectory(prefix="xl-portrait-scene-")
+                    if scene_job and job.sprite_sources else nullcontext(None)
                 )
-                result = run_external_process(
-                    command,
-                    tool="SpineViewerCLI-export",
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-                output_exists = job.output_path.is_file()
-                output_bytes = job.output_path.stat().st_size if output_exists else 0
-                update_process_manifest(
-                    result,
-                    input_resources=[
-                        {"skel": record.source_skel, "atlas": record.atlas_path, "skin": record.skin_name, "resource_family": record.resource_family}
-                        for record in getattr(job, "records", (job.record,))
-                    ],
-                    requested_output=str(job.output_path),
-                    output_verified=result.returncode == 0 and output_exists and output_bytes > 0,
-                    output_bytes=output_bytes,
-                    business_outcome="success" if result.returncode == 0 and output_exists and output_bytes > 0 else "failed",
-                    error_code=("SPINE_OUTPUT_NOT_CREATED" if result.returncode == 0 and not output_exists else "SPINE_OUTPUT_EMPTY" if result.returncode == 0 and output_exists and output_bytes <= 0 else "SPINE_CLI_NONZERO_EXIT" if result.returncode != 0 else None),
-                )
-                if result.returncode != 0:
-                    logger.error(
-                        "SpineViewerCLI 导出失败（命令=%s）: %s",
-                        subprocess.list2cmdline(command),
-                        result.stderr.strip(),
+                with temporary_context as temporary_dir:
+                    execution_job = (
+                        prepare_portrait_scene_export_job(job, temporary_dir)
+                        if scene_job and job.sprite_sources else job
                     )
-                    return False
-                if not job.output_path.is_file() or job.output_path.stat().st_size <= 0:
-                    logger.error("SpineViewerCLI 未生成有效输出: %s", job.output_path)
-                    return False
-                logger.info(
-                    "SpineViewerCLI 导出完成（格式=%s，输出=%s，大小=%s）",
-                    job.settings.format,
-                    job.output_path,
-                    job.output_path.stat().st_size,
-                )
-                return job.output_path.is_file()
+                    command = build_spine_export_command(execution_job, spine_cli)
+                    if scene_job:
+                        resource_label = f"scene {job.scene.character_id}/{job.scene.skin_id}"
+                        animation_label = ",".join(source.animation for source in execution_job.sources)
+                        skin_label = ",".join(source.skin for source in execution_job.sources)
+                        input_resources = [{
+                            "source_kind": source.source_kind,
+                            "part_id": source.part_id,
+                            "skel": str(source.skeleton_path),
+                            "atlas": str(source.atlas_path),
+                            "animation": source.animation,
+                            "skin": source.skin,
+                            "unity_order": source.unity_order,
+                            "skeleton_ref": source.skeleton_ref.to_dict() if source.skeleton_ref else None,
+                            "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
+                            "sprite_ref": source.sprite_ref.to_dict() if source.sprite_ref else None,
+                            "texture_ref": source.texture_ref.to_dict() if source.texture_ref else None,
+                            "source_bundle_hashes": sorted({
+                                reference.bundle_hash
+                                for reference in (source.skeleton_ref, *source.atlas_refs,
+                                                  source.sprite_ref, source.texture_ref)
+                                if reference is not None
+                            }),
+                        } for source in execution_job.sources]
+                        if job.sprite_sources:
+                            logger.info(
+                                "混合场景静态图层已准备: count=%s temp=%s",
+                                len(job.sprite_sources), temporary_dir,
+                                extra={"event": "spine.static_layers.prepared", "details": {
+                                    "layers": [{
+                                        "part_id": source.part_id,
+                                        "sprite_ref": source.sprite_ref.to_dict(),
+                                        "texture_ref": source.texture_ref.to_dict(),
+                                        "unity_order": source.unity_order,
+                                        "rect": source.rect,
+                                        "pivot": source.pivot,
+                                        "pixels_per_unit": source.pixels_per_unit,
+                                    } for source in job.sprite_sources],
+                                }},
+                            )
+                    else:
+                        resource_label = job.record.resource_family
+                        animation_label = job.settings.animation
+                        skin_label = ",".join(job.settings.skins)
+                        input_resources = [
+                            {"skel": record.source_skel, "atlas": record.atlas_path, "skin": record.skin_name, "resource_family": record.resource_family}
+                            for record in getattr(job, "records", (job.record,))
+                        ]
+                    logger.info(
+                        "SpineViewerCLI 导出开始（模式=%s，资源=%s，格式=%s，动画=%s，皮肤=%s，命令=%s）",
+                        getattr(job, "export_mode", "custom"),
+                        resource_label,
+                        job.settings.format,
+                        animation_label,
+                        skin_label,
+                        subprocess.list2cmdline(command),
+                    )
+                    result = run_external_process(
+                        command,
+                        tool="SpineViewerCLI-export",
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                    output_exists = job.output_path.is_file()
+                    output_bytes = job.output_path.stat().st_size if output_exists else 0
+                    update_process_manifest(
+                        result,
+                        input_resources=input_resources,
+                        requested_output=str(job.output_path),
+                        output_verified=result.returncode == 0 and output_exists and output_bytes > 0,
+                        output_bytes=output_bytes,
+                        business_outcome="success" if result.returncode == 0 and output_exists and output_bytes > 0 else "failed",
+                        error_code=("SPINE_OUTPUT_NOT_CREATED" if result.returncode == 0 and not output_exists else "SPINE_OUTPUT_EMPTY" if result.returncode == 0 and output_exists and output_bytes <= 0 else "SPINE_CLI_NONZERO_EXIT" if result.returncode != 0 else None),
+                    )
+                    if result.returncode != 0:
+                        logger.error(
+                            "SpineViewerCLI 导出失败（命令=%s）: %s",
+                            subprocess.list2cmdline(command),
+                            result.stderr.strip(),
+                        )
+                        return False
+                    if not job.output_path.is_file() or job.output_path.stat().st_size <= 0:
+                        logger.error("SpineViewerCLI 未生成有效输出: %s", job.output_path)
+                        return False
+                    logger.info(
+                        "SpineViewerCLI 导出完成（格式=%s，输出=%s，大小=%s）",
+                        job.settings.format,
+                        job.output_path,
+                        job.output_path.stat().st_size,
+                    )
+                    return job.output_path.is_file()
             except (OSError, subprocess.SubprocessError) as error:
                 logger.error("Spine 皮肤导出异常: %s", error)
+                return False
+            except ValueError as error:
+                error_code = getattr(error, "code", "PORTRAIT_RENDER_PLAN_INVALID")
+                logger.error(
+                    "角色场景渲染计划不完整: %s",
+                    error,
+                    extra={"event": "spine.scene.render_unsupported", "error_code": error_code,
+                           "details": {"message": str(error), "part_id": getattr(error, "part_id", "")}},
+                )
                 return False
 
         return run_job
@@ -658,6 +762,12 @@ class PreviewController(QObject):
             return False
         selected_from_page = records is None
         if selected_from_page:
+            scenes = tuple(self.page.checked_portrait_scenes())
+            if scenes:
+                if self.page.selected_spine_record_groups():
+                    self.status_changed.emit("请分别导出组装立绘场景与原始 Spine 资源")
+                    return False
+                return self._start_portrait_scene_export(scenes, settings=settings, runner=runner)
             record_groups = tuple(self.page.selected_spine_record_groups())
             records = record_groups
         else:
@@ -802,6 +912,121 @@ class PreviewController(QObject):
         self.page.preview_progress.setFormat(f"导出中... {current}/{total}")
         self.status_changed.emit(f"导出中 [{current}/{total}]: {label}")
         self.progress_changed.emit(current, total, f"导出 Spine 皮肤: {label}")
+
+    def _start_portrait_scene_export(self, scenes, *, settings=None, runner=None) -> bool:
+        """Resolve checked manifests and queue one CLI job per scene artifact."""
+        from dataclasses import replace
+
+        from app.platform.tool_locator import ToolLocator
+
+        if self._selected_export_worker is not None:
+            return False
+        scene_indices = {}
+        bundles_root = self.service.material_dir.parent / "bundles"
+        for scene in scenes:
+            try:
+                version_dir = bundles_root / str(scene.version_timestamp)
+                map_path = version_dir / "_map" / "assets_map.json"
+                if not map_path.is_file():
+                    raise ValueError(f"版本 {scene.version_timestamp} 缺少 AssetStudio 资源索引")
+                if scene.version_timestamp not in scene_indices:
+                    scene_indices[scene.version_timestamp] = AssetIndex.from_catalog(
+                        map_path, version_dir, int(scene.version_timestamp),
+                    )
+            except (OSError, ValueError, TypeError) as error:
+                self._notify_export_error(f"立绘场景资源索引不可用：{error}")
+                return False
+
+        spine_cli = None
+        if runner is None:
+            spine_cli = ToolLocator.create().spineviewer_cli()
+            if not os.path.isfile(spine_cli):
+                self._notify_export_error(f"SpineViewerCLI 不存在：{spine_cli}")
+                return False
+
+        name_resolver = CharacterNameResolver.from_output_root(self.service.preview_dir.parent)
+        if settings is None:
+            try:
+                initial_jobs = build_portrait_scene_export_jobs(
+                    scenes[0], scene_indices[scenes[0].version_timestamp],
+                    self.service.material_dir, self.service.preview_dir, name_resolver,
+                )
+            except (OSError, ValueError) as error:
+                self._notify_export_error(f"立绘场景配置无法导出：{error}")
+                return False
+            first = initial_jobs[0].sources[0]
+            animation_durations = {}
+            animation_names = ()
+            if spine_cli:
+                animation_durations = get_animation_metadata(
+                    str(first.skeleton_path), str(first.atlas_path), spine_cli,
+                )
+                animation_names = tuple(animation_durations) or get_animation_names(
+                    str(first.skeleton_path), str(first.atlas_path), spine_cli,
+                )
+            skin_names = tuple(dict.fromkeys(
+                source.skin or initial_jobs[0].settings.skins[0]
+                for source in initial_jobs[0].sources
+            ))
+            family_summary = tuple(dict.fromkeys(scene_resource_family(scene) for scene in scenes))
+            dialog = ExportSettingsDialog(
+                str(first.skeleton_path), str(first.atlas_path), "PNG", self.page,
+                animation_names=animation_names,
+                animation_durations=animation_durations,
+                skin_names=skin_names,
+                resource_family=family_summary[0] if family_summary else "spine",
+                selected_group_count=len(scenes),
+                family_summary=family_summary,
+            )
+            if dialog.exec() != QDialog.Accepted:
+                return False
+            if getattr(dialog, "export_mode", lambda: "custom")() == "custom":
+                if len(scenes) != 1:
+                    self.status_changed.emit("自定义导出仅支持恰好一个立绘场景")
+                    return False
+                settings = dialog.settings()
+
+        if settings is not None and not isinstance(settings, ExportSettings):
+            settings = ExportSettings(**settings)
+        try:
+            jobs = []
+            for scene in scenes:
+                scene_jobs = build_portrait_scene_export_jobs(
+                    scene, scene_indices[scene.version_timestamp],
+                    self.service.material_dir, self.service.preview_dir,
+                    name_resolver, settings=settings,
+                )
+                jobs.extend(
+                    replace(job, export_mode="custom") if settings is not None else job
+                    for job in scene_jobs
+                )
+        except (OSError, ValueError) as error:
+            self._notify_export_error(f"立绘场景配置无法导出：{error}")
+            return False
+        if not jobs:
+            self.status_changed.emit("没有可导出的立绘场景")
+            return False
+        if runner is None:
+            runner = self._default_skin_runner(spine_cli)
+
+        self._selected_export_worker = PreviewExportWorker(
+            tuple(jobs), settings=settings or jobs[0].settings, runner=runner, parent=self,
+        )
+        self._selected_export_worker.skin_progress.connect(self._on_selected_export_progress)
+        self._selected_export_worker.finished.connect(self._on_selected_export_summary)
+        self._selected_export_worker.export_finished.connect(self._on_selected_export_finished)
+        self._selected_export_worker.error.connect(self._on_selected_export_error)
+        self._selected_export_cancelled = False
+        self.page.btn_reload.setText("取消导出")
+        self.page.btn_reload.setEnabled(True)
+        self.page.btn_export_selected.setText("取消导出")
+        self.page.btn_export_selected.setEnabled(True)
+        self.page.preview_progress.setVisible(True)
+        self.page.preview_progress.setMaximum(len(jobs))
+        self.page.preview_progress.setValue(0)
+        self.status_changed.emit(f"准备导出 {len(jobs)} 个立绘场景资源")
+        self._selected_export_worker.start()
+        return True
 
     def _on_selected_export_summary(self, summary):
         self.status_changed.emit(summary)

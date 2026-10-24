@@ -84,7 +84,9 @@ class ImportPostprocessWorkflow:
                 self._clear()
             return
         if "preview" in pending and self.preview is not None:
-            self.preview.start_postprocess(force=False, shared_dialog=self._progress_dialog)
+            self.preview.start_postprocess(
+                force=False, shared_dialog=self._progress_dialog, import_result=result,
+            )
             return
         self._finish_success(result, audio_error=self._audio_error)
 
@@ -96,7 +98,7 @@ class ImportPostprocessWorkflow:
         if shared and self._finish is not None:
             self._finish(
                 False,
-                "图片资源预处理已取消，已完成的文件已保留，可稍后重新处理图片资源。",
+                "AB/AS 导入已完成；图片资源预处理已取消，已完成的文件和有效场景清单缓存已保留，可稍后重试。",
                 cancelled=True,
             )
             self._clear()
