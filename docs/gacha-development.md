@@ -2,21 +2,22 @@
 
 [用户指南](gacha-user-guide.md) · [架构与配置协议](gacha-architecture.md) · [HTTPS 运维](../xl_updata_server/docs/gacha-config-hosting.md)
 
-两个客户端相邻存放：Android 构建复用 `xl_gacha_web/static` 和 `data`，不能只取 Android 目录。源码只含合成测试、虚构 demo 与非个人游戏配置。使用各项目/仓库已有 Python 环境，临时构建输出放 Git 外；不提交运行数据、浏览器 profile、签名密钥和产物。
+Android 构建复用 `xl_gacha_web/static` 和 `data`，不能只取 Android 目录。电脑端在 0.3.4 后正式停止维护，保留的共享页面、配置和统计参考继续供 Android 使用。源码只含合成测试、虚构 demo 与非个人游戏配置。使用各项目/仓库已有 Python 环境，临时构建输出放 Git 外；不提交运行数据、浏览器 profile、签名密钥和产物。
 
-## Windows
+## 电脑端停止维护与共享代码
 
-运行需要 Python 3.11+ 标准库与 Tk；发行 ZIP 自带运行时。自动官网登录需要本机 Chromium 系浏览器。打包另需 Windows x64、Node.js 与 PyInstaller 6.x。进入 `xl_gacha_web`，激活项目环境：
+Windows 抽卡手记最后版本为 0.3.4，不再提供构建、发布、登录适配或问题修复。Windows 专属打包 workflow 已移除，旧源码与打包脚本仅作历史资料。`xl_updata_tool` 是另一子项目，不受此决定影响。
 
 ```powershell
-python -B -m unittest discover -s tests -v
+python -B -m unittest discover -s tests -p test_analysis.py -v
+python -B -m unittest discover -s tests -p test_archive.py -v
+python -B -m unittest discover -s tests -p test_catalog_contract.py -v
+python -B -m unittest discover -s tests -p test_catalog_updates.py -v
+python -B -m unittest discover -s tests -p test_core.py -v
 node --test tests/image-export.test.cjs
-python -B scripts/build_portable.py --output E:/builds/starfall-windows
 ```
 
-`scripts/build_windows.ps1` 可创建项目 `.venv` 并安装构建依赖；包管理器网络遵守本机代理策略。脚本要求 Node 验证通过才打包。资源使用明确清单，`data` 只包括图标、catalog、内置正式更新源；不会递归打包个人 data 文件。
-
-根目录 Actions → **Build Windows portable app** → Run workflow，选择已审查分支，下载 `StarfallGacha-Windows-x64`。根 `.github/workflows/gacha-windows-portable.yml` 是实际入口；子目录 workflow 不会生效。手动流程仅产生构建 artifact，不自动发布 Release。主 `XL CI` 覆盖 Python/JS 测试与共享契约。
+在 `xl_gacha_web` 下运行上述共享参考检查。根 `XL CI` 的 `gacha-shared` 作业仅验证 Android 依赖的统计、存档、配置契约和页面脚本，不再构建 Windows artifact。
 
 ## Android
 
@@ -52,12 +53,18 @@ adb install /outside/repo/login-return/login-return-qa.apk
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration
 adb shell am instrument -w -e separateTask false cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.ImageExportIntegration
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginFreshIntegration
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
 adb uninstall cn.starfall.gacha.returnqa
 ```
 
 两次输出都必须包含 `PASS 12 isolated Android` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。同任务、独立任务分别运行，CI 同样检查输出。该测试 APK 使用 Git 外临时开发签名，不能当成正式升级包。
 
 相册/分享检查另需包含 `PASS 20 image album/share checks` 和 `INSTRUMENTATION_CODE: -1`，覆盖真实 MediaStore 落盘/字节、发布目录、原文件导出的 Downloads 路径和字节、临时 provider 读取、单图/多图意图、只读授权、非法 URI 拒绝与过期清理，测试完成前删除自己贡献的相册图片和测试文档。QA provider authority 使用独立包名，避免与正式版冲突。`--assets /outside/repo/release/assets` 可为隔离测试包加入刚构建的页面资源并启用 QA WebView 调试，供合成多页图片界面验证；正式包不启用调试。
+
+新登录清理检查需包含 `PASS 8 fresh-login WebView checks` 和 `INSTRUMENTATION_CODE: -1`。测试向隔离 WebView 的官网来源写入合成旧 JWT/HP/provider/sessionStorage，调用原生产代码的页面完成回调，确认轮询在清理前关闭、实际存储被清空、重新加载后才开放轮询。另以真实官网新登录入口检查等待授权且无旧身份自动查询；不要读取或输出真实凭据。原生测试 JAR 会先进行四字节对齐，使 MuMu 可以直接映射 dex，不依赖 shell 创建提取命名空间。
+
+TapTap App 衔接测试需包含 `PASS 16 TapTap App WebView/handoff checks`、`tap_policy_checks=21` 与 `INSTRUMENTATION_CODE: -1`。它拦截合成官网响应及 App 启动，测试真实 WebView 监听、包名、一次性交接、未安装 App 的反馈、会话切换、当前窗口恢复、超时与诊断不含挑战。21 项链接策略检查在同一个正常 Android 应用进程执行；MuMu 的 shell `app_process` 可能在执行完策略后以 139 退出，不能据打印通过就声称命令成功。JS 监听另用 `node --test tests/tap-app-login.test.cjs` 覆盖官方来源、fetch/XHR、重复注入及过期。
 
 Android 15 模拟器可验证系统分享预览，不替代接收端真机测试。2026-10-23 用户确认 0.3.4 相册保存和分享在真机均正常；功能提交 a66209d7 的 CI 检查通过。接收应用/机型没有逐项枚举，Android 9 保存相册的权限分支需要另行验证。
 

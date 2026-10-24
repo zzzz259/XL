@@ -1,5 +1,7 @@
 # 星落 · 抽卡手记（本地应用）
 
+**电脑端已正式停止维护与更新，最后版本为 0.3.4。** 不再提供新版本、登录适配和问题修复；本页后续内容仅保留作旧版使用说明。已有记录可导出 JSON，再导入 Android 版。`static`、`data`、统计参考及存档兼容性代码仍由 Android 使用，不代表恢复电脑端维护。Windows 自动打包入口已移除，后续交付仅含 Android APK。
+
 Windows 64 位便携应用，双击 StarfallGacha.exe 后自动打开默认浏览器。程序只监听 127.0.0.1，查询由本机程序访问官方游戏服务，没有开发者云端接口、上传、统计脚本或外部 CDN。
 
 [完整用户指南](../docs/gacha-user-guide.md) · [构建与测试](../docs/gacha-development.md) · [数据协议](../docs/gacha-architecture.md)
@@ -80,14 +82,6 @@ Windows 64 位便携应用，双击 StarfallGacha.exe 后自动打开默认浏�
 
 设计预览可用 app.py --preview-report <报告JSON> 配合 /?preview=1；该数据不自动存入账号库。static/demo.json 为虚构示例，不保存为个人账号。
 
-## Windows 一键构建（源码发行包）
+## 历史 Windows 打包资料
 
-需要 Windows x64、Python 3.11+ 和网络访问 PyPI（仅构建机需要）。在项目根目录运行：
-
-    powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
-
-该脚本会在 `.venv` 安装 PyInstaller，先执行 Python / JavaScript 测试，再构建 `output\星落抽卡手记-本地版.zip`。**普通玩家只需要这个最终 ZIP，不必安装 Python。**
-
-也可以在本 monorepo 根目录的 GitHub 仓库打开 **Actions → Build Windows portable app → Run workflow**，在该次运行的 **Artifacts** 中下载 `StarfallGacha-Windows-x64`。这个方式由 GitHub 的 Windows 构建机完成，不需要在自己的电脑安装 Python。切勿把 `user-data`、登录凭据或浏览器登录配置提交到仓库。
-
-Windows 本机用户还可以在解压后的项目文件夹中直接双击 `build_windows.bat`，效果相同。若 PC 没有 Python 或不希望在本机安装构建工具，推荐使用上述 GitHub Actions。
+历史源码和打包脚本保留，Windows 专属自动打包 workflow 已删除，不再提供构建支持或新的 ZIP。后续维护与交付转向 Android；迁移存档使用 JSON 备份。

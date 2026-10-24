@@ -1,14 +1,16 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.starfall.gacha.local" android:versionCode="8" android:versionName="0.3.4">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="cn.starfall.gacha.local" android:versionCode="10" android:versionName="0.3.6">
  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
  <uses-permission android:name="android.permission.INTERNET" />
  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+ <queries><package android:name="tv.danmaku.bili" /><package android:name="com.taptap" /></queries>
  <application android:label="星落抽卡手记" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="false" android:icon="@drawable/icon">
-  <provider android:name=".ImageShareProvider" android:authorities="cn.starfall.gacha.local.images" android:exported="false" android:grantUriPermissions="true" />
-  <activity android:name=".LoginReturnActivity" android:label="抽卡手记·继续QQ授权" android:exported="true" android:noHistory="true">
+  <provider android:name="cn.starfall.gacha.local.ImageShareProvider" android:authorities="cn.starfall.gacha.local.images" android:exported="false" android:grantUriPermissions="true" />
+  <activity android:name="cn.starfall.gacha.local.LoginReturnActivity" android:label="抽卡手记·继续QQ授权" android:exported="true" android:noHistory="true">
    <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="text/plain"/></intent-filter>
   </activity>
-  <activity android:name=".LoginActivity" android:exported="false" android:configChanges="orientation|screenSize" />
-  <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize">
+  <activity android:name="cn.starfall.gacha.local.BiliAuthActivity" android:exported="false" android:configChanges="orientation|screenSize" />
+  <activity android:name="cn.starfall.gacha.local.LoginActivity" android:exported="false" android:configChanges="orientation|screenSize" />
+  <activity android:name="cn.starfall.gacha.local.MainActivity" android:exported="true" android:configChanges="orientation|screenSize">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>
  </application>

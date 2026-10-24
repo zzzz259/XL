@@ -20,7 +20,7 @@ class ToolchainTests(unittest.TestCase):
             for name in ("catalog.json", "update-source.json", "private.json"):
                 (desktop / "data" / name).write_text("synthetic")
             (desktop / "static" / "private.log").write_text("private")
-            for name in ("mobile-engine.js", "android-bridge.js"):
+            for name in ("mobile-engine.js", "android-bridge.js", "tap-app-login.js"):
                 (android / "web" / name).write_text("synthetic")
             assets = root / "assets"
             prepare_assets(desktop, android, assets)

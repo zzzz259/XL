@@ -12,6 +12,14 @@
     PORTAL_AUTH_REJECTED:'官网登录状态未被游戏服务接受，请在官网退出后重新登录。',
     PORTAL_QUERY_IN_PROGRESS:'已开始查询，请等待本次查询完成。',
     PORTAL_LOGIN_FAILED:'自动登录查询未完成，请重试或使用手动粘贴方式。',
+    BILI_APP_NOT_FOUND:'请先安装并登录官方哔哩哔哩 App，再点击 B 服授权。',
+    BILI_AUTH_UNAVAILABLE:'当前 B 站版本无法打开授权页面，请更新官方哔哩哔哩 App 后重试。',
+    BILI_AUTH_RESULT_MISSING:'B 站未返回有效授权，请重新确认授权。',
+    BILI_CONFIG_MISSING:'这个安装包未配置 B 服接入参数，请使用提供的 B 服测试包。',
+    BILI_EXCHANGE_NETWORK_ERROR:'B 服账号交换服务连接失败，请检查网络后重新授权。',
+    BILI_EXCHANGE_REJECTED:'B 服账号交换未通过，请在官方 B 站重新登录并授权。',
+    BILI_EXCHANGE_INVALID_RESPONSE:'B 服账号交换返回内容不完整，请重试并反馈测试结果。',
+    TAP_AUTH_TIMEOUT:'本次 TapTap 授权已过期，请重新打开登录。仍可使用原网页登录方式；可复制 TapTap 脱敏诊断反馈。',
   };
   let timer=null,active=false,starting=false;
   async function api(action,body={}) {
@@ -24,7 +32,7 @@
   function controls(value) {
     active=['opening','waiting','querying','cancelling'].includes(value.phase);
     state.busy=active;
-    for(const id of ['portal-start','remember-login','login-profile','submit','demo'])$(id).disabled=active;
+    for(const id of ['portal-start','tap-start','bili-start','remember-login','login-profile','submit','demo']){const el=$(id);if(el)el.disabled=active;}
     $('account-select').disabled=active;
     $('portal-cancel').hidden=!active;
     $('portal-cancel').disabled=value.phase==='querying';
@@ -42,7 +50,10 @@
     if(value.phase==='done'&&value.report){
       showReport(value.report); LocalArchive.refresh().catch(()=>{});
       document.body.classList.remove('show-query');
-      status('已通过官网登录并完成查询，记录已按账号身份保存到本机。');
+      if(value.report.account?.channel==='bilibili'){
+        const receipt=value.report.query_receipt,qs=receipt?.queries||[],ok=qs.filter(q=>q.ret_code===0).length;
+        status(`B 服查询完成${qs.length?`：${ok}/${qs.length} 个卡池查询成功`:'。'}，记录已存到本机。${value.report.summary.pull_count===0?'当前返回 0 条抽卡记录。':''}`,value.report.partial?'error':undefined);
+      }else status('已通过官网登录并完成查询，记录已按账号身份保存到本机。');
     }
   }
   async function poll() {
@@ -65,17 +76,20 @@
   }
   $('remember-login').addEventListener('change',()=>{$('login-profile-options').hidden=!$('remember-login').checked;});
   $('login-profile').addEventListener('change',()=>{$('forget-login').disabled=active||!$('login-profile').value;});
-  $('portal-start').addEventListener('click',async()=>{
+  async function startLogin(channel,method){
     if(state.busy||starting)return;
     starting=true;
     try{
       clearTimeout(timer);
-      controls({phase:'opening'}); $('portal-progress').hidden=false; $('portal-progress').textContent='正在打开专用官网登录窗口…';
-      const value=await api('start',{remember:$('remember-login').checked,profile:$('remember-login').checked?($('login-profile').value||null):null});
+      controls({phase:'opening'}); $('portal-progress').hidden=false; $('portal-progress').textContent=channel==='bilibili'?'正在打开 B 站官方授权页面…':'正在打开专用官网登录窗口…';
+      const value=await api('start',{...(channel==='bilibili'?{channel}:{}),...(method?{method}:{}),remember:channel!=='bilibili'&&$('remember-login').checked,profile:channel!=='bilibili'&&$('remember-login').checked?($('login-profile').value||null):null});
       show(value); timer=setTimeout(poll,500);
     }catch(e){controls({phase:'error'}); status(e.message,'error');}
     finally{starting=false;}
-  });
+  }
+  $('portal-start').addEventListener('click',()=>startLogin('official'));
+  $('bili-start')?.addEventListener('click',()=>startLogin('bilibili'));
+  $('tap-start')?.addEventListener('click',()=>startLogin('official','taptap_app'));
   $('portal-cancel').addEventListener('click',async()=>{
     try{show(await api('cancel')); clearTimeout(timer);timer=setTimeout(poll,300);}
     catch(e){status(e.message,'error');}
@@ -87,6 +101,6 @@
     catch(e){status(e.message,'error');}
   });
   // Restore active login progress after a browser refresh; do not replace an archive with an old completed query.
-  api('').then(value=>{refreshProfiles(value.profiles||[]);if(['opening','waiting','querying'].includes(value.phase)){show(value);timer=setTimeout(poll,500);}})
+  api('').then(value=>{refreshProfiles(value.profiles||[]);if(['opening','waiting','querying'].includes(value.phase)||value.pending_result){show(value);if(active)timer=setTimeout(poll,500);}})
     .catch(()=>{});
 })();
