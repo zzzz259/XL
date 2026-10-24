@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.*;
 public final class TapAppIntegration extends Instrumentation {
  int checks;LoginActivity activity;AtomicInteger launches=new AtomicInteger();AtomicReference<Intent> launched=new AtomicReference<>();AtomicBoolean unavailable=new AtomicBoolean();
  void ok(boolean condition,String name){checks++;if(!condition)throw new AssertionError(name);}
+ void checkedMain(Runnable action){AtomicReference<Throwable> error=new AtomicReference<>();runOnMainSync(()->{try{action.run();}catch(Throwable e){error.set(e);}});if(error.get()!=null)throw new AssertionError(error.get());}
  @Override public void onCreate(Bundle b){super.onCreate(b);start();}
  @Override public void onStart(){Bundle result=new Bundle();try{
   TapAppLoginTest.main(new String[0]);result.putInt("tap_policy_checks",TapAppLoginTest.checks);
@@ -20,7 +21,7 @@ public final class TapAppIntegration extends Instrumentation {
   MainActivity.session="tapQaOwner";TapAppDiagnostics.begin();
   activity=(LoginActivity)startActivitySync(new Intent(getTargetContext(),LoginActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("reuse",true).putExtra("tap_app",true));
   WebView web=activity.views.get(0);CountDownLatch loaded=new CountDownLatch(1);
-  runOnMainSync(()->{
+  checkedMain(()->{
    activity.handler.removeCallbacks(activity.poll);web.stopLoading();WebViewClient production=web.getWebViewClient();
    web.setWebViewClient(new WebViewClient(){
     @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
@@ -32,8 +33,8 @@ public final class TapAppIntegration extends Instrumentation {
    });MainActivity.phase("waiting","QA only");web.loadUrl("https://accounts.taptap.cn/login?qa=1");
   });
   ok(loaded.await(10,TimeUnit.SECONDS),"official synthetic page loaded");
-  for(int i=0;i<50&&activity.tap.challenge==null;i++){runOnMainSync(()->activity.tap.poll());SystemClock.sleep(100);}
-  runOnMainSync(()->{
+  for(int i=0;i<50&&activity.tap.challenge==null;i++){checkedMain(()->activity.tap.poll());SystemClock.sleep(100);}
+  checkedMain(()->{
    ok(activity.tap.challenge!=null,"production fetch observer captures fresh challenge");
    ok(activity.tap.open.isEnabled(),"native App action enabled");
    activity.tap.open.performClick();ok(launches.get()==1,"one App launch");
@@ -46,7 +47,7 @@ public final class TapAppIntegration extends Instrumentation {
    MainActivity.session="changedOwner";activity.tap.press();ok(launches.get()==1,"cancelled/switched owner cannot launch");MainActivity.session="tapQaOwner";activity.tap.requested=true;
    WebView popup=activity.createWebView();ok(activity.tap.panel.getVisibility()==View.GONE,"toolbar follows active window");activity.views.remove(popup);activity.layout.removeView(popup);popup.destroy();activity.showView(web);ok(activity.tap.panel.getVisibility()==View.VISIBLE,"return restores original official window");
    activity.tap.navigation(web,"https://evil.example/login");ok(activity.tap.panel.getVisibility()==View.GONE,"toolbar hides outside official flow");
-   activity.tap.navigation(web,"https://accounts.taptap.cn/authorize");activity.tap.started=SystemClock.uptimeMillis()-120001;
+   activity.tap.navigation(web,"https://accounts.taptap.cn/authorize");result.putLong("timeout_check_uptime_ms",SystemClock.uptimeMillis());activity.tap.started=SystemClock.uptimeMillis()-120001;
    activity.tap.poll();ok("TAP_AUTH_TIMEOUT".equals(MainActivity.login.optString("error")),"expired authorization cannot remain active");
   });
   waitForIdleSync();ok("error".equals(MainActivity.login.optString("phase")),"destroy preserves timeout error");
