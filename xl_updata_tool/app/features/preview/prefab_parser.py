@@ -76,6 +76,13 @@ def parse_prefab(bundle_path):
     return result
 
 
+def parse_unity_scene(bundle_path, bundle_hash, version_timestamp=None):
+    """Expose the complete parser while keeping the legacy parser API intact."""
+    from app.features.preview.portrait_config.unity_scene import parse_unity_scene as parse_scene
+
+    return parse_scene(bundle_path, bundle_hash, version_timestamp)
+
+
 def compute_pixel_offset(parse_result, ppu=100.0):
     """根据 parse_prefab 返回，计算背景相对人物的像素偏移。
 
