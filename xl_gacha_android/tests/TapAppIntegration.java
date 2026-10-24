@@ -47,7 +47,7 @@ public final class TapAppIntegration extends Instrumentation {
    MainActivity.session="changedOwner";activity.tap.press();ok(launches.get()==1,"cancelled/switched owner cannot launch");MainActivity.session="tapQaOwner";activity.tap.requested=true;
    WebView popup=activity.createWebView();ok(activity.tap.panel.getVisibility()==View.GONE,"toolbar follows active window");activity.views.remove(popup);activity.layout.removeView(popup);popup.destroy();activity.showView(web);ok(activity.tap.panel.getVisibility()==View.VISIBLE,"return restores original official window");
    activity.tap.navigation(web,"https://evil.example/login");ok(activity.tap.panel.getVisibility()==View.GONE,"toolbar hides outside official flow");
-   activity.tap.navigation(web,"https://accounts.taptap.cn/authorize");result.putLong("timeout_check_uptime_ms",SystemClock.uptimeMillis());activity.tap.started=SystemClock.uptimeMillis()-120001;
+   activity.tap.navigation(web,"https://accounts.taptap.cn/authorize");result.putLong("timeout_check_uptime_ms",SystemClock.uptimeMillis());activity.tap.expiresAt=SystemClock.uptimeMillis()-1;
    activity.tap.poll();ok("TAP_AUTH_TIMEOUT".equals(MainActivity.login.optString("error")),"expired authorization cannot remain active");
   });
   waitForIdleSync();ok("error".equals(MainActivity.login.optString("phase")),"destroy preserves timeout error");

@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 /** Keeps the official portal WebView alive while its QR challenge is confirmed in TapTap. */
 final class TapLoginController {
  final LoginActivity activity;final TextView info;final Button open,web;final LinearLayout panel;
- WebView view;long generation,started;boolean requested,opened,reading,closed;String script;
+ WebView view;long generation,expiresAt;boolean requested,opened,reading,closed;String script;
  TapAppLogin.Challenge challenge;
  TapLoginController(LoginActivity activity,boolean requested){
   this.activity=activity;this.requested=requested;
@@ -32,7 +32,7 @@ final class TapLoginController {
   if(changed==view){generation++;challenge=null;reading=false;}
   if(!TapAppLogin.authPage(url)){if(changed==view){view=null;panel.setVisibility(View.GONE);}return;}
   if(view!=changed){view=changed;generation++;challenge=null;reading=false;}
-  if(started==0)started=SystemClock.uptimeMillis();
+  if(expiresAt==0)expiresAt=SystemClock.uptimeMillis()+120000;
   panel.setVisibility(View.VISIBLE);
   if(requested)TapAppDiagnostics.event(TapAppLogin.loginPage(url)?"OFFICIAL_LOGIN_PAGE":"OFFICIAL_AUTHORIZE_PAGE");
   update();
@@ -55,7 +55,7 @@ final class TapLoginController {
  }
  void poll(){
   if(!current())return;
-  if(requested&&started>0&&SystemClock.uptimeMillis()-started>=120000){TapAppDiagnostics.finish("AUTH_TIMEOUT");MainActivity.failLogin("TAP_AUTH_TIMEOUT");activity.finish();return;}
+  if(requested&&expiresAt>0&&SystemClock.uptimeMillis()>=expiresAt){TapAppDiagnostics.finish("AUTH_TIMEOUT");MainActivity.failLogin("TAP_AUTH_TIMEOUT");activity.finish();return;}
   if(!TapAppLogin.loginPage(view.getUrl()))return;
   if(reading||script.isEmpty())return;
   reading=true;final WebView target=view;final long epoch=generation;final String page=view.getUrl();
