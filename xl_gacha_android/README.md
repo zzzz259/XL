@@ -22,6 +22,10 @@
 
 0.3.4 增加长图相册保存和系统分享，支持多选批量处理。[0.3.4 更新公告](../docs/releases/gacha-v0.3.4.md)
 
+当前版本 **0.3.6**，在完整 0.3.4 基线上接入 B 服授权查询与 TapTap App 授权，保留新登录清理、QQ 分享回流、相册保存、系统分享和默认配置源。[0.3.4 之后的更新公告](../docs/releases/gacha-v0.3.6.md) · [渠道登录实现](../docs/gacha-channel-login.md)。电脑端停止维护，后续只交付 Android；0.4 留作 UI 和信息优化。
+
+官服可点「TapTap App 授权并查询」，在官网阅读协议并选择 TapTap，随后点击手记登录窗口上方的「打开 TapTap App」。在已登录的官方 TapTap 确认后，通过系统最近任务返回手记，在原网页完成官网授权，随后自动查询。无需手动扫描二维码；官方确认均保留。取消、授权过期或未安装 TapTap 时可重试或继续网页登录；需要反馈时复制 TapTap 脱敏诊断，不发送密码或令牌。当前仅验证国内 TapTap，尚未验证国际版。
+
 游戏认证 HTTPS 和游戏网关 TCP 使用直接连接，不读取系统 HTTP 代理。官方登录 WebView 遵循 Android 的网络设置；应用不会绕过系统 VPN。
 
 ## 实现边界
@@ -39,6 +43,8 @@
 ## 构建
 
 需要项目 Python 环境与 Pillow、Node、JDK17+、SDK API35/build-tools35，支持标准 Linux/Windows SDK 和旧离线布局。通用命令及真实 Android JSON 测试见[构建指南](../docs/gacha-development.md)。正式包显式提供 Git 外原签名密钥；开发包显式选择 --development-key，不能冒充正式升级。applicationId 保持 cn.starfall.gacha.local；原密钥、密码和证书指纹需离线备份。
+
+B 服入口仅在构建时提供 Git 外 `--bilibili-config` 才显示，配置含客户端 SDK 接入参数，不放进仓库。0.3.6 正式包为 `cn.starfall.gacha.local` / versionCode 10，沿用正式 0.3.4 签名；默认文件名为 `星落抽卡手记-Android-v0.3.6.apk`。`--application-id`、`--label`、`--version-code`、`--version-name` 仍可生成独立 QA 包。此前 `cn.starfall.gacha.bilitest` 为独立测试应用，其存档需通过 JSON 迁移至正式包。APK 内 `build-info.json` 记录基线和实际 Java/Web 源码 SHA256，核对版本时同时核对来源。所有构建输出必须位于仓库外。
 
 ## 当前验证
 
