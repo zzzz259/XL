@@ -15,6 +15,7 @@ xl_updata_tool/app/data/
 xl_updata_tool/output/
 logs/
 /base/
+/base-bili/
 *_as_temp/
 _tmp/
 tmp/
