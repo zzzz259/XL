@@ -3,7 +3,7 @@
 (() => {
   if (location.origin !== 'https://accounts.taptap.cn' || location.pathname !== '/login') return;
   if (window.__starfallTapApp) return;
-  let challenge = null, expires = 0, requested = false, expired = false;
+  let challenge = null, expires = 0, requested = false, expired = false, preparingAt = 0;
   const endpoint = value => {
     try { const u = new URL(value, location.href); return u.origin === location.origin && u.pathname === '/api/device-code/get'; }
     catch { return false; }
@@ -36,15 +36,23 @@
       return open.call(this, method, url, ...args);
     };
   }
+  const snapshot = (phase, extra = {}) => ({phase, page_url:location.href, page_path:location.pathname,
+    mobile_ua:/(mobi|mzbrowser)/i.test(window.navigator?.userAgent || ''),
+    mode_switch_present:!!document.querySelector('.login-page__content__login-mode-icon'),
+    qr_visible:!!document.querySelector('.qrcode-login'), viewport_width:window.innerWidth || 0, ...extra});
   const read = () => {
-    if (location.origin !== 'https://accounts.taptap.cn' || location.pathname !== '/login') { challenge=null; return {phase:'authorizing'}; }
+    if (location.origin !== 'https://accounts.taptap.cn' || location.pathname !== '/login') { challenge=null; return snapshot('authorizing'); }
     if (Date.now() >= expires && challenge) { challenge = null; expired = true; }
-    return challenge ? {phase:'ready', qrcode_url:challenge} : {phase:expired ? 'expired' : 'waiting'};
+    if (challenge) return snapshot('ready', {qrcode_url:challenge});
+    if (expired) return snapshot('expired');
+    if (preparingAt && Date.now() - preparingAt >= 15000) return snapshot('unavailable', {reason:requested ? 'response_missing' : 'mode_switch_missing'});
+    return snapshot('waiting');
   };
   window.__starfallTapApp = {
     read,
-    reset() { challenge=null; requested=false; expired=false; },
+    reset() { challenge=null; requested=false; expired=false; preparingAt=0; },
     request() {
+      if (!preparingAt) preparingAt = Date.now();
       if (!requested) {
         const icon = document.querySelector('.login-page__content__login-mode-icon');
         if (icon) {

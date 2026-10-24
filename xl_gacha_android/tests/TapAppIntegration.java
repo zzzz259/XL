@@ -11,10 +11,10 @@ import java.util.concurrent.atomic.*;
 
 /** Intercepts synthetic provider responses and App launch; never contacts an account service. */
 public final class TapAppIntegration extends Instrumentation {
- int checks;LoginActivity activity;AtomicInteger launches=new AtomicInteger();AtomicReference<Intent> launched=new AtomicReference<>();AtomicBoolean unavailable=new AtomicBoolean();
+ int checks;boolean mobile;LoginActivity activity;AtomicInteger launches=new AtomicInteger();AtomicReference<Intent> launched=new AtomicReference<>();AtomicBoolean unavailable=new AtomicBoolean();
  void ok(boolean condition,String name){checks++;if(!condition)throw new AssertionError(name);}
  void checkedMain(Runnable action){AtomicReference<Throwable> error=new AtomicReference<>();runOnMainSync(()->{try{action.run();}catch(Throwable e){error.set(e);}});if(error.get()!=null)throw new AssertionError(error.get());}
- @Override public void onCreate(Bundle b){super.onCreate(b);start();}
+ @Override public void onCreate(Bundle b){super.onCreate(b);mobile="true".equals(b.getString("mobile"));start();}
  @Override public void onStart(){Bundle result=new Bundle();try{
   TapAppLoginTest.main(new String[0]);result.putInt("tap_policy_checks",TapAppLoginTest.checks);
   ActivityMonitor monitor=new ActivityMonitor(){@Override public ActivityResult onStartActivity(Intent intent){if("com.taptap".equals(intent.getPackage())){if(unavailable.get())throw new ActivityNotFoundException();launches.incrementAndGet();launched.set(intent);return new ActivityResult(Activity.RESULT_CANCELED,null);}return null;}};addMonitor(monitor);
@@ -23,19 +23,28 @@ public final class TapAppIntegration extends Instrumentation {
   WebView web=activity.views.get(0);CountDownLatch loaded=new CountDownLatch(1);
   checkedMain(()->{
    activity.handler.removeCallbacks(activity.poll);web.stopLoading();WebViewClient production=web.getWebViewClient();
+   if(mobile)web.getSettings().setUserAgentString("Mozilla/5.0 (Linux; Android 14; V2162A) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/116.0.5845.92 Mobile Safari/537.36");
    web.setWebViewClient(new WebViewClient(){
     @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){
-     String body=request.getUrl().getPath().equals("/api/device-code/get")?"{\"data\":{\"qrcode_url\":\"https://accounts.taptap.cn/device?qrcode=qaChallenge&user_code=QA123456\",\"expires_in\":120}}":"<!doctype html><button class='login-page__content__login-mode-icon' onclick=\"fetch('/api/device-code/get')\">QR mode</button>";
+     String fixture="<!doctype html><script>"+(mobile?"history.replaceState({},'', '/login'+location.search);if(!/(mobi|mzbrowser)/i.test(navigator.userAgent))":"")+"document.write('<button class=\\\"login-page__content__login-mode-icon\\\" onclick=\\\"fetch(\\\'/api/device-code/get\\\')\\\">QR mode</button>');</script>";
+     String body=request.getUrl().getPath().equals("/api/device-code/get")?"{\"data\":{\"qrcode_url\":\"https://accounts.taptap.cn/device?qrcode=qaChallenge&user_code=QA123456\",\"expires_in\":120}}":fixture;
      return new WebResourceResponse(request.getUrl().getPath().equals("/api/device-code/get")?"application/json":"text/html","UTF-8",new ByteArrayInputStream(body.getBytes()));
     }
     @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){production.onPageStarted(v,url,icon);}
-    @Override public void onPageFinished(WebView v,String url){production.onPageFinished(v,url);if("https://accounts.taptap.cn/login?qa=1".equals(url))loaded.countDown();}
-   });MainActivity.phase("waiting","QA only");web.loadUrl("https://accounts.taptap.cn/login?qa=1");
+    @Override public void doUpdateVisitedHistory(WebView v,String url,boolean reload){production.doUpdateVisitedHistory(v,url,reload);}
+    @Override public void onPageFinished(WebView v,String url){production.onPageFinished(v,url);if(TapAppLogin.authPage(url)&&url.contains("qa=1"))loaded.countDown();}
+   });MainActivity.phase("waiting","QA only");web.loadUrl(mobile?"https://accounts.taptap.cn/authorize?qa=1&state=qaState&code_challenge=qaPkce":"https://accounts.taptap.cn/login?qa=1");
   });
   ok(loaded.await(10,TimeUnit.SECONDS),"official synthetic page loaded");
   for(int i=0;i<50&&activity.tap.challenge==null;i++){checkedMain(()->activity.tap.poll());SystemClock.sleep(100);}
+  if(mobile){
+   checkedMain(()->{ok(activity.tap.challenge!=null,"mobile compatibility reached QR mode before fallback");activity.tap.web.performClick();ok(!activity.tap.requested&&activity.views.get(0).getSettings().getUserAgentString().contains("Mobile"),"web fallback restores the original mobile user agent");});
+   waitForIdleSync();SystemClock.sleep(300);checkedMain(()->activity.tap.open.performClick());
+   for(int i=0;i<50&&activity.tap.challenge==null;i++){checkedMain(()->activity.tap.poll());SystemClock.sleep(100);}
+  }
   checkedMain(()->{
    ok(activity.tap.challenge!=null,"production fetch observer captures fresh challenge");
+   if(mobile){ok("qaState".equals(android.net.Uri.parse(web.getUrl()).getQueryParameter("state")),"pending state retained across mobile compatibility reload");ok("qaPkce".equals(android.net.Uri.parse(web.getUrl()).getQueryParameter("code_challenge")),"pending PKCE challenge retained");}
    ok(activity.tap.open.isEnabled(),"native App action enabled");
    activity.tap.open.performClick();ok(launches.get()==1,"one App launch");
    ok("com.taptap".equals(launched.get().getPackage()),"fixed official package");
@@ -52,6 +61,6 @@ public final class TapAppIntegration extends Instrumentation {
   });
   waitForIdleSync();ok("error".equals(MainActivity.login.optString("phase")),"destroy preserves timeout error");
   ok(!TapAppDiagnostics.report(getTargetContext()).toString().contains("qaChallenge"),"diagnostic never retains challenge");
-  removeMonitor(monitor);result.putString("result","PASS "+checks+" TapTap App WebView/handoff checks");finish(Activity.RESULT_OK,result);
+  removeMonitor(monitor);result.putString("layout",mobile?"phone":"standard");result.putString("result","PASS "+checks+" TapTap App WebView/handoff checks");finish(Activity.RESULT_OK,result);
  }catch(Throwable e){result.putString("result","FAIL "+e);finish(Activity.RESULT_CANCELED,result);}finally{if(activity!=null&&!activity.isFinishing())runOnMainSync(()->activity.finish());}}
 }

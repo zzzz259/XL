@@ -32,6 +32,7 @@ public class LoginActivity extends Activity {
   CookieManager.getInstance().setAcceptThirdPartyCookies(w,true);
   w.setWebViewClient(new WebViewClient(){
    @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){recordAuthorization(v,Uri.parse(url));tap.navigation(v,url);}
+   @Override public void doUpdateVisitedHistory(WebView v,String url,boolean reload){tap.history(v,url);}
    @Override public void onPageFinished(WebView v,String url){
     if(isFinishing()||!ORIGIN.equals(Uri.parse(url).getScheme()+"://"+Uri.parse(url).getHost()))return;
     if(fresh&&!storageCleared){if(storageClearPending)return;storageClearPending=true;v.evaluateJavascript("(()=>{if(location.origin!=='https://i.haoplay.com.cn')return false;localStorage.clear();sessionStorage.clear();return true;})()",value->{if(isFinishing())return;if(!"true".equals(value)){MainActivity.phase("error","无法清理旧登录状态，请重试。");finish();return;}storageCleared=true;v.clearCache(true);v.reload();});}

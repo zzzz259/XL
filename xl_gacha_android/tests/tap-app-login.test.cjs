@@ -4,13 +4,13 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../web/tap-app-login.js'),'utf8');
 const QR='https://accounts.taptap.cn/device?qrcode=qaChallenge&user_code=QA123456';
-function page(origin='https://accounts.taptap.cn',path='/login'){
+function page(origin='https://accounts.taptap.cn',path='/login',options={}){
  let now=1000,modeClicks=0,qr=false;
  const calls=[];
  const icon={click(){modeClicks++;qr=!qr;}};
- const document={querySelector(selector){return selector==='.qrcode-login'?(qr?{}:null):selector==='.login-page__content__login-mode-icon'?icon:null;}};
+ const document={querySelector(selector){return selector==='.qrcode-login'?(qr?{}:null):selector==='.login-page__content__login-mode-icon'?(options.switchMissing?null:icon):null;}};
  const fetch=async url=>{calls.push(url);return {ok:true,clone(){return {json:async()=>({data:{qrcode_url:QR,expires_in:120}})}}};};
- const window={fetch,location:{origin,pathname:path,href:origin+path}};
+ const window={fetch,location:{origin,pathname:path,href:origin+path},navigator:{userAgent:options.userAgent||'Android tablet'},innerWidth:options.width||450};
  class XHR {open(method,url){this.url=url;}addEventListener(name,fn){this.listener=fn;}send(){this.status=200;this.responseType='';this.responseText=JSON.stringify({data:{qrcode_url:QR}});this.listener?.();}}
  window.XMLHttpRequest=XHR;
  const ctx=vm.createContext({window,location:window.location,document,URL,Date:{now:()=>now},setTimeout:fn=>fn(),XMLHttpRequest:XHR});
@@ -36,4 +36,11 @@ test('prepares QR mode once, survives repeat injection, and forgets expired chal
 test('XHR response capture is limited to the same official endpoint',()=>{
  const p=page(),x=new p.window.XMLHttpRequest();x.open('POST','https://evil.example/api/device-code/get');x.send();assert.equal(p.helper().read().phase,'waiting');
  const y=new p.window.XMLHttpRequest();y.open('POST','/api/device-code/get');y.send();assert.equal(p.helper().read().qrcode_url,QR);
+});
+test('missing mobile QR switch becomes an explicit preparation failure without starting login requests',()=>{
+ const p=page('https://accounts.taptap.cn','/login',{switchMissing:true,userAgent:'Chrome/116.0 Mobile Safari',width:360});
+ p.helper().request();p.advance(15001);const state=p.helper().request();
+ assert.equal(state.phase,'unavailable');assert.equal(state.reason,'mode_switch_missing');
+ assert.equal(state.mobile_ua,true);assert.equal(state.page_path,'/login');assert.equal(state.viewport_width,360);
+ assert.equal(p.clicks(),0);assert.deepEqual(p.calls,[]);
 });

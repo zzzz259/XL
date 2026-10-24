@@ -55,6 +55,7 @@ adb shell am instrument -w -e separateTask false cn.starfall.gacha.returnqa/cn.s
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.ImageExportIntegration
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginFreshIntegration
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
+adb shell am instrument -w -e mobile true cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
 adb uninstall cn.starfall.gacha.returnqa
 ```
 
@@ -65,6 +66,8 @@ adb uninstall cn.starfall.gacha.returnqa
 新登录清理检查需包含 `PASS 8 fresh-login WebView checks` 和 `INSTRUMENTATION_CODE: -1`。测试向隔离 WebView 的官网来源写入合成旧 JWT/HP/provider/sessionStorage，调用原生产代码的页面完成回调，确认轮询在清理前关闭、实际存储被清空、重新加载后才开放轮询。另以真实官网新登录入口检查等待授权且无旧身份自动查询；不要读取或输出真实凭据。原生测试 JAR 会先进行四字节对齐，使 MuMu 可以直接映射 dex，不依赖 shell 创建提取命名空间。
 
 TapTap App 衔接测试需包含 `PASS 16 TapTap App WebView/handoff checks`、`tap_policy_checks=21` 与 `INSTRUMENTATION_CODE: -1`。它拦截合成官网响应及 App 启动，测试真实 WebView 监听、包名、一次性交接、未安装 App 的反馈、会话切换、当前窗口恢复、超时与诊断不含挑战。21 项链接策略检查在同一个正常 Android 应用进程执行；MuMu 的 shell `app_process` 可能在执行完策略后以 139 退出，不能据打印通过就声称命令成功。JS 监听另用 `node --test tests/tap-app-login.test.cjs` 覆盖官方来源、fetch/XHR、重复注入及过期。
+
+手机布局分支另外需包含 `layout=phone`、`PASS 20 TapTap App WebView/handoff checks` 和成功结束码。该夹具使用含 Mobile 标识的手机 UA 与官网相同的扫码切换可见性条件，并通过 history.replaceState 模拟 `/authorize` 到 `/login` 的 SPA 跳转；同时验证原 state/PKCE 保留、网页登录回退恢复原 UA、再次 App 授权可用。诊断只记录页面路径和布局准备状态，完整 URL 与挑战仅在原生内存中绑定本次窗口，不进入诊断。
 
 Android 15 模拟器可验证系统分享预览，不替代接收端真机测试。2026-10-23 用户确认 0.3.4 相册保存和分享在真机均正常；功能提交 a66209d7 的 CI 检查通过。接收应用/机型没有逐项枚举，Android 9 保存相册的权限分支需要另行验证。
 
