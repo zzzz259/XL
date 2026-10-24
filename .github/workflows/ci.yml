@@ -65,7 +65,7 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Test engine and SDK resolver
         run: |
-          node --test tests/engine.test.cjs tests/tap-app-login.test.cjs
+          node --test tests/engine.test.cjs tests/tap-app-login.test.cjs tests/mobile-ui.test.cjs
           for file in web/*.js; do node --check "$file"; done
           python -B -m unittest discover -s tests -p 'test_*.py' -v
       - name: Compile all native sources, execute WireTest and prepare real JSON tests
@@ -104,6 +104,8 @@ jobs:
             python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/tap.txt').read_text(); assert 'PASS 16 TapTap App WebView/handoff checks' in s and 'tap_policy_checks=21' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
             adb shell am instrument -w -e mobile true cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration | tee "$RUNNER_TEMP/login-return/tap-mobile.txt"
             python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/tap-mobile.txt').read_text(); assert 'PASS 20 TapTap App WebView/handoff checks' in s and 'layout=phone' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.MobileUiIntegration | tee "$RUNNER_TEMP/login-return/mobile-ui.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/mobile-ui.txt').read_text(); assert 'mobile UI WebView checks' in s and 'PASS ' in s and 'FAIL' not in s and 'INSTRUMENTATION_CODE: -1' in s, s"
             adb uninstall cn.starfall.gacha.returnqa
 
   gacha-https-config:

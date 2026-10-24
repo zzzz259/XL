@@ -25,7 +25,7 @@ node --test tests/image-export.test.cjs
 
 ```sh
 cd xl_gacha_android
-node --test tests/engine.test.cjs
+node --test tests/engine.test.cjs tests/tap-app-login.test.cjs tests/mobile-ui.test.cjs
 python -B -m unittest discover -s tests -p 'test_*.py' -v
 python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/native-tests
 ```
@@ -56,10 +56,13 @@ adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.Im
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginFreshIntegration
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
 adb shell am instrument -w -e mobile true cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.MobileUiIntegration
 adb uninstall cn.starfall.gacha.returnqa
 ```
 
 两次输出都必须包含 `PASS 12 isolated Android` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。同任务、独立任务分别运行，CI 同样检查输出。该测试 APK 使用 Git 外临时开发签名，不能当成正式升级包。
+
+移动 UI 检查需包含 `PASS`、`mobile UI WebView checks`、`INSTRUMENTATION_CODE: -1`，且没有 `FAIL`。它只在 QA 包中使用合成存档，覆盖展开卡池、分类与后台刷新、跨渠道账号、弹窗与原生返回、实际 Canvas 图片和 140% 字体。默认 QA 构建组合真实移动资源并关闭公网配置源；`-e phone true` 可在宽屏模拟器内将 QA WebView 限为 393dp 并导出裁到 WebView 区域的截图。不会清除或操作正式应用的存档。
 
 相册/分享检查另需包含 `PASS 20 image album/share checks` 和 `INSTRUMENTATION_CODE: -1`，覆盖真实 MediaStore 落盘/字节、发布目录、原文件导出的 Downloads 路径和字节、临时 provider 读取、单图/多图意图、只读授权、非法 URI 拒绝与过期清理，测试完成前删除自己贡献的相册图片和测试文档。QA provider authority 使用独立包名，避免与正式版冲突。`--assets /outside/repo/release/assets` 可为隔离测试包加入刚构建的页面资源并启用 QA WebView 调试，供合成多页图片界面验证；正式包不启用调试。
 

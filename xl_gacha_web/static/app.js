@@ -35,7 +35,8 @@ function status(text, kind = '') {
   target.textContent = text;
 }
 
-function showReport(report, isDemo = false) {
+function showReport(report, isDemo = false, options = {}) {
+  const previousCategory = state.category;
   document.body.classList.add('has-report');
   state.report = report;
   state.demo = isDemo;
@@ -79,7 +80,12 @@ function showReport(report, isDemo = false) {
   }
   renderTable();
   renderCareer();
-  document.dispatchEvent(new CustomEvent('report-shown', {detail: report}));
+  if (options.preserveView && previousCategory !== 'all') {
+    [...$('category-tabs').children].find(button => button.dataset.category === previousCategory)?.click();
+  }
+  const shown = new CustomEvent('report-shown', {detail: report});
+  shown.preserveView = Boolean(options.preserveView);
+  document.dispatchEvent(shown);
 }
 
 function renderCareer() {
@@ -129,6 +135,7 @@ function metric(label, value) {
 }
 
 function renderPools() {
+  if (window.GachaPresentation?.renderPools) { window.GachaPresentation.renderPools(state.report, state.category, $('pool-timeline')); return; }
   $('pool-timeline').replaceChildren();
   const pools = (state.report?.analysis?.pools || []).filter(pool => state.category === 'all' || pool.category === state.category);
   if (!pools.length) {$('pool-timeline').append(node('div', '这个分类暂时没有返回记录。', 'pool-empty')); return;}
@@ -219,6 +226,7 @@ function clearResults() {
   $('history-body').replaceChildren(); $('rarity-bars').replaceChildren(); $('pool-bars').replaceChildren();
   $('pool-filter').replaceChildren(new Option('全部卡池', '')); $('search').value = '';
   $('pool-timeline').replaceChildren(); $('career-categories').replaceChildren(); $('extra-categories').replaceChildren();
+  document.dispatchEvent(new CustomEvent('report-cleared'));
 }
 
 function download(kind) {
@@ -242,7 +250,7 @@ function download(kind) {
 $('query-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (state.busy) return;
-  if (!$('credential').value.trim()) {status('请先粘贴登录凭据。不知道在哪里找？点击右侧的完整教程。', 'error'); $('credential').focus(); return;}
+  if (!$('credential').value.trim()) {status('请先粘贴本人账号的登录凭据，或使用官网登录查询。', 'error'); $('credential').focus(); return;}
   if (!$('consent').checked) {status('请先确认这是你本人的账号，并同意查询抽卡历史。', 'error'); $('consent').focus(); return;}
   state.busy = true;
   $('submit').disabled = true; $('demo').disabled = true;

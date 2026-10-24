@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101821">
+  <title>星落 · 抽卡手记</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./mobile-ui.css">
+  <script src="./mobile-engine.js"></script>
+  <script src="./android-bridge.js"></script>
+  <script src="./app.js" defer></script>
+  <script src="./image-export.js" defer></script>
+  <script src="./local.js" defer></script>
+  <script src="./login.js" defer></script>
+  <script src="./catalog-ui.js" defer></script>
+  <script src="./mobile-ui.js" defer></script>
+</head>
+<body class="mobile-app" data-page="query" data-category="all">
+  <svg class="icon-definitions" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="icon-book" viewBox="0 0 24 24"><path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4Zm0 12h15M8 8h7M8 11h5"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M10.5 7v7M7 10.5h7"/></symbol>
+    <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></symbol>
+    <symbol id="icon-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m4 18 6-6 4 4 3-3 4 4"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  </defs></svg>
+
+  <header class="app-header">
+    <button class="brand" type="button" data-nav="records" aria-label="返回记录首页"><span class="brand-mark" aria-hidden="true">✦</span><span>星落<span class="brand-subtitle">抽卡手记</span></span></button>
+    <button id="mobile-account" class="account-pill" type="button" data-dialog="accounts-dialog" aria-label="切换或管理账号"><span class="account-dot"></span><span id="mobile-account-name">本地存档</span><svg class="icon"><use href="#icon-chevron"/></svg></button>
+  </header>
+  <main class="app-main">
+    <div id="global-status" class="status global-status" role="status" aria-live="polite" hidden></div>
+
+    <section id="page-records" class="app-page" data-view="records" aria-label="记录首页" hidden>
+      <div class="page-heading"><div><p class="eyebrow">MY RECRUITMENT JOURNAL</p><h1>招募档案</h1></div><button id="toggle-query" type="button" class="quiet-button" aria-expanded="false">重新查询 <svg class="icon"><use href="#icon-arrow"/></svg></button></div>
+      <section id="empty-state" class="empty-records">
+        <div class="empty-emblem" aria-hidden="true">✧</div><h2 id="mobile-empty-title">还没有记录的篇章</h2><p id="mobile-empty-description">完成一次查询，或导入已有存档，把每一次相遇留在这里。</p>
+        <button class="primary-button" type="button" data-nav="query">查询我的记录 <svg class="icon"><use href="#icon-arrow"/></svg></button>
+        <button type="button" class="text-button" data-dialog="accounts-dialog">选择或导入存档</button>
+      </section>
+      <section id="results" class="results" aria-label="抽卡查询结果" hidden>
+        <div class="account-summary"><div><h2 id="account-title">招募记录</h2><p id="mobile-account-meta" class="muted"></p><p id="result-time" class="micro"></p></div><span id="demo-label" class="demo-label" hidden>演示数据</span></div>
+        <div id="partial-warning" class="notice" role="status" hidden>部分卡池查询未成功。以下为已保存的可见记录，可稍后重试。</div>
+        <div class="stats-grid" aria-label="累计统计"><article class="stat-card stat-main"><span>累计招募</span><strong id="stat-pulls">0</strong><p id="stat-records">0 条记录</p></article><article class="stat-card"><span>五星相遇</span><strong id="stat-five">0</strong><p id="stat-rate">样本占比 0%</p></article><article class="stat-card"><span>历经卡池</span><strong id="stat-pools">0</strong><p id="stat-dates">等待查询</p></article></div>
+        <div class="record-actions"><button id="export-image" type="button" class="primary-button"><svg class="icon"><use href="#icon-image"/></svg>生成记录长图</button><button type="button" class="outline-button" data-dialog="accounts-dialog">数据管理</button></div>
+        <div id="category-tabs" class="category-tabs" aria-label="卡池分类"></div>
+        <section id="career-panel" class="career-panel" aria-label="抽卡生涯统计"><div class="section-heading"><h3>抽卡生涯</h3><span>本机可见历史</span></div><div id="career-categories" class="career-categories"></div><div id="extra-categories" class="extra-categories"></div><p class="career-disclaimer">各类卡池独立统计；保底由连续可见历史推断，并非游戏实时状态。</p></section>
+        <section class="pool-history" aria-labelledby="pool-history-title"><div class="section-heading"><h3 id="pool-history-title">卡池足迹</h3><span id="mobile-pool-count"></span></div><div id="pool-timeline" class="pool-timeline"></div></section>
+        <details class="distribution-details"><summary>星级与卡池分布</summary><div class="analysis-grid"><article class="analysis-card"><h3>星级分布</h3><div id="rarity-bars"></div></article><article class="analysis-card"><h3>卡池分布</h3><div id="pool-bars" class="pool-bars"></div></article></div></details>
+        <details class="raw-details"><summary>原始招募记录 <span>搜索与逐项核对</span></summary><div class="history-card"><div class="history-heading"><h3>掉落明细 <span id="filtered-count"></span></h3><div class="filters"><label class="sr-only" for="search">搜索角色</label><input id="search" type="search" placeholder="搜索角色名称"><label class="sr-only" for="pool-filter">卡池</label><select id="pool-filter"><option value="">全部卡池</option></select><label class="sr-only" for="rarity-filter">星级</label><select id="rarity-filter"><option value="">全部星级</option><option value="5">5 星</option><option value="4">4 星</option><option value="3">3 星</option><option value="2">2 星</option><option value="1">1 星</option></select></div></div><table class="raw-records"><thead><tr><th>北京时间</th><th>卡池</th><th>角色</th><th>星级</th><th>数量</th></tr></thead><tbody id="history-body"></tbody></table><div class="pagination"><p id="page-description"></p><div><button id="prev-page" class="page-button" aria-label="上一页">←</button><span id="page-number"></span><button id="next-page" class="page-button" aria-label="下一页">→</button></div></div></div></details>
+        <details id="bili-receipt" class="diagnostic-details" hidden><summary>最近查询回执</summary><pre id="bili-receipt-text"></pre></details>
+        <details class="method-details"><summary>如何理解这些统计？</summary><p>平均抽数＝可见总抽数÷五星数量，包含首个五星与当前垫抽。“≥”表示前序不完整，只能确定下界；同一保底组会跨池累计，记录序号 80→1 视为连续。</p><p>“当前距五星 24 抽”表示已累计 24 抽未出五星，不表示下一个五星还差 24 抽。十连内按服务端返回顺序统计。UP 未知时保留未知，不当成“歪”。</p></details>
+        <p class="coverage">仅累计服务端可见历史，不保证覆盖全部生涯。历史占比不代表未来概率。</p>
+      </section>
+    </section>
+
+    <section id="page-query" class="app-page" data-view="query" aria-label="查询招募记录">
+      <div class="query-intro"><p class="eyebrow">A NEW CHAPTER</p><div class="star-map" aria-hidden="true"><i></i><span>✦</span><b>✧</b></div><h1>查询我的招募记录</h1><p>登录你的账号，把散落的相遇<br>整理成一份专属手记。</p></div>
+      <div class="query-card"><div class="section-heading"><h2>从这里开始</h2><span>选择账号渠道</span></div><p class="field-help">只读取抽卡历史，不会执行抽卡操作。</p><div class="portal-login">
+        <button id="portal-start" type="button" class="primary-button"><span>官网登录并查询</span><svg class="icon"><use href="#icon-arrow"/></svg></button>
+        <button id="tap-start" type="button" class="channel-button"><span><b>TapTap App 授权</b><small>复用手机上已登录的 TapTap</small></span><svg class="icon"><use href="#icon-chevron"/></svg></button>
+        <button id="bili-start" type="button" class="channel-button" data-bilibili-feature><span><b>B 服授权并查询</b><small>在官方哔哩哔哩 App 确认</small></span><svg class="icon"><use href="#icon-chevron"/></svg></button>
+        <div id="portal-progress" class="status" role="status" aria-live="polite" hidden></div><button id="portal-cancel" class="outline-button" type="button" hidden>取消登录</button>
+        <details class="login-options"><summary>登录选项与其他账号</summary><button id="other-login" type="button" class="outline-button">登录其他账号</button><label class="consent"><input id="remember-login" type="checkbox"><span>在本机记住官网登录状态</span></label><p class="field-help">默认清理官网会话。开启后仅保留最近一次官网登录状态，与抽卡存档独立。</p><div id="login-profile-options" hidden><label for="login-profile">使用登录会话</label><select id="login-profile"><option value="">添加新的登录会话</option></select><button id="forget-login" type="button" class="text-button" disabled>删除所选登录会话</button></div></details>
+      </div></div>
+      <div class="query-secondary"><button type="button" class="text-button" data-dialog="accounts-dialog">已有备份？导入本地记录</button><button id="demo" type="button" class="text-button">先看看演示效果</button></div>
+      <details class="manual-login"><summary>手动凭据查询（备用）</summary><form id="query-form" novalidate><div class="field-label"><label for="credential">本人账号的登录凭据</label><button id="visibility" type="button" class="text-button" aria-pressed="false">显示内容</button></div><textarea id="credential" class="masked" rows="4" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="65536" placeholder="JWT 或官网 HP 条目完整 JSON" aria-describedby="credential-help"></textarea><p id="credential-help" class="field-help">凭据只用于本次查询，提交后清空。请勿公开或发送给他人。</p><label class="consent"><input id="consent" type="checkbox"><span>这是我本人的账号，我同意查询抽卡历史。</span></label><button id="submit" class="primary-button" type="submit"><span id="submit-label">查询我的抽卡记录</span><span id="submit-arrow">↗</span></button><div id="status" hidden></div></form></details>
+      <p class="query-privacy">记录留在你的手机 · 不上传到开发者服务器</p>
+    </section>
+
+    <section id="page-settings" class="app-page" data-view="settings" aria-label="我的与设置" hidden>
+      <div class="page-heading"><div><p class="eyebrow">YOUR TRAVEL KIT</p><h1>我的手记</h1></div><span class="section-seal" aria-hidden="true">✧</span></div>
+      <button type="button" class="settings-account" data-dialog="accounts-dialog"><span class="avatar" aria-hidden="true">✦</span><span><b id="mobile-settings-account">本地账号与备份</b><small id="mobile-library-count">正在读取存档…</small></span><svg class="icon"><use href="#icon-chevron"/></svg></button>
+      <section class="settings-group"><h2>游戏配置</h2><details id="catalog-panel" class="storage-note"><summary>角色与卡池配置 <span id="catalog-version">读取中…</span></summary><p id="catalog-status" role="status">正在读取配置状态。</p><button id="catalog-check" type="button" class="outline-button">检查配置更新</button><details class="catalog-source-options"><summary>配置下载地址</summary><p class="field-help">只下载公共角色和卡池配置；不会发送账号凭据或抽卡记录。</p><label for="catalog-source">HTTPS 配置清单 URL</label><input id="catalog-source" type="url" spellcheck="false" autocomplete="off" placeholder="https://…/current.json"><button id="catalog-source-save" type="button" class="outline-button">保存地址并检查</button></details></details></section>
+      <section class="settings-group"><h2>帮助与应用</h2><button type="button" class="settings-row" data-dialog="guide-dialog"><span>登录与使用帮助</span><svg class="icon"><use href="#icon-chevron"/></svg></button><details class="privacy-details"><summary>隐私与本地存储</summary><p>抽卡记录保存在此应用的本机存储。覆盖升级保留数据；卸载或清除应用数据会删除记录，请定期导出 JSON 备份。</p><p>登录凭据仅在查询过程中使用，不进入存档、导出或诊断。记住登录会保留官网 WebView 会话，可在查询页删除。分享图片使用临时缓存，选择分享应用后仍需你确认发送。</p><p>本工具为玩家制作的非官方查询工具，与游戏发行方无隶属关系。</p></details><details class="diagnostic-details"><summary>授权诊断</summary><p class="field-help">遇到授权问题时复制脱敏诊断反馈。不含账号 UID 或令牌。</p><button id="tap-copy-diagnostics" type="button" class="outline-button">复制 TapTap 诊断</button><button id="bili-copy-diagnostics" type="button" class="outline-button" data-bilibili-feature>复制 B 服诊断</button></details><a class="settings-row" href="https://github.com/zzzz259/XL" target="_blank" rel="noopener noreferrer"><span>开源项目</span><span>↗</span></a><div class="version-row"><span>星落 · 抽卡手记</span><span id="mobile-version">0.4.0</span></div></section><p class="settings-footnote">愿每一次相遇，都有迹可循。</p>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="主要导航"><button type="button" data-nav="records"><svg class="icon"><use href="#icon-book"/></svg><span>记录</span></button><button type="button" data-nav="query" aria-current="page"><svg class="icon"><use href="#icon-search"/></svg><span>查询</span></button><button type="button" data-nav="settings"><svg class="icon"><use href="#icon-user"/></svg><span>我的</span></button></nav>
+
+  <dialog id="accounts-dialog" class="sheet" aria-labelledby="accounts-title"><div class="dialog-heading"><div><p class="eyebrow">LOCAL ARCHIVES</p><h2 id="accounts-title">账号与数据</h2></div><button type="button" class="icon-button" data-close="accounts-dialog" aria-label="关闭账号面板"><svg class="icon"><use href="#icon-close"/></svg></button></div><label for="account-select">切换存档 <span id="account-count">0 个账号</span></label><select id="account-select"><option value="">选择一个账号存档</option></select><p id="mobile-selected-meta" class="field-help"></p><div class="account-edit"><button id="rename-account" type="button" class="outline-button" disabled>重命名</button><button id="delete-account" type="button" class="text-button danger" disabled>删除存档</button></div><div class="data-actions"><button type="button" class="primary-button" id="mobile-add-account">添加账号 / 查询</button><button id="import-open" type="button" class="outline-button">导入 JSON / CSV</button><button id="backup-all" type="button" class="outline-button">备份全部账号 JSON</button><button id="export-json" type="button" class="outline-button">导出当前账号 JSON</button><button id="export-csv" type="button" class="outline-button">导出当前账号 CSV</button><button id="clear-results" type="button" class="text-button">取消选择，保留存档</button></div><details class="storage-note archive-storage-note"><summary>本地存档说明</summary><p id="storage-path"></p><p>记录保存在手机，删除前请备份。账号与渠道分别归档，不会合并到其他账号。</p></details></dialog>
+  <dialog id="import-dialog" class="sheet" aria-labelledby="import-title"><div class="dialog-heading"><h2 id="import-title">导入本地记录</h2><button id="import-close" type="button" class="icon-button" aria-label="关闭导入窗口">×</button></div><form id="import-form" class="local-dialog-body"><label for="import-file">JSON / CSV 文件（最多 30 MB）</label><input id="import-file" type="file" accept=".csv,.json" required><label for="import-target">记录归属</label><select id="import-target"><option value="">自动识别账号；无身份时新建存档</option></select><p class="field-help">有身份的备份自动合并去重。旧文件默认新建存档，仅在确认是同一账号时选择已有存档。</p><label for="import-label">新存档名称（可选）</label><input id="import-label" maxlength="60" placeholder="例如：主号、旧记录"><p id="import-error" class="status error" hidden role="alert"></p><button id="import-submit" type="submit" class="primary-button">读取并保存到本机</button></form></dialog>
+  <dialog id="image-dialog" class="image-sheet" aria-labelledby="image-title"><div class="dialog-heading"><div><p class="eyebrow">SHARE YOUR JOURNEY</p><h2 id="image-title">记录长图</h2></div><button id="image-close" type="button" class="icon-button" aria-label="关闭长图预览">×</button></div><div class="local-dialog-body"><p id="mobile-image-scope" class="field-help">当前卡池分类 · 长记录自动分张</p><p id="image-status" role="status" aria-live="polite"></p><button id="image-zip" class="outline-button" hidden>导出全部图片 ZIP</button><div id="image-previews"></div></div></dialog>
+  <dialog id="guide-dialog" class="sheet" aria-labelledby="guide-title"><div class="dialog-heading"><h2 id="guide-title">使用帮助</h2><button id="close-guide" type="button" class="icon-button" aria-label="关闭帮助">×</button></div><ol class="help-steps"><li><b>登录本人账号</b><p>官服可选择官网登录或 TapTap App；B 服在哔哩哔哩 App 确认。所有官方授权均由你本人完成。</p></li><li><b>完成授权后返回</b><p>TapTap App 确认后，从最近任务返回手记，继续网页授权。QQ 授权若进入浏览器，可将回调网页分享给“抽卡手记·继续QQ授权”。</p></li><li><b>留住已有记录</b><p>查询结果自动合并存到本机。游戏只返回有限历史，建议定期查询、备份 JSON。不要卸载旧应用来升级。</p></li></ol><button id="guide-done" type="button" class="primary-button">明白了</button></dialog>
+</body>
+</html>

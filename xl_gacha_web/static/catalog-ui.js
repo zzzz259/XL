@@ -13,7 +13,7 @@
   $('catalog-check').disabled=v.phase==='checking';$('catalog-source-save').disabled=v.phase==='checking';
   clearTimeout(timer);if(v.phase==='checking')timer=setTimeout(refresh,700);
   if(v.revision&&!opening&&!state.busy&&state.report?.storage==='local'&&state.report.configuration_revision!==v.revision){
-   opening=true;try{const id=state.report.account.id;const report=await LocalArchive.api('open',{id});if(state.report?.account?.id===id)showReport(report);}catch{}finally{opening=false;}
+   opening=true;try{const id=state.report.account.id;const report=await LocalArchive.api('open',{id});if(state.report?.account?.id===id)showReport(report,false,{preserveView:true});}catch{}finally{opening=false;}
   }
  }
  async function refresh(){try{await show(await api(''));}catch(e){$('catalog-status').textContent=e.message;}}

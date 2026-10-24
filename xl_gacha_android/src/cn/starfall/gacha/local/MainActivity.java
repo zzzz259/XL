@@ -134,6 +134,6 @@ public class MainActivity extends Activity {
    if(result==RESULT_OK&&data!=null&&data.getData()!=null&&bytes!=null){Uri target=data.getData();IO.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(target)){if(out==null)throw new IOException();out.write(bytes);reply(id,200,object("saved",true));runOnUiThread(()->Toast.makeText(this,"文件已保存",Toast.LENGTH_SHORT).show());}catch(Exception e){reply(id,400,object("error","FILE_SAVE_FAILED"));}});}
    else reply(id,200,object("cancelled",true));}
  }
- @Override public void onBackPressed(){web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){if(d.dataset.busy!=='true')d.close();return true;}return false;})()",value->{if(!"true".equals(value))super.onBackPressed();});}
+ @Override public void onBackPressed(){web.evaluateJavascript("(()=>{const d=Array.from(document.querySelectorAll('dialog[open]')).pop();if(d){if(d.dataset.busy!=='true')d.close();return true;}return Boolean(window.MobileUI&&window.MobileUI.back&&window.MobileUI.back());})()",value->{if(!"true".equals(value))super.onBackPressed();});}
  @Override protected void onDestroy(){if(current==this)current=null;albumBytes=null;albumRequest=null;albumName=null;if(web!=null){web.removeJavascriptInterface("AndroidHost");web.destroy();web=null;}super.onDestroy();}
 }

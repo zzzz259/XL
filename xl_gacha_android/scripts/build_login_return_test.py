@@ -7,7 +7,6 @@ The generated QA key stays in the explicitly selected external output directory.
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 import zipfile
@@ -68,6 +67,7 @@ def main():
             ROOT / "tests/LoginFreshIntegration.java",
             ROOT / "tests/TapAppIntegration.java",
             ROOT / "tests/TapAppLoginTest.java",
+            ROOT / "tests/MobileUiIntegration.java",
         ]
     )
     run(
@@ -106,13 +106,17 @@ def main():
     )
     manifest = manifest.replace(
         "</manifest>",
-        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.ImageExportIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.LoginFreshIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.TapAppIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
+        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.ImageExportIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.LoginFreshIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.TapAppIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.MobileUiIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
     )
     (out / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
     test_assets = args.assets or out / "test-assets"
     if not args.assets:
         test_assets.mkdir(exist_ok=True)
-        shutil.copyfile(ROOT / "web/tap-app-login.js", test_assets / "tap-app-login.js")
+        from build import prepare_assets
+
+        prepare_assets(ROOT.parent / "xl_gacha_web", ROOT, test_assets)
+        # Isolated fixtures never contact the public configuration source.
+        (test_assets / "update-source.json").write_text('{"url":""}', encoding="utf-8")
     run(
         [
             executable(tools, "aapt2"),

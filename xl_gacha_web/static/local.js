@@ -43,6 +43,7 @@
     $('account-select').value = selected() || '';
     $('storage-path').textContent = info.directory;
     controls();
+    document.dispatchEvent(new CustomEvent('library-changed', {detail: info}));
     if (restore && info.last_account && accounts.some(a => a.id === info.last_account)) {
       showReport(await api('open', {id: info.last_account}));
     }
