@@ -33,6 +33,7 @@ ANDROID_FILES = (
     "mobile-engine.js",
     "android-bridge.js",
     "tap-app-login.js",
+    "mobile-insights.js",
     "mobile-ui.js",
     "mobile-ui.css",
 )
@@ -103,7 +104,7 @@ def main():
     def run(argv, cwd=root):
         subprocess.run([str(v) for v in argv], cwd=cwd, check=True)
 
-    run(["node", "--test", "tests/engine.test.cjs", "tests/tap-app-login.test.cjs", "tests/mobile-ui.test.cjs"])
+    run(["node", "--test", "tests/engine.test.cjs", "tests/tap-app-login.test.cjs", "tests/mobile-ui.test.cjs", "tests/mobile-insights.test.cjs"])
     for js in root.joinpath("web").glob("*.js"):
         run(["node", "--check", js])
     assets = out / "assets"

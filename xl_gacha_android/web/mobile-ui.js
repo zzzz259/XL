@@ -38,10 +38,36 @@
   }
   function badge(parent, text, kind = '') { parent.append(el('span', text, `event-badge ${kind}`)); }
 
+  const insightCache = new WeakMap();
+  function insightsFor(report, category) {
+    if (!report) return root.MobileInsights.analyze(null, {category});
+    const minute = Math.floor(Date.now() / 60000);
+    let entry = insightCache.get(report);
+    if (!entry || entry.minute !== minute) { entry = {minute, categories: new Map()}; insightCache.set(report, entry); }
+    if (!entry.categories.has(category)) entry.categories.set(category, root.MobileInsights.analyze(report, {category}));
+    return entry.categories.get(category);
+  }
+  function renderInsights(value) {
+    for (const key of ['recent', 'total']) {
+      const target = byId(`mobile-luck-${key}`), data = value[key];
+      if (!target) continue;
+      target.dataset.tone = data.tone;
+      target.querySelector('strong').textContent = data.grade;
+      target.querySelector('.luck-sample').textContent = data.status === 'excluded' ? '启程、未分类或规则未确认' : data.pulls ? `${data.pulls.toLocaleString()} 抽参与评价 · ${data.unknown_count ? '已知 ' : ''}${data.five_count} 个五星` : key === 'recent' ? '近 30 天暂无可评价记录' : '暂无可评价的已存档记录';
+      target.querySelector('.luck-average').textContent = data.average === null ? '平均出金：—' : `平均出金 ${Number(data.average.toFixed(1))} 抽`;
+      target.querySelector('.luck-confidence').textContent = data.status === 'unknown' ? '有未知星级，暂不评级' : data.status === 'small' ? '少于 30 抽，先积累记录' : data.status === 'rated' && data.low_confidence ? '小样本 · 评价暂估' : data.status === 'zero' ? '可见样本中尚未出现五星' : '';
+    }
+    const highlights = byId('mobile-multi-highlights'); if (!highlights) return;
+    highlights.replaceChildren();
+    if (!value.multi.count) highlights.append(el('span', '尚未发现十连多金记录', 'insight-empty'));
+    else for (const [key, count] of Object.entries(value.multi.counts)) highlights.append(el('span', `${root.MobileInsights.batchLabel(Number.parseInt(key, 10), !key.endsWith('+'))} ×${count}`, 'multi-badge'));
+  }
+
   function renderPools(report, category, target) {
     target.replaceChildren();
     const pools = (report?.analysis?.pools || []).filter(pool => category === 'all' || pool.category === category);
     byId('mobile-pool-count').textContent = `${pools.length} 个卡池`;
+    const insights = insightsFor(report, category); renderInsights(insights);
     if (!pools.length) { target.append(el('p', '这个分类暂时没有可见记录。', 'pool-empty')); return; }
     // Pools remain expanded. Long histories append in batches without changing their order.
     let poolCursor = 0;
@@ -49,19 +75,30 @@
     function appendPools() {
       morePools.remove();
       const end = Math.min(poolCursor + 20, pools.length);
-      for (; poolCursor < end; poolCursor++) target.append(poolCard(pools[poolCursor]));
+      for (; poolCursor < end; poolCursor++) target.append(poolCard(pools[poolCursor], insights.multi.by_pool[String(pools[poolCursor].pool_id)] || []));
       if (poolCursor < pools.length) { morePools.textContent = `继续显示卡池 · 还有 ${pools.length - poolCursor} 个`; target.append(morePools); }
     }
     morePools.addEventListener('click', appendPools); appendPools();
   }
 
-  function poolCard(pool) {
+  function poolCard(pool, bursts) {
     const card = el('article', undefined, `mobile-pool ${pool.category}`);
     const header = el('div', undefined, 'pool-top'), title = el('div');
     title.append(el('span', pool.category_name, 'pool-category'), el('h4', pool.pool_name), el('small', `${pool.first_date} — ${pool.last_date}`));
     const total = el('div', undefined, 'pool-total'); total.append(el('strong', Number(pool.pull_count).toLocaleString()), el('span', `抽 · ${pool.five_count} 个五星`));
     header.append(title, total); card.append(header);
     card.append(el('p', pool.featured_names?.length ? `当期五星 UP · ${pool.featured_names.join(' / ')}` : pool.category === 'normal' ? '常驻招募 · 不区分 UP / 歪' : pool.category === 'beginner' ? '启程招募 · 独立计数' : 'UP 配置未确认', 'pool-up'));
+    const burstPositions = new Map(), burstCounts = new Map();
+    for (const burst of bursts) {
+      const label = root.MobileInsights.batchLabel(burst.five_count, burst.exact);
+      burstCounts.set(label, (burstCounts.get(label) || 0) + 1);
+      for (const position of burst.positions) burstPositions.set(position, burst);
+    }
+    if (bursts.length) {
+      const chips = el('div', undefined, 'pool-highlights');
+      for (const [label, count] of burstCounts) chips.append(el('span', `${label} ×${count}`, 'multi-badge'));
+      card.append(chips);
+    }
     const events = el('div', undefined, 'pool-events'); card.append(events);
     const visible = [...(pool.events || [])].reverse();
     if (!visible.length) events.append(el('p', '可见记录中尚未出现五星角色。', 'no-five'));
@@ -81,6 +118,11 @@
         fill.style.width = `${Math.max(16, Math.min(100, count / (pool.hard_pity || 70) * 100))}%`;
         track.append(fill); main.append(emblem, name, track); row.append(main);
         const notes = el('div', undefined, 'mobile-event-notes');
+        const burst = burstPositions.get(event.in_pool_pull);
+        if (burst) {
+          badge(notes, root.MobileInsights.batchLabel(burst.five_count, burst.exact), 'multi');
+          notes.lastElementChild.title = `${burst.time_beijing || ''} · 同一条十抽记录 · ${burst.characters.map(character => `${character.name}×${character.count}`).join(' / ')}`;
+        }
         if (event.outcome === 'up') badge(notes, 'UP', 'up');
         else if (event.outcome === 'off') badge(notes, '歪', 'off');
         else if (!['normal', 'beginner'].includes(pool.category)) badge(notes, 'UP 未知', 'uncertain');
@@ -185,6 +227,7 @@
     }
     function reflectCategory() {
       document.body.dataset.category = state.category;
+      renderInsights(insightsFor(state.report, state.category));
       const keys = ['normal', 'limited', 'collection'];
       for (const card of byId('career-categories').children) card.hidden = state.category !== 'all' && !card.classList.contains(state.category);
       for (const [index, key] of keys.entries()) {

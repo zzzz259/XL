@@ -25,7 +25,7 @@ node --test tests/image-export.test.cjs
 
 ```sh
 cd xl_gacha_android
-node --test tests/engine.test.cjs tests/tap-app-login.test.cjs tests/mobile-ui.test.cjs
+node --test tests/engine.test.cjs tests/tap-app-login.test.cjs tests/mobile-ui.test.cjs tests/mobile-insights.test.cjs
 python -B -m unittest discover -s tests -p 'test_*.py' -v
 python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/native-tests
 ```

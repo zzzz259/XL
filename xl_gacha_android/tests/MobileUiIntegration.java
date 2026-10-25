@@ -44,6 +44,8 @@ public final class MobileUiIntegration extends Instrumentation {
   eval("document.getElementById('demo').click()");
   waitFor("document.body.dataset.page==='records'&&document.querySelectorAll('.mobile-event').length>0","expanded pools rendered");screenshot("02-records");
   ok("true".equals(eval("document.querySelectorAll('.mobile-pool>summary').length===0")),"pool cards are not collapsed");
+  ok("true".equals(eval("Boolean(window.MobileInsights&&document.getElementById('mobile-luck-total').querySelector('strong').textContent)")),"luck insights loaded and rendered");
+  ok("true".equals(eval("(()=>{const x=[...document.querySelectorAll('.mobile-pool')].map(x=>x.getBoundingClientRect().left);return x.every(v=>Math.abs(v-x[0])<1);})()")),"pools stay in a single column on wide screens");
   eval("document.querySelector('#category-tabs [data-category=limited]').click()");
   waitFor("state.category==='limited'&&document.querySelector('.career-category.normal').hidden","category binds existing state");screenshot("03-category");
   eval("MobileUI.navigate('settings');showReport(state.report,state.demo,{preserveView:true})");
@@ -59,11 +61,14 @@ public final class MobileUiIntegration extends Instrumentation {
   eval("MobileUI.navigate('records');document.getElementById('export-image').click()");
   waitFor("document.querySelectorAll('#image-previews .image-preview').length>0&&!document.querySelector('#image-previews button').disabled","real canvas image generated");screenshot("06-image");
   runOnMainSync(()->activity.onBackPressed());waitFor("!document.getElementById('image-dialog').open","native back closes image preview");
+  eval("window.qaInsightReady=false;(async()=>{const cfg=await fetch('./catalog.json').then(r=>r.json());const f=state.report;const gold=f.records.flatMap(r=>r.drops).find(d=>d.rarity===5);const low=f.records.flatMap(r=>r.drops).find(d=>d.rarity===3);const pool=f.analysis.pools.find(p=>p.category==='limited');const records=[...f.records,{pool_id:pool.pool_id,index:79,record_id:900900,timestamp:Math.floor(Date.now()/1000)-60,drops:[{item_id:low.item_id,count:3},{item_id:gold.item_id,count:2},{item_id:low.item_id,count:5}]}];const next=MobileEngine.buildReport(records,cfg,f.pool_metadata);next.account=f.account;showReport(next,true);window.qaInsightReady=true;})()");
+  waitFor("window.qaInsightReady===true&&document.getElementById('mobile-multi-highlights').textContent.includes('十连双金')&&document.querySelectorAll('.event-badge.multi').length>=2","ten-pull achievement and event markers match raw batch");
   runOnMainSync(()->web.getSettings().setTextZoom(140));
   SystemClock.sleep(250);
   screenshot("08-records-large-text");
   ok("true".equals(eval("document.documentElement.scrollWidth<=innerWidth+1")),"large system text has no horizontal overflow");
   ok("true".equals(eval("[...document.querySelectorAll('.career-category:not([hidden])')].every(x=>x.scrollWidth<=x.clientWidth+1)")),"career metrics fit with large text");
+  ok("true".equals(eval("[...document.querySelectorAll('.luck-card')].every(x=>x.scrollWidth<=x.clientWidth+1)")),"luck cards fit with large text");
   eval("MobileUI.navigate('settings')");screenshot("07-settings-large-text");
   result.putString("result","PASS "+checks+" mobile UI WebView checks");finish(Activity.RESULT_OK,result);
  }catch(Throwable e){result.putString("result","FAIL "+e);finish(Activity.RESULT_CANCELED,result);}finally{if(activity!=null)runOnMainSync(()->activity.finish());}}

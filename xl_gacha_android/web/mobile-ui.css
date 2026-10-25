@@ -1497,10 +1497,6 @@ dialog::backdrop {
     display:grid;
     grid-template-columns:1fr 1fr
   }
-  .pool-timeline {
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    align-items:start
-  }
   .mobile-event .event-main {
     grid-template-columns:32px minmax(55px,.7fr) minmax(65px,1fr);
     gap:7px
@@ -1718,3 +1714,24 @@ body[data-category=all] .category-metrics strong,body[data-category=all] .catego
     transition:none!important
   }
 }
+
+/* Entertainment insights remain separate from the game's factual pity state. */
+.career-insights { margin: 0 0 26px; }
+.luck-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.luck-card { min-width: 0; padding: 16px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow-wrap: anywhere; }
+.luck-card h4 { font-size: 13px; font-weight: 500; color: var(--muted); }
+.luck-card>strong { display: block; font-size: 26px; margin: 8px 0 10px; line-height: 1.4; color: var(--gold); }
+.luck-card[data-tone=good]>strong,.luck-card[data-tone=lucky]>strong { color: var(--green); }
+.luck-card[data-tone=rough]>strong { color: var(--orange); }
+.luck-card[data-tone=quiet]>strong { color: var(--muted); font-size: 21px; }
+.luck-card p { font-size: 12px; line-height: 1.8; color: var(--muted); }
+.luck-card small { display: block; margin-top: 6px; color: var(--gold); line-height: 1.7; }
+.highlight-heading { font-size: 14px; margin: 16px 0 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.highlight-heading>span { font-size: 11px; color: var(--muted); }
+.multi-highlights,.pool-highlights { display: flex; flex-wrap: wrap; gap: 7px; }
+.pool-highlights { padding: 0 16px 12px; }
+.multi-badge,.event-badge.multi { background: var(--gold-soft); color: var(--gold); border: 1px solid #8e75424d; border-radius: 6px; padding: 4px 8px; font-size: 12px; line-height: 1.6; }
+.event-badge.multi { padding: 1px 6px; }
+.insight-empty { font-size: 12px; color: var(--muted); }
+.insight-method { margin-top: 12px; font-size: 12px; color: var(--muted); }
+.insight-method p { margin: 10px 0; font-size: 13px; line-height: 1.8; }

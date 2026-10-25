@@ -2,7 +2,7 @@
   "version": "0.3.4",
   "commit": "5402df97",
   "functional_commit": "a66209d7",
-  "integration_version": "0.4.0",
+  "integration_version": "0.4.1",
   "preserved": ["fresh-login-origin-cleanup", "qq-authorization-return", "downloads-export", "gallery-and-image-sharing", "default-catalog-source"],
   "channel_overlay": "bilibili"
 }
