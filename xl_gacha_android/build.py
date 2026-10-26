@@ -13,27 +13,31 @@ from xml.sax.saxutils import escape
 
 from toolchain import executable, sdk_paths
 
-STATIC_FILES = (
-    "app.js",
-    "catalog-ui.js",
-    "environment.js",
-    "image-export.js",
-    "local.js",
-    "login.js",
+SHARED_STATIC_FILES = (
     "demo.json",
     "favicon.svg",
+    "image-export.js",
+)
+
+ANDROID_WEB_FILES = (
     "index.html",
-    "local.css",
-    "style.css",
-    "theme.css",
+    "mobile-ui.css",
+    "mobile-app.js",
+    "mobile-render.js",
+    "mobile-image.js",
+    "mobile-services.js",
+    "mobile-view-model.js",
+    "mobile-engine.js",
+    "android-bridge.js",
+    "tap-app-login.js",
 )
 
 
 def prepare_assets(desktop, root, assets):
     assets.mkdir(exist_ok=True)
-    for name in STATIC_FILES:
+    for name in SHARED_STATIC_FILES:
         shutil.copyfile(desktop / "static" / name, assets / name)
-    for name in ("mobile-engine.js", "android-bridge.js", "tap-app-login.js"):
+    for name in ANDROID_WEB_FILES:
         shutil.copyfile(root / "web" / name, assets / name)
     for name in ("catalog.json", "update-source.json"):
         shutil.copyfile(desktop / "data" / name, assets / name)
@@ -90,7 +94,16 @@ def main():
     def run(argv, cwd=root):
         subprocess.run([str(v) for v in argv], cwd=cwd, check=True)
 
-    run(["node", "--test", "tests/engine.test.cjs", "tests/tap-app-login.test.cjs"])
+    run(
+        [
+            "node",
+            "--test",
+            "tests/mobile-view-model.test.cjs",
+            "tests/mobile-export.test.cjs",
+            "tests/engine.test.cjs",
+            "tests/tap-app-login.test.cjs",
+        ]
+    )
     for js in root.joinpath("web").glob("*.js"):
         run(["node", "--check", js])
     assets = out / "assets"
@@ -117,29 +130,6 @@ def main():
             ),
             encoding="utf-8",
         )
-    html = (assets / "index.html").read_text(encoding="utf-8")
-    html = html.replace(
-        '<script src="/app.js" defer></script>',
-        '<script src="./mobile-engine.js"></script><script src="./android-bridge.js"></script><script src="./app.js" defer></script>',
-    )
-    html = html.replace(
-        '<div id="portal-progress"',
-        '<button id="tap-start" type="button" class="outline-button" style="margin-top:12px">TapTap App 授权并查询</button><p class="field-help">官服：在官网选择 TapTap，进入授权页后点击“打开 TapTap App”；App 确认后手动返回手记，继续官网授权。</p><button id="tap-copy-diagnostics" type="button" class="text-button">复制 TapTap 脱敏诊断</button><div id="portal-progress"',
-    )
-    if args.bilibili_config:
-        html = html.replace(
-            '<div id="portal-progress"',
-            '<button id="bili-start" class="primary-button" type="button" style="margin-top:12px"><span>B 服授权并查询</span><span>↗</span></button><p class="field-help">B 服：在官方哔哩哔哩 App 确认授权，自动识别 UID。每次查询均需授权，不受“记住官网登录”选项影响。</p><button id="bili-copy-diagnostics" class="text-button" type="button">复制 B 服脱敏诊断</button><div id="portal-progress"',
-        )
-        html = html.replace("官网登录，自动整理记录", "选择渠道，自动整理记录").replace(
-            "打开专用的官方登录窗口，正常完成短信或 TapTap 登录，程序会自动获取凭据并查询，无需 F12 或复制粘贴。",
-            "官服使用官网登录；B 服使用官方哔哩哔哩 App 授权。完成后自动查询全部已知卡池，并按渠道和账号保存。",
-        )
-        html = html.replace(
-            '<section class="hero">',
-            '<details id="bili-receipt" class="storage-note" hidden><summary>最近查询回执</summary><pre id="bili-receipt-text" style="white-space:pre-wrap"></pre></details><section class="hero">',
-        )
-    (assets / "index.html").write_text(html, encoding="utf-8")
     res = out / "res" / "drawable"
     res.mkdir(parents=True, exist_ok=True)
     from PIL import Image
@@ -182,6 +172,8 @@ def main():
             [
                 *root.joinpath("src").rglob("*.java"),
                 *root.joinpath("web").glob("*.js"),
+                *root.joinpath("web").glob("*.css"),
+                *root.joinpath("web").glob("*.html"),
                 *desktop.joinpath("static").iterdir(),
             ]
         )

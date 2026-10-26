@@ -122,7 +122,7 @@ const LongImage = (() => {
 })();
 
 if (typeof module !== 'undefined') module.exports = LongImage;
-if (typeof document !== 'undefined') {
+if (typeof document !== 'undefined' && document.getElementById('image-dialog')) {
   let urls = [], generating = false, delivering=false;
   const mobile=Boolean(window.AndroidBridge?.saveImage);
   if(mobile){$('image-zip').className='outline-button';$('image-zip').textContent='导出全部图片 ZIP';$('image-dialog').classList.add('mobile-images');}

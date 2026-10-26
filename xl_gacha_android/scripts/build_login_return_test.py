@@ -6,6 +6,7 @@ The generated QA key stays in the explicitly selected external output directory.
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from build import prepare_assets
 from toolchain import executable, sdk_paths
 
 
@@ -68,6 +70,7 @@ def main():
             ROOT / "tests/LoginFreshIntegration.java",
             ROOT / "tests/TapAppIntegration.java",
             ROOT / "tests/TapAppLoginTest.java",
+            ROOT / "tests/MobileUiIntegration.java",
         ]
     )
     run(
@@ -106,13 +109,26 @@ def main():
     )
     manifest = manifest.replace(
         "</manifest>",
-        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.ImageExportIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.LoginFreshIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.TapAppIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
+        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.ImageExportIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.LoginFreshIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.TapAppIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.MobileUiIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
     )
     (out / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
     test_assets = args.assets or out / "test-assets"
     if not args.assets:
-        test_assets.mkdir(exist_ok=True)
-        shutil.copyfile(ROOT / "web/tap-app-login.js", test_assets / "tap-app-login.js")
+        if test_assets.exists():
+            shutil.rmtree(test_assets)
+        prepare_assets(ROOT.parent / "xl_gacha_web", ROOT, test_assets)
+        (test_assets / "update-source.json").write_text(
+            json.dumps({"url": ""}), encoding="utf-8"
+        )
+        (test_assets / "build-info.json").write_text(
+            json.dumps(
+                {
+                    "bilibili_enabled": False,
+                    "baseline": {"integration_version": "0.4-qa"},
+                }
+            ),
+            encoding="utf-8",
+        )
     run(
         [
             executable(tools, "aapt2"),

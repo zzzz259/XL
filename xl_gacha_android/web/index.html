@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="星落抽卡手记 Android 本地记录与统计">
+  <title>星落 · 抽卡手记</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/mobile-ui.css">
+  <script src="/mobile-engine.js" defer></script>
+  <script src="/image-export.js" defer></script>
+  <script src="/android-bridge.js" defer></script>
+  <script src="/mobile-view-model.js" defer></script>
+  <script src="/mobile-services.js" defer></script>
+  <script src="/mobile-render.js" defer></script>
+  <script src="/mobile-image.js" defer></script>
+  <script src="/mobile-app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 2 2.6 6.5L21 11l-6.4 2.5L12 20l-2.6-6.5L3 11l6.4-2.5L12 2Z"/><path d="m19 2 .6 2.4L22 5l-2.4.6L19 8l-.6-2.4L16 5l2.4-.6L19 2Z"/></symbol>
+    <symbol id="icon-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></symbol>
+    <symbol id="icon-pools" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></symbol>
+    <symbol id="icon-records" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+    <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4.5 3.4-7 8-7s7.3 2.5 8 7"/></symbol>
+    <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 12a7 7 0 0 0-12-4.8L4 9.5M5.5 12a7 7 0 0 0 12 4.8l2.5-2.3"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="icon-down" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+    <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 20h16"/></symbol>
+    <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M4 20h16"/></symbol>
+    <symbol id="icon-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m4 17 5-5 4 4 3-3 5 5"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="icon-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9H3V7Z"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.6-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.6-2h-3l-.6 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .6v3l2 .6.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.6 2h3l.6-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4 2-.6Z"/></symbol>
+    <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+    <symbol id="icon-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4.5-2.5 7.5-8 9-5.5-1.5-8-4.5-8-9V6l8-3Z"/><path d="m8 12 2.5 2.5L16 9"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="icon-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L20 8l-4-4L4 16ZM13 7l4 4"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+  </svg>
+
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="星落抽卡手记">
+        <span class="brand-symbol"><svg><use href="#icon-star"></use></svg></span>
+        <span class="brand-copy"><strong>抽卡手记</strong><small>STARFALL ARCHIVE</small></span>
+      </div>
+      <button id="account-button" class="account-switch" type="button" aria-haspopup="dialog">
+        <span class="account-avatar"><svg><use href="#icon-user"></use></svg></span>
+        <span id="account-button-label">本机存档</span>
+        <svg class="chevron"><use href="#icon-down"></use></svg>
+      </button>
+    </header>
+
+    <main class="main-content" id="main-content">
+      <section id="view-overview" class="view" aria-label="总览">
+        <div id="overview-empty" class="empty-hero">
+          <div class="empty-orbit" aria-hidden="true"><span></span><svg><use href="#icon-star"></use></svg></div>
+          <p class="kicker">YOUR STARFALL ARCHIVE</p>
+          <h1>每一次相遇，<br><em>都有迹可循。</em></h1>
+          <p class="hero-description">在手机上整理招募记录，看见五星旅程与每一次积累。数据只保存在这台设备。</p>
+          <div class="hero-actions">
+            <button id="login-empty-button" class="button primary large" type="button"><svg><use href="#icon-refresh"></use></svg>登录并查询<svg class="end"><use href="#icon-arrow"></use></svg></button>
+            <div class="secondary-actions">
+              <button id="import-empty-button" class="button secondary" type="button"><svg><use href="#icon-upload"></use></svg>导入记录</button>
+              <button id="demo-button" class="button ghost" type="button">查看演示<svg><use href="#icon-chevron"></use></svg></button>
+            </div>
+          </div>
+          <p class="privacy-note"><svg><use href="#icon-shield"></use></svg>仅查询历史，不会进行抽卡</p>
+        </div>
+
+        <div id="overview-content" hidden>
+          <section class="overview-heading">
+            <div>
+              <p class="kicker">MY RECRUITMENT ARCHIVE</p>
+              <div class="account-title-line"><h1 id="overview-account-title">招募档案</h1><span id="demo-badge" class="demo-badge" hidden>演示数据</span></div>
+              <p id="overview-updated" class="muted"></p>
+            </div>
+            <button id="update-record-button" class="button primary" type="button"><svg><use href="#icon-refresh"></use></svg>更新记录</button>
+          </section>
+          <div id="partial-warning" class="notice warning" role="status" hidden><svg><use href="#icon-info"></use></svg><p>部分卡池查询未成功。已保存成功返回的记录，可稍后再次更新。</p></div>
+          <section class="summary-card" aria-label="存档汇总">
+            <div class="summary-main"><span>累计可见抽数</span><strong id="summary-pulls">0</strong><small>本机累计存档 · 去重后</small></div>
+            <div class="summary-metrics">
+              <div><span class="metric-icon gold"><svg><use href="#icon-star"></use></svg></span><p>五星角色</p><strong id="summary-fives">0</strong></div>
+              <div><span class="metric-icon blue"><svg><use href="#icon-pools"></use></svg></span><p>涉及卡池</p><strong id="summary-pools">0</strong></div>
+              <div><span class="metric-icon teal"><svg><use href="#icon-records"></use></svg></span><p>服务端记录</p><strong id="summary-records">0</strong></div>
+            </div>
+          </section>
+          <section class="content-section" aria-labelledby="pity-heading">
+            <div class="section-heading"><div><p class="kicker">PITY JOURNEY</p><h2 id="pity-heading">可见垫抽</h2></div><button class="icon-button info-trigger" type="button" aria-label="垫抽统计说明" data-info="method"><svg><use href="#icon-info"></use></svg></button></div>
+            <p class="section-description">按本机连续记录推断，不等同于游戏内实时保底。</p>
+            <div id="category-summary" class="category-summary"></div>
+          </section>
+          <section class="content-section" aria-labelledby="recent-heading">
+            <div class="section-heading"><div><p class="kicker">FIVE-STAR MOMENTS</p><h2 id="recent-heading">最近五星</h2></div><button id="overview-to-pools" class="text-link" type="button">全部卡池<svg><use href="#icon-chevron"></use></svg></button></div>
+            <div id="recent-five-list" class="recent-list"></div>
+          </section>
+          <section class="quick-actions" aria-label="常用操作">
+            <button id="overview-image" type="button"><span><svg><use href="#icon-image"></use></svg></span><div><strong>生成抽卡长图</strong><small>保存到相册或系统分享</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+            <button id="overview-to-records" type="button"><span><svg><use href="#icon-records"></use></svg></span><div><strong>核对完整明细</strong><small>搜索、筛选每一次掉落</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+          </section>
+          <p id="overview-coverage" class="coverage-note"></p>
+        </div>
+      </section>
+
+      <section id="view-pools" class="view" aria-label="卡池" hidden>
+        <header class="view-heading"><p class="kicker">BANNER JOURNEYS</p><h1>卡池旅程</h1><p>按卡池回顾投入、五星间隔与角色收获。</p></header>
+        <div id="pool-category-tabs" class="chip-scroll" role="group" aria-label="卡池分类">
+          <button type="button" data-category="all" class="active">全部</button><button type="button" data-category="normal">普通</button><button type="button" data-category="limited">限定</button><button type="button" data-category="collection">典藏</button><button type="button" data-category="beginner">启程</button><button type="button" data-category="unknown">未分类</button>
+        </div>
+        <div id="pool-list" class="pool-list"></div>
+        <div id="pool-empty" class="empty-panel" hidden><svg><use href="#icon-pools"></use></svg><h2>这个分类还没有记录</h2><p>切换分类，或更新记录后再来查看。</p></div>
+      </section>
+
+      <section id="view-records" class="view" aria-label="记录" hidden>
+        <header class="view-heading"><p class="kicker">EVERY DROP, IN ORDER</p><h1>招募明细</h1><p>最新记录在前，逐项核对每一次掉落。</p></header>
+        <div class="record-tools">
+          <label class="search-field" for="record-search"><svg><use href="#icon-search"></use></svg><input id="record-search" type="search" placeholder="搜索角色或物品" autocomplete="off"></label>
+          <button id="record-filter-toggle" class="filter-toggle" type="button" aria-expanded="true" aria-controls="record-filters"><svg><use href="#icon-filter"></use></svg><span>筛选</span></button>
+        </div>
+        <div id="record-filters" class="record-filters">
+          <label>卡池<select id="record-pool"><option value="">全部卡池</option></select></label>
+          <label>星级<select id="record-rarity"><option value="">全部星级</option><option value="5">5 星</option><option value="4">4 星</option><option value="3">3 星</option><option value="2">2 星</option><option value="1">1 星</option><option value="unknown">未映射</option></select></label>
+          <label class="toggle-row" for="record-five-only"><span><strong>仅看五星</strong><small>隐藏其他星级掉落</small></span><input id="record-five-only" type="checkbox" role="switch"></label>
+        </div>
+        <div class="record-result-line"><p id="record-count">0 项掉落</p><span>北京时间</span></div>
+        <div id="record-list" class="record-list"></div>
+        <div id="record-empty" class="empty-panel" hidden><svg><use href="#icon-search"></use></svg><h2>没有找到匹配记录</h2><p>试试清空搜索或调整筛选条件。</p></div>
+        <nav class="pagination" aria-label="记录分页"><button id="record-prev" class="button secondary" type="button">上一页</button><span id="record-page">1 / 1</span><button id="record-next" class="button secondary" type="button">下一页</button></nav>
+      </section>
+
+      <section id="view-profile" class="view" aria-label="我的" hidden>
+        <header class="view-heading"><p class="kicker">LOCAL & PERSONAL</p><h1>我的手记</h1><p>管理账号、数据与应用设置。</p></header>
+        <section class="profile-account-card">
+          <span class="profile-avatar"><svg><use href="#icon-user"></use></svg></span>
+          <div><small>当前存档</small><h2 id="profile-account-name">尚未选择</h2><p id="profile-account-meta">登录或导入后，记录会保存在本机。</p></div>
+          <div class="profile-account-actions"><button id="rename-account" class="icon-button" type="button" aria-label="存档改名"><svg><use href="#icon-edit"></use></svg></button><button id="delete-account" class="icon-button danger" type="button" aria-label="删除存档"><svg><use href="#icon-trash"></use></svg></button></div>
+        </section>
+        <section class="settings-section"><h2>记录与数据</h2><div class="settings-list">
+          <button id="profile-login" type="button"><span class="settings-icon gold"><svg><use href="#icon-refresh"></use></svg></span><div><strong>登录并更新记录</strong><small>官服、TapTap App 或 B 服授权</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+          <button id="profile-import" type="button"><span class="settings-icon blue"><svg><use href="#icon-upload"></use></svg></span><div><strong>导入记录</strong><small>合并 JSON / CSV，自动去重</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+          <button id="profile-image" type="button"><span class="settings-icon violet"><svg><use href="#icon-image"></use></svg></span><div><strong>长图与分享</strong><small>按分类生成、保存或分享</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+          <button id="profile-export-json" type="button"><span class="settings-icon teal"><svg><use href="#icon-download"></use></svg></span><div><strong>导出当前账号 JSON</strong><small>用于迁移与完整备份</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+          <button id="profile-export-csv" type="button"><span class="settings-icon teal"><svg><use href="#icon-records"></use></svg></span><div><strong>导出当前账号 CSV</strong><small>用于表格查看与核对</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+          <button id="profile-backup" type="button"><span class="settings-icon blue"><svg><use href="#icon-folder"></use></svg></span><div><strong>备份全部账号</strong><small>将所有本机存档保存为一个 JSON</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+        </div></section>
+        <section class="settings-section"><h2>游戏配置</h2><div class="catalog-card">
+          <div class="catalog-heading"><span class="settings-icon blue"><svg><use href="#icon-settings"></use></svg></span><div><strong id="catalog-version">正在读取配置</strong><p id="catalog-status" role="status">请稍候…</p></div></div>
+          <button id="catalog-check" class="button secondary full" type="button"><svg><use href="#icon-refresh"></use></svg>检查配置更新</button>
+          <details class="advanced-options"><summary>配置下载地址</summary><p>仅下载公共角色与卡池配置，不发送账号或抽卡记录。</p><label for="catalog-source">HTTPS 清单地址</label><input id="catalog-source" type="url" spellcheck="false" autocomplete="off"><button id="catalog-source-save" class="button secondary full" type="button">保存地址并检查</button></details>
+        </div></section>
+        <section id="query-receipt" class="settings-section" hidden><h2>最近查询回执</h2><pre id="query-receipt-text"></pre></section>
+        <section class="settings-section information-section"><h2>说明与隐私</h2>
+          <details><summary><svg><use href="#icon-info"></use></svg>统计口径与记录范围<svg class="chevron"><use href="#icon-down"></use></svg></summary><p>平均抽数为可见总抽数除以五星数量。首个可见五星及断档后的间隔使用「≥」；大小保底只根据连续可见历史推断，不代表官方实时状态。</p><p>普通、限定、典藏分别统计，启程独立计数。同保底组可跨池继承，未确认的类别不会伪造 UP 结果。</p></details>
+          <details><summary><svg><use href="#icon-shield"></use></svg>本机存储与隐私<svg class="chevron"><use href="#icon-down"></use></svg></summary><p>抽卡存档位于应用内部 IndexedDB。覆盖安装同签名应用会保留；卸载或清除应用数据会删除，请定期备份 JSON。</p><p>没有开发者云端存档。配置下载不携带凭据或记录；备份包含账号名称、UID 和渠道，分享前请自行检查。</p></details>
+        </section>
+        <footer class="app-footer"><svg><use href="#icon-star"></use></svg><strong>星落 · 抽卡手记</strong><span id="app-version">Android 0.4</span><small>玩家查询工具 · 非官方服务</small></footer>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="主要导航">
+      <button type="button" data-tab="overview" class="active" aria-current="page"><svg><use href="#icon-home"></use></svg><span>总览</span></button>
+      <button type="button" data-tab="pools"><svg><use href="#icon-pools"></use></svg><span>卡池</span></button>
+      <button type="button" data-tab="records"><svg><use href="#icon-records"></use></svg><span>记录</span></button>
+      <button type="button" data-tab="profile"><svg><use href="#icon-user"></use></svg><span>我的</span></button>
+    </nav>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </div>
+
+  <dialog id="account-dialog" class="sheet" aria-labelledby="account-dialog-title">
+    <div class="sheet-heading"><div><p class="kicker">LOCAL ARCHIVES</p><h2 id="account-dialog-title">切换本机存档</h2></div><button class="icon-button" type="button" data-close="account-dialog" aria-label="关闭"><svg><use href="#icon-close"></use></svg></button></div>
+    <div id="account-list" class="account-list"></div>
+    <button id="account-import" class="button secondary full" type="button"><svg><use href="#icon-upload"></use></svg>导入其他记录</button>
+  </dialog>
+
+  <dialog id="login-dialog" class="sheet" aria-labelledby="login-dialog-title">
+    <div class="sheet-heading"><div><p class="kicker">UPDATE ARCHIVE</p><h2 id="login-dialog-title">更新抽卡记录</h2></div><button class="icon-button" type="button" data-close="login-dialog" aria-label="关闭"><svg><use href="#icon-close"></use></svg></button></div>
+    <div id="login-options">
+      <p class="sheet-intro">在官方页面或 App 中由本人完成授权，查询后自动按账号合并存档。</p>
+      <div class="channel-list">
+        <button id="official-login" type="button"><span class="channel-mark gold"><svg><use href="#icon-star"></use></svg></span><div><strong>官服网页登录</strong><small>短信、QQ 或官网提供的其他方式</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+        <button id="tap-login" type="button"><span class="channel-mark teal">T</span><div><strong>TapTap App 授权</strong><small>使用手机上已登录的官方 TapTap</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+        <button id="bili-login" type="button" hidden><span class="channel-mark blue">B</span><div><strong>B 服授权</strong><small>在官方哔哩哔哩 App 中确认</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
+      </div>
+      <label class="toggle-row login-remember" for="remember-login"><span><strong>记住官网登录</strong><small>只保留最近一次会话，不影响抽卡存档</small></span><input id="remember-login" type="checkbox" role="switch"></label>
+      <div id="login-profile-options" class="login-profile-options" hidden><label for="login-profile">登录会话</label><select id="login-profile"><option value="">添加新的登录会话</option></select><button id="forget-login" class="text-link" type="button">删除所选会话</button><button id="other-account-login" class="text-link" type="button">登录其他账号</button></div>
+      <details id="manual-login" class="advanced-options"><summary>手动凭据（备用方式）</summary><p>仅粘贴本人官网会话的 JWT 或 HP 对象。凭据具有账号访问权限，不要分享给他人。</p><form id="manual-form"><label for="manual-credential">登录凭据</label><textarea id="manual-credential" rows="3" spellcheck="false" autocomplete="off" placeholder="粘贴完整 JWT 或 HP JSON"></textarea><label class="check-row" for="manual-consent"><input id="manual-consent" type="checkbox"><span>确认这是本人账号，并同意用于本次查询</span></label><button id="manual-submit" class="button primary full" type="submit">查询并保存记录</button></form></details>
+      <div class="diagnostic-links"><button id="tap-diagnostics" class="text-link" type="button">复制 TapTap 脱敏诊断</button><button id="bili-diagnostics" class="text-link" type="button" hidden>复制 B 服脱敏诊断</button></div>
+    </div>
+    <div id="login-progress" class="login-progress" role="status" hidden><span class="loading-ring"></span><h3 id="login-progress-title">正在处理</h3><p id="login-progress-text"></p><button id="login-cancel" class="button secondary full" type="button">取消登录</button></div>
+  </dialog>
+
+  <dialog id="import-dialog" class="sheet" aria-labelledby="import-dialog-title">
+    <div class="sheet-heading"><div><p class="kicker">MERGE LOCAL DATA</p><h2 id="import-dialog-title">导入抽卡记录</h2></div><button class="icon-button" type="button" data-close="import-dialog" aria-label="关闭"><svg><use href="#icon-close"></use></svg></button></div>
+    <form id="import-form" class="sheet-form">
+      <label for="import-file">JSON / CSV 文件（最多 30 MB）</label><input id="import-file" type="file" accept=".json,.csv" required>
+      <label for="import-target">记录归属</label><select id="import-target"><option value="">自动识别账号；无身份时新建存档</option></select>
+      <p class="field-help">无账号身份的旧文件默认新建存档。只有确认属于同一账号时，才选择合并到已有存档。</p>
+      <label for="import-label">新存档名称（可选）</label><input id="import-label" maxlength="60" placeholder="例如：主号、小号、旧记录">
+      <p id="import-error" class="form-error" role="alert" hidden></p>
+      <button id="import-submit" class="button primary full" type="submit">读取并合并到本机</button>
+    </form>
+  </dialog>
+
+  <dialog id="rename-dialog" class="sheet" aria-labelledby="rename-dialog-title">
+    <div class="sheet-heading"><h2 id="rename-dialog-title">存档改名</h2><button class="icon-button" type="button" data-close="rename-dialog" aria-label="关闭"><svg><use href="#icon-close"></use></svg></button></div>
+    <form id="rename-form" class="sheet-form"><label for="rename-input">存档名称</label><input id="rename-input" maxlength="60" required><button class="button primary full" type="submit">保存名称</button></form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="sheet compact" aria-labelledby="confirm-title">
+    <div class="sheet-heading"><h2 id="confirm-title">确认操作</h2><button class="icon-button" type="button" data-close="confirm-dialog" aria-label="关闭"><svg><use href="#icon-close"></use></svg></button></div>
+    <p id="confirm-message" class="sheet-intro"></p><div class="confirm-actions"><button class="button secondary" type="button" data-close="confirm-dialog">取消</button><button id="confirm-action" class="button danger-button" type="button">确认</button></div>
+  </dialog>
+
+  <dialog id="mobile-image-dialog" class="sheet image-sheet" aria-labelledby="image-dialog-title">
+    <div class="sheet-heading"><div><p class="kicker">SHARE YOUR JOURNEY</p><h2 id="image-dialog-title">抽卡长图</h2></div><button id="image-close" class="icon-button" type="button" aria-label="关闭"><svg><use href="#icon-close"></use></svg></button></div>
+    <label for="image-category">导出分类</label><select id="image-category"><option value="all">全部卡池</option><option value="normal">普通池</option><option value="limited">限定池</option><option value="collection">典藏池</option><option value="beginner">启程池</option><option value="unknown">未分类</option></select>
+    <p id="image-status" class="image-status" role="status">选择分类后生成本机图片。</p>
+    <div class="image-toolbar"><button id="image-select-all" class="text-link" type="button">全选</button><button id="image-clear" class="text-link" type="button">清空选择</button><span id="image-selected">已选 0 张</span></div>
+    <div id="image-previews" class="image-previews"></div>
+    <div class="image-bottom-actions"><button id="image-save" class="button primary" type="button"><svg><use href="#icon-download"></use></svg>保存所选</button><button id="image-share" class="button secondary" type="button"><svg><use href="#icon-arrow"></use></svg>分享所选</button><button id="image-zip" class="button ghost full" type="button">导出全部图片 ZIP</button></div>
+  </dialog>
+</body>
+</html>

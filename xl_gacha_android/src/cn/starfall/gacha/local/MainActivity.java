@@ -39,12 +39,12 @@ public class MainActivity extends Activity {
   String id=prefs.getString("profile","");if(!id.isEmpty())profiles.put(object("id",id,"label",prefs.getString("label","最近一次登录"),"account_id",prefs.getString("account","")));
   return out.put("profiles",profiles);
  }
- @Override public void onCreate(Bundle b){super.onCreate(b);current=this;getWindow().setStatusBarColor(0xff111820);getWindow().setNavigationBarColor(0xff111820);
+ @Override public void onCreate(Bundle b){super.onCreate(b);current=this;getWindow().setStatusBarColor(0xff0b1020);getWindow().setNavigationBarColor(0xff0b1020);
   IO.execute(()->ImageExports.cleanup(getApplicationContext()));
   try{ensureCatalog(this);updates.start(false);
   }catch(Exception e){throw new IllegalStateException("CATALOG_INIT_FAILED");}
-  FrameLayout content=new FrameLayout(this);content.setBackgroundColor(0xff111820);
-  web=new WebView(this);web.setBackgroundColor(0xff111820);content.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(content);
+  FrameLayout content=new FrameLayout(this);content.setBackgroundColor(0xff0b1020);
+  web=new WebView(this);web.setBackgroundColor(0xff0b1020);content.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(content);
   // WebView does not inset its rendered document when its own padding changes.
   content.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
   WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -134,6 +134,6 @@ public class MainActivity extends Activity {
    if(result==RESULT_OK&&data!=null&&data.getData()!=null&&bytes!=null){Uri target=data.getData();IO.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(target)){if(out==null)throw new IOException();out.write(bytes);reply(id,200,object("saved",true));runOnUiThread(()->Toast.makeText(this,"文件已保存",Toast.LENGTH_SHORT).show());}catch(Exception e){reply(id,400,object("error","FILE_SAVE_FAILED"));}});}
    else reply(id,200,object("cancelled",true));}
  }
- @Override public void onBackPressed(){web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){if(d.dataset.busy!=='true')d.close();return true;}return false;})()",value->{if(!"true".equals(value))super.onBackPressed();});}
+ @Override public void onBackPressed(){web.evaluateJavascript("(()=>{if(typeof window.mobileBack==='function')return window.mobileBack()===true;const d=document.querySelector('dialog[open]');if(d){if(d.dataset.busy!=='true')d.close();return true;}return false;})()",value->{if(!"true".equals(value))super.onBackPressed();});}
  @Override protected void onDestroy(){if(current==this)current=null;albumBytes=null;albumRequest=null;albumName=null;if(web!=null){web.removeJavascriptInterface("AndroidHost");web.destroy();web=null;}super.onDestroy();}
 }
