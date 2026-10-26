@@ -19,7 +19,7 @@ public final class MobileUiIntegration extends Instrumentation {
   for(int i=0;i<100;i++){if("true".equals(evaluate(script)))return;SystemClock.sleep(100);}
   throw new AssertionError("WebView condition timeout: "+script);
  }
- void check(boolean script,String name)throws Exception{ok("true".equals(evaluate(script)),name);}
+ void check(String script,String name)throws Exception{ok("true".equals(evaluate(script)),name);}
  void tab(String name)throws Exception{
   check("(()=>{document.querySelector('.bottom-nav [data-tab=\""+name+"\"]').click();return true;})()","open "+name);
   await("!document.getElementById('view-"+name+"').hidden");
