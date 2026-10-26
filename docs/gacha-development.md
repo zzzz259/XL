@@ -25,7 +25,7 @@ node --test tests/image-export.test.cjs
 
 ```sh
 cd xl_gacha_android
-node --test tests/engine.test.cjs
+node --test tests/mobile-view-model.test.cjs tests/mobile-export.test.cjs tests/engine.test.cjs tests/tap-app-login.test.cjs
 python -B -m unittest discover -s tests -p 'test_*.py' -v
 python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/native-tests
 ```
@@ -45,7 +45,7 @@ adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-test/catalog-tests.jar app_proce
 
 该测试不安装 APK、不读取已安装应用账号数据，不做真实登录。命令退出码必须为零。`XL CI` 使用同样原生编译、WireTest、JS 与 Android emulator 检查；首次本机开发可只编译，但须明确尚未运行 Android JSON。
 
-QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
+QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。构建脚本默认打包 0.4 移动端页面资源，并将 `update-source.json` 置空、`build-info.json` 标记 `bilibili_enabled: false`，避免 QA 连接真实配置源或显示 B 服入口；只有显式传 `--assets` 才改用给定资源。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
 
 ```sh
 python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/login-return
@@ -56,6 +56,7 @@ adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.Im
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginFreshIntegration
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
 adb shell am instrument -w -e mobile true cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.MobileUiIntegration
 adb uninstall cn.starfall.gacha.returnqa
 ```
 
@@ -68,6 +69,10 @@ adb uninstall cn.starfall.gacha.returnqa
 TapTap App 衔接测试需包含 `PASS 16 TapTap App WebView/handoff checks`、`tap_policy_checks=21` 与 `INSTRUMENTATION_CODE: -1`。它拦截合成官网响应及 App 启动，测试真实 WebView 监听、包名、一次性交接、未安装 App 的反馈、会话切换、当前窗口恢复、超时与诊断不含挑战。21 项链接策略检查在同一个正常 Android 应用进程执行；MuMu 的 shell `app_process` 可能在执行完策略后以 139 退出，不能据打印通过就声称命令成功。JS 监听另用 `node --test tests/tap-app-login.test.cjs` 覆盖官方来源、fetch/XHR、重复注入及过期。
 
 手机布局分支另外需包含 `layout=phone`、`PASS 20 TapTap App WebView/handoff checks` 和成功结束码。该夹具使用含 Mobile 标识的手机 UA 与官网相同的扫码切换可见性条件，并通过 history.replaceState 模拟 `/authorize` 到 `/login` 的 SPA 跳转；同时验证原 state/PKCE 保留、网页登录回退恢复原 UA、再次 App 授权可用。诊断只记录页面路径和布局准备状态，完整 URL 与挑战仅在原生内存中绑定本次窗口，不进入诊断。
+
+移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面，用内置合成演示数据和合成导入账号检查：底部四栏导航与各栏无横向溢出、总览汇总数值、卡池分类与展开五星、记录搜索/卡池/星级/仅五星筛选与空结果、长图弹窗实际生成一张 1080px PNG、返回键先走页面 `window.mobileBack`（关闭弹层、非总览栏回总览）、账号切换与重载后恢复上次账号。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
+
+对应 Node 单测 `tests/mobile-view-model.test.cjs` 校验总览视图模型（累计与分类抽数、可见垫抽、最近五星倒序与上下文、条数上限）、卡池分类视图与记录卡片（最新在前、筛选后分页、仅五星/星级/卡池/搜索与空态，且不改动原始分析数据）；`tests/mobile-export.test.cjs` 校验 JSON/CSV 导出保真与安全文件名、CSV 公式中立化、不支持的格式与空记录报错，并确认共享长图引擎 `image-export.js` 脱离旧版桌面弹窗仍可加载；构建脚本与 `XL CI` 在打包前运行这两个测试。
 
 Android 15 模拟器可验证系统分享预览，不替代接收端真机测试。2026-10-23 用户确认 0.3.4 相册保存和分享在真机均正常；功能提交 a66209d7 的 CI 检查通过。接收应用/机型没有逐项枚举，Android 9 保存相册的权限分支需要另行验证。
 

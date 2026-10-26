@@ -6,7 +6,7 @@
 
 Windows：浏览器 UI → loopback `app.py` → 官方认证/网关；`archive.py` 将记录保存 SQLite。启动窗口管理本机服务，CDP 只管理专用官网登录浏览器。Host/Origin 白名单、请求大小和并发限制约束本机 API。
 
-Android：内置本地域名 UI → 受约束的原生桥 → GachaClient/Wire；IndexedDB 保存各账号原始记录。官网使用独立 WebView，主页面桥不注入官网。`allowBackup=false`，备份由玩家显式导出。两端的游戏认证和网关直连，配置请求也不携带账号信息。
+Android：内置本地域名 UI（0.4 起为独立的移动端页面 `web/index.html` + `mobile-ui.css` + `mobile-app` 系列脚本，不再打包电脑端旧版桌面 `index/app/style/theme/local/login/catalog-ui/environment`，仍复用共享 `demo.json` 与 `image-export.js`）→ 受约束的原生桥 → GachaClient/Wire；IndexedDB 保存各账号原始记录。官网使用独立 WebView，主页面桥不注入官网。`allowBackup=false`，备份由玩家显式导出。两端的游戏认证和网关直连，配置请求也不携带账号信息。
 
 记录身份由官方验证的 UID/渠道组成，去重根据原始记录 ID/卡池/序号与内容。JSON 保留原始 item_id、pool_id、数量、时间及账号身份；CSV 旧格式无唯一身份时保守处理。配置更新按一份快照重映射原始 ID，保持记录数量/时间；保存的 catalog 指纹变化才触发重算。
 
