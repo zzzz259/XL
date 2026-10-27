@@ -25,7 +25,7 @@ node --test tests/image-export.test.cjs
 
 ```sh
 cd xl_gacha_android
-node --test tests/mobile-navigation.test.cjs tests/mobile-view-model.test.cjs tests/mobile-export.test.cjs tests/engine.test.cjs tests/tap-app-login.test.cjs
+node --test tests/mobile-navigation.test.cjs tests/mobile-probability.test.cjs tests/mobile-insights.test.cjs tests/mobile-view-model.test.cjs tests/mobile-export.test.cjs tests/engine.test.cjs tests/tap-app-login.test.cjs
 python -B -m unittest discover -s tests -p 'test_*.py' -v
 python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/native-tests
 ```
@@ -45,7 +45,7 @@ adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-test/catalog-tests.jar app_proce
 
 该测试不安装 APK、不读取已安装应用账号数据，不做真实登录。命令退出码必须为零。`XL CI` 使用同样原生编译、WireTest、JS 与 Android emulator 检查；首次本机开发可只编译，但须明确尚未运行 Android JSON。
 
-QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。构建脚本默认打包 0.4 移动端页面资源，并将 `update-source.json` 置空、`build-info.json` 标记 `bilibili_enabled: false`，避免 QA 连接真实配置源或显示 B 服入口（B 服实现仍在，仅构建传入 Git 外 `--bilibili-config` 才写入并显示入口；普通 QA 未提供该私有配置故隐藏）；只有显式传 `--assets` 才改用给定资源。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
+QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。构建脚本默认打包 0.4 移动端页面资源，并将 `update-source.json` 置空、`build-info.json` 标记 `bilibili_enabled: false`，避免 QA 连接真实配置源；B 服授权入口在界面中始终显示，未启用时按钮禁用并标注「待接入」（B 服实现仍在，仅构建传入 Git 外 `--bilibili-config` 才写入并启用点击；普通 QA 未提供该私有配置，故入口为禁用态）。只有显式传 `--assets` 才改用给定资源。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
 
 ```sh
 python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/login-return
@@ -70,9 +70,9 @@ TapTap App 衔接测试需包含 `PASS 16 TapTap App WebView/handoff checks`、`
 
 手机布局分支另外需包含 `layout=phone`、`PASS 20 TapTap App WebView/handoff checks` 和成功结束码。该夹具使用含 Mobile 标识的手机 UA 与官网相同的扫码切换可见性条件，并通过 history.replaceState 模拟 `/authorize` 到 `/login` 的 SPA 跳转；同时验证原 state/PKCE 保留、网页登录回退恢复原 UA、再次 App 授权可用。诊断只记录页面路径和布局准备状态，完整 URL 与挑战仅在原生内存中绑定本次窗口，不进入诊断。
 
-移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面：先清空隔离存档，检查空库打开查询页、登录为页内流程而非对话框、已移除控件（remember-login、demo-button、compact-toggle、tap-diagnostics 等）缺席且查询页无宣传文案、手动凭据入口存在；随后 fetch 内置 `demo.json` 并附上合成账号身份，经 `/api/library/import` 注入（不依赖任何界面演示入口），重载后检查合成数据汇总数值（总抽数 464、五星 9）、当前账号与抽卡生涯汇总、三类垫抽以 `career-pity` 简行并入生涯卡、统一简洁模式（body 固定 `compact-ui`、次要信息隐藏）、卡池默认展开五星及间隔条（高约 24px）、卡池分类筛选、原始招募明细折叠内搜索/卡池/星级/仅五星筛选与空结果、长图弹窗实际生成一张 1080px PNG、返回键先走页面 `window.mobileBack`（关闭弹层后回到上一栏并恢复其滚动位置）、账号切换与重载后恢复上次账号，以及 140% 大字体下页面与汇总指标均无横向溢出。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
+移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面：先清空隔离存档，检查空库打开查询页、登录为页内流程而非对话框、已移除控件（remember-login、demo-button、compact-toggle、tap-diagnostics 等）缺席且查询页无宣传文案、手动凭据入口存在并可打开底部弹窗（返回键关闭）、B 服入口常显但无配置时禁用、`aria-disabled` 并标注「待接入」；随后 fetch 内置 `demo.json` 并附上合成账号身份，经 `/api/library/import` 注入（不依赖任何界面演示入口），重载后检查合成数据汇总数值（总抽数 464、五星 9、卡池 7）、结果页标题固定「招募档案」且无 `account-quick-stats`（账号名不重复）、生涯与近 45 天评价及标签渲染、三类垫抽以 `career-pity` 进度条叠字并入生涯卡（限定/典藏用 UP/歪 与平均 UP、普通保留五星平均）、启程不计入生涯附注、卡池默认展开五星及间隔条（高约 24px）、「全部角色/收起角色」开关整体显隐角色列表、卡池分类筛选、原始招募明细折叠内搜索/卡池/星级/仅五星筛选与空结果、长图弹窗实际生成一张 1080px PNG、返回键先走页面 `window.mobileBack`（关闭弹层后回到上一栏并恢复其滚动位置）、账号切换与重载后恢复上次账号，以及 140% 大字体下页面与汇总指标均无横向溢出。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
 
-对应 Node 单测 `tests/mobile-navigation.test.cjs` 校验三栏初始目的地（有选中报告或本机存档进「记录」、否则进「查询」）、返回上一页并恢复其滚动位置、replace 去重与非法页面拒绝；`tests/mobile-view-model.test.cjs` 校验汇总视图模型（累计与分类抽数、可见垫抽、最近五星倒序与上下文、条数上限）、卡池分类视图与记录卡片（最新在前、筛选后分页、仅五星/星级/卡池/搜索与空态、UP ID 取自内置 catalog，且不改动原始分析数据）；`tests/mobile-export.test.cjs` 校验 JSON/CSV 导出保真与安全文件名、CSV 公式中立化、不支持的格式与空记录报错，并确认共享长图引擎 `image-export.js` 脱离旧版桌面弹窗仍可加载；构建脚本与 `XL CI` 在打包前运行这组测试。
+对应 Node 单测 `tests/mobile-navigation.test.cjs` 校验三栏初始目的地（有选中报告或本机存档进「记录」、否则进「查询」）、返回上一页并恢复其滚动位置、replace 去重与非法页面拒绝；`tests/mobile-view-model.test.cjs` 校验汇总视图模型（累计与分类抽数、可见垫抽、最近五星倒序与上下文、条数上限）、卡池分类视图与记录卡片（最新在前、筛选后分页、仅五星/星级/卡池/搜索与空态、UP ID 取自内置 catalog，且不改动原始分析数据）；`tests/mobile-export.test.cjs` 校验 JSON/CSV 导出保真与安全文件名、CSV 公式中立化、不支持的格式与空记录报错，并确认共享长图引擎 `image-export.js` 脱离旧版桌面弹窗仍可加载；`tests/mobile-insights.test.cjs` 校验生涯/近 45 天口径（含端点、剔除未来记录）、empty/small/zero/unknown/rated 与暂估边界、十连多金（未知稀有度按至少双金）、按 hard_pity 抽满、2 连及以上 UP/歪 标签、分类收窄，以及与 `mobile-engine.js` 报告的一致性和输入不可变；`tests/mobile-probability.test.cjs` 校验首次 UP 的 1–140 抽分布与固定阈值（超欧 ≤6、超非 ≥122），以及大保底、guaranteed 为空、前序不完整、非限定/典藏、hard_pity 非 70 时不判超非；构建脚本与 `XL CI` 在打包前运行这组测试。
 
 Android 15 模拟器可验证系统分享预览，不替代接收端真机测试。2026-10-23 用户确认 0.3.4 相册保存和分享在真机均正常；功能提交 a66209d7 的 CI 检查通过。接收应用/机型没有逐项枚举，Android 9 保存相册的权限分支需要另行验证。
 
