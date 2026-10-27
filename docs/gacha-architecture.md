@@ -6,7 +6,7 @@
 
 Windows：浏览器 UI → loopback `app.py` → 官方认证/网关；`archive.py` 将记录保存 SQLite。启动窗口管理本机服务，CDP 只管理专用官网登录浏览器。Host/Origin 白名单、请求大小和并发限制约束本机 API。
 
-Android：内置本地域名 UI（0.4 起为独立的移动端页面 `web/index.html` + `mobile-ui.css` + `mobile-app` 系列脚本与 `mobile-navigation.js`，不再打包电脑端旧版桌面 `index/app/style/theme/local/login/catalog-ui/environment`，仍复用共享 `demo.json` 与 `image-export.js`）→ 受约束的原生桥 → GachaClient/Wire；IndexedDB 保存各账号原始记录。官网使用独立 WebView，主页面桥不注入官网。栏间导航记录访问顺序与各栏滚动位置；「简洁/详细」界面偏好存于 WebView localStorage 键 `starfall-ui-compact`（缺省 1 为简洁、0 为详细），属非账号数据，不写入 IndexedDB 存档、导出文件或日志，简洁模式只隐藏次要信息（每条五星的时间与本池第几抽、账号更新时间、卡池尾部次要说明、覆盖说明及标题旁 eyebrow/次要文字），统计与原始记录不变；配置 revision 变化触发的后台重算保留当前筛选与浏览位置，不强制跳回顶部。`allowBackup=false`，备份由玩家显式导出。两端的游戏认证和网关直连，配置请求也不携带账号信息。
+Android：内置本地域名 UI（0.4 起为独立的移动端页面 `web/index.html` + `mobile-ui.css` + `mobile-app` 系列脚本与 `mobile-navigation.js`，不再打包电脑端旧版桌面 `index/app/style/theme/local/login/catalog-ui/environment`，仍复用共享 `demo.json` 与 `image-export.js`）→ 受约束的原生桥 → GachaClient/Wire；IndexedDB 保存各账号原始记录。官网使用独立 WebView，主页面桥不注入官网。栏间导航记录访问顺序与各栏滚动位置；0.4 起记录页统一为简洁布局：body 固定 `compact-ui`，不再有「简洁/详细」切换，也不读写 WebView localStorage 键 `starfall-ui-compact`，隐藏仅限次要信息展示（每条五星的时间与本池第几抽、账号更新时间、卡池尾部次要说明、覆盖说明及标题旁 eyebrow/次要文字），统计与原始记录不变；独立的当前垫抽区块已移除，普通/限定/典藏三类垫抽以 `career-pity` 简行并入生涯卡，五星间隔条高约 24px；查询页 `startLogin` 固定 `remember=false`、`profile=null`，每次登录都是新的官网会话（原生桥仍接受 remember/profile 参数，仅界面不提供会话保留），页面无查看演示按钮与 TapTap/B 服诊断复制入口，`demo.json` 仅作为合成测试数据，由 MobileUiIntegration 经 `/api/library/import` 注入；配置 revision 变化触发的后台重算保留当前筛选与浏览位置，不强制跳回顶部。`allowBackup=false`，备份由玩家显式导出。两端的游戏认证和网关直连，配置请求也不携带账号信息。
 
 记录身份由官方验证的 UID/渠道组成，去重根据原始记录 ID/卡池/序号与内容。JSON 保留原始 item_id、pool_id、数量、时间及账号身份；CSV 旧格式无唯一身份时保守处理。配置更新按一份快照重映射原始 ID，保持记录数量/时间；保存的 catalog 指纹变化才触发重算。
 
