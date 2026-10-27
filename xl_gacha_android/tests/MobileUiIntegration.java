@@ -30,7 +30,7 @@ public final class MobileUiIntegration extends Instrumentation {
   MainActivity.login=MainActivity.object("phase","idle");MainActivity.session="";
   activity=(MainActivity)startActivitySync(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));web=activity.web;
   await("window.mobileReady===true");
-  check("window.__qaReset='';(async()=>{const d=await new Promise((resolve,reject)=>{const q=indexedDB.open('starfall-local-archives',1);q.onsuccess=()=>resolve(q.result);q.onerror=reject;});await new Promise((resolve,reject)=>{const t=d.transaction(['accounts','settings'],'readwrite');t.objectStore('accounts').clear();t.objectStore('settings').clear();t.oncomplete=resolve;t.onerror=reject;});d.close();window.__qaReset=true;})().catch(e=>window.__qaReset='FAIL '+e);return true;})()","clear isolated archives");
+  check("(()=>{window.__qaReset='';(async()=>{const d=await new Promise((resolve,reject)=>{const q=indexedDB.open('starfall-local-archives',1);q.onsuccess=()=>resolve(q.result);q.onerror=reject;});await new Promise((resolve,reject)=>{const t=d.transaction(['accounts','settings'],'readwrite');t.objectStore('accounts').clear();t.objectStore('settings').clear();t.oncomplete=resolve;t.onerror=reject;});d.close();window.__qaReset=true;})().catch(e=>window.__qaReset='FAIL '+e);return true;})()","clear isolated archives");
   await("window.__qaReset===true");evaluate("window.mobileReady=false");runOnMainSync(()->web.reload());await("window.mobileReady===true");
   check("!document.getElementById('view-query').hidden","empty library opens query page");
   check("document.querySelectorAll('.bottom-nav [data-tab]').length===3","three mobile destinations");
