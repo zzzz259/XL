@@ -18,7 +18,7 @@
   <script src="/mobile-image.js" defer></script>
   <script src="/mobile-app.js" defer></script>
 </head>
-<body>
+<body class="compact-ui">
   <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 2 2.6 6.5L21 11l-6.4 2.5L12 20l-2.6-6.5L3 11l6.4-2.5L12 2Z"/><path d="m19 2 .6 2.4L22 5l-2.4.6L19 8l-.6-2.4L16 5l2.4-.6L19 2Z"/></symbol>
     <symbol id="icon-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></symbol>
@@ -64,12 +64,8 @@
             <div class="section-heading"><h2>抽卡生涯</h2><span>本机可见历史</span></div>
             <div id="career-categories" class="career-categories"></div><div id="career-extra" class="career-extra"></div>
           </section>
-          <section id="pity-summary" class="pity-summary" aria-label="当前垫抽">
-            <div class="section-heading"><h2>当前垫抽</h2><button class="icon-button info-trigger" type="button" aria-label="垫抽统计说明" data-info="method"><svg><use href="#icon-info"></use></svg></button></div>
-            <div id="pity-categories" class="pity-categories"></div>
-          </section>
           <section class="history-section" aria-label="抽卡历史">
-            <div class="history-heading"><div class="history-title-row"><h2>抽卡历史</h2><button id="compact-toggle" class="compact-toggle" type="button" aria-pressed="true" aria-label="切换简洁与详细信息">简洁</button></div><div id="pool-category-tabs" class="category-tabs" role="group" aria-label="卡池分类"><button type="button" data-category="all" class="active">全部</button><button type="button" data-category="normal">普通</button><button type="button" data-category="limited">限定</button><button type="button" data-category="collection">典藏</button><button type="button" data-category="beginner">启程</button><button type="button" data-category="unknown">未分类</button></div></div>
+            <div class="history-heading"><h2>抽卡历史</h2><div id="pool-category-tabs" class="category-tabs" role="group" aria-label="卡池分类"><button type="button" data-category="all" class="active">全部</button><button type="button" data-category="normal">普通</button><button type="button" data-category="limited">限定</button><button type="button" data-category="collection">典藏</button><button type="button" data-category="beginner">启程</button><button type="button" data-category="unknown">未分类</button></div></div>
             <div id="pool-list" class="pool-list"></div><div id="pool-empty" class="empty-panel" hidden><h2>这个分类还没有记录</h2><p>切换分类，或更新记录后再来查看。</p></div>
           </section>
           <details id="distribution-details" class="secondary-details"><summary>星级与卡池分布<svg class="chevron"><use href="#icon-down"></use></svg></summary><div class="distribution-grid"><article><h3>星级分布</h3><div id="rarity-bars"></div></article><article><h3>卡池分布</h3><div id="pool-bars"></div></article></div></details>
@@ -86,20 +82,15 @@
       </section>
 
       <section id="view-query" class="view" aria-label="查询">
-        <header class="query-heading"><p class="eyebrow">A NEW CHAPTER</p><h1>查询招募记录</h1><p>登录你的账号，把散落的相遇整理成一份专属手记。</p></header>
+        <header class="query-heading"><h1>查询招募记录</h1></header>
         <section class="query-card">
-          <div class="section-heading"><h2>从这里开始</h2><span>选择账号渠道</span></div><p class="field-help">只读取抽卡历史，不会执行抽卡操作。</p>
           <div id="login-options">
             <div class="channel-list"><button id="official-login" type="button"><span class="channel-mark gold"><svg><use href="#icon-star"></use></svg></span><div><strong>官服网页登录</strong><small>短信、QQ 或官网提供的其他方式</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button><button id="tap-login" type="button"><span class="channel-mark teal">T</span><div><strong>TapTap App 授权</strong><small>使用手机上已登录的官方 TapTap</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button><button id="bili-login" type="button" hidden><span class="channel-mark blue">B</span><div><strong>B 服授权</strong><small>在官方哔哩哔哩 App 中确认</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button></div>
-            <label class="toggle-row login-remember" for="remember-login"><span><strong>保留官网会话</strong><small>下次可沿用本次官网登录；不保存密码，也不写入抽卡存档</small></span><input id="remember-login" type="checkbox" role="switch"></label>
-            <div id="login-profile-options" class="login-profile-options" hidden><label for="login-profile">登录会话</label><select id="login-profile"><option value="">添加新的登录会话</option></select><button id="forget-login" class="text-link" type="button">删除所选会话</button><button id="other-account-login" class="text-link" type="button">登录其他账号</button></div>
-            <details id="manual-login" class="advanced-options"><summary>手动凭据（备用方式）</summary><p>仅粘贴本人官网会话的 JWT 或 HP 对象。凭据具有账号访问权限，不要分享给他人。</p><form id="manual-form"><label for="manual-credential">登录凭据</label><textarea id="manual-credential" rows="3" spellcheck="false" autocomplete="off" placeholder="粘贴完整 JWT 或 HP JSON"></textarea><label class="check-row" for="manual-consent"><input id="manual-consent" type="checkbox"><span>确认这是本人账号，并同意用于本次查询</span></label><button id="manual-submit" class="button primary full" type="submit">查询并保存记录</button></form></details>
-            <div class="diagnostic-links"><button id="tap-diagnostics" class="text-link" type="button">复制 TapTap 脱敏诊断</button><button id="bili-diagnostics" class="text-link" type="button" hidden>复制 B 服脱敏诊断</button></div>
+            <details id="manual-login" class="advanced-options"><summary>手动凭据</summary><p>仅粘贴本人官网会话的 JWT 或 HP 对象。凭据具有账号访问权限，不要分享给他人。</p><form id="manual-form"><label for="manual-credential">登录凭据</label><textarea id="manual-credential" rows="3" spellcheck="false" autocomplete="off" placeholder="粘贴完整 JWT 或 HP JSON"></textarea><label class="check-row" for="manual-consent"><input id="manual-consent" type="checkbox"><span>确认这是本人账号，并同意用于本次查询</span></label><button id="manual-submit" class="button primary full" type="submit">查询并保存记录</button></form></details>
           </div>
           <div id="login-progress" class="login-progress" role="status" hidden><span class="loading-ring"></span><h3 id="login-progress-title">正在处理</h3><p id="login-progress-text"></p><button id="login-cancel" class="button secondary full" type="button">取消登录</button></div>
         </section>
-        <div class="query-secondary"><button id="import-empty-button" class="button secondary" type="button"><svg><use href="#icon-upload"></use></svg>导入本地记录</button><button id="demo-button" class="button ghost" type="button">查看演示<svg><use href="#icon-chevron"></use></svg></button></div>
-        <p class="query-privacy"><svg><use href="#icon-shield"></use></svg>记录留在你的手机 · 不上传到开发者服务器</p>
+        <div class="query-secondary"><button id="import-empty-button" class="button secondary" type="button"><svg><use href="#icon-upload"></use></svg>导入本地记录</button><button id="manual-open" class="button ghost" type="button">手动凭据<svg><use href="#icon-chevron"></use></svg></button></div>
       </section>
 
       <section id="view-profile" class="view" aria-label="我的" hidden>

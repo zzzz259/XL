@@ -42,24 +42,13 @@ const MobileRender=(()=>{
    const metrics=el('div',undefined,'career-metrics'),count=el('div'),average=el('div');
    count.append(el('strong',key==='normal'?String(value.five_count):`${value.five_count} / ${value.off_count}`),el('span',key==='normal'?'出卡数':'出卡数 / 歪'));
    const avg=value.average_five_interval===null?'—':Number(value.average_five_interval).toFixed(1);average.append(el('strong',avg),el('span','五星平均'));
-   metrics.append(count,average);card.append(pulls,metrics);list.append(card);
+   metrics.append(count,average);
+   const pity=el('div',undefined,'career-pity'),countText=value.pull_count?`${value.since_five_exact?'':'≥'}${MobileView.number(value.since_five)}`:'—';pity.append(el('span','已垫'),el('strong',`${countText} / ${value.hard_pity||'—'}`));
+   card.append(pulls,metrics,pity);list.append(card);
   }
   const extra=$('career-extra');extra.replaceChildren();
   for(const key of ['beginner','unknown']){const value=source[key];if(value?.pull_count)extra.append(el('span',`${value.name}另计 ${MobileView.number(value.pull_count)} 抽 · ${value.five_count} 个五星`));}
   extra.hidden=!extra.children.length;
- }
- function pity(state){
-  const source=state.report?.analysis?.categories||{},list=$('pity-categories');list.replaceChildren();
-  for(const key of ['normal','limited','collection']){
-   const value=source[key];if(!value)continue;
-   const card=el('article',undefined,`pity-category ${key}`);card.dataset.category=key;
-   card.append(el('span',`${value.name}已垫`));
-   const count=value.pull_count?`${value.since_five_exact?'':'≥'}${MobileView.number(value.since_five)}`:'—',limit=value.hard_pity||'—';
-   card.append(el('strong',`${count} / ${limit}`));
-   if(value.pull_count&&value.hard_pity){const track=el('div',undefined,'pity-track'),fill=el('div',undefined,`pity-fill${value.since_five_exact?'':' uncertain'}`);fill.style.width=`${Math.min(100,value.since_five/value.hard_pity*100)}%`;track.append(fill);card.append(track);}
-   else card.append(el('small',value.pull_count?'保底规则未确认':'暂无记录'));
-   list.append(card);
-  }
  }
  function poolCard(pool,state){
   const card=el('article',undefined,`pool-card ${pool.category}`);card.dataset.poolId=String(pool.poolId);card.dataset.category=pool.category;
@@ -120,7 +109,7 @@ const MobileRender=(()=>{
   $('record-account-meta').textContent=accountMeta(report.account);$('record-account-updated').textContent=state.demo?'虚构演示数据 · 没有连接游戏账号':`更新于 ${time(report.captured_at)}`;
   $('partial-warning').hidden=!report.partial;
   $('summary-pulls').textContent=MobileView.number(report.summary.pull_count);$('summary-fives').textContent=MobileView.number(report.summary.rarity_counts['5']||0);$('summary-pools').textContent=MobileView.number(Object.keys(report.summary.pool_pull_counts||{}).length);$('summary-records').textContent=MobileView.number(report.summary.record_count);
-  career(state);pity(state);pools(state);distribution(state);$('record-coverage').textContent=report.coverage||'展示本机已累计保存的可见历史，不保证覆盖账号全部生涯。';
+  career(state);pools(state);distribution(state);$('record-coverage').textContent=report.coverage||'展示本机已累计保存的可见历史，不保证覆盖账号全部生涯。';
  }
  function recordPoolOptions(state){
   const select=$('record-pool'),selected=select.value,pools=[...(state.report?.analysis?.pools||[])].sort((a,b)=>a.pool_name.localeCompare(b.pool_name,'zh-CN'));select.replaceChildren(new Option('全部卡池',''));
@@ -142,13 +131,11 @@ const MobileRender=(()=>{
  }
  function login(state){
   const value=state.login||{phase:'idle',profiles:[]},active=['opening','waiting','querying','cancelling'].includes(value.phase),progress=state.loginPanel==='progress';
-  $('bili-login').hidden=!state.buildInfo?.bilibili_enabled;$('bili-diagnostics').hidden=!state.buildInfo?.bilibili_enabled;$('login-options').hidden=progress;$('login-progress').hidden=!progress;$('login-progress').classList.toggle('error',value.phase==='error');
+  $('bili-login').hidden=!state.buildInfo?.bilibili_enabled;$('login-options').hidden=progress;$('login-progress').hidden=!progress;$('login-progress').classList.toggle('error',value.phase==='error');
   const titles={opening:'正在打开授权',waiting:'等待本人授权',querying:'正在查询记录',cancelling:'正在取消',done:'查询完成',error:'这次没有完成'};$('login-progress-title').textContent=titles[value.phase]||'正在处理';
   $('login-progress-text').textContent=value.phase==='error'?(value.message||MobileServices.messages[value.error]||'登录或查询未完成，请返回后重试。'):(value.message||'正在处理，请稍候…');
   $('login-cancel').hidden=!active&&value.phase!=='error';$('login-cancel').disabled=['querying','cancelling'].includes(value.phase);$('login-cancel').textContent=value.phase==='error'?'返回登录方式':value.phase==='querying'?'正在查询，请稍候':'取消登录';
-  for(const id of ['official-login','tap-login','bili-login','remember-login','manual-submit','other-account-login'])$(id).disabled=active||state.working;
-  $('login-profile-options').hidden=!$('remember-login').checked;
-  const select=$('login-profile'),selected=select.value;select.replaceChildren(new Option('添加新的登录会话',''));for(const profile of value.profiles||[])select.append(new Option(profile.label,profile.id));select.value=selected;if(!select.value){const profile=(value.profiles||[]).find(item=>item.account_id===state.report?.account?.id);select.value=profile?profile.id:'';}$('forget-login').disabled=active||!select.value;
+  for(const id of ['official-login','tap-login','bili-login','manual-submit'])$(id).disabled=active||state.working;
  }
  function profile(state){accounts(state);catalog(state.catalog);login(state);$('app-version').textContent=`Android ${state.buildInfo?.baseline?.integration_version||'0.4'}`;}
  function all(state){tabs(state);recordPage(state);recordPoolOptions(state);records(state,MobileView.records(state.report,{...state.filters,page:state.recordPage}));profile(state);}

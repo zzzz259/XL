@@ -473,6 +473,21 @@ body.compact-ui #record-coverage { display: none !important; }
 .distribution-row { grid-template-columns: 64px minmax(0, 1fr) minmax(42px, max-content); }
 .distribution-row strong { overflow-wrap: anywhere; }
 
+.career-pity { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.career-pity strong { color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.main-content { padding-top: 4px; }
+.account-summary { padding-block: 6px 8px; }
+.account-quick-stats { padding-block: 8px; }
+.career-summary { padding: 10px 8px; }
+.career-categories { gap: 6px; }
+.career-metrics { margin-top: 6px; padding-top: 6px; }
+.pool-list { gap: 9px; }
+.pool-card { padding: 10px; }
+.pool-title h3 { font-size: 17px; }
+.five-event-list { gap: 9px; margin-top: 10px; }
+.five-event-track, .five-event-fill { min-height: 24px; height: auto; }
+.five-event-fill > span { font-size: 14px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

@@ -1,11 +1,9 @@
 'use strict';
 
 (()=>{
- function readCompact(){try{return localStorage.getItem('starfall-ui-compact')!=='0';}catch{return true;}}
- const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,login:{phase:'idle',profiles:[]},loginPanel:'options',loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,compact:readCompact()};
+ const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,login:{phase:'idle',profiles:[]},loginPanel:'options',loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1};
  let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null;
  window.mobileReady=false;
- function applyCompact(){document.body.classList.toggle('compact-ui',state.compact);const button=$('compact-toggle');button.textContent=state.compact?'简洁':'详细';button.setAttribute('aria-pressed',String(state.compact));button.setAttribute('aria-label',state.compact?'当前为简洁模式，点击显示次要信息':'当前为详细模式，点击隐藏次要信息');}
  const active=()=>['opening','waiting','querying','cancelling'].includes(state.login.phase);
  function notify(text,kind=''){clearTimeout(toastTimer);const toast=$('toast');toast.textContent=text;toast.className=`toast ${kind}`;toast.hidden=!text;if(text)toastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:4000);}
  function openDialog(id){const dialog=$(id);if(!dialog.open)dialog.showModal();}
@@ -28,9 +26,9 @@
  function scheduleLogin(delay=800){clearTimeout(loginTimer);loginTimer=setTimeout(pollLogin,delay);}
  async function pollLogin(){try{const value=await MobileServices.api('/login');handleLogin(value);if(active())scheduleLogin();}catch(error){state.login={phase:'error',error:error.code||'QUERY_FAILED',profiles:state.login.profiles||[]};state.loginPanel='progress';MobileRender.login(state);}}
  function handleLogin(value){state.login=value;if(['cancelled','done','idle'].includes(value.phase))state.loginPanel='options';else if(active()||value.phase==='error')state.loginPanel='progress';MobileRender.login(state);if(value.report&&value.id!==state.loginResult){state.loginResult=value.id||String(Date.now());showReport(value.report,false);refreshLibrary(false).catch(error=>notify(error.message,'error'));notify('记录已更新并按账号保存到本机。');}}
- async function startLogin(channel,method='',forceNew=false){
+ async function startLogin(channel,method=''){
   if(state.working||active())return;state.working=true;state.loginResult='';state.loginPanel='progress';state.login={phase:'opening',profiles:state.login.profiles||[]};MobileRender.login(state);
-  try{const value=await MobileServices.api('/login/start',{channel,...(method?{method}:{}),remember:channel!=='bilibili'&&$('remember-login').checked,profile:channel==='official'&&!forceNew&&$('remember-login').checked?($('login-profile').value||null):null});handleLogin(value);scheduleLogin(400);}
+  try{const value=await MobileServices.api('/login/start',{channel,...(method?{method}:{}),remember:false,profile:null});handleLogin(value);scheduleLogin(400);}
   catch(error){state.login={phase:'error',error:error.code||'PORTAL_LOGIN_FAILED',profiles:state.login.profiles||[]};MobileRender.login(state);}
   finally{state.working=false;MobileRender.login(state);}
  }
@@ -44,21 +42,16 @@
  }
  function bind(){
   document.querySelectorAll('.bottom-nav [data-tab]').forEach(button=>button.addEventListener('click',()=>switchTab(button.dataset.tab)));
-  $('compact-toggle').addEventListener('click',()=>{state.compact=!state.compact;applyCompact();try{localStorage.setItem('starfall-ui-compact',state.compact?'1':'0');}catch{}});
   document.addEventListener('click',event=>{const close=event.target.closest('[data-close]');if(close)closeDialog(close.dataset.close);});
   document.addEventListener('mobile-status',event=>notify(event.detail.text,event.detail.kind));
   $('account-button').addEventListener('click',openAccount);$('empty-to-accounts').addEventListener('click',openAccount);
   $('account-list').addEventListener('click',event=>{const option=event.target.closest('[data-account-id]');if(!option)return;run(async()=>{const report=await MobileServices.api('/library/open',{id:option.dataset.accountId});showReport(report,false);closeDialog('account-dialog');await refreshLibrary(false);});});
   for(const id of ['account-import','import-empty-button','profile-import'])$(id).addEventListener('click',openImport);
   for(const id of ['empty-to-query','update-record-button','profile-login'])$(id).addEventListener('click',openLogin);
-  $('demo-button').addEventListener('click',()=>run(async()=>{const response=await fetch('./demo.json',{cache:'no-store'});if(!response.ok)throw new Error('演示数据暂时无法加载。');showReport(await response.json(),true);}));
   $('official-login').addEventListener('click',()=>startLogin('official'));$('tap-login').addEventListener('click',()=>startLogin('official','taptap_app'));$('bili-login').addEventListener('click',()=>startLogin('bilibili'));
-  $('other-account-login').addEventListener('click',()=>{$('login-profile').value='';startLogin('official','',true);});
-  $('remember-login').addEventListener('change',()=>MobileRender.login(state));$('login-profile').addEventListener('change',()=>MobileRender.login(state));
-  $('forget-login').addEventListener('click',()=>{if(!$('login-profile').value)return;confirm('删除登录会话','只删除记住的官网会话，不会删除抽卡存档。','删除会话',async()=>{await MobileServices.api('/login/forget',{profile:$('login-profile').value});$('login-profile').value='';state.login=await MobileServices.api('/login');MobileRender.login(state);notify('登录会话已删除，抽卡存档未改变。');});});
+  $('manual-open').addEventListener('click',()=>{const details=$('manual-login');details.open=true;details.scrollIntoView({block:'start'});});
   $('login-cancel').addEventListener('click',()=>{if(state.login.phase==='error'){state.loginPanel='options';state.login={phase:'idle',profiles:state.login.profiles||[]};MobileRender.login(state);return;}run(async()=>{state.login=await MobileServices.api('/login/cancel');state.loginPanel='options';MobileRender.login(state);});});
   $('manual-form').addEventListener('submit',event=>{event.preventDefault();if(state.working)return;const credential=$('manual-credential').value.trim();if(!credential){notify('请先粘贴完整登录凭据。','error');return;}if(!$('manual-consent').checked){notify('请先确认这是本人账号。','error');return;}run(async()=>{$('manual-credential').value='';$('manual-consent').checked=false;state.loginPanel='progress';state.login={phase:'querying',message:'正在验证凭据并查询记录…',profiles:state.login.profiles||[]};MobileRender.login(state);try{const report=await MobileServices.api('/query',{credential});state.login={phase:'idle',profiles:state.login.profiles||[]};state.loginPanel='options';showReport(report,false);await refreshLibrary(false);notify('查询完成，记录已保存到本机。');}catch(error){state.login={phase:'error',error:error.code||'QUERY_FAILED',profiles:state.login.profiles||[]};MobileRender.login(state);throw error;}});});
-  for(const [id,method] of [['tap-diagnostics','copyTapDiagnostics'],['bili-diagnostics','copyBiliDiagnostics']])$(id).addEventListener('click',()=>run(async()=>{await window.AndroidBridge[method]();notify('已复制脱敏诊断，不包含账号凭据。');}));
   $('import-form').addEventListener('submit',event=>{event.preventDefault();const file=$('import-file').files[0];if(!file||state.working)return;state.working=true;$('import-submit').disabled=true;$('import-error').hidden=true;(async()=>{if(file.size>30*1024*1024)throw new Error('文件最多 30 MB。');const content=await file.text(),format=file.name.toLowerCase().endsWith('.csv')?'csv':'json';const result=await MobileServices.api('/library/import',{content,format,target:$('import-target').value||null,label:$('import-label').value.trim()});showReport(result.reports.at(-1),false);await refreshLibrary(false);$('import-form').reset();closeDialog('import-dialog');notify(`已导入并合并 ${result.reports.length} 个账号存档。`);})().catch(error=>{$('import-error').textContent=error.message;$('import-error').hidden=false;}).finally(()=>{state.working=false;$('import-submit').disabled=false;});});
   $('profile-export-json').addEventListener('click',()=>run(()=>exportReport('json')));$('profile-export-csv').addEventListener('click',()=>run(()=>exportReport('csv')));
   $('profile-backup').addEventListener('click',()=>run(async()=>{const backup=await MobileServices.api('/library/backup');MobileServices.saveBlob(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}),`星落-全部账号备份-${new Date().toISOString().slice(0,10)}.json`);notify(`已生成 ${backup.accounts.length} 个账号的备份。`);}));
@@ -76,12 +69,11 @@
   $('record-filter-toggle').addEventListener('click',()=>{const hidden=$('record-filters').hidden;$('record-filters').hidden=!hidden;$('record-filter-toggle').setAttribute('aria-expanded',String(hidden));});
   $('record-prev').addEventListener('click',()=>{state.recordPage--;renderRecords();});$('record-next').addEventListener('click',()=>{state.recordPage++;renderRecords();});
   $('catalog-check').addEventListener('click',()=>checkCatalog(true));$('catalog-source-save').addEventListener('click',()=>run(async()=>{const value=await MobileServices.api('/catalog/source',{url:$('catalog-source').value.trim()});await updateCatalog(value);notify('配置地址已保存，正在检查更新。');}));
-  document.querySelector('.info-trigger').addEventListener('click',()=>{switchTab('profile');const details=document.querySelector('.information-section details');details.open=true;details.scrollIntoView({block:'start'});});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkCatalog(false);});
  }
  window.mobileBack=()=>{const dialogs=[...document.querySelectorAll('dialog[open]')];if(dialogs.length){const dialog=dialogs.at(-1);if(dialog.dataset.busy==='true')return true;dialog.close();return true;}const previous=navigation.back(window.scrollY);if(previous){applyPage(previous.page,previous.scrollY);return true;}return false;};
  async function init(){
-  applyCompact();bind();MobileImage.init({notify});renderAll();
+  bind();MobileImage.init({notify});renderAll();
   try{
    state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());await refreshLibrary(true);
    const initial=MobileNavigation.initialPage(state);navigation=MobileNavigation.createNavigation(initial);switchTab(initial,{replace:true,resetScroll:true});
