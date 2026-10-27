@@ -41,7 +41,7 @@ const MobileRender=(()=>{
    const card=el('article',undefined,`career-category ${key}`);card.dataset.category=key;
    card.append(el('h3',value.name));const pulls=el('div',undefined,'career-pulls');pulls.append(el('strong',MobileView.number(value.pull_count)),el('span','抽'));
    const metrics=el('div',undefined,'career-metrics'),count=el('div'),average=el('div');
-   count.append(el('strong',key==='normal'?String(value.five_count):`${value.five_count} / ${value.off_count}`),el('span',key==='normal'?'出卡数':'UP/歪'));
+   count.append(el('strong',key==='normal'?String(value.five_count):`${value.up_count} / ${value.off_count}`),el('span',key==='normal'?'出卡数':'UP/歪'));
    const avg=value.average_five_interval===null?'—':Number(value.average_five_interval).toFixed(1);average.append(el('strong',avg),el('span',key==='normal'?'五星平均':'平均UP'));
    metrics.append(count,average);
    const pity=el('div',undefined,'career-pity'),countText=value.pull_count?`${value.since_five_exact?'':'≥'}${MobileView.number(value.since_five)}`:'—';
@@ -57,7 +57,7 @@ const MobileRender=(()=>{
   const heading=el('div',undefined,'pool-heading'),title=el('div',undefined,'pool-title');title.append(el('h3',pool.name),el('p',`${pool.firstDate} — ${pool.lastDate}`));
   const total=el('div',undefined,'pool-total');total.append(el('strong',MobileView.number(pool.pullCount)),el('span','抽'));heading.append(title,total);card.append(heading);
   const featured=el('div',undefined,'pool-featured');
-  if(pool.featuredIds.length||pool.featuredNames.length){const avatars=el('div',undefined,'pool-up-avatars'),ids=pool.featuredNames.length?pool.featuredNames:pool.featuredIds;for(const [index,id] of ids.entries())avatars.append(avatar(pool.featuredIds[index]||'',pool.featuredNames[index]||'UP 角色',5,'up-avatar'));featured.append(avatars);}
+  if(pool.featuredIds.length||pool.featuredNames.length){const avatars=el('div',undefined,'pool-up-avatars'),ids=pool.featuredNames.length?pool.featuredNames:pool.featuredIds;for(const [index,name] of ids.entries()){const itemId=pool.featuredIds[index];if(pool.featuredIds.length&&itemId===undefined)continue;avatars.append(avatar(itemId||'',pool.featuredNames[index]||'UP 角色',5,'up-avatar'));}featured.append(avatars);}
   else featured.append(el('p',pool.category==='normal'?'常驻角色招募 · 不区分 UP / 歪':pool.category==='beginner'?'启程招募 · 独立计数':'UP 配置未确认'));
   card.append(featured);
   const events=el('div',undefined,'five-event-list'),limit=state.eventLimits[pool.poolId]||20,burstPositions=new Map(),numerals=['','单','双','三','四','五','六','七','八','九','十'];
@@ -134,13 +134,17 @@ const MobileRender=(()=>{
   $('catalog-status').textContent=value.updated===true?phases.updated:(phases[value.phase]||'本机配置可用，启动后自动检查。');if(document.activeElement!==$('catalog-source'))$('catalog-source').value=value.source||'';$('catalog-check').disabled=value.phase==='checking';$('catalog-source-save').disabled=value.phase==='checking';
  }
  function login(state){
-  const value=state.login||{phase:'idle',profiles:[]},active=['opening','waiting','querying','cancelling'].includes(value.phase),progress=state.loginPanel==='progress',bilibiliEnabled=Boolean(state.buildInfo?.bilibili_enabled);
-  $('bili-login').hidden=false;$('bili-login').disabled=active||state.working||!bilibiliEnabled;$('bili-login').setAttribute('aria-disabled',String(!bilibiliEnabled));$('bili-login-note').textContent=bilibiliEnabled?'在官方哔哩哔哩 App 中确认':'待接入';
+  const value=state.login||{phase:'idle',profiles:[]},active=['opening','waiting','querying','cancelling'].includes(value.phase),progress=state.loginPanel==='progress',manual=Boolean(state.manualOpen),bilibiliEnabled=Boolean(state.buildInfo?.bilibili_enabled);
+  $('query-flip').classList.toggle('flipped',manual);$('query-front').setAttribute('aria-hidden',String(manual));$('manual-panel').setAttribute('aria-hidden',String(!manual));$('query-front').inert=manual;$('manual-panel').inert=!manual;
+  $('manual-open').setAttribute('aria-expanded',String(manual));$('manual-open-label').textContent=manual?'返回登录方式':'手动凭据';$('manual-form').setAttribute('aria-busy',String(manual&&value.phase==='querying'));
+  $('bili-login').hidden=false;$('bili-login').disabled=active||state.working||!bilibiliEnabled||manual;$('bili-login').setAttribute('aria-disabled',String(!bilibiliEnabled));$('bili-login-note').textContent=bilibiliEnabled?'在官方哔哩哔哩 App 中确认':'待接入';
   $('login-options').hidden=progress;$('login-progress').hidden=!progress;$('login-progress').classList.toggle('error',value.phase==='error');
   const titles={opening:'正在打开授权',waiting:'等待本人授权',querying:'正在查询记录',cancelling:'正在取消',done:'查询完成',error:'这次没有完成'};$('login-progress-title').textContent=titles[value.phase]||'正在处理';
   $('login-progress-text').textContent=value.phase==='error'?(value.message||MobileServices.messages[value.error]||'登录或查询未完成，请返回后重试。'):(value.message||'正在处理，请稍候…');
   $('login-cancel').hidden=!active&&value.phase!=='error';$('login-cancel').disabled=['querying','cancelling'].includes(value.phase);$('login-cancel').textContent=value.phase==='error'?'返回登录方式':value.phase==='querying'?'正在查询，请稍候':'取消登录';
-  for(const id of ['official-login','tap-login','manual-submit'])$(id).disabled=active||state.working;
+  for(const id of ['official-login','tap-login'])$(id).disabled=active||state.working||manual;
+  for(const id of ['manual-credential','manual-consent','manual-submit','manual-help'])$(id).disabled=!manual||active||state.working;
+  $('manual-open').disabled=active||state.working;$('manual-submit').textContent=manual&&value.phase==='querying'?'正在查询…':'查询并保存记录';
  }
  function profile(state){accounts(state);catalog(state.catalog);login(state);$('app-version').textContent=`Android ${state.buildInfo?.baseline?.integration_version||'0.4'}`;}
  function all(state){tabs(state);recordPage(state);recordPoolOptions(state);records(state,MobileView.records(state.report,{...state.filters,page:state.recordPage}));profile(state);}

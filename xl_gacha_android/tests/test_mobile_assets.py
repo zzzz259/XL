@@ -33,9 +33,9 @@ class MobileAssetTests(unittest.TestCase):
         parser.feed(page.read_text(encoding="utf-8"))
         self.assertEqual(len(parser.ids), len(set(parser.ids)))
         self.assertCountEqual(parser.tabs, ["records", "query", "profile"])
-        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "manual-open", "manual-dialog", "characters-toggle", "career-evaluation", "recent-evaluation", "career-tags"):
+        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "query-flip", "query-front", "manual-panel", "manual-open", "manual-open-label", "manual-help", "manual-help-dialog", "characters-toggle", "career-evaluation", "recent-evaluation", "career-tags"):
             self.assertIn(element_id, parser.ids)
-        for removed_id in ("account-quick-stats", "record-account-updated", "characters-detail"):
+        for removed_id in ("account-quick-stats", "record-account-updated", "characters-detail", "manual-dialog"):
             self.assertNotIn(removed_id, parser.ids)
         for removed_id in ("pity-summary", "compact-toggle", "remember-login", "login-profile-options", "forget-login", "demo-button", "tap-diagnostics", "bili-diagnostics"):
             self.assertNotIn(removed_id, parser.ids)

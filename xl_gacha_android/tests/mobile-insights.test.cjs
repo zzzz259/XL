@@ -112,13 +112,15 @@ test('duplicate records dedupe by pool timestamp index and record id keeping the
 });
 
 test('category option narrows every section to that category',()=>{
- const records=[record(20,1000,[drop(11,3,9),drop(12,5,1,'金')]),record(21,2000,[drop(11,3,9),drop(12,5,1,'金')])];
- const pools=[poolInfo(20,'normal',70),poolInfo(21,'limited',70)];
+ const doubleFive=()=>[drop(11,3,6),drop(12,5,1,'金A'),drop(13,5,1,'金B'),drop(11,3,2)];
+ const records=[record(1,1000,doubleFive()),record(2,2000,doubleFive())];
+ const pools=[poolInfo(1,'limited',70),poolInfo(2,'normal',70)];
  const all=MobileInsights.analyze(report(records,pools),{now:3000});
- assert.equal(all.career.pulls,20);assert.equal(all.career.fiveCount,2);
+ assert.equal(all.career.pulls,20);assert.equal(all.career.fiveCount,4);assert.equal(all.multi.count,2);
  const limited=MobileInsights.analyze(report(records,pools),{now:3000,category:'limited'});
- assert.equal(limited.career.pulls,10);assert.equal(limited.career.fiveCount,1);
- assert.equal(limited.multi.count,0);assert.equal(tag(limited.tags,'ten_2'),undefined);
+ assert.equal(limited.career.pulls,10);assert.equal(limited.career.fiveCount,2);
+ assert.equal(limited.multi.count,1);assert.deepEqual(Object.keys(limited.multi.byPool),['1']);
+ assert.equal(tag(limited.tags,'ten_2').count,1);
 });
 
 const catalog={version:'test',_revision:'test',cards:{1001:['低星',3],1002:['普通五星',5],1003:['限定五星',5]},
