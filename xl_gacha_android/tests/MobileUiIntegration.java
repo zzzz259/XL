@@ -59,7 +59,7 @@ public final class MobileUiIntegration extends Instrumentation {
   check("document.getElementById('query-flip').classList.contains('flipped')&&document.getElementById('manual-credential').value==='QA_INVALID'&&document.getElementById('manual-consent').checked","query failure retains input and stays on the manual face");
   check("(()=>{MobileServices.api=window.__qaApi;delete window.__qaApi;return true;})()","restore native API bridge");
   check("window.mobileBack()===true&&!document.getElementById('query-flip').classList.contains('flipped')","back returns from manual face to login methods");
-  check("window.__qaBiliEnabled=undefined;fetch('./build-info.json').then(r=>r.json()).then(info=>window.__qaBiliEnabled=info.bilibili_enabled).catch(()=>window.__qaBiliEnabled=false);return true;","load Bili build config");
+  check("(()=>{window.__qaBiliEnabled=undefined;fetch('./build-info.json').then(r=>r.json()).then(info=>window.__qaBiliEnabled=info.bilibili_enabled).catch(()=>window.__qaBiliEnabled=false);return true;})()","load Bili build config");
   await("window.__qaBiliEnabled!==undefined");
   check("window.__qaBiliEnabled?document.getElementById('bili-login').disabled===false&&document.getElementById('bili-login').getAttribute('aria-disabled')==='false':document.getElementById('bili-login').disabled&&document.getElementById('bili-login').getAttribute('aria-disabled')==='true'","bilibili UI matches build config");
   check("document.getElementById('bili-login').textContent.includes(window.__qaBiliEnabled?'在官方哔哩哔哩 App 中确认':'待接入')","bilibili note matches build config");

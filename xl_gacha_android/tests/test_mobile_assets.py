@@ -65,6 +65,26 @@ class MobileAssetTests(unittest.TestCase):
             referenced = set(re.findall(r"\$\('([A-Za-z0-9-]+)'\)", source))
             self.assertFalse(referenced - declared, f"{name}: {sorted(referenced - declared)}")
 
+    def test_mobile_instrumentation_javascript_is_valid(self):
+        import json
+        import re
+        import subprocess
+
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "tests" / "MobileUiIntegration.java").read_text(encoding="utf-8")
+        scripts = []
+        for match in re.finditer(r'\b(?:check|await|evaluate)\("', source):
+            literal = source[match.end() - 1:]
+            script, end = json.JSONDecoder().raw_decode(literal)
+            if literal[end:].lstrip().startswith("+"):
+                continue
+            scripts.append(script)
+        self.assertTrue(scripts)
+        for script in scripts:
+            with self.subTest(script=script[:80]):
+                result = subprocess.run(["node", "--input-type=module", "--check"], input=script, encoding="utf-8", capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
