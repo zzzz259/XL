@@ -29,10 +29,10 @@ const MobileView=(()=>{
   return {totalPulls:report.summary.pull_count,fiveCount:report.summary.rarity_counts['5']||0,
    poolCount:Object.keys(report.summary.pool_pull_counts||{}).length,categories,recentFive:recentFive.slice(0,Math.max(0,recentLimit))};
  }
- function pools(report,selected='all'){
+ function pools(report,selected='all',catalog=null){
   return (report?.analysis?.pools||[]).filter(pool=>selected==='all'||pool.category===selected).map(source=>({
    source,poolId:source.pool_id,name:source.pool_name,category:source.category,categoryName:source.category_name,
-   featuredNames:source.featured_names||[],firstDate:source.first_date,lastDate:source.last_date,
+   featuredIds:catalog?.pool_meta?.[String(source.pool_id)]?.featured_ids||[],featuredNames:source.featured_names||[],firstDate:source.first_date,lastDate:source.last_date,
    pullCount:source.pull_count,fiveCount:source.five_count,pity:source.tail_since_five,pityExact:source.tail_exact,
    pityText:`${source.tail_exact?'':'≥'}${number(source.tail_since_five)}`,hardPity:source.hard_pity,
    progress:source.hard_pity?percent(source.tail_since_five/source.hard_pity*100):null,nextGuaranteed:source.next_guaranteed,

@@ -27,6 +27,7 @@ ANDROID_WEB_FILES = (
     "mobile-image.js",
     "mobile-services.js",
     "mobile-view-model.js",
+    "mobile-navigation.js",
     "mobile-engine.js",
     "android-bridge.js",
     "tap-app-login.js",
@@ -98,6 +99,7 @@ def main():
         [
             "node",
             "--test",
+            "tests/mobile-navigation.test.cjs",
             "tests/mobile-view-model.test.cjs",
             "tests/mobile-export.test.cjs",
             "tests/engine.test.cjs",

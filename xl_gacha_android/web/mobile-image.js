@@ -27,6 +27,7 @@ const MobileImage=(()=>{
   const details=document.createElement('details'),summary=el('summary','预览图片'),image=document.createElement('img');image.src=file.url;image.alt=`抽卡记录长图第 ${index+1} 张`;details.append(summary,image);item.append(heading,actions,details);return item;
  }
  async function generate(){
+  if(typeof LongImage==='undefined'){notify('长图组件未加载，请重新构建应用后再试。','error');return;}
   const run=++generation;generating=true;clear();update();$('image-status').textContent='正在本机生成图片…';
   try{
    await document.fonts.ready;const pages=LongImage.planPages(report,category),base=`星落-${(report.account?.label||'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;

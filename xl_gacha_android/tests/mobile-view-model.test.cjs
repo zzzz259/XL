@@ -5,6 +5,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const MobileView=require('../web/mobile-view-model.js');
 const demo=JSON.parse(fs.readFileSync('../xl_gacha_web/static/demo.json','utf8'));
+const catalog=JSON.parse(fs.readFileSync('../xl_gacha_web/data/catalog.json','utf8'));
 
 test('overview preserves totals and derives primary and non-empty extra categories',()=>{
  const original=JSON.stringify(demo),view=MobileView.summary(demo,100);
@@ -45,6 +46,16 @@ test('pool views filter categories and present events newest first without mutat
   assert.equal(pool.pityExact,pool.source.tail_exact);
  }
  assert.equal(JSON.stringify(demo),original);
+});
+
+test('pool views retain hard-pity limits and map UP IDs from the local catalog',()=>{
+ const pools=MobileView.pools(demo,'all',catalog);
+ assert.ok(pools.some(pool=>pool.featuredIds.length>0));
+ for(const pool of pools){
+  assert.equal(pool.hardPity,pool.source.hard_pity);
+  const meta=catalog.pool_meta[String(pool.poolId)];
+  if(meta)assert.deepEqual(pool.featuredIds,meta.featured_ids);
+ }
 });
 
 test('record cards flatten newest drops and paginate after filtering',()=>{

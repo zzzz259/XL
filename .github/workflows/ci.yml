@@ -65,7 +65,7 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Test engine and SDK resolver
         run: |
-          node --test tests/mobile-view-model.test.cjs tests/mobile-export.test.cjs tests/engine.test.cjs tests/tap-app-login.test.cjs
+          node --test tests/mobile-navigation.test.cjs tests/mobile-view-model.test.cjs tests/mobile-export.test.cjs tests/engine.test.cjs tests/tap-app-login.test.cjs
           for file in web/*.js; do node --check "$file"; done
           python -B -m unittest discover -s tests -p 'test_*.py' -v
       - name: Compile all native sources, execute WireTest and prepare real JSON tests
