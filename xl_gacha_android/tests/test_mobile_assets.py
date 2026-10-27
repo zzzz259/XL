@@ -33,8 +33,10 @@ class MobileAssetTests(unittest.TestCase):
         parser.feed(page.read_text(encoding="utf-8"))
         self.assertEqual(len(parser.ids), len(set(parser.ids)))
         self.assertCountEqual(parser.tabs, ["records", "query", "profile"])
-        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "manual-open"):
+        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "manual-open", "manual-dialog", "characters-toggle", "career-evaluation", "recent-evaluation", "career-tags"):
             self.assertIn(element_id, parser.ids)
+        for removed_id in ("account-quick-stats", "record-account-updated", "characters-detail"):
+            self.assertNotIn(removed_id, parser.ids)
         for removed_id in ("pity-summary", "compact-toggle", "remember-login", "login-profile-options", "forget-login", "demo-button", "tap-diagnostics", "bili-diagnostics"):
             self.assertNotIn(removed_id, parser.ids)
         self.assertNotIn("view-overview", parser.ids)

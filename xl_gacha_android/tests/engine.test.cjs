@@ -13,6 +13,17 @@ test('80 to 1 wrap retains cross-banner pulls and guaranteed UP; missing 80 stil
  assert.equal(gap.pulls_since_five,10);assert.equal(gap.interval_exact,false);assert.equal(gap.guaranteed,null);
 });
 
+test('non-contiguous index jumps conservatively mark earlier history incomplete',()=>{
+ const records=[
+  {pool_id:1,pool_name:'测试池',timestamp:100,index:40,record_id:1,time_beijing:'2026-01-01 00:00:00',drops:[{item_id:5,name:'低星',rarity:3,count:9}]},
+  {pool_id:1,pool_name:'测试池',timestamp:200,index:50,record_id:2,time_beijing:'2026-01-01 00:00:00',drops:[{item_id:11,name:'五星',rarity:5,count:1}]},
+ ];
+ const hit=engine.analyze(records,{1:{category:'limited',pity_group:'limited',featured_ids:[11]}}).pools[0].events[0];
+ assert.equal(hit.interval_exact,false);
+ assert.equal(hit.pulls_since_five,1);
+ assert.equal(hit.guaranteed,null);
+});
+
 test('average includes every visible pull, first five and current unfinished pulls',()=>{
  const rows=[{pool_id:1,pool_name:'测试池',timestamp:100,index:1,record_id:1,time_beijing:'2026-01-01 00:00:00',drops:[{item_id:1,name:'低星',rarity:3,count:3},{item_id:2,name:'五星',rarity:5,count:1},{item_id:1,name:'低星',rarity:3,count:6}]}];
  assert.equal(engine.analyze(rows,{1:{category:'normal'}}).categories.normal.average_five_interval,10);

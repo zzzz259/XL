@@ -1,5 +1,6 @@
 'use strict';
 
+const MobileProbabilityApi=typeof MobileProbability!=='undefined'?MobileProbability:require('./mobile-probability.js');
 const MobileView=(()=>{
  const primary=['normal','limited','collection'];
  const names={normal:'普通池',limited:'限定池',collection:'典藏池',beginner:'启程池',unknown:'未分类'};
@@ -61,7 +62,7 @@ const MobileView=(()=>{
   const total=items.length,pages=Math.max(1,Math.ceil(total/pageSize)),page=Math.min(Math.max(1,Number(options.page)||1),pages);
   return {items:items.slice((page-1)*pageSize,page*pageSize),total,page,pages,pageSize};
  }
- return {summary,pools,records,number};
+ return {summary,pools,records,number,eventGrade:MobileProbabilityApi.eventGrade};
 })();
 
 if(typeof module!=='undefined')module.exports=MobileView;

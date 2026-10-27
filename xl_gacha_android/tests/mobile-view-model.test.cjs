@@ -95,3 +95,16 @@ test('empty and unknown reports never invent live pity or statistics',()=>{
  assert.equal(view.pityText,'≥12');
  assert.equal(view.guaranteeText,'大小保底未知');
 });
+
+test('event luck grades use the first-UP distribution and never punish guaranteed pulls',()=>{
+ const event=(pulls,guaranteed=false,exact=true)=>({pulls,guaranteed,interval_exact:exact});
+ assert.equal(MobileView.eventGrade(event(6),70),'lucky');
+ assert.equal(MobileView.eventGrade(event(7),70),'normal');
+ assert.equal(MobileView.eventGrade(event(70),70),'normal');
+ assert.equal(MobileView.eventGrade(event(121),70),'normal');
+ assert.equal(MobileView.eventGrade(event(122),70),'rough');
+ assert.equal(MobileView.eventGrade(event(122,true),70),'normal');
+ assert.equal(MobileView.eventGrade(event(122,null),70),'normal');
+ assert.equal(MobileView.eventGrade(event(1,false,false),70),'normal');
+ assert.equal(MobileView.eventGrade(event(122),null),'normal');
+});
