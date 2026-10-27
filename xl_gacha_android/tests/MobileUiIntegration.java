@@ -35,6 +35,7 @@ public final class MobileUiIntegration extends Instrumentation {
   check("!document.getElementById('view-query').hidden","empty library opens query page");
   check("document.querySelectorAll('.bottom-nav [data-tab]').length===3","three mobile destinations");
   check("document.getElementById('login-dialog')===null","login is inline instead of a dialog");
+  check("document.querySelector('.login-remember strong').textContent.includes('保留官网会话')","remember session label is explicit");
   check("(()=>{document.getElementById('demo-button').click();return true;})()","start synthetic demo");
   await("document.body.dataset.demo==='true'&&!document.getElementById('view-records').hidden");
   check("document.getElementById('summary-pulls').textContent.trim()==='464'","demo summary total");
@@ -43,6 +44,12 @@ public final class MobileUiIntegration extends Instrumentation {
   check("document.querySelectorAll('#pool-list .pool-card').length>0","pool cards render in records");
   check("document.querySelector('#pool-list .five-event')!==null","five-star events are expanded");
   check("document.querySelector('#pool-list .five-event-fill').getBoundingClientRect().height>=20","pull interval bars are prominent");
+  check("document.body.classList.contains('compact-ui')","compact mode is default");
+  check("getComputedStyle(document.querySelector('.five-event-meta')).display==='none'","event metadata is hidden in compact mode");
+  check("(()=>{document.getElementById('compact-toggle').click();return true;})()","show secondary details");
+  await("getComputedStyle(document.querySelector('.five-event-meta')).display!=='none'");
+  check("(()=>{document.getElementById('compact-toggle').click();return true;})()","restore compact mode");
+  await("getComputedStyle(document.querySelector('.five-event-meta')).display==='none'");
   check("(()=>{document.querySelector('#pool-category-tabs [data-category=\"limited\"]').click();return true;})()","filter limited pools");
   await("document.querySelectorAll('#pool-list .pool-card').length>0&&[...document.querySelectorAll('#pool-list .pool-card')].every(e=>e.dataset.category==='limited')");
   check("(()=>{document.querySelector('#pool-category-tabs [data-category=\"all\"]').click();return true;})()","restore all pools");

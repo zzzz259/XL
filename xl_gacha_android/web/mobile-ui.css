@@ -394,6 +394,77 @@ input[role="switch"]:checked::before { transform: translateX(20px); background: 
   .distribution-grid { grid-template-columns: 1fr 1fr; }
 }
 
+body { font-size: 14px; }
+h1 { font-size: 26px; }
+h2 { font-size: 18px; }
+h3 { font-size: 16px; }
+.topbar { min-height: 58px; padding-block: 8px; }
+.main-content { padding: 6px 10px 118px; }
+.account-summary { gap: 11px; padding: 8px 2px 10px; }
+.record-account-avatar, .item-avatar.account-avatar-placeholder { width: 56px; height: 56px; font-size: 22px; }
+.account-name-line h1 { font-size: 23px; }
+.account-quick-stats { padding: 9px 0; }
+.account-quick-stats strong { font-size: 18px; }
+.career-summary { padding: 12px 10px; }
+.career-categories { gap: 7px; margin-top: 10px; }
+.career-category { padding: 10px 7px; }
+.career-category h3 { font-size: 13px; }
+.career-pulls { margin-top: 4px; }
+.career-metrics { gap: 5px; margin-top: 7px; padding-top: 7px; }
+.career-extra { margin-top: 8px; }
+.pity-summary { margin-top: 12px; }
+.pity-categories { gap: 7px; margin-top: 9px; }
+.pity-category { padding: 9px 6px; }
+.pity-category > strong { margin-top: 3px; font-size: 16px; }
+.pity-track { height: 7px; margin-top: 7px; }
+.history-section { margin-top: 16px; }
+.history-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.compact-toggle { min-height: 36px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #30363a; font-size: 12px; }
+.compact-toggle[aria-pressed="true"] { color: var(--teal); }
+.history-heading { gap: 8px; }
+.category-tabs button { min-width: 53px; min-height: 36px; padding: 6px 10px; font-size: 12px; }
+.pool-list { gap: 11px; margin-top: 10px; }
+.pool-card { padding: 12px 11px; }
+.pool-title h3 { font-size: 18px; }
+.pool-title p { margin-top: 2px; font-size: 11px; }
+.pool-total { min-width: 56px; padding: 7px 8px; }
+.pool-total strong { font-size: 20px; }
+.pool-featured { min-height: 26px; margin-top: 8px; }
+.item-avatar.up-avatar { width: 26px; height: 26px; flex-basis: 26px; font-size: 11px; }
+.five-event-list { gap: 11px; margin-top: 12px; }
+.five-event { grid-template-columns: 44px minmax(0, 1fr); gap: 9px; }
+.item-avatar.event-avatar { width: 44px; height: 44px; flex-basis: 44px; font-size: 17px; }
+.event-name { margin-bottom: 4px; }
+.event-name > strong { font-size: 12px; }
+.event-badge { font-size: 9px; }
+.five-event-track, .five-event-fill { min-height: 30px; }
+.five-event-fill > span { font-size: 16px; }
+.five-event-meta { margin-top: 4px; }
+.pool-tail { margin-top: 10px; }
+.record-floating-actions { right: 12px; bottom: 82px; gap: 10px; }
+.record-floating-actions button { width: 60px; height: 60px; }
+.secondary-details { margin-top: 12px; }
+.secondary-details > summary { min-height: 46px; padding: 10px 12px; font-size: 14px; }
+.record-list { gap: 7px; }
+.record-item { padding: 10px; }
+.query-heading, .view-heading { padding: 12px 3px; }
+.query-card { padding: 14px 12px; }
+.channel-list > button, .settings-list > button { min-height: 60px; padding: 10px; }
+.login-remember { margin-top: 9px; }
+.query-secondary { margin-top: 10px; }
+.query-privacy { margin-top: 14px; }
+.profile-account-card { padding: 12px 11px; }
+.settings-section { margin-top: 18px; }
+.catalog-card { padding: 12px; }
+.bottom-nav { padding-top: 6px; }
+.bottom-nav button { min-height: 55px; }
+body.compact-ui .eyebrow,
+body.compact-ui .section-heading > span,
+body.compact-ui #record-account-updated,
+body.compact-ui .five-event-meta,
+body.compact-ui .pool-tail,
+body.compact-ui #record-coverage { display: none !important; }
+
 .account-quick-stats strong, .career-pulls strong, .career-metrics strong, .career-metrics span, .pity-category > strong { min-width: 0; overflow-wrap: anywhere; }
 .account-quick-stats strong { font-size: clamp(15px, 4.5vw, 21px); }
 .career-pulls strong { font-size: clamp(20px, 6vw, 32px); }

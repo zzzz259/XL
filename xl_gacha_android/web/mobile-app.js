@@ -1,9 +1,11 @@
 'use strict';
 
 (()=>{
- const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,login:{phase:'idle',profiles:[]},loginPanel:'options',loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1};
+ function readCompact(){try{return localStorage.getItem('starfall-ui-compact')!=='0';}catch{return true;}}
+ const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,login:{phase:'idle',profiles:[]},loginPanel:'options',loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,compact:readCompact()};
  let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null;
  window.mobileReady=false;
+ function applyCompact(){document.body.classList.toggle('compact-ui',state.compact);const button=$('compact-toggle');button.textContent=state.compact?'简洁':'详细';button.setAttribute('aria-pressed',String(state.compact));button.setAttribute('aria-label',state.compact?'当前为简洁模式，点击显示次要信息':'当前为详细模式，点击隐藏次要信息');}
  const active=()=>['opening','waiting','querying','cancelling'].includes(state.login.phase);
  function notify(text,kind=''){clearTimeout(toastTimer);const toast=$('toast');toast.textContent=text;toast.className=`toast ${kind}`;toast.hidden=!text;if(text)toastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:4000);}
  function openDialog(id){const dialog=$(id);if(!dialog.open)dialog.showModal();}
@@ -42,6 +44,7 @@
  }
  function bind(){
   document.querySelectorAll('.bottom-nav [data-tab]').forEach(button=>button.addEventListener('click',()=>switchTab(button.dataset.tab)));
+  $('compact-toggle').addEventListener('click',()=>{state.compact=!state.compact;applyCompact();try{localStorage.setItem('starfall-ui-compact',state.compact?'1':'0');}catch{}});
   document.addEventListener('click',event=>{const close=event.target.closest('[data-close]');if(close)closeDialog(close.dataset.close);});
   document.addEventListener('mobile-status',event=>notify(event.detail.text,event.detail.kind));
   $('account-button').addEventListener('click',openAccount);$('empty-to-accounts').addEventListener('click',openAccount);
@@ -78,7 +81,7 @@
  }
  window.mobileBack=()=>{const dialogs=[...document.querySelectorAll('dialog[open]')];if(dialogs.length){const dialog=dialogs.at(-1);if(dialog.dataset.busy==='true')return true;dialog.close();return true;}const previous=navigation.back(window.scrollY);if(previous){applyPage(previous.page,previous.scrollY);return true;}return false;};
  async function init(){
-  bind();MobileImage.init({notify});renderAll();
+  applyCompact();bind();MobileImage.init({notify});renderAll();
   try{
    state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());await refreshLibrary(true);
    const initial=MobileNavigation.initialPage(state);navigation=MobileNavigation.createNavigation(initial);switchTab(initial,{replace:true,resetScroll:true});
