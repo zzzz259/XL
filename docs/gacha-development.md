@@ -25,7 +25,7 @@ node --test tests/image-export.test.cjs
 
 ```sh
 cd xl_gacha_android
-node --test tests/mobile-view-model.test.cjs tests/mobile-export.test.cjs tests/engine.test.cjs tests/tap-app-login.test.cjs
+node --test tests/mobile-navigation.test.cjs tests/mobile-view-model.test.cjs tests/mobile-export.test.cjs tests/engine.test.cjs tests/tap-app-login.test.cjs
 python -B -m unittest discover -s tests -p 'test_*.py' -v
 python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/native-tests
 ```
@@ -70,9 +70,9 @@ TapTap App 衔接测试需包含 `PASS 16 TapTap App WebView/handoff checks`、`
 
 手机布局分支另外需包含 `layout=phone`、`PASS 20 TapTap App WebView/handoff checks` 和成功结束码。该夹具使用含 Mobile 标识的手机 UA 与官网相同的扫码切换可见性条件，并通过 history.replaceState 模拟 `/authorize` 到 `/login` 的 SPA 跳转；同时验证原 state/PKCE 保留、网页登录回退恢复原 UA、再次 App 授权可用。诊断只记录页面路径和布局准备状态，完整 URL 与挑战仅在原生内存中绑定本次窗口，不进入诊断。
 
-移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面，用内置合成演示数据和合成导入账号检查：底部四栏导航与各栏无横向溢出、总览汇总数值、卡池分类与展开五星、记录搜索/卡池/星级/仅五星筛选与空结果、长图弹窗实际生成一张 1080px PNG、返回键先走页面 `window.mobileBack`（关闭弹层、非总览栏回总览）、账号切换与重载后恢复上次账号。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
+移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面，用内置合成演示数据和合成导入账号检查：底部三栏导航与各栏无横向溢出、空库打开查询页、登录为页内流程而非对话框、演示数据汇总数值、当前账号/抽卡生涯/当前垫抽汇总与卡池默认展开五星及间隔条、卡池分类筛选、原始招募明细折叠内搜索/卡池/星级/仅五星筛选与空结果、长图弹窗实际生成一张 1080px PNG、返回键先走页面 `window.mobileBack`（关闭弹层后回到上一栏并恢复其滚动位置）、账号切换与重载后恢复上次账号，以及 140% 大字体下页面与汇总指标均无横向溢出。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
 
-对应 Node 单测 `tests/mobile-view-model.test.cjs` 校验总览视图模型（累计与分类抽数、可见垫抽、最近五星倒序与上下文、条数上限）、卡池分类视图与记录卡片（最新在前、筛选后分页、仅五星/星级/卡池/搜索与空态，且不改动原始分析数据）；`tests/mobile-export.test.cjs` 校验 JSON/CSV 导出保真与安全文件名、CSV 公式中立化、不支持的格式与空记录报错，并确认共享长图引擎 `image-export.js` 脱离旧版桌面弹窗仍可加载；构建脚本与 `XL CI` 在打包前运行这两个测试。
+对应 Node 单测 `tests/mobile-navigation.test.cjs` 校验三栏初始目的地（有选中报告或本机存档进「记录」、否则进「查询」）、返回上一页并恢复其滚动位置、replace 去重与非法页面拒绝；`tests/mobile-view-model.test.cjs` 校验汇总视图模型（累计与分类抽数、可见垫抽、最近五星倒序与上下文、条数上限）、卡池分类视图与记录卡片（最新在前、筛选后分页、仅五星/星级/卡池/搜索与空态、UP ID 取自内置 catalog，且不改动原始分析数据）；`tests/mobile-export.test.cjs` 校验 JSON/CSV 导出保真与安全文件名、CSV 公式中立化、不支持的格式与空记录报错，并确认共享长图引擎 `image-export.js` 脱离旧版桌面弹窗仍可加载；构建脚本与 `XL CI` 在打包前运行这组测试。
 
 Android 15 模拟器可验证系统分享预览，不替代接收端真机测试。2026-10-23 用户确认 0.3.4 相册保存和分享在真机均正常；功能提交 a66209d7 的 CI 检查通过。接收应用/机型没有逐项枚举，Android 9 保存相册的权限分支需要另行验证。
 

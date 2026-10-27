@@ -6,7 +6,7 @@
 
 Windows：浏览器 UI → loopback `app.py` → 官方认证/网关；`archive.py` 将记录保存 SQLite。启动窗口管理本机服务，CDP 只管理专用官网登录浏览器。Host/Origin 白名单、请求大小和并发限制约束本机 API。
 
-Android：内置本地域名 UI（0.4 起为独立的移动端页面 `web/index.html` + `mobile-ui.css` + `mobile-app` 系列脚本，不再打包电脑端旧版桌面 `index/app/style/theme/local/login/catalog-ui/environment`，仍复用共享 `demo.json` 与 `image-export.js`）→ 受约束的原生桥 → GachaClient/Wire；IndexedDB 保存各账号原始记录。官网使用独立 WebView，主页面桥不注入官网。`allowBackup=false`，备份由玩家显式导出。两端的游戏认证和网关直连，配置请求也不携带账号信息。
+Android：内置本地域名 UI（0.4 起为独立的移动端页面 `web/index.html` + `mobile-ui.css` + `mobile-app` 系列脚本与 `mobile-navigation.js`，不再打包电脑端旧版桌面 `index/app/style/theme/local/login/catalog-ui/environment`，仍复用共享 `demo.json` 与 `image-export.js`）→ 受约束的原生桥 → GachaClient/Wire；IndexedDB 保存各账号原始记录。官网使用独立 WebView，主页面桥不注入官网。栏间导航记录访问顺序与各栏滚动位置；配置 revision 变化触发的后台重算保留当前筛选与浏览位置，不强制跳回顶部。`allowBackup=false`，备份由玩家显式导出。两端的游戏认证和网关直连，配置请求也不携带账号信息。
 
 记录身份由官方验证的 UID/渠道组成，去重根据原始记录 ID/卡池/序号与内容。JSON 保留原始 item_id、pool_id、数量、时间及账号身份；CSV 旧格式无唯一身份时保守处理。配置更新按一份快照重映射原始 ID，保持记录数量/时间；保存的 catalog 指纹变化才触发重算。
 
@@ -20,7 +20,7 @@ PNG 每张最多 8 MiB，并校验格式、尺寸和像素上限；一次最多 
 
 ## 统计
 
-`analysis.py` 与 `mobile-engine.js` 保持普通、限定、典藏、启程和未知分类一致。保底组来自 catalog 的 `pity_group`，跨池继承只在同组连续历史成立；未知不伪造 UP。平均抽数=可见分类总抽数/五星数；首个五星与断档为下界；序号 80→1 连续。具体用户边界见使用指南，不将可见历史推断当成官方实时状态。
+`analysis.py` 与 `mobile-engine.js` 保持普通、限定、典藏、启程和未知分类一致。保底组来自 catalog 的 `pity_group`，跨池继承只在同组连续历史成立；未知不伪造 UP。界面展示卡池 UP 时只引用已验证 catalog 的 `pool_meta.featured_ids`，头像以名称首字与星级色块占位，不联网取图、不伪造真实头像；不做账号级欧非鉴定、累计消耗金额或实时概率展示。平均抽数=可见分类总抽数/五星数；首个五星与断档为下界；序号 80→1 连续。具体用户边界见使用指南，不将可见历史推断当成官方实时状态。
 
 ## 公共配置生产与分发
 
