@@ -45,7 +45,7 @@ adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-test/catalog-tests.jar app_proce
 
 该测试不安装 APK、不读取已安装应用账号数据，不做真实登录。命令退出码必须为零。`XL CI` 使用同样原生编译、WireTest、JS 与 Android emulator 检查；首次本机开发可只编译，但须明确尚未运行 Android JSON。
 
-QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。构建脚本默认打包 0.4 移动端页面资源，并将 `update-source.json` 置空、`build-info.json` 标记 `bilibili_enabled: false`，避免 QA 连接真实配置源或显示 B 服入口；只有显式传 `--assets` 才改用给定资源。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
+QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。构建脚本默认打包 0.4 移动端页面资源，并将 `update-source.json` 置空、`build-info.json` 标记 `bilibili_enabled: false`，避免 QA 连接真实配置源或显示 B 服入口（B 服实现仍在，仅构建传入 Git 外 `--bilibili-config` 才写入并显示入口；普通 QA 未提供该私有配置故隐藏）；只有显式传 `--assets` 才改用给定资源。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
 
 ```sh
 python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/login-return
@@ -70,7 +70,7 @@ TapTap App 衔接测试需包含 `PASS 16 TapTap App WebView/handoff checks`、`
 
 手机布局分支另外需包含 `layout=phone`、`PASS 20 TapTap App WebView/handoff checks` 和成功结束码。该夹具使用含 Mobile 标识的手机 UA 与官网相同的扫码切换可见性条件，并通过 history.replaceState 模拟 `/authorize` 到 `/login` 的 SPA 跳转；同时验证原 state/PKCE 保留、网页登录回退恢复原 UA、再次 App 授权可用。诊断只记录页面路径和布局准备状态，完整 URL 与挑战仅在原生内存中绑定本次窗口，不进入诊断。
 
-移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面，用内置合成演示数据和合成导入账号检查：底部三栏导航与各栏无横向溢出、空库打开查询页、登录为页内流程而非对话框、演示数据汇总数值、当前账号/抽卡生涯/当前垫抽汇总与卡池默认展开五星及间隔条、卡池分类筛选、原始招募明细折叠内搜索/卡池/星级/仅五星筛选与空结果、长图弹窗实际生成一张 1080px PNG、返回键先走页面 `window.mobileBack`（关闭弹层后回到上一栏并恢复其滚动位置）、账号切换与重载后恢复上次账号，以及 140% 大字体下页面与汇总指标均无横向溢出。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
+移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面，用内置合成演示数据和合成导入账号检查：底部三栏导航与各栏无横向溢出、空库打开查询页、登录为页内流程而非对话框、「保留官网会话」文案、演示数据汇总数值、默认简洁模式（次要信息隐藏）、「简洁/详细」切换显示并恢复隐藏、当前账号/抽卡生涯/当前垫抽汇总与卡池默认展开五星及间隔条、卡池分类筛选、原始招募明细折叠内搜索/卡池/星级/仅五星筛选与空结果、长图弹窗实际生成一张 1080px PNG、返回键先走页面 `window.mobileBack`（关闭弹层后回到上一栏并恢复其滚动位置）、账号切换与重载后恢复上次账号，以及 140% 大字体下页面与汇总指标均无横向溢出。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
 
 对应 Node 单测 `tests/mobile-navigation.test.cjs` 校验三栏初始目的地（有选中报告或本机存档进「记录」、否则进「查询」）、返回上一页并恢复其滚动位置、replace 去重与非法页面拒绝；`tests/mobile-view-model.test.cjs` 校验汇总视图模型（累计与分类抽数、可见垫抽、最近五星倒序与上下文、条数上限）、卡池分类视图与记录卡片（最新在前、筛选后分页、仅五星/星级/卡池/搜索与空态、UP ID 取自内置 catalog，且不改动原始分析数据）；`tests/mobile-export.test.cjs` 校验 JSON/CSV 导出保真与安全文件名、CSV 公式中立化、不支持的格式与空记录报错，并确认共享长图引擎 `image-export.js` 脱离旧版桌面弹窗仍可加载；构建脚本与 `XL CI` 在打包前运行这组测试。
 
