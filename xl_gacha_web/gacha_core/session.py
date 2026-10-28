@@ -11,10 +11,12 @@ from . import gacha
 
 REQUEST_RESPONSES = MappingProxyType({
     2301: 102301,
+    2306: 102306,
     2307: 102307,
     10033: 110033,
     2001: 102001,
     2002: 102002,
+    2003: 102003,
     3001: 103001,
     3004: 103004,
     10504: 110504,
@@ -30,20 +32,26 @@ class GameGatewaySession:
     HTTP/DNS operations retain their underlying per-operation timeout semantics,
     rather than providing a process-level absolute interruption guarantee.
     A failed session cannot be reopened.
+    An optional response_observer callable receives (command, raw_body) for every
+    accepted business RPC response; authentication and the enter frame are never
+    observed, and an observer failure stops the session with OBSERVER_FAILED.
     """
 
     def __init__(self, credentials, *, max_requests=64, max_duration=180,
-                 request_delay=2, timeout=12):
+                 request_delay=2, timeout=12, response_observer=None):
         if (type(max_requests) is not int or max_requests < 0
                 or any(type(value) not in (int, float) or not math.isfinite(value)
                        for value in (max_duration, request_delay, timeout))
                 or max_duration <= 0 or timeout <= 0 or request_delay < 0):
             raise gacha.GachaError('INVALID_SESSION_LIMITS')
+        if response_observer is not None and not callable(response_observer):
+            raise gacha.GachaError('INVALID_OBSERVER')
         self._credentials = credentials
         self._max_requests = max_requests
         self._max_duration = max_duration
         self._request_delay = request_delay
         self._timeout = timeout
+        self._response_observer = response_observer
         self._requests_used = 0
         self._sequence = 1
         self._sock = None
@@ -205,7 +213,13 @@ class GameGatewaySession:
             self._requests_used += 1
             self._last_sent = time.monotonic()
             self._sock.sendall(packet)
-            return self._response(REQUEST_RESPONSES[command], sequence, 'RPC_REJECTED')
+            body = self._response(REQUEST_RESPONSES[command], sequence, 'RPC_REJECTED')
+            if self._response_observer is not None:
+                try:
+                    self._response_observer(command, body)
+                except Exception:  # noqa: BLE001 - never retain observer exception text
+                    raise gacha.GachaError('OBSERVER_FAILED') from None
+            return body
         except gacha.GachaError:
             self.close()
             raise

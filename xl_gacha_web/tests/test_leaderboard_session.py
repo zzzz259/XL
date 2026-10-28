@@ -93,6 +93,53 @@ class SessionTests(unittest.TestCase):
             for sequence, command in enumerate(commands, 2):
                 self.assertEqual(client.request(command), bytes([sequence]))
 
+    def test_archive_business_commands_are_whitelisted(self):
+        self.wire.data += reply(102003, 2, b'lineup') + reply(102306, 3, b'reference')
+        with self.session(request_delay=0) as client:
+            self.assertEqual(client.request(2003, gacha.integer(1, 7)), b'lineup')
+            self.assertEqual(client.request(2306, gacha.integer(1, 51506311)), b'reference')
+        self.assertEqual(client.requests_used, 2)
+
+    def test_response_observer_receives_raw_business_bodies_in_order(self):
+        seen = []
+        self.wire.data += reply(102301, 2, b'first') + reply(102003, 3, b'lineup')
+        with self.session(request_delay=0,
+                          response_observer=lambda *event: seen.append(event)) as client:
+            client.request(2301)
+            client.request(2003, gacha.integer(1, 9))
+        self.assertEqual(seen, [(2301, b'first'), (2003, b'lineup')])
+
+    def test_response_observer_never_sees_authentication_or_enter(self):
+        seen = []
+        with self.session(response_observer=lambda *event: seen.append(event)):
+            pass
+        self.assertEqual(seen, [])
+        self.auth.assert_called_once()
+
+    def test_response_observer_must_be_callable_and_fails_before_auth(self):
+        self.assert_code('INVALID_OBSERVER',
+                         lambda: self.session(response_observer='archive'))
+        self.auth.assert_not_called()
+
+    def test_observer_failure_closes_session_with_fixed_code(self):
+        seen = []
+        def explode(command, body):
+            seen.append((command, body))
+            raise RuntimeError('disk full: secret-token')
+        self.wire.data += reply(102301, 2, b'first')
+        with self.session(response_observer=explode) as client:
+            self.assert_code('OBSERVER_FAILED', lambda: client.request(2301))
+            self.assert_code('SESSION_CLOSED', lambda: client.request(2301))
+        self.assertEqual(seen, [(2301, b'first')])
+        self.assertTrue(self.wire.closed)
+
+    def test_observer_is_not_called_for_rejected_rpc(self):
+        seen = []
+        self.wire.data += reply(102301, 2, code=99)
+        with self.session(response_observer=seen.append) as client:
+            self.assert_code('RPC_REJECTED', lambda: client.request(2301))
+        self.assertEqual(seen, [])
+
     def test_unsafe_rpc_rejected_before_send_and_closes(self):
         with self.session() as client:
             self.assert_code('RPC_NOT_ALLOWED', lambda: client.request(9999))

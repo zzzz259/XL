@@ -250,16 +250,24 @@ def _hash(value):
 
 
 def collect_mode(session, mode, *, scope, first_page_only=False, max_pages=20,
-                 max_entries=200, metadata_only=False, now=time.time):
+                 max_entries=200, metadata_only=False, allow_closed=False,
+                 now=time.time):
     """Collect one mode; transport errors retain partial records and fixed error codes.
 
     Pages include guild's ext comparison and consistency reads. Local clocks only
     provide provisional activity classification; static evidence is not live proof.
+    Ranking pages are read only while the mode reports ACTIVE, SETTLING or
+    SETTLED_CANDIDATE; callers serving closed-period archives must opt in with
+    allow_closed=True, which never upgrades CLOSED availability and keeps
+    settle_evidence at LAST_OBSERVED. Default budgets match the CLI (20 pages,
+    200 entries); server collectors may raise them within the validated bound.
     """
     if mode not in MODE_RPC or not isinstance(scope,str) or not scope.strip() or len(scope) > 512:
         raise ValueError('explicit scope and supported mode required')
     if any(type(value) is not int or not 1 <= value <= 100000 for value in (max_pages,max_entries)):
         raise ValueError('positive bounded page and entry budgets required')
+    if type(allow_closed) is not bool:
+        raise ValueError('allow_closed must be an explicit bool')
     clock = now()
     result = {'scope':scope, 'mode':mode, 'season_id':None,
         'entity_kind':'guild' if mode == 'guild_war' else 'player',
@@ -335,7 +343,9 @@ def collect_mode(session, mode, *, scope, first_page_only=False, max_pages=20,
             result['settle_evidence'] = 'LIVE'
         elif availability == 'SETTLED_CANDIDATE':
             result['settle_evidence'] = 'SETTLED_CANDIDATE'
-        if not metadata_only and season is not None and availability in ('ACTIVE','SETTLING','SETTLED_CANDIDATE'):
+        if not metadata_only and season is not None and (
+                availability in ('ACTIVE','SETTLING','SETTLED_CANDIDATE')
+                or allow_closed and availability == 'CLOSED'):
             result['coverage'] = 'PARTIAL'
             rows,members,total,echo,first_hash = read_page(commands['rank'])
             accepted = result['coverage'] != 'INCONSISTENT' and append_rows(rows) and append_rows(members,True)

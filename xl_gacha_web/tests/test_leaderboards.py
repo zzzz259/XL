@@ -207,6 +207,57 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(r['coverage'], 'NO_RANKING')
         self.assertEqual(len(s.calls), 1)
 
+    def test_closed_modes_keep_default_no_rank_behavior_for_cli(self):
+        closed_sessions = {
+            'illusion': FakeSession(meta('illusion')),
+            'nightmare': FakeSession(meta('nightmare', state=4)),
+            'guild_war': FakeSession(meta('guild_war', state=5)),
+        }
+        for mode, s in closed_sessions.items():
+            with self.subTest(mode=mode):
+                r = lb.collect_mode(s, mode, scope='x', now=lambda: 200)
+                self.assertEqual(r['availability'], 'CLOSED')
+                self.assertEqual(r['coverage'], 'NO_RANKING')
+                self.assertEqual(r['settle_evidence'], 'LAST_OBSERVED')
+                self.assertEqual(len(s.calls), 1)
+
+    def test_closed_read_opt_in_keeps_closed_label_and_last_observed_settlement(self):
+        closed_page = i(1, 0) + i(2, 1) + b(3, schedule(42, 4)) + b(4, actor('nightmare'))
+        s = FakeSession(meta('nightmare', state=4), closed_page)
+        r = lb.collect_mode(s, 'nightmare', scope='x', allow_closed=True,
+                            first_page_only=True, now=lambda: 100)
+        self.assertEqual(len(s.calls), 2)
+        self.assertEqual(r['availability'], 'CLOSED')
+        self.assertEqual(r['settle_evidence'], 'LAST_OBSERVED')
+        self.assertEqual(r['coverage'], 'PARTIAL')
+        self.assertEqual(len(r['entries']), 1)
+
+    def test_closed_read_opt_in_can_complete_reported_range(self):
+        first = page('illusion', [actor('illusion')], total=2)
+        second = page('illusion', [actor('illusion', uid=2, rank=2)], cursor=2, total=2)
+        s = FakeSession(meta('illusion'), first, second, meta('illusion'), first)
+        r = lb.collect_mode(s, 'illusion', scope='x', allow_closed=True, now=lambda: 200)
+        self.assertEqual(r['availability'], 'CLOSED')
+        self.assertEqual(r['settle_evidence'], 'LAST_OBSERVED')
+        self.assertEqual(r['coverage'], 'COMPLETE_REPORTED_RANGE')
+        self.assertEqual(r['pages_fetched'], 3)
+        self.assertEqual([row['rank'] for row in r['entries']], [1, 2])
+
+    def test_closed_guild_read_opt_in_fetches_rank_and_ext_slice(self):
+        guild = i(1, 77) + i(2, 12) + b(4, b'guild') + i(5, 1) + i(6, 2**60)
+        p = page('guild_war', [guild])
+        s = FakeSession(meta('guild_war', state=5), p, p, meta('guild_war', state=5), p)
+        r = lb.collect_mode(s, 'guild_war', scope='x', allow_closed=True, now=lambda: 100)
+        self.assertEqual(len(s.calls), 5)
+        self.assertEqual(r['availability'], 'CLOSED')
+        self.assertEqual(r['settle_evidence'], 'LAST_OBSERVED')
+        self.assertEqual(r['coverage'], 'SERVER_VISIBLE_SLICE')
+
+    def test_allow_closed_requires_explicit_bool(self):
+        for value in (1, 'yes', None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                lb.collect_mode(FakeSession(), 'illusion', scope='x', allow_closed=value)
+
     def test_illusion_time_boundaries_or_missing_times_are_unknown(self):
         for now, body in [(150, meta('illusion')), (250, meta('illusion')), (100, i(1, 42)), (100, i(1, 42) + i(2, 150) + i(3, 100))]:
             with self.subTest(now=now, body=body):
