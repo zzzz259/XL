@@ -2,6 +2,7 @@ import os
 import re
 import tomllib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -140,6 +141,42 @@ class ServerStatusConfig:
 
 
 @dataclass(frozen=True)
+class LeaderboardConfig:
+    """Opt-in per-season leaderboard archive job; disabled by default.
+
+    ``scope`` is the operator-verified server/account context label stored
+    with every run. Per-mode session budgets are configurable but always
+    capped by LEADERBOARD_BUDGET_CAPS.
+    """
+
+    enabled: bool = False
+    credentials_file: str = ""
+    refresh_enabled: bool = False
+    refresh_proxy: str = "direct"
+    scope: str = ""
+    data_dir: str = ""
+    request_delay: float = 2.0
+    metadata_probe_interval: int = 600
+    ranking_max_requests: int = 80
+    ranking_max_seconds: int = 300
+    ranking_max_pages: int = 35
+    ranking_max_entries: int = 1000
+    lineup_max_requests: int = 400
+    lineup_max_seconds: int = 900
+    guild_index_max_requests: int = 200
+    guild_index_max_seconds: int = 600
+
+
+# Hard upper bounds for the configurable per-mode session budgets.
+LEADERBOARD_BUDGET_CAPS = {
+    "ranking": (200, 900),
+    "lineup": (800, 1800),
+    "guild_index": (400, 1200),
+}
+LEADERBOARD_SCOPE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
+
+
+@dataclass(frozen=True)
 class Config:
     bot: BotConfig
     watch: WatchConfig
@@ -153,6 +190,7 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     server_status: ServerStatusConfig = field(default_factory=ServerStatusConfig)
     instance: InstanceConfig = field(default_factory=InstanceConfig)
+    leaderboard: LeaderboardConfig = field(default_factory=LeaderboardConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -472,6 +510,63 @@ def load_config(path: str = "config.toml") -> Config:
         recipient_tiers=status_tiers,
     )
 
+    leaderboard_raw = raw.get("leaderboard", {})
+    if not isinstance(leaderboard_raw.get("enabled", False), bool):
+        raise ValueError("[leaderboard] enabled 必须是布尔值")
+    lb_enabled = leaderboard_raw.get("enabled", False)
+    lb_credentials = str(leaderboard_raw.get("credentials_file", "")).strip()
+    lb_scope = str(leaderboard_raw.get("scope", "")).strip()
+    if lb_enabled:
+        if not lb_credentials:
+            raise ValueError("[leaderboard] enabled=true 时必须配置 credentials_file")
+        if not LEADERBOARD_SCOPE_RE.fullmatch(lb_scope):
+            raise ValueError("[leaderboard] scope 必须是 1-128 位 [A-Za-z0-9_.:-]")
+    lb_refresh_enabled = leaderboard_raw.get("refresh_enabled", False)
+    if not isinstance(lb_refresh_enabled, bool):
+        raise ValueError("[leaderboard] refresh_enabled must be boolean")
+    lb_refresh_proxy = leaderboard_raw.get("refresh_proxy", "direct")
+    if not isinstance(lb_refresh_proxy, str):
+        raise ValueError("[leaderboard] refresh_proxy must be direct or a loopback HTTP proxy")
+    if lb_refresh_enabled:
+        from starfall_refresh.http import HTTP
+
+        HTTP(lb_refresh_proxy)  # Validate transport without networking.
+    lb_request_delay = float(leaderboard_raw.get("request_delay", 2.0))
+    if lb_request_delay <= 0 or lb_request_delay > 60:
+        raise ValueError("[leaderboard] request_delay 必须 > 0 且 <= 60")
+    lb_probe_interval = int(leaderboard_raw.get("metadata_probe_interval", 600))
+    if lb_probe_interval < 60 or lb_probe_interval > 86400:
+        raise ValueError("[leaderboard] metadata_probe_interval 必须在 60 到 86400 秒之间")
+    lb_budgets = {}
+    for key, default, cap in (
+        ("ranking_max_requests", 80, LEADERBOARD_BUDGET_CAPS["ranking"][0]),
+        ("ranking_max_seconds", 300, LEADERBOARD_BUDGET_CAPS["ranking"][1]),
+        ("ranking_max_pages", 35, 60),
+        ("ranking_max_entries", 1000, 1000),
+        ("lineup_max_requests", 400, LEADERBOARD_BUDGET_CAPS["lineup"][0]),
+        ("lineup_max_seconds", 900, LEADERBOARD_BUDGET_CAPS["lineup"][1]),
+        ("guild_index_max_requests", 200, LEADERBOARD_BUDGET_CAPS["guild_index"][0]),
+        ("guild_index_max_seconds", 600, LEADERBOARD_BUDGET_CAPS["guild_index"][1]),
+    ):
+        value = int(leaderboard_raw.get(key, default))
+        if value < 1 or value > cap:
+            raise ValueError(f"[leaderboard] {key} 必须在 1 到 {cap} 之间")
+        lb_budgets[key] = value
+    lb_data_dir = str(leaderboard_raw.get("data_dir", "")).strip()
+    if not lb_data_dir:
+        lb_data_dir = str(Path(data_dir) / "leaderboard")
+    leaderboard = LeaderboardConfig(
+        enabled=lb_enabled,
+        credentials_file=lb_credentials,
+        refresh_enabled=lb_refresh_enabled,
+        refresh_proxy=lb_refresh_proxy,
+        scope=lb_scope,
+        data_dir=lb_data_dir,
+        request_delay=lb_request_delay,
+        metadata_probe_interval=lb_probe_interval,
+        **lb_budgets,
+    )
+
     return Config(
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
@@ -495,6 +590,7 @@ def load_config(path: str = "config.toml") -> Config:
         gateway=gateway_config,
         server_status=server_status,
         instance=InstanceConfig(instance_id=instance_id),
+        leaderboard=leaderboard,
     )
 
 

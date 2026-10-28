@@ -110,6 +110,41 @@ confirm_delay_seconds = 3
 # 旧配置字段，读取但不再筛选群组；实际目标来自 [target].group_openids。
 recipient_tiers = []
 
+[leaderboard]
+# 排行榜赛季归档（三榜全榜 + 幻象阵容 + 公会 2306 推荐索引）。默认关闭；main 环境不要启用。
+# 启用后由 automation jobs 进程调度：开放期每整点/半点随机提前 30~60 秒采集；
+# 终盘 PRE_END_300/120/60/30/15 只采排行榜；结束 +1h 受控补采后调用 SeasonPackager 封包。
+# 关闭期只按 metadata_probe_interval 探测元信息，其他 RPC 零请求。
+enabled = false
+# 私密凭据文件。refresh_enabled=false 时存放 {open_id, token, channel}（JSON/TOML，权限 600）；
+# refresh_enabled=true 时存放 starfall_refresh 初始化过的 renewal state.json。
+credentials_file = ""
+# 仅当凭据文件是 renewal state、且 [server_status] 没有续签同一文件时才开启。
+# 同一 state 只能有一个续签 owner：server_status 续签同路径时，本任务只读取（只读采集）。
+refresh_enabled = false
+# "direct" 显式绕过环境代理；或配置 loopback HTTP 代理。
+refresh_proxy = "direct"
+# 操作员确认的服务器/账号上下文标签（必填，1-128 位 [A-Za-z0-9_.:-]），随每次采集入库。
+scope = ""
+# 归档数据目录（schedule_state.json、seasonal_leaderboards.sqlite3、packages/）。
+# 留空默认使用 [watch].data_dir/leaderboard。
+data_dir = ""
+# 同一账号的登录与续签与状态 probe 共享 per-account asyncio 锁，避免并发登录。
+# 每个模式的网关会话预算（请求数/秒数），均可调低但不可超过硬上限：
+# ranking 200/900、lineup 800/1800、guild_index 400/1200。
+request_delay = 2
+# 关闭期元信息探测间隔（秒），默认 600。
+metadata_probe_interval = 600
+ranking_max_requests = 80
+ranking_max_seconds = 300
+# 幻象满编约 300 名 ≈ 29 页含复查，默认 35 页保证不截断；硬上限 60。
+ranking_max_pages = 35
+ranking_max_entries = 1000
+lineup_max_requests = 400
+lineup_max_seconds = 900
+guild_index_max_requests = 200
+guild_index_max_seconds = 600
+
 [bilibili]
 # B 站 UP 主动态/视频监视。enabled=false 可关闭。
 enabled = true

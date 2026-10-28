@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from .bilibili import BilibiliWatcher
 from .config import Config, UpdateSourceConfig, load_config
+from .leaderboard_credentials import shared_account_lock
 from .notification_service import NotificationClient
 from .renewing_probe import build_status_probe
 from .status_monitor_runtime import build_status_monitor
@@ -24,6 +25,7 @@ class AutomationRuntime:
     watchers: tuple[Watcher, ...]
     status_monitor: object | None
     bilibili_watcher: BilibiliWatcher | None
+    leaderboard_job: object | None
     stop_event: asyncio.Event
 
     async def run(self) -> None:
@@ -32,6 +34,8 @@ class AutomationRuntime:
             jobs.append(self.status_monitor.run(self.stop_event))
         if self.bilibili_watcher is not None:
             jobs.append(self.bilibili_watcher.run())
+        if self.leaderboard_job is not None:
+            jobs.append(self.leaderboard_job.run(self.stop_event))
         if not jobs:
             await self.stop_event.wait()
             return
@@ -51,6 +55,7 @@ def build_automation_runtime(
     instance_id: str | None = None,
     notification_client: NotificationClient,
     probe_factory=None,
+    leaderboard_factory=None,
 ) -> AutomationRuntime:
     instance_id = instance_id or config.instance.instance_id
     configured_sources = config.watch.update_sources or (
@@ -78,11 +83,19 @@ def build_automation_runtime(
         if config.bilibili.enabled
         else None
     )
+    leaderboard_job = None
+    if config.leaderboard.enabled:
+        if leaderboard_factory is None:
+            from .leaderboard_job import build_leaderboard_job
+
+            leaderboard_factory = build_leaderboard_job
+        leaderboard_job = leaderboard_factory(config)
     return AutomationRuntime(
         instance_id=instance_id,
         watchers=watchers,
         status_monitor=status_monitor,
         bilibili_watcher=bilibili_watcher,
+        leaderboard_job=leaderboard_job,
         stop_event=asyncio.Event(),
     )
 
@@ -111,7 +124,12 @@ async def _amain(config: Config, instance_id: str) -> None:
         instance_id=instance_id,
         notification_client=client,
         probe_factory=lambda instance_config: build_status_probe(
-            instance_config.server_status
+            instance_config.server_status,
+            account_lock=(
+                shared_account_lock(instance_config.server_status.credentials_file)
+                if instance_config.server_status.credentials_file
+                else None
+            ),
         ),
     )
     loop = asyncio.get_running_loop()
