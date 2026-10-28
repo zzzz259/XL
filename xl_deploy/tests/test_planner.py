@@ -69,6 +69,58 @@ def test_unknown_branch_is_rejected():
         plan_deployment("feature", "sha", ["xl_qqbot/bot_app/service.py"])
 
 
+def test_gacha_web_runtime_changes_map_to_bot_units_on_test_and_main():
+    test = plan_deployment("test", "t2", ["xl_gacha_web/gacha_core/leaderboards.py"])
+    main = plan_deployment("main", "m2", ["xl_gacha_web/leaderboard_archive.py"])
+
+    assert test.impacted_units == (
+        "xl-qqbot-test.service",
+        "xl-qqbot-test-notify.service",
+        "xl-qqbot-test-jobs.service",
+    )
+    assert test.impacted_tiers == ("debug", "test")
+    assert main.impacted_units == (
+        "xl-qqbot-prod.service",
+        "xl-qqbot-router.service",
+        "xl-qqbot-main-notify.service",
+        "xl-qqbot-control.service",
+        "xl-qqbot-main-jobs.service",
+    )
+    assert main.impacted_tiers == ("debug", "test", "production")
+
+
+def test_gacha_web_change_combined_with_qqbot_does_not_duplicate_units():
+    plan = plan_deployment(
+        "test",
+        "t3",
+        ["xl_qqbot/bot_app/service.py", "xl_gacha_web/gacha_core/gacha.py"],
+    )
+
+    assert plan.impacted_units == (
+        "xl-qqbot-test.service",
+        "xl-qqbot-test-notify.service",
+        "xl-qqbot-test-jobs.service",
+    )
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["xl_gacha_web/docs/leaderboard-archive.md"],
+        ["xl_gacha_web/tests/test_core.py"],
+        ["xl_gacha_web/tests/fixtures/catalog-contract.json"],
+        ["xl_gacha_web/README.md"],
+    ],
+)
+def test_gacha_web_docs_tests_and_readme_do_not_trigger(paths):
+    for branch in ("debug", "test", "main"):
+        plan = plan_deployment(branch, "sha", paths)
+
+        assert plan.impacted_units == ()
+        assert plan.impacted_tiers == ()
+        assert plan.announcement_scope == ()
+
+
 def test_deployment_target_is_an_explicit_immutable_mapping():
     target = DeploymentTarget.for_changes("debug", ["xl_qqbot/bot_app/service.py"])
 

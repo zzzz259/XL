@@ -40,12 +40,14 @@ def source(tmp_path):
     git(repo, 'init')
     (repo / '.gitignore').write_text('*.db\nlogs/\nxl_updata_server/data/\n'
                                     '__pycache__/\nxl_updata_server/renderer/node_modules/\n')
-    for name in ('xl_deploy/a.py', 'xl_qqbot/a.py', 'xl_updata_server/a.py',
+    for name in ('xl_deploy/a.py', 'xl_qqbot/a.py', 'xl_qqbot/bot_app/__init__.py',
+                 'xl_updata_server/a.py',
                  'xl_updata_tool/tools/lua/tool.jar', 'xl_updata_tool/tools/windows.exe',
                  'xl_gacha_web/a.py', 'xl_gacha_android/a.js', 'README.md'):
         path = repo / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('fixture', encoding='utf-8')
+    (repo / 'xl_qqbot/bot_app/__init__.py').write_text('', encoding='utf-8')
     git(repo, 'add', '.')
     git(repo, 'commit', '-m', 'fixture')
     git(repo, 'remote', 'add', 'origin', repo)
@@ -58,11 +60,31 @@ def test_stage_materializes_only_runtime_allowlist(source, tmp_path):
     CommandRunner(repository=repo).stage(SimpleNamespace(sha=sha, branch='test'), path)
     assert (path / 'xl_updata_tool/tools/lua/tool.jar').is_file()
     assert (path / 'xl_qqbot/a.py').is_file()
+    assert (path / 'xl_gacha_web/a.py').is_file()
     assert (path / 'README.md').is_file()
     assert not (path / 'xl_updata_tool/tools/windows.exe').exists()
-    assert not (path / 'xl_gacha_web').exists()
     assert not (path / 'xl_gacha_android').exists()
     assert git(path, 'rev-parse', 'HEAD') == sha
+
+
+def test_staged_gacha_web_imports_alongside_qqbot_on_pythonpath(source, tmp_path):
+    repo, _ = source
+    web = Path(__file__).resolve().parents[2] / 'xl_gacha_web'
+    shutil.copytree(web, repo / 'xl_gacha_web', dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'gacha web fixture')
+    sha = git(repo, 'rev-parse', 'HEAD')
+    path = tmp_path / 'releases' / sha
+    CommandRunner(repository=repo).stage(SimpleNamespace(sha=sha, branch='test'), path)
+    result = subprocess.run([sys.executable, '-I', '-c',
+        ('import sys; sys.path[:0] = [sys.argv[1], sys.argv[2]]; '
+         'import bot_app; import gacha_core.leaderboards; import leaderboard_archive; '
+         'assert sys.modules["gacha_core.leaderboards"].__file__.startswith(sys.argv[2])'),
+        str(path / 'xl_qqbot'), str(path / 'xl_gacha_web')],
+        cwd=path, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert not (path / 'xl_gacha_android').exists()
 
 
 def test_sparse_server_retains_shared_headless_character_parser(source, tmp_path):

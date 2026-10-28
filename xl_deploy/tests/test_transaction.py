@@ -515,7 +515,7 @@ def test_command_runner_stages_exact_sha_as_argv_without_branch_interpolation(tm
         ["git", "fetch", "--no-tags", "origin", NEW_SHA],
         ["git", "worktree", "add", "--detach", "--no-checkout", str(candidate), NEW_SHA],
         ["git", "sparse-checkout", "set", "--no-cone", "/*", "!/*/",
-         "/xl_deploy/", "/xl_qqbot/", "/xl_updata_server/", "/xl_updata_tool/tools/lua/",
+         "/xl_deploy/", "/xl_qqbot/", "/xl_gacha_web/", "/xl_updata_server/", "/xl_updata_tool/tools/lua/",
          "/xl_updata_tool/app/__init__.py", "/xl_updata_tool/app/features/__init__.py",
          "/xl_updata_tool/app/features/characters/__init__.py",
          "/xl_updata_tool/app/features/characters/parser/", "/xl_updata_tool/app/platform/",
@@ -592,6 +592,8 @@ def test_preflight_creates_release_local_venvs_for_all_branch_units(tmp_path):
     release = tmp_path / "release"
     (release / "xl_qqbot").mkdir(parents=True)
     (release / "xl_updata_server").mkdir()
+    (release / "xl_gacha_web" / "gacha_core").mkdir(parents=True)
+    (release / "xl_gacha_web" / "gacha_core" / "__init__.py").write_text("", encoding="utf-8")
     renderer_directory = release / "xl_updata_server" / "renderer"
     renderer_directory.mkdir()
     (renderer_directory / "package.json").write_text('{"dependencies":{"canvas":"^3.2.3"}}', encoding="utf-8")
@@ -655,6 +657,8 @@ def test_preflight_compiles_backend_sources_before_any_service_stop(tmp_path):
     (renderer / "package.json").write_text('{"dependencies":{"canvas":"^3.2.3"}}', encoding="utf-8")
     (release / "xl_qqbot").mkdir(parents=True)
     (release / "xl_qqbot" / "requirements.txt").write_text("", encoding="utf-8")
+    (release / "xl_gacha_web" / "gacha_core").mkdir(parents=True)
+    (release / "xl_gacha_web" / "gacha_core" / "__init__.py").write_text("", encoding="utf-8")
     (backend / "broken.py").write_text("def invalid(:\n", encoding="utf-8")
     plan = plan_deployment(
         "main", NEW_SHA, ["xl_updata_server/server_app/processor.py"]
@@ -662,6 +666,76 @@ def test_preflight_compiles_backend_sources_before_any_service_stop(tmp_path):
     runner = CommandRunner(executor=lambda args, **kwargs: None)
 
     with pytest.raises(SyntaxError):
+        runner.preflight(
+            plan,
+            release,
+            tmp_path / "shared" / "config.toml",
+            tmp_path / "shared" / "data",
+        )
+
+
+def make_release_with_gacha_web(tmp_path, *, gacha_web=True):
+    release = tmp_path / "release"
+    backend = release / "xl_updata_server" / "server_app"
+    backend.mkdir(parents=True)
+    (release / "xl_updata_server" / "requirements.txt").write_text("", encoding="utf-8")
+    renderer = release / "xl_updata_server" / "renderer"
+    renderer.mkdir()
+    (renderer / "package.json").write_text('{"dependencies":{"canvas":"^3.2.3"}}', encoding="utf-8")
+    (release / "xl_qqbot").mkdir(parents=True)
+    (release / "xl_qqbot" / "requirements.txt").write_text("", encoding="utf-8")
+    if gacha_web:
+        core = release / "xl_gacha_web" / "gacha_core"
+        core.mkdir(parents=True)
+        (core / "__init__.py").write_text("", encoding="utf-8")
+        (core / "leaderboards.py").write_text("def collect_mode():\n    return 'guild_war'\n", encoding="utf-8")
+        (release / "xl_gacha_web" / "leaderboard_archive.py").write_text("SCHEMA_VERSION = 1\n", encoding="utf-8")
+    return release
+
+
+def test_preflight_compiles_gacha_web_runtime_sources_before_any_service_stop(tmp_path):
+    from xl_deploy.runner import CommandRunner
+
+    release = make_release_with_gacha_web(tmp_path)
+    (release / "xl_gacha_web" / "gacha_core" / "broken.py").write_text("def invalid(:\n", encoding="utf-8")
+    plan = plan_deployment("test", NEW_SHA, ["xl_gacha_web/gacha_core/leaderboards.py"])
+    runner = CommandRunner(executor=lambda args, **kwargs: None)
+
+    with pytest.raises(SyntaxError):
+        runner.preflight(
+            plan,
+            release,
+            tmp_path / "shared" / "config.toml",
+            tmp_path / "shared" / "data",
+        )
+
+
+def test_preflight_skips_gacha_web_test_sources_and_accepts_runtime_sources(tmp_path):
+    from xl_deploy.runner import CommandRunner
+
+    release = make_release_with_gacha_web(tmp_path)
+    tests_dir = release / "xl_gacha_web" / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_placeholder.py").write_text("def invalid(:\n", encoding="utf-8")
+    plan = plan_deployment("test", NEW_SHA, ["xl_gacha_web/gacha_core/leaderboards.py"])
+    runner = CommandRunner(executor=lambda args, **kwargs: None)
+
+    runner.preflight(
+        plan,
+        release,
+        tmp_path / "shared" / "config.toml",
+        tmp_path / "shared" / "data",
+    )
+
+
+def test_preflight_requires_gacha_web_runtime_sources(tmp_path):
+    from xl_deploy.runner import CommandRunner
+
+    release = make_release_with_gacha_web(tmp_path, gacha_web=False)
+    plan = plan_deployment("test", NEW_SHA, ["xl_qqbot/bot_app/service.py"])
+    runner = CommandRunner(executor=lambda args, **kwargs: None)
+
+    with pytest.raises(RuntimeError, match="gacha web"):
         runner.preflight(
             plan,
             release,

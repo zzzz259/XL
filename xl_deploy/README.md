@@ -83,6 +83,17 @@ fast-forward sequence; test/main are code snapshot refs, not product tiers.
 Runtime instances must watch `test` or `main`; `debug` is rejected as a runtime
 watch ref so it cannot silently remain undeployed.
 
+## Leaderboard runtime sources
+
+Release snapshots include both `xl_qqbot/` and `xl_gacha_web/`. The jobs units
+set `PYTHONPATH` to both roots so `bot_app` can reuse the read-only gateway and
+season archive modules without copying them into the QQ bot package. Changes to
+runtime Python files under `xl_gacha_web` select the same Bot instances as
+`xl_qqbot` changes; documentation and tests alone do not trigger deployment.
+Preflight compiles the runtime sources but not the test suites. No additional
+Python dependency is introduced, and enabling leaderboard collection still
+requires an explicit opt-in in each instance's external configuration.
+
 | Legacy loopback port | Process | Purpose |
 |---:|---|---|
 | 8782 | `xl-qqbot-test.service` | legacy test worker |

@@ -125,7 +125,7 @@ class CommandRunner:
         # Non-cone patterns include root files without bringing in sibling tools.
         self._executor(
             ["git", "sparse-checkout", "set", "--no-cone", "/*", "!/*/",
-             "/xl_deploy/", "/xl_qqbot/", "/xl_updata_server/",
+             "/xl_deploy/", "/xl_qqbot/", "/xl_gacha_web/", "/xl_updata_server/",
              "/xl_updata_tool/tools/lua/", "/xl_updata_tool/app/__init__.py",
              "/xl_updata_tool/app/features/__init__.py",
              "/xl_updata_tool/app/features/characters/__init__.py",
@@ -265,6 +265,9 @@ class CommandRunner:
                         ],
                         cwd=release_path / "xl_updata_server",
                     )
+        gacha_web_root = release_path / "xl_gacha_web"
+        if not gacha_web_root.is_dir():
+            raise RuntimeError("candidate is missing the gacha web runtime sources")
         source_roots = (
             release_path / "xl_deploy",
             release_path / "xl_qqbot" / "bot_app",
@@ -276,6 +279,13 @@ class CommandRunner:
             if source_root.is_dir()
             for source in source_root.rglob("*.py")
         ]
+        sources.extend(
+            source
+            for source in gacha_web_root.rglob("*.py")
+            if not {"docs", "tests"}.intersection(
+                source.relative_to(gacha_web_root).parts[:-1]
+            )
+        )
         backend_entry = release_path / "xl_updata_server" / "run_server.py"
         if backend_entry.is_file():
             sources.append(backend_entry)

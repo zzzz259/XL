@@ -17,6 +17,8 @@ class RendererDependencyPreflightTests(unittest.TestCase):
             (release / "xl_updata_server" / "requirements.txt").write_text("", encoding="utf-8")
             (release / "xl_qqbot").mkdir()
             (release / "xl_qqbot" / "requirements.txt").write_text("", encoding="utf-8")
+            (release / "xl_gacha_web" / "gacha_core").mkdir(parents=True)
+            (release / "xl_gacha_web" / "gacha_core" / "__init__.py").write_text("", encoding="utf-8")
             commands = []
             runner = CommandRunner(executor=lambda args, **kwargs: commands.append((args, kwargs)))
             plan = plan_deployment(
