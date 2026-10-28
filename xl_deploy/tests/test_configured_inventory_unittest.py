@@ -256,6 +256,8 @@ class ConfiguredInventoryTests(unittest.TestCase):
         inv = self.inventory(); commands = []; release = self.root / 'candidate'
         (release / 'xl_qqbot').mkdir(parents=True)
         (release / 'xl_qqbot' / 'requirements.txt').write_text('')
+        (release / 'xl_gacha_web' / 'gacha_core').mkdir(parents=True)
+        (release / 'xl_gacha_web' / 'gacha_core' / '__init__.py').write_text('')
         runner = CommandRunner(inventory=inv, executor=lambda args, **kwargs: commands.append(args))
         plan = plan_deployment('test', SHA, ['xl_qqbot/bot_app/service.py'], inventory=inv)
         runner.preflight(plan, release, inv.instances[0].config_path, inv.instances[0].data_roots[0])
@@ -414,6 +416,41 @@ class ConfiguredInventoryTests(unittest.TestCase):
         self.assertEqual(load_inventory(target).instances[1].instance_id, 'test-b')
         target.write_text(source.split('[inventory.gateway]')[0], encoding='utf-8')
         self.assertIsNone(load_runtime_config(target).inventory)
+
+    def test_gacha_web_runtime_change_selects_bot_instances(self):
+        plan = plan_deployment('test', SHA, ['xl_gacha_web/gacha_core/leaderboards.py'], inventory=self.inventory())
+        self.assertEqual(plan.impacted_units, ('xl-test-a.service', 'xl-test-b.service'))
+        self.assertEqual(plan.impacted_tiers, ('test-a', 'test-b'))
+        self.assertEqual(plan.announcement_scope, ('test-a', 'test-b'))
+
+    def test_gacha_web_change_also_selects_jobs_and_notify_roles(self):
+        values = mapping()
+        values['instances'][0]['units'].update(notify='xl-a-notify.service', jobs='xl-a-jobs.service')
+        values['instances'][0]['listen_ports']['notify'] = 8813
+        values['instances'][1]['watch_ref'] = 'main'
+        inv = self.inventory(values)
+        plan = plan_deployment('test', SHA, ['xl_gacha_web/leaderboard_cli.py'], inventory=inv)
+        self.assertEqual(plan.impacted_units, ('xl-test-a.service', 'xl-a-notify.service', 'xl-a-jobs.service'))
+        self.assertNotIn('xl-gateway.service', plan.impacted_units)
+
+    def test_gacha_web_change_skips_backend_only_instances(self):
+        values = mapping()
+        values['instances'].append({'instance_id': 'updater-a', 'watch_ref': 'test',
+            'config_path': 'updater/config.toml', 'data_roots': ['updater/data'],
+            'units': {'backend': 'xl-updater-a.service'}, 'listen_ports': {'backend': 8890}, 'groups': []})
+        inv = config.DeploymentInventory.from_mapping(values, base_dir=self.root)
+        plan = plan_deployment('test', SHA, ['xl_gacha_web/gacha_core/leaderboards.py'], inventory=inv)
+        self.assertEqual(plan.impacted_units, ('xl-test-a.service', 'xl-test-b.service'))
+
+    def test_gacha_web_docs_and_tests_do_not_select_instances(self):
+        for path in ('xl_gacha_web/docs/leaderboard-archive.md',
+                     'xl_gacha_web/tests/test_core.py',
+                     'xl_gacha_web/README.md'):
+            with self.subTest(path=path):
+                plan = plan_deployment('test', SHA, [path], inventory=self.inventory())
+                self.assertEqual(plan.impacted_units, ())
+                self.assertEqual(plan.impacted_tiers, ())
+                self.assertEqual(plan.announcement_scope, ())
 
     def test_gateway_shared_transport_dependencies_select_gateway(self):
         inv = self.inventory()

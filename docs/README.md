@@ -38,6 +38,7 @@
 
 - [README](../xl_qqbot/README.md)：功能、拓扑、快速启动与项目测试入口。
 - [配置与运维](../xl_qqbot/docs/配置与运维.md)：TOML 配置、tier 路由、Bot 进程职责、systemd 部署、状态/日志及故障排查。
+- [每期排行榜采集与历史档案](../xl_gacha_web/docs/leaderboard-archive.md)：公会战、幻象禁地、噩梦投影的人工授权 CLI、独立历史库和完整性口径。
 
 ### 自动部署控制器
 

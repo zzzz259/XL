@@ -243,6 +243,8 @@ jobs:
 
   qq-bot:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}/xl_qqbot:${{ github.workspace }}/xl_gacha_web
     defaults:
       run:
         working-directory: xl_qqbot
