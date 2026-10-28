@@ -49,6 +49,7 @@ def main():
             ROOT / "tests/CatalogUpdatesTest.java",
             ROOT / "tests/LoginLinksTest.java",
             ROOT / "tests/LoginReturnTest.java",
+            ROOT / "tests/TapAppLoginTest.java",
         ]
     )
     wire = out / "wire"
@@ -64,10 +65,20 @@ def main():
             "-d",
             wire,
             ROOT / "src/cn/starfall/gacha/local/Wire.java",
+            ROOT / "src/cn/starfall/gacha/local/BiliProtocol.java",
             ROOT / "tests/WireTest.java",
+            ROOT / "tests/BiliProtocolTest.java",
         ]
     )
     run([executable(jdk, "java"), "-cp", wire, "cn.starfall.gacha.local.WireTest"])
+    run(
+        [
+            executable(jdk, "java"),
+            "-cp",
+            wire,
+            "cn.starfall.gacha.local.BiliProtocolTest",
+        ]
+    )
     dex = out / "dex"
     dex.mkdir(exist_ok=True)
     run(
@@ -85,9 +96,14 @@ def main():
             *sorted(classes.rglob("*.class")),
         ]
     )
-    with zipfile.ZipFile(out / "catalog-tests.jar", "w") as archive:
+    unaligned = out / "catalog-tests-unaligned.jar"
+    with zipfile.ZipFile(unaligned, "w") as archive:
         for path in dex.glob("*.dex"):
             archive.write(path, path.name)
+    # MuMu's Android runtime cannot extract an unaligned dex in shell context.
+    run(
+        [executable(tools, "zipalign"), "-f", "4", unaligned, out / "catalog-tests.jar"]
+    )
     print(
         "Native compile and WireTest passed. Android org.json runtime execution is still required."
     )

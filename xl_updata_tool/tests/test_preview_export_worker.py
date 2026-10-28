@@ -5,6 +5,12 @@ import pytest
 
 from app.features.preview.export_plan import ExportSettings, build_default_export_plan, build_export_plan
 from app.features.preview.resource_model import SpineSkinRecord
+from app.features.preview.portrait_config.model import AssetRef, PortraitScene
+from app.features.preview.portrait_scene_export import (
+    PortraitSceneExportJob,
+    SpineSource,
+    SpriteSource,
+)
 from app.features.preview.workers import preview_export
 from app.features.preview.workers.preview_export import PreviewExportWorker
 from app.platform.logger import configure_logging
@@ -78,6 +84,85 @@ def test_worker_reports_progress_and_finished_summary_for_runner_results(tmp_pat
     summaries = list((session.directory / "tasks").glob("*/summary.json"))
     assert len(summaries) == 1
     assert json.loads(summaries[0].read_text(encoding="utf-8"))["outcome"] == "partial"
+
+
+def test_worker_logs_and_writes_exact_scene_part_refs(tmp_path):
+    scene = PortraitScene(
+        game_version="vA160", version_timestamp="134351472190013976",
+        entry_config_id="12002183", character_id="10118", skin_id="12002183",
+        prefab=None, source_bundles=("bundle-a",), parts=(),
+    )
+    source = SpineSource(
+        part_id="role", skeleton_path=tmp_path / "role.skel", atlas_path=tmp_path / "role.atlas",
+        animation="idle", loop=False, skin="", time_scale=1.0,
+        unity_order=(0, 4, 0.0, 0), skeleton_ref=AssetRef("bundle-a", 10),
+        atlas_refs=(AssetRef("bundle-a", 11),),
+    )
+    job = PortraitSceneExportJob(
+        scene, (source,), tmp_path / "character" / "role.png", ExportSettings(),
+    )
+    runner = RecordingRunner()
+    worker = PreviewExportWorker((job,), settings=ExportSettings(), runner=runner)
+    summaries = []
+    worker.finished.connect(summaries.append)
+
+    worker.run()
+
+    assert summaries == ["1 succeeded, 0 failed"]
+    metadata = json.loads(
+        job.output_path.with_name(job.output_path.name + ".metadata.json").read_text(encoding="utf-8")
+    )
+    assert metadata["scene"]["source_bundles"] == ["bundle-a"]
+    assert metadata["sources"][0]["skeleton_ref"] == {"bundle_hash": "bundle-a", "path_id": 10}
+    assert metadata["sources"][0]["animation"] == "idle"
+
+
+def test_scene_metadata_records_static_sprite_identity_and_render_transform(tmp_path):
+    scene = PortraitScene(
+        game_version="vA160", version_timestamp="134351472190013976",
+        entry_config_id="12002183", character_id="10118", skin_id="12002183",
+        prefab=None, source_bundles=("bundle-a",), parts=(),
+    )
+    sprite = SpriteSource(
+        part_id="SpriteRenderer:bundle-a:40",
+        texture_path=tmp_path / "sprite-atlas.png",
+        rect=(12.0, 20.0, 64.0, 80.0),
+        pivot=(0.25, 0.5),
+        pixels_per_unit=100.0,
+        transform_chain=(),
+        color=(1.0, 1.0, 1.0, 0.75),
+        flip_x=True,
+        flip_y=False,
+        mask_interaction=0,
+        blend_mode="normal",
+        unity_order=(0, 3, 0.0, 2),
+        sprite_ref=AssetRef("bundle-a", 40),
+        texture_ref=AssetRef("bundle-a", 41),
+    )
+    job = PortraitSceneExportJob(
+        scene, (), tmp_path / "character" / "sprite.png", ExportSettings(), sprite_sources=(sprite,),
+    )
+    worker = PreviewExportWorker((job,), settings=ExportSettings(), runner=RecordingRunner())
+    worker.run()
+
+    metadata = json.loads(
+        job.output_path.with_name(job.output_path.name + ".metadata.json").read_text(encoding="utf-8")
+    )
+    assert metadata["sprite_sources"] == [{
+        "part_id": "SpriteRenderer:bundle-a:40",
+        "texture_path": str(tmp_path / "sprite-atlas.png"),
+        "sprite_ref": {"bundle_hash": "bundle-a", "path_id": 40},
+        "texture_ref": {"bundle_hash": "bundle-a", "path_id": 41},
+        "rect": [12.0, 20.0, 64.0, 80.0],
+        "pivot": [0.25, 0.5],
+        "pixels_per_unit": 100.0,
+        "unity_order": [0, 3, 0.0, 2],
+        "color": [1.0, 1.0, 1.0, 0.75],
+        "flip_x": True,
+        "flip_y": False,
+        "mask_interaction": 0,
+        "blend_mode": "normal",
+    }]
 
 
 def test_skin_jobs_use_labeled_signal_and_preserve_legacy_progress_signature(tmp_path):

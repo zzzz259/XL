@@ -25,6 +25,14 @@ public class MainActivity extends Activity {
  byte[] albumBytes;String albumName,albumRequest;
  static JSONObject object(Object... kv){JSONObject j=new JSONObject();try{for(int i=0;i<kv.length;i+=2)j.put((String)kv[i],kv[i+1]);}catch(JSONException ignored){}return j;}
  static synchronized void phase(String name,String message){login=object("phase",name,"message",message,"id",session);}
+ static synchronized void failLogin(String code){if(code==null||!code.matches("[A-Z_0-9]{1,70}"))code="QUERY_FAILED";login=object("phase","error","error",code,"id",session);}
+ static synchronized void ensureCatalog(Context context)throws Exception{
+  if(updates==null){JSONObject base;JSONObject source;
+   try(InputStream in=context.getAssets().open("catalog.json")){base=new JSONObject(new String(GachaClient.bounded(in,4*1024*1024),StandardCharsets.UTF_8));}
+   try(InputStream in=context.getAssets().open("update-source.json")){source=new JSONObject(new String(GachaClient.bounded(in,16384),StandardCharsets.UTF_8));}
+   updates=new CatalogUpdates(new File(context.getFilesDir(),"catalog-cache"),base,source.optString("url",""));
+  }
+ }
  static synchronized JSONObject loginStatus(Context c)throws Exception{
   JSONObject out=new JSONObject(login.toString());if(!out.has("phase"))out.put("phase","idle");
   JSONArray profiles=new JSONArray();android.content.SharedPreferences prefs=c.getSharedPreferences("login",MODE_PRIVATE);
@@ -33,9 +41,7 @@ public class MainActivity extends Activity {
  }
  @Override public void onCreate(Bundle b){super.onCreate(b);current=this;getWindow().setStatusBarColor(0xff111820);getWindow().setNavigationBarColor(0xff111820);
   IO.execute(()->ImageExports.cleanup(getApplicationContext()));
-  try{if(updates==null){JSONObject base=new JSONObject(new String(GachaClient.bounded(getAssets().open("catalog.json"),4*1024*1024),StandardCharsets.UTF_8));
-    JSONObject source=new JSONObject(new String(GachaClient.bounded(getAssets().open("update-source.json"),16384),StandardCharsets.UTF_8));
-    updates=new CatalogUpdates(new File(getFilesDir(),"catalog-cache"),base,source.optString("url",""));}updates.start(false);
+  try{ensureCatalog(this);updates.start(false);
   }catch(Exception e){throw new IllegalStateException("CATALOG_INIT_FAILED");}
   FrameLayout content=new FrameLayout(this);content.setBackgroundColor(0xff111820);
   web=new WebView(this);web.setBackgroundColor(0xff111820);content.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(content);
@@ -46,7 +52,7 @@ public class MainActivity extends Activity {
   web.addJavascriptInterface(new Host(),"AndroidHost");
   web.setWebViewClient(new WebViewClient(){
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){Uri u=r.getUrl();if(!"https".equals(u.getScheme())||!HOST.equals(u.getHost()))return denied();
-    String path=u.getPath();if("/".equals(path))path="/index.html";if(path==null||path.contains("..")||!path.matches("/[A-Za-z0-9._-]+"))return denied();
+    String path=u.getPath();if("/".equals(path))path="/index.html";if(path==null||path.equals("/bilibili-client.json")||path.contains("..")||!path.matches("/[A-Za-z0-9._-]+"))return denied();
     try{if("/catalog.json".equals(path))return new WebResourceResponse("application/json","UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream(updates.catalog().toString().getBytes(StandardCharsets.UTF_8)));
      String mime=path.endsWith(".js")?"text/javascript":path.endsWith(".css")?"text/css":path.endsWith(".json")?"application/json":path.endsWith(".svg")?"image/svg+xml":"text/html";
      return new WebResourceResponse(mime,"UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),getAssets().open(path.substring(1)));
@@ -74,10 +80,14 @@ public class MainActivity extends Activity {
      case "catalogSource":updates.setSource(body.getString("url"));updates.start(true);result=updates.status();break;
      case "query":result=GachaClient.query(getApplicationContext(),body.getString("credential"));break;
      case "loginStatus":result=loginStatus(MainActivity.this);break;
+     case "copyBiliDiagnostics":String diagnostic="星落手记 B 服脱敏诊断（无账号 UID、令牌）\n"+BiliDiagnostics.report(MainActivity.this).toString(2);runOnUiThread(()->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("B 服诊断",diagnostic));Toast.makeText(MainActivity.this,"脱敏诊断已复制",Toast.LENGTH_SHORT).show();});result=object("copied",true);break;
+     case "copyTapDiagnostics":runOnUiThread(()->TapLoginController.copyDiagnostic(MainActivity.this));result=object("copied",true);break;
+     case "loginAck":synchronized(MainActivity.class){if(session.equals(body.optString("id"))&&"done".equals(login.optString("phase"))){login.remove("raw");login.put("pending_result",false);}}result=object("saved",true);break;
      case "loginStart":synchronized(MainActivity.class){String p=login.optString("phase");if(Arrays.asList("opening","waiting","querying").contains(p))throw GachaClient.error("PORTAL_BUSY");
-      remember=body.optBoolean("remember",false);session=UUID.randomUUID().toString();phase("opening","正在打开官网…");}
-      boolean reuse=remember&&!body.optString("profile","").isEmpty();runOnUiThread(()->startActivity(new Intent(MainActivity.this,LoginActivity.class).putExtra("reuse",reuse).putExtra("remember",remember)));result=loginStatus(MainActivity.this);break;
-     case "loginCancel":synchronized(MainActivity.class){if("querying".equals(login.optString("phase")))throw GachaClient.error("PORTAL_QUERY_IN_PROGRESS");phase("cancelled","已取消登录。");}runOnUiThread(()->{if(LoginActivity.current!=null)LoginActivity.current.finish();});result=loginStatus(MainActivity.this);break;
+      if(!Arrays.asList("official","bilibili").contains(body.optString("channel","official")))throw GachaClient.error("INVALID_CHANNEL");
+      remember=!"bilibili".equals(body.optString("channel"))&&body.optBoolean("remember",false);session=UUID.randomUUID().toString();phase("opening","正在打开官方授权页面…");}
+      boolean bili="bilibili".equals(body.optString("channel")),tapApp=!bili&&"taptap_app".equals(body.optString("method")),reuse=remember&&!tapApp&&!body.optString("profile","").isEmpty();if(bili)BiliDiagnostics.begin(MainActivity.this);if(tapApp)TapAppDiagnostics.begin();runOnUiThread(()->startActivity(new Intent(MainActivity.this,bili?BiliAuthActivity.class:LoginActivity.class).putExtra("reuse",reuse).putExtra("remember",remember).putExtra("tap_app",tapApp)));result=loginStatus(MainActivity.this);break;
+     case "loginCancel":synchronized(MainActivity.class){if("querying".equals(login.optString("phase")))throw GachaClient.error("PORTAL_QUERY_IN_PROGRESS");phase("cancelled","已取消登录。");}runOnUiThread(()->{if(LoginActivity.current!=null)LoginActivity.current.finish();if(BiliAuthActivity.current!=null)BiliAuthActivity.current.finish();});result=loginStatus(MainActivity.this);break;
      case "loginForget":getSharedPreferences("login",MODE_PRIVATE).edit().clear().apply();runOnUiThread(()->LoginActivity.clearRemoteSessions(()->{}));result=object("deleted",true);break;
      case "imageStage":result=object("image",ImageExports.stage(MainActivity.this,Base64.decode(body.getString("data"),Base64.DEFAULT)).getLastPathSegment());break;
      case "imageShare":{
@@ -105,9 +115,18 @@ public class MainActivity extends Activity {
  @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] granted){super.onRequestPermissionsResult(request,permissions,granted);if(request==103){String id=albumRequest;byte[] png=albumBytes;String name=albumName;albumRequest=null;albumBytes=null;albumName=null;if(id==null)return;if(granted.length>0&&granted[0]==android.content.pm.PackageManager.PERMISSION_GRANTED)saveAlbum(id,png,name);else reply(id,400,object("error","STORAGE_PERMISSION_DENIED"));}}
  static void acceptCredential(String token){MainActivity a=current;if(a==null)return;phase("querying","已获取官网状态，正在查询抽卡记录…");
   IO.execute(()->{try{JSONObject result=GachaClient.query(a.getApplicationContext(),token);
-   synchronized(MainActivity.class){login=object("phase","done","message","查询完成，正在保存到本机。","id",session,"raw",result);}
+   synchronized(MainActivity.class){login=object("phase","done","message","查询完成，正在保存到本机。","id",session,"raw",result,"pending_result",true);}TapAppDiagnostics.queryFinished(true);
    if(remember)a.getSharedPreferences("login",MODE_PRIVATE).edit().putString("profile",UUID.randomUUID().toString().replace("-","")).putString("label",result.getString("channel")+" · UID "+result.getString("uid")).putString("account",GachaClient.accountId(result.getString("uid"),result.getString("channel"))).apply();
-  }catch(Exception e){String code=e.getMessage();if(code==null||!code.matches("[A-Z_0-9]{1,70}"))code="QUERY_FAILED";synchronized(MainActivity.class){login=object("phase","error","error",code,"id",session);}}});
+  }catch(Exception e){String code=e.getMessage();if(code==null||!code.matches("[A-Z_0-9]{1,70}"))code="QUERY_FAILED";synchronized(MainActivity.class){login=object("phase","error","error",code,"id",session);}TapAppDiagnostics.queryFinished(false);}});
+ }
+ static void acceptBiliGrant(Context context,String grant){
+  synchronized(MainActivity.class){if(session.isEmpty())session=UUID.randomUUID().toString();}
+  phase("querying","已获 B 站授权，正在识别账号并查询全部已知卡池…");
+  IO.execute(()->{GachaClient.Credential credential=null;try{
+   ensureCatalog(context);credential=BiliAuthClient.exchange(context,grant);JSONObject result=GachaClient.query(context,credential);
+   BiliDiagnostics.finish(context,result.optBoolean("partial")?"HISTORY_PARTIAL":"HISTORY_ALL_ACCEPTED");
+   synchronized(MainActivity.class){login=object("phase","done","message","B 服查询完成，正在保存到本机。","id",session,"raw",result,"pending_result",true);}
+  }catch(Exception e){failLogin(e.getMessage());BiliDiagnostics.put("exception_class",e.getClass().getSimpleName());BiliDiagnostics.finish(context,login.optString("error","QUERY_FAILED"));}finally{if(credential!=null){credential.token=null;credential.guid=null;}}});
  }
  @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
   if(request==101&&picker!=null){picker.onReceiveValue(result==RESULT_OK&&data!=null&&data.getData()!=null?new Uri[]{data.getData()}:null);picker=null;}

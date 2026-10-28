@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QApplication
 from app.features.preview.controller import PreviewController
 from app.features.preview.page import PreviewPage
 from app.features.preview.service import PreviewService
+from app.features.preview.portrait_config.cache import PortraitSceneCache
+from app.features.preview.portrait_config.model import PortraitScene, SceneDiagnostic
 
 
 class _Signal:
@@ -76,6 +78,8 @@ def test_preview_load_normalises_legacy_internal_skin_display_names(tmp_path):
                                 "fingerprint_kind": "source_skin_identity",
                                 "diagnostic": "",
                                 "resource_family": "battlespine",
+                                "composition_group": "eventcovers_0005",
+                                "composition_order": 3,
                             }
                         ],
                     }
@@ -87,7 +91,10 @@ def test_preview_load_normalises_legacy_internal_skin_display_names(tmp_path):
 
     catalog = PreviewService(tmp_path / "material", output_root / "character").load_published_preview_resources()
 
-    assert next(iter(catalog.skins.values())).display_name == "皮肤 2"
+    record = next(iter(catalog.skins.values()))
+    assert record.display_name == "皮肤 2"
+    assert record.composition_group == "eventcovers_0005"
+    assert record.composition_order == 3
 
 
 def test_preview_load_is_cached_until_forced_reload(monkeypatch, tmp_path):
@@ -124,3 +131,28 @@ def test_preview_preload_prepares_views_without_starting_image_worker(monkeypatc
     assert _ImageWorker.created == 0
     controller.close()
     page.close()
+
+
+def test_preview_service_loads_versioned_scene_manifests_without_source_discovery(tmp_path, monkeypatch):
+    data_root = tmp_path / "data"
+    scene = PortraitScene(
+        game_version="test", version_timestamp="20261012", entry_config_id="12002183",
+        character_id="10118", skin_id="12002183", prefab=None,
+        source_bundles=("bundle-a",), parts=(),
+        diagnostics=(SceneDiagnostic("missing_asset", "atlas unavailable"),),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10118_3.prefab",
+    )
+    PortraitSceneCache(
+        data_root / "cache" / "portrait-scenes", parser_version="4",
+    ).store_snapshot(scene)
+    service = PreviewService(data_root / "material", tmp_path / "output" / "character")
+    monkeypatch.setattr(
+        service, "discover_preview_resources",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not scan raw assets")),
+    )
+
+    catalog = service.load_published_preview_resources()
+
+    assert len(catalog.portrait_scenes) == 1
+    assert catalog.portrait_scenes[0].skin_id == "12002183"
+    assert catalog.portrait_scenes[0].diagnostics[0].message == "atlas unavailable"

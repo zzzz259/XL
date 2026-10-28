@@ -50,6 +50,14 @@ test('account identity hashes match the desktop algorithm and fields are allowli
  assert.ok(!JSON.stringify(report).includes('NEVER_STORE'));
 });
 
+test('same numeric UID in Bilibili and official login remains in separate archives',async()=>{
+ const bili=await engine.identity({uid:'555',channel:'bilibili'}),official=await engine.identity({uid:'555',channel:'sms'});
+ assert.notEqual(bili.id,official.id);
+ assert.equal(bili.id,'account-'+require('node:crypto').createHash('sha256').update('bilibili:555').digest('hex').slice(0,32));
+ const repeated=engine.buildReport([...demo.records,...demo.records],catalog,{}),single=engine.buildReport(demo.records,catalog,{});
+ assert.equal(repeated.summary.pull_count,single.summary.pull_count);assert.deepEqual(repeated.analysis,single.analysis);
+});
+
 test('new catalog remaps raw IDs and refreshes revision while preserving pulls',()=>{
  const raw=[{pool_id:999901,timestamp:1700000000,index:1,record_id:1,drops:[{item_id:999001,count:1}]}];
  const before=engine.buildReport(raw,catalog,{});

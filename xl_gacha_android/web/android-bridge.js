@@ -25,7 +25,10 @@
    if(target){const old=map.get(target);if(!old)MobileEngine.fail('ACCOUNT_NOT_FOUND');if(source.account&&id.id!==target)MobileEngine.fail('ACCOUNT_ID_MISMATCH');id=old.account;}
    const old=map.get(id.id);if(old)id=old.account;
    const r=MobileEngine.buildReport([...(old?.records||[]),...source.records],cfg,{...(old?.pool_metadata||{}),...(source.pool_metadata||{})});
-   r.account=id;r.partial=Boolean(source.partial);map.set(id.id,r);results.push(r);
+   r.account=id;r.partial=Boolean(source.partial);
+   if(source.queries)r.query_receipt={at:new Date().toISOString(),queries:source.queries.map(q=>({selector:q.selector,ret_code:q.ret_code,record_count:q.record_count}))};
+   else if(old?.query_receipt)r.query_receipt=old.query_receipt;
+   map.set(id.id,r);results.push(r);
   }
   if(map.size>500)MobileEngine.fail('ARCHIVE_TOO_LARGE');
   await write(results,results.at(-1)?.account.id);return results;
@@ -38,9 +41,10 @@
   if(path==='/api/login'){
    const v=await native('loginStatus');
    if(v.phase==='done'&&v.raw){
-    if(savedSession!==v.id){const [r]=await merge([{records:v.raw.records,partial:v.raw.partial,account:{uid:v.raw.uid,channel:v.raw.channel}}],null,null,v.raw.catalog_snapshot);savedSession=v.id;v.report=r;}
+    if(savedSession!==v.id){const [r]=await merge([{records:v.raw.records,queries:v.raw.queries,partial:v.raw.partial,account:{uid:v.raw.uid,channel:v.raw.channel}}],null,null,v.raw.catalog_snapshot);savedSession=v.id;v.report=r;}
     else{const rows=await all();v.report=rows.find(r=>r.account.uid===v.raw.uid&&r.account.channel===v.raw.channel);}
     delete v.raw;
+    await native('loginAck',{id:v.id});
    }return v;
   }
   if(path==='/api/login/start')return native('loginStart',body);
@@ -80,7 +84,7 @@
   const response=await originalFetch(a.href),blob=await response.blob();
   const data=await base64(blob);
   const result=await native('save',{name:a.download||'星落记录',mime:blob.type||'application/octet-stream',data});
-  if(result.saved&&typeof status==='function')status('文件已保存到所选位置。');
+  if(result.saved&&typeof status==='function')status(result.location?`文件已保存到${result.location}。`:'文件已保存到所选位置。');
  }
  const click=HTMLAnchorElement.prototype.click;
  const exportError=e=>{if(typeof status==='function')status(e.message==='SAVE_IN_PROGRESS'?'请先完成当前文件保存。':'文件保存失败，请重试。','error');};
@@ -95,6 +99,16 @@
   const p=document.querySelector('.portal-login>.field-help');if(p)p.textContent='在独立的官方登录页面正常登录后自动查询。默认清理官网会话；开启记住登录仅保留最近一次官网登录状态。';
   const start=document.querySelector('#portal-start');
   if(start){const other=document.createElement('button');other.type='button';other.className='outline-button';other.textContent='登录其他账号';other.onclick=()=>{if(start.disabled)return;document.querySelector('#login-profile').value='';start.click();};start.after(other);}
+  document.getElementById('bili-copy-diagnostics')?.addEventListener('click',()=>native('copyBiliDiagnostics').then(()=>status('已复制脱敏诊断，可粘贴反馈；不含账号 UID 或令牌。')).catch(()=>status('复制失败，请重试。','error')));
+  document.getElementById('tap-copy-diagnostics')?.addEventListener('click',()=>native('copyTapDiagnostics').catch(()=>status('复制失败，请重试。','error')));
   window.mobileReady=true;
  });
+ // Show the receipt for the selected archive, including after an application restart.
+ const renderReceipt=report=>{
+  const panel=document.getElementById('bili-receipt'),text=document.getElementById('bili-receipt-text');if(!panel||!text)return;
+  const r=report?.query_receipt;panel.hidden=!r;
+  if(r)text.textContent=`查询时间：${new Date(r.at).toLocaleString()}\n`+r.queries.map(q=>`卡池 ${q.selector}：返回码 ${q.ret_code}，${q.record_count} 条记录`).join('\n');
+ };
+ document.addEventListener('report-shown',()=>renderReceipt(state.report));
+ document.addEventListener('DOMContentLoaded',()=>document.getElementById('clear-results')?.addEventListener('click',()=>renderReceipt(null)));
 })();

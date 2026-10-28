@@ -1,4 +1,5 @@
 import os
+import json
 import threading
 from dataclasses import replace
 
@@ -12,6 +13,8 @@ from app.features.preview.controller import PreviewController
 from app.features.preview.export_plan import ExportSettings
 from app.features.preview.page import PreviewPage
 from app.features.preview.resource_model import SpineSkinRecord
+from app.features.preview.resource_model import PreviewResourceCatalog
+from app.features.preview.portrait_config.model import AssetRef, PortraitScene, ScenePart, SpineState
 from app.features.preview.resource_catalog import discover_preview_resources
 from app.features.preview.service import PreviewService
 
@@ -77,6 +80,54 @@ def test_selected_export_builds_identity_jobs_and_restores_ui_on_success(tmp_pat
     assert page.btn_reload.isEnabled()
     assert any("1 succeeded" in status or "完成" in status for status in statuses)
 
+    page.close()
+
+
+def test_checked_manifest_scene_uses_its_version_index_and_scene_export_job(tmp_path, qapp):
+    controller, page = make_controller(tmp_path, qapp)
+    version = 134351472190013976
+    bundle_hash = "a" * 32
+    version_dir = tmp_path / "bundles" / str(version)
+    version_dir.mkdir(parents=True)
+    (version_dir / f"{bundle_hash}.bundle").write_bytes(b"bundle")
+    container = "assets/art/models/cardspine/prefab/cardspine_10118_3.prefab"
+    material_root = tmp_path / "material"
+    (material_root / "assets" / "art" / "models" / "cardspine" / "prefab").mkdir(parents=True)
+    skeleton_path = material_root / "assets" / "art" / "models" / "cardspine" / "prefab" / "cardspine_10118_3.skel"
+    atlas_path = skeleton_path.with_suffix(".atlas")
+    skeleton_path.write_bytes(b"skeleton")
+    atlas_path.write_bytes(b"atlas")
+    skeleton_ref = AssetRef(bundle_hash, 10)
+    atlas_ref = AssetRef(bundle_hash, 11)
+    object_ref = AssetRef(bundle_hash, 12)
+    (version_dir / "_map").mkdir()
+    (version_dir / "_map" / "assets_map.json").write_text(json.dumps([
+        {"Name": "cardspine_10118_3.skel", "Container": container, "Source": f"{bundle_hash}.bundle", "PathID": 10, "Type": "TextAsset"},
+        {"Name": "cardspine_10118_3.atlas", "Container": container, "Source": f"{bundle_hash}.bundle", "PathID": 11, "Type": "TextAsset"},
+    ]), encoding="utf-8")
+    scene = PortraitScene(
+        game_version="vA160", version_timestamp=str(version), entry_config_id="12002183",
+        character_id="10118", skin_id="12002183", prefab=None,
+        source_bundles=(bundle_hash,),
+        parts=(ScenePart(
+            "role", object_ref, "cardspine_10118_3",
+            spine=SpineState(skeleton_ref, default_animation="idle", skeleton_json=skeleton_ref, atlases=(atlas_ref,)),
+        ),),
+        available_assets=(object_ref, skeleton_ref, atlas_ref), prefab_container=container,
+    )
+    page.set_spine_catalog(PreviewResourceCatalog.from_records((), portrait_scenes=(scene,)))
+    scene_item = page.spine_tree.topLevelItem(0).child(0)
+    scene_item.setCheckState(0, Qt.Checked)
+    runner = RecordingRunner()
+
+    assert controller.start_selected_export(settings=ExportSettings(), runner=runner)
+    assert controller._selected_export_worker.wait(5000)
+    qapp.processEvents()
+
+    assert len(runner.calls) == 1
+    assert runner.calls[0].scene == scene
+    assert runner.calls[0].sources[0].skeleton_path == skeleton_path
+    assert runner.calls[0].output_path.name == "10118_角色立绘_3.png"
     page.close()
 
 

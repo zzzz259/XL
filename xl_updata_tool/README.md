@@ -45,7 +45,7 @@ Pop-Location
 1. 启动后检查版本，选择版本并下载所需 bundle。
 2. 点击“导入 AS”，按需选择 Lua、角色立绘/Spine、FGUI 图集或音频类别。
 3. 资源导入完成后，图片预处理会在后台完成 Spine 原始资源归档、图集切割和识别到的独立素材导出；切换图片预览页只读取已生成产物，不负责首次全量预处理。
-4. 在预览页查看资源或执行 Spine 导出。默认设置按类型区分：`cardspine` 默认 PNG 与完整动画 MP4；`battlespine` 默认 `motion_stander` 表情且只导出 PNG；`eventcovers` 默认导出静态图。自定义模式提供传统导出设置。
+4. 在预览页查看资源或执行 Spine 导出。默认设置按类型区分：`cardspine` 默认 PNG 与完整动画 MP4；`battlespine` 默认 `motion_stander` 表情且只导出 PNG；活动封面以当前版本 `BaseActivityStageConfig.bg_main` 和对应 Prefab 场景图为来源，合并为一张静态图。配置根或依赖未能解析、材质混合不受支持时会标为不完整/未支持，不按同名或入口动画顺序猜测合成关系。自定义模式提供传统导出设置。
 
 主要交付目录：
 

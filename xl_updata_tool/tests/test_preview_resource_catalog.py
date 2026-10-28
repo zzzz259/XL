@@ -169,3 +169,13 @@ def test_eventcover_display_name_is_chinese():
     assert display_skin_name(
         "eventcovers_0038.skel.prefab", None, "eventcovers"
     ) == "活动封面 0038"
+
+def test_resolve_character_id_accepts_multi_segment_cardspine_variant_names():
+    assert resolve_character_id("cardspine_10002_2_1.skel", {}) == "10002"
+    assert resolve_character_id("cardspine_10002_2_1_bg.skel", {}) == "10002"
+    assert resolve_character_id("cardspine_10002_2.skel", {}) == "10002"
+    assert resolve_character_id("cardspine_10014_2_tx.skel", {}) == "10014"
+    assert resolve_character_id("cardspine_10061_2_effect.skel", {}) == "10061"
+    assert resolve_character_id("cardspine_10044_2_bg_1.skel", {}) == "10044"
+    assert resolve_character_id("battlespine_20908 _ui.skel", {}) == "20908"
+    assert resolve_character_id("misc/cardspine_10002_2_1.skel", {"characters": ["10003"]}) is None
