@@ -161,12 +161,11 @@ class RenewalProviderTests(unittest.IsolatedAsyncioTestCase):
         if os.name != "posix":
             self.skipTest("posix permission bits only")
         self.path.chmod(0o644)
-        provider = LeaderboardCredentialProvider(
-            self.config(), engine_factory=self._exploding_engine
-        )
         with self.assertLogs(credentials_mod._logger, level="WARNING"), \
                 self.assertRaises(CredentialError) as caught:
-            provider.startup_check()
+            LeaderboardCredentialProvider(
+                self.config(), engine_factory=self._exploding_engine
+            )
         self.assertEqual(caught.exception.code, "PRIVATE_PERMISSIONS_REQUIRED")
 
     def test_store_safe_error_without_code_attribute_is_mapped(self):

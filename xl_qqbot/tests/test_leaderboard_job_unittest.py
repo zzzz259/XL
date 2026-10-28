@@ -541,9 +541,15 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
             self.root, world, clock, packager=packager, on_session=settle_after_end)
         await drive(job, self.stop,
                     predicate=lambda: len(packager.sealed) >= 3)
-        # probe + 2 routine pipelines + 5 pre-end ranking-only + 1 post-close
-        # verification probe + 1 post-close pipeline
-        self.assertEqual(len(factory.sessions), 1 + 2 * 5 + 5 * 3 + 1 + 5)
+        budgets = [(max_requests, max_seconds)
+                   for _, max_requests, max_seconds in factory.sessions]
+        expected_business = {(80, 300): 24, (400, 900): 3, (200, 600): 3}
+        for budget, count in expected_business.items():
+            self.assertEqual(budgets.count(budget), count, budget)
+        metadata_sessions = [budget for budget in budgets if budget not in expected_business]
+        self.assertGreaterEqual(len(metadata_sessions), 2)
+        self.assertLessEqual(len(metadata_sessions), 3,
+                               "one optional closed-period metadata probe is allowed")
         slots = {row["slot"]: row["status"]
                  for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
         self.assertEqual(slots["ROUTINE"], "SKIPPED",
