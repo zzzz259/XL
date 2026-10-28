@@ -169,6 +169,25 @@ class RenewalProviderTests(unittest.IsolatedAsyncioTestCase):
             provider.startup_check()
         self.assertEqual(caught.exception.code, "PRIVATE_PERMISSIONS_REQUIRED")
 
+    def test_store_safe_error_without_code_attribute_is_mapped(self):
+        from starfall_refresh.core import SafeError
+
+        class BrokenStore:
+            def locked(self):
+                return self
+
+            def __enter__(self):
+                raise SafeError("PRIVATE_PERMISSIONS_REQUIRED")
+
+            def __exit__(self, *exc_info):
+                return False
+
+        provider = LeaderboardCredentialProvider(self.config())
+        provider._store = BrokenStore()
+        with self.assertRaises(CredentialError) as caught:
+            provider.startup_check()
+        self.assertEqual(caught.exception.code, "PRIVATE_PERMISSIONS_REQUIRED")
+
     def _exploding_engine(self, *args, **kwargs):
         raise AssertionError("engine must not be constructed")
 

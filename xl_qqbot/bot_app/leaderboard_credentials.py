@@ -78,7 +78,17 @@ def renewal_owner(path: str | Path) -> str | None:
     return _RENEWAL_OWNERS.get(_resolved(path))
 
 
-def _fixed_failure(code: str) -> CredentialError:
+def _fixed_failure(error: Exception | str) -> CredentialError:
+    if isinstance(error, str):
+        code = error
+    elif error.args and isinstance(error.args[0], str):
+        code = error.args[0]
+    else:
+        code = "STATE_READ_FAILED"
+    if (not code or len(code) > 128
+            or any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for char in code)
+            or not code[0].isupper()):
+        code = "STATE_READ_FAILED"
     _logger.warning("leaderboard credentials unavailable: %s", code)
     return CredentialError(code)
 
@@ -87,7 +97,7 @@ def _parse_token(token: str, *, open_id=None, channel=None):
     try:
         web = parse_credentials(token, supported_app_ids=LEADERBOARD_APP_IDS)
     except GachaError as error:
-        raise _fixed_failure(error.code) from None
+        raise _fixed_failure(error) from None
     if open_id is not None and web.open_id != str(open_id):
         raise _fixed_failure("INVALID_CREDENTIAL_BINDING")
     if channel is not None and web.channel != str(channel):
@@ -133,7 +143,7 @@ class LeaderboardCredentialProvider:
             with self._store.locked():
                 self._store.load()
         except SafeError as error:
-            raise _fixed_failure(error.code) from None
+            raise _fixed_failure(error) from None
 
     def _renewal_tick(self) -> None:
         if self._engine is None:
@@ -153,7 +163,7 @@ class LeaderboardCredentialProvider:
             with self._store.locked():
                 data = self._store.load()
         except SafeError as error:
-            raise _fixed_failure(error.code) from None
+            raise _fixed_failure(error) from None
         credential = data.get("credential", {})
         token = credential.get("token")
         if not isinstance(token, str) or not token.strip():
