@@ -9,6 +9,7 @@ from app.features.preview.controller import PreviewController
 from app.features.preview.page import PreviewPage
 from app.features.preview.service import PreviewService
 from app.features.preview.portrait_config.cache import PortraitSceneCache
+from app.features.preview.portrait_config.builder import PARSER_VERSION
 from app.features.preview.portrait_config.model import PortraitScene, SceneDiagnostic
 
 
@@ -143,7 +144,7 @@ def test_preview_service_loads_versioned_scene_manifests_without_source_discover
         prefab_container="assets/art/models/cardspine/prefab/cardspine_10118_3.prefab",
     )
     PortraitSceneCache(
-        data_root / "cache" / "portrait-scenes", parser_version="4",
+        data_root / "cache" / "portrait-scenes", parser_version=PARSER_VERSION,
     ).store_snapshot(scene)
     service = PreviewService(data_root / "material", tmp_path / "output" / "character")
     monkeypatch.setattr(

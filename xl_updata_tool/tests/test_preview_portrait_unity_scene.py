@@ -84,6 +84,17 @@ def test_nested_transform_chain_and_same_gameobject_spine_components_are_distinc
     assert spine_parts[0].hierarchy_path == "root/hero"
 
 
+def test_spine_parser_preserves_exact_skeleton_data_scale(monkeypatch):
+    objects = _scene_objects()
+    next(obj for obj in objects if obj.path_id == 50).tree["scale"] = 0.003000000026077032
+    monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=objects))
+
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
+
+    spine = next(part for part in parsed.parts if part.component_ref.path_id == 5)
+    assert spine.skeleton_scale == 0.003000000026077032
+
+
 def test_skeleton_atlas_assets_resolve_through_atlas_asset_to_text_asset(monkeypatch):
     objects = _scene_objects()
     skeleton_data = next(obj for obj in objects if obj.path_id == 50)
@@ -187,16 +198,17 @@ def test_sprite_material_blend_mode_is_classified_from_material_typetree(monkeyp
     material.tree["m_SavedProperties"]["m_Floats"]["_DstBlend"] = 1.0
     parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
     sprite = next(part for part in parsed.parts if part.component_type == "SpriteRenderer")
-    assert sprite.blend_mode == "unsupported"
+    assert sprite.blend_mode == "normal"  # Base image export omits extra Unity shader effects.
 
 
-def test_spine_screen_material_variant_is_rejected_until_renderer_supports_it(monkeypatch):
+@pytest.mark.parametrize("variant", ["Screen", "Multiply", "Additive"])
+def test_spine_standard_material_variant_uses_skeleton_slot_blending(monkeypatch, variant):
     objects = _scene_objects()
     renderer = next(obj for obj in objects if obj.path_id == 12)
     renderer.tree["m_Materials"] = [_ptr(72)]
     material = next(obj for obj in objects if obj.path_id == 72)
     material.tree.update({
-        "m_Name": "eventcovers_0002_Material-Screen",
+        "m_Name": f"eventcovers_0002_Material-{variant}",
         "m_SavedProperties": {"m_Floats": [("_StencilRef", 0), ("_StencilComp", 8)]},
     })
     monkeypatch.setattr(unity_scene, "_load_environment", lambda _path: SimpleNamespace(objects=objects))
@@ -204,10 +216,10 @@ def test_spine_screen_material_variant_is_rejected_until_renderer_supports_it(mo
     parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
 
     spine = next(part for part in parsed.parts if part.component_type == "SkeletonAnimation")
-    assert spine.blend_mode == "unsupported"
+    assert spine.blend_mode == "normal"
 
 
-def test_spine_additive_material_with_game_stencil_reference_is_rejected(monkeypatch):
+def test_spine_additive_material_game_stencil_does_not_block_base_content(monkeypatch):
     objects = _scene_objects()
     renderer = next(obj for obj in objects if obj.path_id == 12)
     renderer.tree["m_Materials"] = [_ptr(72)]
@@ -221,10 +233,20 @@ def test_spine_additive_material_with_game_stencil_reference_is_rejected(monkeyp
     parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
 
     spine = next(part for part in parsed.parts if part.component_type == "SkeletonAnimation")
-    assert spine.blend_mode == "unsupported"
+    assert spine.blend_mode == "normal"
 
 
-def test_spine_material_with_unknown_blend_name_is_unsupported(monkeypatch):
+def test_default_sprite_material_without_blend_floats_exports_base_image(monkeypatch):
+    objects = _scene_objects()
+    next(obj for obj in objects if obj.path_id == 10).tree["m_Materials"] = [_ptr(72)]
+    next(obj for obj in objects if obj.path_id == 72).tree["m_Name"] = "Sprites-Default"
+    monkeypatch.setattr(unity_scene, "_load_environment", lambda _: SimpleNamespace(objects=objects))
+    parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
+    sprite = next(part for part in parsed.parts if part.component_type == "SpriteRenderer")
+    assert sprite.blend_mode == "normal"
+
+
+def test_spine_custom_material_name_warns_about_omitted_shader_effects_but_keeps_base(monkeypatch):
     objects = _scene_objects()
     renderer = next(obj for obj in objects if obj.path_id == 12)
     renderer.tree["m_Materials"] = [_ptr(72)]
@@ -238,7 +260,10 @@ def test_spine_material_with_unknown_blend_name_is_unsupported(monkeypatch):
     parsed = unity_scene.parse_unity_scene(Path("fixture.bundle"), "bundle-hash")
 
     spine = next(part for part in parsed.parts if part.component_type == "SkeletonAnimation")
-    assert spine.blend_mode == "unsupported"
+    assert spine.blend_mode == "normal"
+    warnings = [item for item in parsed.diagnostics if item.code == "shader_effects_omitted"]
+    assert warnings
+    assert all(item.severity == "warning" for item in warnings)
 
 
 def test_skeleton_data_asset_and_renderer_component_are_linked_without_duplicate_mesh_part(monkeypatch):

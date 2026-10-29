@@ -32,6 +32,7 @@ from app.shared.qt.chrome import (
 from .drag_list import DragListWidget
 from .output_browser import OutputBrowserCatalog, OutputBrowserEntry, folder_fingerprint
 from .spine_tree import PreviewSpineTree
+from .scene_capabilities import portrait_scene_capabilities
 from .workers.image_loader import ImageLoadWorker
 from app.ui.theme import get_color
 
@@ -138,6 +139,9 @@ class PreviewIconBrowser(QListWidget):
         self.setObjectName("previewIconBrowser")
         self._root_path = ""
         self._thumbnail_worker = None
+        self._retired_thumbnail_workers = set()
+        self._thumbnail_closing = False
+        self._thumbnail_close_pending = False
         self._thumbnail_pending: set[str] = set()
         self._thumbnail_loaded: set[str] = set()
         self._file_items: dict[str, QListWidgetItem] = {}
@@ -258,10 +262,12 @@ class PreviewIconBrowser(QListWidget):
         return QIcon(pixmap)
 
     def _schedule_visible_thumbnails(self):
+        if self._thumbnail_closing:
+            return
         QTimer.singleShot(80, self._load_visible_thumbnails)
 
     def _load_visible_thumbnails(self):
-        if self._thumbnail_worker is not None:
+        if self._thumbnail_closing or self._thumbnail_worker is not None:
             return
         visible = []
         viewport_rect = self.viewport().rect()
@@ -286,6 +292,8 @@ class PreviewIconBrowser(QListWidget):
         worker.start()
 
     def _on_thumbnail_loaded(self, path, image):
+        if self._thumbnail_closing or self.sender() is not self._thumbnail_worker:
+            return
         item = self._file_items.get(str(path))
         if item is not None:
             data = item.data(Qt.UserRole) or {}
@@ -304,23 +312,38 @@ class PreviewIconBrowser(QListWidget):
         worker = self.sender()
         if worker is self._thumbnail_worker:
             self._thumbnail_worker = None
+        self._retired_thumbnail_workers.discard(worker)
         if worker is not None:
             worker.deleteLater()
-        self._load_visible_thumbnails()
+        if not self._thumbnail_closing:
+            self._load_visible_thumbnails()
+        elif self._thumbnail_close_pending and not self.has_running_thumbnail_tasks:
+            self.close()
 
     def _stop_thumbnail_worker(self):
         worker = self._thumbnail_worker
         if worker is not None:
             worker.cancel()
-            worker.wait(2000)
+            # Decoding may still hold native image resources. Retain the thread
+            # until its inherited finished signal, including across navigation.
+            self._retired_thumbnail_workers.add(worker)
         self._thumbnail_worker = None
+
+    @property
+    def has_running_thumbnail_tasks(self):
+        return bool(self._thumbnail_worker is not None or self._retired_thumbnail_workers)
 
     def stop_thumbnail_loading(self) -> None:
         """Stop background image decoding before the page is destroyed."""
+        self._thumbnail_closing = True
         self._stop_thumbnail_worker()
 
     def closeEvent(self, event):
         self.stop_thumbnail_loading()
+        if self.has_running_thumbnail_tasks:
+            self._thumbnail_close_pending = True
+            event.ignore()
+            return
         super().closeEvent(event)
 
     def _activate_item(self, item) -> None:
@@ -342,6 +365,8 @@ class PreviewPage(QWidget):
     spine_selection_changed = Signal(object)
     portrait_scene_selection_changed = Signal(object)
     export_selected_requested = Signal()
+    portrait_refresh_requested = Signal()
+    export_basic_requested = Signal()
     thumbnail_page_changed = Signal(int)
 
     def __init__(self, parent=None):
@@ -431,6 +456,10 @@ class PreviewPage(QWidget):
         self.btn_thumbnail_next.clicked.connect(lambda: self.set_thumbnail_page(self._thumbnail_page + 1))
         self.spine_tree.selection_changed.connect(self._on_spine_selection_changed)
         self.spine_tree.portrait_scenes_changed.connect(self._on_portrait_scene_selection_changed)
+        self.spine_tree.portrait_scene_checks_changed.connect(lambda _scenes: self._sync_export_actions())
+        self._export_busy = False
+        self._export_cancelling = False
+        self._sync_export_actions()
         self._material_state = None
         self._character_state = None
         self._material_catalog = None
@@ -448,6 +477,17 @@ class PreviewPage(QWidget):
         self.btn_export_selected.setObjectName("exportSelectedSpineButton")
         self.btn_export_selected.setAccessibleName("导出选中 Spine 皮肤")
         spine_command.addWidget(self.btn_export_selected)
+        self.btn_export_basic = create_action_button('仅导出基础画面', 'secondary', None, self.tabs.spine_tab)
+        self.btn_export_basic.setObjectName('exportBasicSceneButton')
+        self.btn_export_basic.setAccessibleName('仅导出基础画面')
+        self.btn_export_basic.clicked.connect(self.export_basic_requested)
+        spine_command.addWidget(self.btn_export_basic)
+        self.btn_refresh_portrait = create_action_button('更新场景工程', 'secondary', None, self.tabs.spine_tab)
+        self.btn_refresh_portrait.setObjectName('refreshPortraitSceneButton')
+        self.btn_refresh_portrait.setAccessibleName('更新选中场景工程')
+        self.btn_refresh_portrait.setToolTip('使用所选工程的同版源资源更新；重新加载只刷新目录')
+        self.btn_refresh_portrait.clicked.connect(self.portrait_refresh_requested)
+        spine_command.addWidget(self.btn_refresh_portrait)
         spine_command.addStretch()
         spine_layout.addLayout(spine_command)
         self.spine_tree = PreviewSpineTree(parent=self.tabs.spine_tab)
@@ -753,11 +793,39 @@ class PreviewPage(QWidget):
         self.set_character_output_root(root, state)
 
     def _on_spine_selection_changed(self, records) -> None:
+        self._sync_export_actions()
         self.spine_selection_changed.emit(records)
         self.export_requested.emit(records)
 
     def _on_portrait_scene_selection_changed(self, scenes) -> None:
+        self._sync_export_actions()
         self.portrait_scene_selection_changed.emit(scenes)
+
+    def action_portrait_scenes(self):
+        """Use checked scenes first; an inspected scene is actionable when no raw row is checked."""
+        checked = self.checked_portrait_scenes()
+        return checked or (() if self.selected_spine_records() else self.spine_tree.selected_portrait_scenes())
+
+    def set_export_busy(self, busy: bool, *, cancelling: bool = False) -> None:
+        self._export_busy = bool(busy)
+        self._export_cancelling = bool(cancelling) and bool(busy)
+        self._sync_export_actions()
+
+    def _sync_export_actions(self) -> None:
+        scenes = self.action_portrait_scenes()
+        capabilities = tuple(portrait_scene_capabilities(scene) for scene in scenes)
+        busy = getattr(self, '_export_busy', False)
+        cancelling = getattr(self, '_export_cancelling', False)
+        label = ('正在取消…' if cancelling else '取消导出') if busy else (
+            '导出选中场景' if scenes else '导出选中 Spine')
+        self.btn_export_selected.setText(label)
+        self.btn_export_selected.setAccessibleName(label)
+        self.btn_export_selected.setEnabled(not cancelling if busy else (
+            all(cap.can_export for cap in capabilities) if scenes else bool(self.selected_spine_records())))
+        self.btn_export_basic.setEnabled(not busy and bool(capabilities) and all(
+            cap.can_export_basic for cap in capabilities) and any(not cap.can_export for cap in capabilities))
+        self.btn_refresh_portrait.setEnabled(not busy and bool(capabilities) and any(
+            cap.state != 'not_applicable' for cap in capabilities))
 
     def _sync_character_empty_state(self) -> None:
         self.empty_label.sync_visibility()

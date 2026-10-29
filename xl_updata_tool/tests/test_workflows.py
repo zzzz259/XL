@@ -1,5 +1,8 @@
 from app.bootstrap.workflows import ImportPostprocessWorkflow
 from app.shared.contracts import ImportResult
+from app.features.preview.service import PreviewPreprocessSummary
+from app.features.preview.output_publisher import RawSpinePublishSummary
+from app.features.preview.material_catalog import MaterialExportSummary
 
 
 class FakeSignal:
@@ -134,3 +137,19 @@ def test_import_postprocess_workflow_does_not_skip_required_preview_processing()
     assert preview.started == []
     assert finished and finished[0][0][0] is False
     assert "图片资源后处理未启动" in finished[0][0][1]
+
+
+def test_import_postprocess_preserves_partial_raw_and_material_results():
+    result = ImportResult(categories=frozenset({'fgui'}), completed_categories=frozenset({'fgui'}),
+                          postprocess_categories=frozenset({'preview'}))
+    preview = FakePreview()
+    preview.last_postprocess_summary = PreviewPreprocessSummary(
+        object(), RawSpinePublishSummary(published=1, diagnostics=('atlas missing',)),
+        MaterialExportSummary(exported=2, failed=1, diagnostics=('disk full',)),
+    )
+    workflow = ImportPostprocessWorkflow(FakeImporter(result), FakeAudio(), FakeCharacters(), FakeRegistry(), preview)
+    finished = []
+    workflow.handle_import_finished(True, '导入完成', None, lambda *args, **kwargs: finished.append((args, kwargs)))
+    preview.processing_finished.emit(True)
+    assert 'disk full' in finished[0][1]['preview_error']
+    assert 'atlas missing' in finished[0][1]['preview_error']

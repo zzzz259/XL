@@ -94,7 +94,7 @@ def test_import_manifest_builder_receives_eventcover_scene_roots(tmp_path, monke
 
     captured = []
     monkeypatch.setattr(import_service, "load_portrait_roots", lambda *_: [])
-    monkeypatch.setattr(AssetIndex, "from_catalog", lambda *_: type("Index", (), {
+    monkeypatch.setattr(AssetIndex, "from_catalog", lambda *_, **_kwargs: type("Index", (), {
         "assets": (),
     })())
 

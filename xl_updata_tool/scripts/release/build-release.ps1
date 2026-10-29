@@ -107,6 +107,13 @@ Invoke-Step '安装构建依赖（requirements-build.txt + requirements-dev.txt�
 }
 
 # ---------- 4. 质量门禁 ----------
+Invoke-Step '编译立绘场景导出器（复用 tools 内 .NET/Spine，无 restore）' {
+    Invoke-Native $python @((Join-Path $appDir 'scripts\build-portrait-scene-renderer.py'), '--root', $appDir, '--work-dir', (Join-Path $buildDir 'portrait-scene'))
+    $sceneTools = Join-Path $stageDir 'tools\SpineViewer'
+    foreach ($name in @('PortraitSceneCLI.dll', 'PortraitSceneCLI.runtimeconfig.json')) {
+        Copy-Item -LiteralPath (Join-Path $appDir "tools\SpineViewer\$name") -Destination (Join-Path $sceneTools $name) -Force
+    }
+}
 if (-not $SkipTests) {
     Invoke-Step 'pytest -q' {
         Push-Location $appDir

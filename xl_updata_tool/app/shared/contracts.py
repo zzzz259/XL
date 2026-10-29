@@ -111,6 +111,9 @@ class ImportResult:
     message: str = ""
     lua_export_result: object | None = None
     postprocess_categories: frozenset[str] = field(default_factory=frozenset)
+    # Selected bundle/config version also exists for character-only imports.
+    # It must not be inferred from whichever Lua directory is newest.
+    version_timestamp: int | None = None
 
     def has_category(self, category: str) -> bool:
         """返回本次导入是否包含指定分类。"""

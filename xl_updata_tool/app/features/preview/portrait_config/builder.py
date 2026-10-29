@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from collections.abc import Callable
 
 from .asset_index import AssetIndex, IndexedAsset
 from .cache import PortraitSceneCache, file_sha256
-from .dependency_resolver import ResolvedScene, resolve_scene_assets
+from .dependency_resolver import ResolvedScene, ResolvedReference, resolve_scene_assets
 from .lua_config import PortraitRoot
+from .event_runtime import apply_event_runtime, runtime_diagnostics
 from .model import (
     AssetRef,
     AssetDependency,
@@ -26,11 +27,24 @@ from .model import (
 )
 from .unity_scene import UnitySceneParseResult, UnityScenePart, parse_unity_scene
 
-PARSER_VERSION = "4"
+PARSER_VERSION = "13"
+
+# Confirmed by the user as Japan-only entries retained in the CN Lua tables.
+# If an exact resource becomes available in a later version it is used normally.
+_KNOWN_NON_CN_PREFABS = frozenset({
+    *(f"cardspine_10099_{i}.prefab" for i in (1, 2, 3, 5)),
+    *(f"cardspine_10100_{i}.prefab" for i in (1, 2, 3)),
+    "cardspine_10102_4.prefab", "cardspine_10103_4.prefab", "eventcovers_0101.prefab",
+})
 
 
 def _metadata(root: PortraitRoot) -> dict[str, str]:
-    return dict(root.metadata)
+    return {
+        **dict(root.metadata),
+        "configuration_evidence": root.evidence,
+        "configured_prefab": str(root.prefab_name or ""),
+        **{f"field_evidence.{key}": value for key, value in root.field_evidence},
+    }
 
 
 def _root_config_hash(
@@ -38,13 +52,16 @@ def _root_config_hash(
 ) -> str:
     # Hash this parsed root rather than its whole Lua source file: one unrelated
     # skin entry changing must not invalidate every skin declared in that file.
+    from .interaction_metadata import source_fingerprints
     payload = {
+        "interaction_sources": source_fingerprints(root),
         "skin_id": root.skin_id,
         "version_timestamp": root.version_timestamp,
         "prefab_name": root.prefab_name,
         "position": root.position,
         "metadata": root.metadata,
         "unresolved_reason": root.unresolved_reason,
+        "event_runtime": asdict(root.event_runtime) if root.event_runtime else None,
         "container_assets": [
             (item.name, item.container, item.path_id, item.asset_type)
             for item in sorted(container_assets, key=lambda asset: (
@@ -77,18 +94,41 @@ def _container_part_refs(part: UnityScenePart) -> set[AssetRef]:
 
 def _scope_to_container(
     parsed: UnitySceneParseResult, assets: tuple[IndexedAsset, ...], index: AssetIndex,
+    *, prefab_name: str = "", prefab_ref: AssetRef | None = None,
 ) -> UnitySceneParseResult:
     """Limit a whole-bundle parse to renderers evidenced by one AS Container."""
     listed = {AssetRef(asset.bundle_hash, asset.path_id) for asset in assets}
-    parts = tuple(
-        part for part in parsed.parts
-        if _container_part_refs(part) & listed
-    )
+    game_objects = {ref for ref, _ in parsed.game_objects} | {ref for ref, _ in parsed.object_ancestry}
+    # Unity's m_Container can list TextAssets/textures under the same Prefab
+    # path. Only GameObjects can establish hierarchy ownership.
+    container_roots = tuple((name, ref) for name, ref in parsed.container_roots if ref in game_objects)
+    containers = {a.container.casefold() for a in assets}
+    roots = {ref for name, ref in container_roots if name in containers}
+    if not roots and prefab_ref is not None:
+        roots = {ref for _, ref in container_roots if ref == prefab_ref}
+    if not roots and prefab_name:
+        configured = prefab_name.replace("\\", "/").strip("/").casefold()
+        roots = {ref for name, ref in container_roots
+                 if (name == configured if "/" in configured else name.rsplit("/", 1)[-1] == configured)}
+    if parsed.container_roots and len(roots) != 1:
+        diagnostic = SceneDiagnostic(
+            "ambiguous_prefab_root" if roots else "prefab_root_unresolved",
+            "Configured Prefab has no unique AssetBundle container root",
+            details=(("prefab_name", prefab_name), ("root_matches", str(len(roots)))),
+        )
+        return replace(parsed, parts=(), interactions=(), references=(), game_objects=(),
+                       component_refs=(), diagnostics=(diagnostic,))
+    ancestry = dict(parsed.object_ancestry)
+    owned = {go for go, chain in ancestry.items() if roots.intersection(chain)}
+    parts = tuple(part for part in parsed.parts if
+                  (part.game_object_ref in owned if roots else bool(_container_part_refs(part) & listed)))
     selected_objects = {
         ref for part in parts
         for ref in (part.component_ref, part.game_object_ref,
                     *(node.component_ref for node in part.transform_chain))
     }
+    selected_objects.update(owned)
+    selected_objects.update(ref for ref, owner, _ in parsed.component_refs if owner in owned)
     # Follow local PPtrs from the selected renderers (e.g. SkeletonAnimation ->
     # SkeletonDataAsset -> skeleton JSON/atlas) without importing pointers from
     # other Prefabs that happen to share the same bundle.
@@ -104,11 +144,10 @@ def _scope_to_container(
     }
     scoped_interactions = tuple(
         item for item in parsed.interactions
-        if item.component_ref in selected_objects or item.game_object_ref in selected_objects
-        or item.target_component in selected_objects
+        if item.game_object_ref in selected_objects
     )
     traversal_sources.update(item.component_ref for item in scoped_interactions)
-    known_sources = set(traversal_sources)
+    known_sources = set(traversal_sources) | selected_objects
     pending_sources = list(traversal_sources)
     while pending_sources:
         source = pending_sources.pop()
@@ -173,7 +212,11 @@ def _incomplete_scene(
         prefab=None,
         source_bundles=(),
         parts=(),
-        diagnostics=(SceneDiagnostic(code, message, details=details),),
+        display_position=root.position,
+        config_metadata=tuple(metadata.items()),
+        diagnostics=(SceneDiagnostic(code, message, details=details), *(
+            runtime_diagnostics(root.event_runtime) if root.event_runtime else ()
+        )),
     )
 
 
@@ -221,14 +264,15 @@ def _part_to_model(
     )
     sprite_renderer = part.component_type == "SpriteRenderer"
 
+    materials = part.material_refs or _field_targets(resolved, part.renderer_ref or part.component_ref, "m_materials")
     renderer = RendererState(
         kind=part.component_type,
         enabled=part.enabled,
         sorting_layer=str(part.sorting_layer_value),
         sorting_order=part.sorting_order,
         transform=tuple(part.world_position),
-        material=part.material_refs[0] if part.material_refs else None,
-        materials=part.material_refs,
+        material=materials[0] if materials else None,
+        materials=materials,
         mesh=part.mesh_ref,
         color=part.renderer_color,
         flip_x=part.flip_x,
@@ -242,13 +286,14 @@ def _part_to_model(
             skeleton=skeleton,
             atlas=atlas_refs[0] if atlas_refs else None,
             texture=None,
-            material=part.material_refs[0] if part.material_refs else None,
+            material=materials[0] if materials else None,
             default_animation=part.animation,
             loop=part.loop,
             time_scale=part.time_scale,
             initial_skin=part.initial_skin,
             skeleton_json=skeleton_json,
             atlases=atlas_refs,
+            skeleton_scale=part.skeleton_scale,
         )
     sprite = None
     if sprite_renderer and sprite_ref is not None:
@@ -278,6 +323,7 @@ def _part_to_model(
         sorting_layer_value=part.sorting_layer_value,
         renderer_depth=part.renderer_depth,
         stable_order=stable_order,
+        particle=part.particle,
     )
 
 
@@ -330,6 +376,8 @@ def _scene_assets(
                 part.spine.skeleton, part.spine.atlas, part.spine.texture, part.spine.material,
                 part.spine.skeleton_json, *part.spine.atlases,
             ) if ref)
+        if part.particle:
+            refs.update(ref for ref in (part.particle.system, part.particle.material, part.particle.texture) if ref)
         if part.sprite:
             refs.update(ref for ref in (part.sprite.sprite, part.sprite.texture) if ref)
     for item in interactions:
@@ -386,6 +434,8 @@ def _part_asset_refs(part: ScenePart) -> set[AssetRef]:
             part.spine.skeleton, part.spine.atlas, part.spine.texture, part.spine.material,
             part.spine.skeleton_json, *part.spine.atlases,
         ) if ref)
+    if part.particle:
+        refs.update(ref for ref in (part.particle.system, part.particle.material, part.particle.texture) if ref)
     if part.sprite:
         refs.update(ref for ref in (part.sprite.sprite, part.sprite.texture) if ref)
     return refs
@@ -458,6 +508,15 @@ def build_portrait_scenes(
                 (("evidence", root.evidence),),
             ))
             continue
+        if root.event_runtime and root.event_runtime.purpose == "sequential_entrance":
+            scenes.append(_incomplete_scene(
+                version_timestamp, root, game_version, "event_sequence_unsupported",
+                "Configured cover is unmounted; entrance phases are sequential and cannot form one scene",
+                (("purpose", root.event_runtime.purpose),
+                 ("sequence_prefabs", ";".join(root.event_runtime.sequence_prefabs)),
+                 ("evidence", ";".join(root.event_runtime.evidence))),
+            ))
+            continue
         prefab_matches = index.find_by_name_exact(root.prefab_name)
         container_assets: tuple[IndexedAsset, ...] = ()
         if not prefab_matches:
@@ -489,6 +548,18 @@ def build_portrait_scenes(
                 ))
                 continue
         if not prefab_matches:
+            leaf = str(root.prefab_name).replace("\\", "/").rsplit("/", 1)[-1].casefold()
+            if leaf in _KNOWN_NON_CN_PREFABS:
+                scene = _incomplete_scene(
+                    version_timestamp, root, game_version, "region_not_applicable",
+                    "Confirmed Japan-only configuration has no asset in this CN version",
+                    (("prefab_name", root.prefab_name), ("evidence", root.evidence)),
+                )
+                scenes.append(replace(
+                    scene, config_metadata=(*_metadata(root).items(), ("export_status", "not_applicable")),
+                    diagnostics=tuple(replace(d, severity="warning") for d in scene.diagnostics),
+                ))
+                continue
             scenes.append(_incomplete_scene(
                 version_timestamp, root, game_version, "prefab_asset_missing",
                 "Configured Prefab name has no exact AssetStudio catalog match",
@@ -526,23 +597,48 @@ def build_portrait_scenes(
         parsed = parse_unity_scene(
             prefab_asset.bundle_path, prefab_asset.bundle_hash, version_timestamp,
         )
-        if container_assets:
-            parsed = _scope_to_container(parsed, container_assets, index)
+        if container_assets or parsed.container_roots:
+            parsed = _scope_to_container(
+                parsed, container_assets or (prefab_asset,), index,
+                prefab_name=str(root.prefab_name),
+                prefab_ref=None if container_assets else AssetRef(prefab_asset.bundle_hash, prefab_asset.path_id),
+            )
             if not parsed.parts:
-                scenes.append(_incomplete_scene(
+                incomplete = _incomplete_scene(
                     version_timestamp, root, game_version, "prefab_scene_parts_unmatched",
                     "AssetStudio container has no matching Unity renderer parts",
                     (("prefab_name", root.prefab_name),
                      ("bundle_hash", prefab_asset.bundle_hash),
                      ("container_assets", str(len(container_assets)))),
-                ))
+                )
+                scenes.append(replace(incomplete, diagnostics=(*incomplete.diagnostics, *parsed.diagnostics)))
                 continue
         resolved = resolve_scene_assets(parsed, index)
         parts = tuple(
             _part_to_model(part, resolved, order)
             for order, part in enumerate(parsed.sorted_parts())
         )
-        interactions = _interactions(parsed, resolved)
+        runtime_notes = ()
+        if root.event_runtime:
+            parts, runtime_notes = apply_event_runtime(parts, root.event_runtime)
+        from .particle_metadata import enrich_particle
+        enriched = [enrich_particle(part, index) for part in parts]
+        parts = tuple(part for part, _ in enriched)
+        shader_references=[]
+        for part in parts:
+            if part.particle and part.particle.profile != 'unsupported' and part.particle.material:
+                material=part.particle.material
+                pointer=index.object_tree(material).get('m_Shader')
+                shader=index.resolve_object_pointer(material,pointer,expected_type='Shader')
+                if shader is not None:
+                    asset=index.find_exact(shader.bundle_hash,shader.path_id)[0]
+                    shader_references.append(ResolvedReference(material,'particle.shader',pointer,shader,asset,'resolved',asset.evidence))
+        if shader_references:
+            resolved=replace(resolved,references=(*resolved.references,*shader_references))
+        runtime_notes = (*runtime_notes, *(note for _, notes in enriched for note in notes))
+        from .interaction_metadata import apply_callbacks
+        interactions, interaction_notes = apply_callbacks(_interactions(parsed, resolved), root)
+        runtime_notes = (*runtime_notes, *interaction_notes)
         source_bundles = _source_bundles(prefab_asset, parts, resolved)
         asset_dependencies = _asset_dependencies(resolved)
         source_bundle_details = _source_bundle_details(source_bundles, asset_dependencies, index)
@@ -561,10 +657,12 @@ def build_portrait_scenes(
             parts=parts,
             available_assets=_scene_assets(prefab_ref, parts, interactions, resolved),
             interactions=interactions,
-            diagnostics=_unique_diagnostics(resolved.diagnostics),
+            diagnostics=_unique_diagnostics((*resolved.diagnostics, *runtime_notes)),
             source_bundle_details=source_bundle_details,
             asset_dependencies=asset_dependencies,
             prefab_container=container_assets[0].container if container_assets else "",
+            display_position=root.position,
+            config_metadata=tuple(metadata.items()),
         )
         resource_diagnostics = []
         for source_part, model_part in zip(parsed.sorted_parts(), parts, strict=True):

@@ -17,6 +17,34 @@ from app.features.preview.resource_state import PreviewResourceState
 from app.features.preview.spine_tree import PreviewSpineTree
 
 
+def test_configured_skin_label_distinguishes_shared_prefab_identities():
+    first = PortraitScene(
+        game_version="402", version_timestamp="402", entry_config_id="12002183",
+        character_id="10118", skin_id="12002183", prefab=None, source_bundles=(), parts=(),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10118_3.prefab",
+    )
+    second = replace(first, skin_id="12002184")
+    label_a = PreviewSpineTree._portrait_scene_label(first)
+    label_b = PreviewSpineTree._portrait_scene_label(second)
+    assert label_a != label_b
+    assert "12002183" in label_a
+
+
+def test_pure_sprite_event_can_be_checked_and_exported(qapp):
+    from app.features.preview.portrait_config.model import SpriteState
+    refs = tuple(AssetRef('bundle', n) for n in range(1, 4))
+    part = ScenePart('sprite', refs[0], 'background',
+                     sprite=SpriteState(refs[1], (0, 0, 2, 2), (0.5, 0.5), refs[2]))
+    scene = PortraitScene('123', '123', 'cover', '', 'eventcovers_0028', None, ('bundle',),
+                          (part,), available_assets=refs, prefab_container='assets/eventcovers/0028.prefab')
+    tree = PreviewSpineTree()
+    tree.set_catalog(PreviewResourceCatalog.from_records((), portrait_scenes=(scene,)))
+    item = tree.topLevelItem(0).child(0)
+    assert item.flags() & Qt.ItemIsUserCheckable
+    item.setCheckState(0, Qt.Checked)
+    assert tree.checked_portrait_scenes() == (scene,)
+
+
 @pytest.fixture(scope="module")
 def qapp():
     app = QApplication.instance() or QApplication([])
@@ -318,7 +346,7 @@ def test_spine_tree_displays_manifest_skin_once_and_keeps_raw_resources_separate
 
     assert len(scene_items) == 1
     assert scene_items[0].text(0).startswith("角色立绘 4")
-    assert "完整" in scene_items[0].text(1)
+    assert "缺少资源" in scene_items[0].text(1)
     assert not (scene_items[0].flags() & Qt.ItemIsUserCheckable)
     assert raw_root.childCount() == 1
 
@@ -355,7 +383,7 @@ def test_spine_tree_keeps_unresolved_configured_event_root_under_cover_group(qap
     group = tree.topLevelItem(0)
     assert group.text(0) == "活动封面"
     assert group.child(0).text(0) == "活动封面 0005"
-    assert "不完整" in group.child(0).text(1)
+    assert "缺少资源" in group.child(0).text(1)
 
 
 def test_spine_tree_checks_manifest_scene_separately_from_current_preview_selection(qapp):
@@ -407,7 +435,7 @@ def test_spine_tree_shows_incomplete_manifest_diagnostic(qapp):
         item for item in _walk(tree.topLevelItem(0))
         if (item.data(0, Qt.UserRole) or {}).get("kind") == "portrait_scene"
     )
-    assert "不完整" in item.text(1)
+    assert "缺少资源" in item.text(1)
     assert "Atlas path ID 12 is unresolved" in item.toolTip(0)
     received = []
     tree.portrait_scenes_changed.connect(received.append)

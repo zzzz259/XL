@@ -20,6 +20,12 @@ class ImportPostprocessWorkflow:
         self.characters = characters
         self.registry = registry
         self.preview = preview
+        importer_service = getattr(importer, "service", None)
+        if preview is not None and importer_service is not None:
+            # Composition Root owns the cross-feature dependency; Importer sees
+            # only the Shared callable protocol, never Preview internals.
+            from app.features.preview.portrait_import import export_configured_character_assets
+            importer_service.character_asset_exporter = export_configured_character_assets
         self._latest_result: ImportResult | None = None
         self._message = ""
         self._progress_dialog = None
@@ -92,7 +98,21 @@ class ImportPostprocessWorkflow:
 
     def _on_preview_finished(self, shared) -> None:
         if shared and self._finish is not None:
-            self._finish_success(self._latest_result or self.importer.last_result, audio_error=self._audio_error)
+            summary = getattr(self.preview, 'last_postprocess_summary', None)
+            partial = None
+            if summary is not None and summary.partial:
+                partial = (f'图片资源部分完成：Spine {summary.spine.published} 组，'
+                           f'游戏素材成功 {summary.materials.exported}，失败 {summary.materials.failed}')
+                details = (*summary.spine.diagnostics, *summary.materials.diagnostics)
+                if summary.portrait is not None and summary.portrait.status in {'partial', 'skipped'}:
+                    partial += f'；场景 {summary.portrait.status}：{summary.portrait.diagnostic or summary.portrait.incomplete}'
+                if summary.packages is not None:
+                    partial += f'；工程成功 {summary.packages.published}，失败 {summary.packages.failed}'
+                    details += tuple(item['error'] for item in summary.packages.failures)
+                if details:
+                    partial += '；' + '；'.join(details)
+            self._finish_success(self._latest_result or self.importer.last_result,
+                                 audio_error=self._audio_error, preview_error=partial)
 
     def _on_preview_cancelled(self, shared) -> None:
         if shared and self._finish is not None:
@@ -111,7 +131,7 @@ class ImportPostprocessWorkflow:
             )
             self._clear()
 
-    def _finish_success(self, result, audio_error=None) -> None:
+    def _finish_success(self, result, audio_error=None, preview_error=None) -> None:
         if self._finish is None:
             return
         lua_result = result.lua_export_result if result else None
@@ -120,7 +140,10 @@ class ImportPostprocessWorkflow:
                 lua_result,
                 progress_dialog=self._progress_dialog,
             )
-        self._finish(True, self._message, audio_error=audio_error)
+        options = {'audio_error': audio_error}
+        if preview_error:
+            options['preview_error'] = preview_error
+        self._finish(True, self._message, **options)
         self._clear()
 
     def _clear(self) -> None:

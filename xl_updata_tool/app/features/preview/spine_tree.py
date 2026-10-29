@@ -14,8 +14,9 @@ from PySide6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
 from .character_names import CharacterNameResolver, display_role_label, display_skin_label
 from .resource_model import (
     PreviewResourceCatalog, SpineSkinRecord, display_skin_key, portrait_scene_key,
-    portrait_scene_status, skin_key,
+    skin_key,
 )
+from .scene_capabilities import portrait_scene_capabilities
 from .resource_state import PreviewResourceState
 from app.ui.theme import get_color
 
@@ -142,7 +143,8 @@ class PreviewSpineTree(QTreeWidget):
                     scene_label = self._portrait_scene_label(scene)
                     version_label = (
                         f"{scene.game_version} · {scene.version_timestamp}"
-                        if scene.game_version else scene.version_timestamp
+                        if scene.game_version and scene.game_version != scene.version_timestamp
+                        else scene.version_timestamp
                     )
                     if len(scenes) > 1 or sum(
                         other.skin_id == scene.skin_id for other in scenes
@@ -161,10 +163,8 @@ class PreviewSpineTree(QTreeWidget):
                             f"{diagnostic.severity}: {diagnostic.code} — {diagnostic.message}"
                             for diagnostic in diagnostics
                         ))
-                    if (
-                        portrait_scene_status(scene) in {"complete", "standalone"}
-                        and any(part.spine is not None for part in scene.parts)
-                    ):
+                    capability = portrait_scene_capabilities(scene)
+                    if capability.can_export or capability.can_export_basic:
                         self._make_checkable(item, enabled=True)
                     else:
                         self._make_readonly(item)
@@ -282,6 +282,15 @@ class PreviewSpineTree(QTreeWidget):
         data = item.data(0, Qt.UserRole) if item is not None else {}
         scene = (data or {}).get("scene") if (data or {}).get("kind") == self._SCENE else None
         return (scene,) if scene is not None else ()
+
+    def restore_current_portrait_scene(self, scene):
+        identity = (scene.version_timestamp, scene.entry_config_id, scene.skin_id)
+        for item in self._scene_items():
+            candidate = (item.data(0, Qt.UserRole) or {}).get('scene')
+            if candidate and (candidate.version_timestamp, candidate.entry_config_id, candidate.skin_id) == identity:
+                self.setCurrentItem(item)
+                return True
+        return False
 
     def checked_portrait_scenes(self):
         """Return manifest-backed scene rows checked for export."""
@@ -497,8 +506,8 @@ class PreviewSpineTree(QTreeWidget):
                 scene = data.get("scene")
                 return bool(
                     scene is not None
-                    and portrait_scene_status(scene) in {"complete", "standalone"}
-                    and any(part.spine is not None for part in scene.parts)
+                    and (portrait_scene_capabilities(scene).can_export
+                         or portrait_scene_capabilities(scene).can_export_basic)
                 )
             records = data.get("records", ())
             return any(self._is_eligible(record) for record in records)
@@ -581,14 +590,10 @@ class PreviewSpineTree(QTreeWidget):
             if data.get("kind") == self._SCENE:
                 scene = data.get("scene")
                 is_new = self._is_scene_new(scene)
-                labels = {
-                    "complete": "完整",
-                    "incomplete": "不完整",
-                    "unsupported": "未支持",
-                    "standalone": "独立资源",
-                }
-                status = labels.get(portrait_scene_status(scene), "未知")
+                capability = portrait_scene_capabilities(scene)
+                status = capability.label
                 item.setText(1, f"{status} · 新" if is_new else status)
+                item.setToolTip(1, capability.reason or capability.label)
             else:
                 records = data.get("records", ())
                 is_new = any(self._is_eligible(record) and self._is_new(record) for record in records)
@@ -598,19 +603,23 @@ class PreviewSpineTree(QTreeWidget):
             QBrush(QColor(get_color("DANGER")))
             if is_new else QBrush(QColor(get_color("WARNING")))
             if item.childCount() == 0 and (item.data(0, Qt.UserRole) or {}).get("kind") == self._SCENE
-            and portrait_scene_status((item.data(0, Qt.UserRole) or {}).get("scene")) in {"incomplete", "unsupported"}
+            and portrait_scene_capabilities((item.data(0, Qt.UserRole) or {}).get("scene")).state
+            in {"missing", "partial", "legacy"}
             else QBrush(),
         )
         return is_new
 
     @staticmethod
     def _portrait_scene_label(scene) -> str:
+        metadata = dict(scene.config_metadata)
+        if metadata.get("stage_index"):
+            return f"活动封面 {metadata.get('eventcover_id', scene.skin_id)} · 阶段 {metadata['stage_index']}"
         container = scene.prefab_container.replace("\\", "/")
         stem = PurePosixPath(container).stem
         family_match = re.search(r"(?:cardspine|battlespine)[_-]\d{5}[_-](\d+)", stem, re.IGNORECASE)
         if family_match:
             prefix = "角色立绘" if "cardspine" in stem.casefold() else "战斗小人"
-            return f"{prefix} {family_match.group(1)}"
+            return f"{prefix} {family_match.group(1)} · 皮肤 {scene.skin_id}"
         if "eventcovers" in container.casefold():
             suffix = re.search(r"(\d+)$", stem)
             event_match = re.match(r"eventcovers_(\d+)$", scene.skin_id, re.IGNORECASE)
@@ -622,6 +631,8 @@ class PreviewSpineTree(QTreeWidget):
 
     def _is_scene_new(self, scene) -> bool:
         if scene is None:
+            return False
+        if dict(scene.config_metadata).get("export_status") == "not_applicable":
             return False
         if self._state is not None:
             return self._state.is_new(portrait_scene_key(scene))

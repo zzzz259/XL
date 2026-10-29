@@ -13,7 +13,7 @@ from .asset_index import AssetIndex
 from .builder import PARSER_VERSION, build_portrait_scenes
 from .cache import PortraitSceneCache
 from .lua_config import load_eventcover_roots, load_portrait_roots
-from .model import PortraitScene
+from .model import PortraitScene, SceneDiagnostic
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class PortraitImportSummary:
     incomplete: int = 0
     cache_hits: int = 0
     diagnostic: str = ""
+    not_applicable: int = 0
 
 
 def generate_portrait_manifests(
@@ -58,7 +59,12 @@ def generate_portrait_manifests(
             *load_portrait_roots(lua_root, int(version_timestamp)),
             *load_eventcover_roots(lua_root, int(version_timestamp)),
         ]
-        index = AssetIndex.from_catalog(catalog_path, bundle_root, int(version_timestamp))
+        roots = [root for root in roots
+                 if getattr(root, "unresolved_reason", None) != "missing_show_spine"]
+        index = AssetIndex.from_catalog(
+            catalog_path, bundle_root, int(version_timestamp),
+            cab_cache_path=version_root / "cache" / "portrait-cab" / f"{int(version_timestamp)}.json",
+        )
     except Exception as exc:
         logger.exception("立绘场景输入解析失败", extra={
             "event": "portrait_import.inputs_invalid",
@@ -95,6 +101,7 @@ def generate_portrait_manifests(
     hits = [0]
     cache_hit_skins: set[str] = set()
     complete = incomplete = processed = 0
+    not_applicable = 0
     for i, root in enumerate(roots, 1):
         if cancel_check and cancel_check():
             break
@@ -107,10 +114,13 @@ def generate_portrait_manifests(
             )
             for scene in scenes:
                 errors = [item for item in scene.diagnostics if item.severity == "error"]
-                status = "incomplete" if errors else "complete"
+                excluded = dict(getattr(scene, "config_metadata", ())).get("export_status") == "not_applicable"
+                status = "not_applicable" if excluded else ("incomplete" if errors else "complete")
                 if errors and isinstance(scene, PortraitScene):
                     cache.store_snapshot(scene)
-                if errors:
+                if excluded:
+                    not_applicable += 1
+                elif errors:
                     incomplete += 1
                 else:
                     complete += 1
@@ -133,17 +143,31 @@ def generate_portrait_manifests(
                         ],
                     }},
                 )
-        except Exception:
+        except Exception as error:
             incomplete += 1
             logger.exception("立绘场景皮肤构建异常 skin=%s", root.skin_id, extra={
                 "event": "portrait_import.scene.failed", "error_code": "PORTRAIT_SCENE_BUILD_FAILED",
                 "details": {"version": int(version_timestamp), "skin_id": root.skin_id},
             })
+            metadata = dict(getattr(root, "metadata", ()))
+            failed_scene = PortraitScene(
+                game_version=str(version_timestamp), version_timestamp=str(version_timestamp),
+                entry_config_id=metadata.get("entry_id", root.skin_id),
+                character_id=metadata.get("card_id", ""), skin_id=root.skin_id,
+                prefab=None, source_bundles=(), parts=(),
+                prefab_container=str(getattr(root, "prefab_name", "") or ""),
+                diagnostics=(SceneDiagnostic(
+                    "scene_build_failed", f"{type(error).__name__}: {error}",
+                    details=(("evidence", getattr(root, "evidence", "")),),
+                ),),
+            )
+            cache.store_snapshot(failed_scene)
         processed += 1
         if progress_callback:
             progress_callback(root.skin_id, i, len(roots))
     if cancel_check and cancel_check():
-        return PortraitImportSummary("cancelled", processed, complete, incomplete, hits[0])
+        return PortraitImportSummary("cancelled", processed, complete, incomplete, hits[0], not_applicable=not_applicable)
     return PortraitImportSummary(
         "partial" if incomplete else "complete", processed, complete, incomplete, hits[0],
+        not_applicable=not_applicable,
     )

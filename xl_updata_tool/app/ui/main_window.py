@@ -570,7 +570,7 @@ class MainWindow(QMainWindow):
             self._finish_import,
         )
 
-    def _finish_import(self, success, message, audio_error=None, cancelled=False):
+    def _finish_import(self, success, message, audio_error=None, cancelled=False, preview_error=None):
         """结束导入及其后处理阶段，统一关闭共享弹窗和恢复按钮状态。"""
         self.btn_browse.setEnabled(True)
         self.dl_progress.setVisible(False)
@@ -587,7 +587,13 @@ class MainWindow(QMainWindow):
             if progress_dialog:
                 progress_dialog.close()
                 self._import_progress_dialog = None
-            if audio_error:
+            if preview_error:
+                self.status_bar.showMessage('导入部分完成：图片资源存在失败项')
+                details = f'{message}\n\n{preview_error}'
+                if audio_error:
+                    details += f'\n音频解析失败：{audio_error}'
+                QMessageBox.warning(self, '导入部分完成', details)
+            elif audio_error:
                 self.status_bar.showMessage("导入完成，但音频后处理失败")
                 QMessageBox.warning(
                     self,
@@ -726,5 +732,15 @@ class MainWindow(QMainWindow):
         self.runtime.shell_contribution.schedule_update_check()
 
     def closeEvent(self, event):
-        self.runtime.registry.close()
+        if self.runtime.registry.close() is False:
+            event.ignore()
+            self.statusBar().showMessage('正在取消任务并清理临时文件，完成后关闭…')
+            if not getattr(self, '_close_retry_pending', False):
+                self._close_retry_pending = True
+                QTimer.singleShot(100, self._retry_close)
+            return
         super().closeEvent(event)
+
+    def _retry_close(self):
+        self._close_retry_pending = False
+        self.close()

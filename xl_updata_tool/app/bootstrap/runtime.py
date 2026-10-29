@@ -40,6 +40,7 @@ class FeatureRuntimeRegistry:
     def __init__(self, features: Iterable[FeatureRuntime]):
         self._features = tuple(features)
         self._by_key = {}
+        self._closed_keys = set()
         for feature in self._features:
             key = feature.descriptor.key
             if key in self._by_key:
@@ -94,10 +95,14 @@ class FeatureRuntimeRegistry:
                     raise TypeError(f"{attribute} must expose connect(): {feature.descriptor.key}")
                 connect(handler)
 
-    def close(self) -> None:
+    def close(self) -> bool:
         """按注册顺序释放 Feature 持有的任务和资源。"""
         for feature in reversed(self._features):
+            key = feature.descriptor.key
+            if key in self._closed_keys:
+                continue
             controller = feature.controller
             closer = getattr(controller, "close", None) or getattr(controller, "stop", None)
-            if closer is not None:
-                closer()
+            if closer is None or closer() is not False:
+                self._closed_keys.add(key)
+        return len(self._closed_keys) == len(self._features)

@@ -109,6 +109,14 @@ def test_importer_service_schedules_preview_for_legacy_full_import():
     assert result.postprocess_categories == frozenset({"preview"})
 
 
+def test_character_only_import_retains_selected_version_for_config_postprocessing():
+    result = ImporterService("material", "lua").result(
+        {"character"}, {"character"}, version_timestamp=402,
+    )
+    assert result.version_timestamp == 402
+    assert result.lua_export_result is None
+
+
 def test_postprocessor_registry_filters_result_categories():
     result = ImporterService("material", "lua").result(
         {"lua", "audio"}, {"lua", "audio"}
