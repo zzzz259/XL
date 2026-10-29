@@ -242,6 +242,29 @@ def test_import_as_replaces_only_selected_category(tmp_path):
     assert old_fgui.read_text(encoding="utf-8") == "keep"
 
 
+def test_character_only_import_builds_config_catalog_with_existing_same_version_lua(tmp_path, monkeypatch):
+    lua = tmp_path / "output" / "lua" / "402"
+    lua.mkdir(parents=True)
+    (lua / "BaseFashion.lua").write_text("return {}", encoding="utf-8")
+    bundle = tmp_path / "data" / "bundles" / "402"
+    bundle.mkdir(parents=True)
+    worker = ImportProcessor(
+        [], str(bundle), str(tmp_path / "data" / "material"), "AssetStudio.CLI.exe",
+        export_categories={"character"}, version_timestamp=402,
+        lua_output_dir=str(lua.parent),
+    )
+    monkeypatch.setattr(worker, "_stage_fix", lambda: (1, 0))
+    monkeypatch.setattr(worker, "_prepare_cli_bundle_dir", lambda: None)
+    def export(_assets):
+        worker._categories_with_output.add("character")
+        return 1, ""
+    monkeypatch.setattr(worker, "_stage_export", export)
+    mapped = []
+    monkeypatch.setattr(worker, "_stage_map", lambda: mapped.append(True) or ([], ""))
+    worker.process()
+    assert mapped == [True]
+
+
 def test_import_as_commits_all_character_resource_roots(tmp_path):
     material_dir = tmp_path / "material"
     old_model = material_dir / "assets" / "art" / "models" / "old.skel"

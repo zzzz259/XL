@@ -56,7 +56,7 @@ def test_worker_reports_progress_and_finished_summary_for_runner_results(tmp_pat
     summaries = []
     errors = []
     worker.skin_progress.connect(lambda current, total, label: progress.append((current, total, label)))
-    worker.finished.connect(summaries.append)
+    worker.summary_ready.connect(summaries.append)
     worker.error.connect(errors.append)
 
     worker.run()
@@ -104,7 +104,7 @@ def test_worker_logs_and_writes_exact_scene_part_refs(tmp_path):
     runner = RecordingRunner()
     worker = PreviewExportWorker((job,), settings=ExportSettings(), runner=runner)
     summaries = []
-    worker.finished.connect(summaries.append)
+    worker.summary_ready.connect(summaries.append)
 
     worker.run()
 
@@ -181,7 +181,7 @@ def test_skin_job_worker_does_not_call_composite_functions(tmp_path, monkeypatch
 
     worker = PreviewExportWorker(make_jobs(tmp_path, "base"), ExportSettings(), RecordingRunner())
     summaries = []
-    worker.finished.connect(summaries.append)
+    worker.summary_ready.connect(summaries.append)
 
     worker.run()
 
@@ -286,6 +286,55 @@ def test_legacy_battlespine_export_passes_motion_stander_skin(tmp_path, monkeypa
     assert calls[0][-1] == "motion_stander"
 
 
+@pytest.mark.parametrize('mode,spine_failed,material_failed,outcome,complete', [
+    ('complete', 0, 0, 'success', True),
+    ('materials', 0, 1, 'partial', False),
+    ('raw', 1, 0, 'partial', False),
+    ('missing_atlas', 1, 0, 'partial', False),
+    ('skins', 1, 0, 'partial', False),
+    ('cancelled', 0, 0, 'cancelled', False),
+])
+def test_legacy_whole_image_summary_accounts_for_every_failure_and_cancel(
+    tmp_path, monkeypatch, mode, spine_failed, material_failed, outcome, complete,
+):
+    from app.features.preview.material_catalog import MaterialExportSummary
+    material = tmp_path / 'material'
+    material.mkdir()
+    for name in ('good', 'bad'):
+        (material / f'{name}.skel').write_bytes(b'skeleton')
+        if name != 'bad' or mode != 'missing_atlas':
+            (material / f'{name}.atlas').write_bytes(b'atlas')
+    monkeypatch.setattr(preview_export, 'get_animation_names', lambda *args: ['idle'])
+    monkeypatch.setattr(preview_export, 'build_cardspine_bundle_map', lambda *args: {})
+    monkeypatch.setattr(PreviewExportWorker, '_find_assets_map', lambda self: None)
+    monkeypatch.setattr(preview_export, 'extract_motion_names', lambda path: ['expression'] if mode == 'skins' and path.endswith('bad.skel') else [])
+    monkeypatch.setattr(preview_export, 'export_skel_skins', lambda *args: 0)
+    worker = PreviewExportWorker(str(material), str(tmp_path / 'output'), 'fake-cli')
+    def export(*args):
+        if mode == 'cancelled':
+            worker.cancel()
+        return not (mode == 'raw' and args[0].endswith('bad.skel'))
+    monkeypatch.setattr(preview_export, 'export_animation_frames', export)
+    material_calls, outcomes, results = [], [], []
+    monkeypatch.setattr(worker, '_export_fgui_atlas', lambda: material_calls.append(True) or MaterialExportSummary(exported=1, failed=material_failed, diagnostics=('material failed',) if material_failed else ()))
+    monkeypatch.setattr(preview_export, 'set_task_outcome', lambda value, **kwargs: outcomes.append((value, kwargs)))
+    worker.export_finished.connect(lambda ok, summary: results.append((ok, summary)))
+
+    returned = worker._do_export()
+
+    assert returned is complete
+    assert results[0][0] is complete
+    assert f'失败: {spine_failed + material_failed} 个' in results[0][1]
+    assert outcomes[-1][0] == outcome
+    assert outcomes[-1][1]['details']['spine_failed'] == spine_failed
+    assert outcomes[-1][1]['details']['material_failed'] == material_failed
+    if mode == 'cancelled':
+        assert '已取消' in results[0][1]
+        assert material_calls == []
+    else:
+        assert f'游戏素材失败: {material_failed} 个' in results[0][1]
+
+
 def test_worker_cancellation_stops_subsequent_jobs_and_preserves_completed_output(tmp_path):
     runner = RecordingRunner()
 
@@ -297,7 +346,7 @@ def test_worker_cancellation_stops_subsequent_jobs_and_preserves_completed_outpu
     worker_runner = run_and_cancel
     worker = PreviewExportWorker(make_jobs(tmp_path, "base", "holiday"), ExportSettings(), worker_runner)
     summaries = []
-    worker.finished.connect(summaries.append)
+    worker.summary_ready.connect(summaries.append)
 
     worker.run()
 
@@ -307,7 +356,7 @@ def test_worker_cancellation_stops_subsequent_jobs_and_preserves_completed_outpu
     assert summaries and "cancelled" in summaries[0].lower()
 
 
-def test_worker_emits_error_for_runner_exception_without_starting_cli(tmp_path):
+def test_worker_reports_item_failure_for_runner_exception_without_starting_cli(tmp_path):
     def runner(_job):
         raise RuntimeError("runner unavailable")
 
@@ -315,12 +364,12 @@ def test_worker_emits_error_for_runner_exception_without_starting_cli(tmp_path):
     errors = []
     summaries = []
     worker.error.connect(errors.append)
-    worker.finished.connect(summaries.append)
+    worker.summary_ready.connect(summaries.append)
 
     worker.run()
 
-    assert errors == ["runner unavailable"]
-    assert summaries == []
+    assert errors == []
+    assert summaries == ['0 succeeded, 1 failed']
 
 
 def test_worker_rejects_a_second_active_start(tmp_path):

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
-from .model import AssetRef, SceneDiagnostic
+from .model import AssetRef, SceneDiagnostic, ParticleState
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,8 @@ class UnityScenePart:
     mask_interaction: int = 0
     sorting_layer_id: int = 0
     blend_mode: str = "normal"
+    skeleton_scale: float = 0.01
+    particle: ParticleState | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +106,8 @@ class UnitySceneParseResult:
     references: tuple[UnityObjectPointer, ...] = ()
     externals: tuple[UnityExternalFile, ...] = ()
     version_timestamp: int | None = None
+    container_roots: tuple[tuple[str, AssetRef], ...] = ()
+    object_ancestry: tuple[tuple[AssetRef, tuple[AssetRef, ...]], ...] = ()
 
     def sort_key(self, part: UnityScenePart) -> tuple[Any, ...]:
         sibling_path = tuple(node.sibling_index for node in part.transform_chain)
@@ -221,6 +226,10 @@ def _renderer_refs(tree: dict[str, Any], bundle_hash: str, objects: dict[int, An
 def _renderer_blend_mode(tree: dict[str, Any], trees: dict[int, dict[str, Any]],
                          objects: dict[int, Any], component_type: str = "") -> str:
     """Recognize standard alpha/PMA and Spine's named slot-blend materials."""
+    if component_type in {"SpriteRenderer", "SkeletonAnimation"}:
+        # Base portrait export consumes Sprite images/geometry or Spine's own
+        # slot blending. Unity shader effects and overrides are omitted.
+        return "normal"
     material_pointers = tuple(tree.get("m_Materials", ()))
     if not material_pointers:
         return "normal"
@@ -252,11 +261,11 @@ def _renderer_blend_mode(tree: dict[str, Any], trees: dict[int, dict[str, Any]],
         if component_type != "SkeletonAnimation":
             return "unsupported"
         material_name = str(material_tree.get("m_Name", ""))
-        # A recognizable Unity/Spine material name is not evidence that the
-        # export renderer implements its slot blend. Only the default material
-        # can use the normal path; named additive/multiply/screen variants need
-        # explicit compositing support before they can be accepted.
-        if not material_name.casefold().endswith("_material"):
+        # Spine's skeleton data owns slot blending; Unity's standard material
+        # variants do not require a separate scene layer or shader texture.
+        if not material_name.casefold().endswith((
+            "_material", "_material-additive", "_material-multiply", "_material-screen",
+        )):
             return "unsupported"
     return "normal"
 
@@ -308,6 +317,17 @@ def _pointer_records(trees: dict[int, dict[str, Any]], objects: dict[int, Any],
                     ))
                 return
             for key, child in value.items():
+                if key == "m_TexEnvs":
+                    from .scope_policy import auxiliary_texture_property
+
+                    pairs = child.items() if isinstance(child, dict) else child
+                    for entry in pairs:
+                        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+                            continue
+                        property_name, texture_env = entry
+                        if not auxiliary_texture_property(str(property_name)):
+                            walk(owner_id, texture_env, f"{field_path}.{key}.{property_name}")
+                    continue
                 walk(owner_id, child, f"{field_path}.{key}" if field_path else str(key))
         elif isinstance(value, (list, tuple)):
             for index, child in enumerate(value):
@@ -336,7 +356,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
     external_files = _external_files(objects)
     types = {path_id: str(obj.type.name) for path_id, obj in objects.items()}
     accepted_types = {"GameObject", "Transform", "RectTransform", "MeshRenderer", "SkinnedMeshRenderer",
-                      "SpriteRenderer", "MeshFilter", "Sprite", "Material", "MonoBehaviour"}
+                      "SpriteRenderer", "MeshFilter", "Sprite", "Material", "MonoBehaviour", "AssetBundle", "ParticleSystem"}
     trees: dict[int, dict[str, Any]] = {}
     kinds: dict[int, str] = {}
     for path_id, obj in objects.items():
@@ -448,6 +468,20 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
         reversed_names.reverse()
         return "/".join(reversed_names), tuple(reversed_nodes)
 
+    ancestry = {}
+    for go_id in names:
+        _, chain = chain_for(go_id)
+        ancestors = tuple(AssetRef(str(bundle_hash), component_owner[n.component_ref.path_id]) for n in chain if n.component_ref.path_id in component_owner)
+        ancestry[AssetRef(str(bundle_hash), go_id)] = ancestors
+    container_roots = tuple((str(name).replace("\\", "/").casefold(), ref)
+        for oid, tree in trees.items() if types.get(oid) == "AssetBundle"
+        for name, entry in tree.get("m_Container", ())
+        if (ref := _asset_ref(str(bundle_hash), entry.get("asset"), objects)) is not None
+        and ref.bundle_hash == str(bundle_hash) and ref.path_id in names)
+
+    def active(go_id):
+        return all(bool(trees.get(ref.path_id, {}).get("m_IsActive", True)) for ref in ancestry.get(AssetRef(str(bundle_hash), go_id), ()))
+
     game_objects = tuple(sorted(
         ((AssetRef(str(bundle_hash), path_id), name) for path_id, name in names.items()),
         key=lambda item: (item[0].bundle_hash, item[0].path_id),
@@ -511,7 +545,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
             ))
 
     parts: list[UnityScenePart] = []
-    renderer_kinds = {"MeshRenderer", "SpriteRenderer"}
+    renderer_kinds = {"MeshRenderer", "SpriteRenderer", "ParticleSystemRenderer"}
     for game_object_id, component_ids in go_components.items():
         mesh_renderers = [cid for cid in component_ids if kinds.get(cid) == "MeshRenderer"]
         sprite_renderers = [cid for cid in component_ids if kinds.get(cid) == "SpriteRenderer"]
@@ -610,10 +644,35 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
                 _record_unresolved(pointer, AssetRef(str(bundle_hash), component_id), field_name, objects, diagnostics)
             materials = _renderer_refs(renderer_tree, str(bundle_hash), objects)
             blend_mode = _renderer_blend_mode(renderer_tree, trees, objects, component_type)
+            if component_type == "SkeletonAnimation":
+                for material_ref in materials:
+                    material_name = str(trees.get(material_ref.path_id, {}).get("m_Name", ""))
+                    if not material_name.casefold().endswith((
+                        "_material", "_material-additive", "_material-multiply", "_material-screen",
+                    )):
+                        diagnostics.append(SceneDiagnostic(
+                            "shader_effects_omitted",
+                            "Export uses Spine base content; custom Unity material effects are omitted",
+                            severity="warning", source=AssetRef(str(bundle_hash), component_id),
+                            details=(("material", material_name),),
+                        ))
+            particle = None
+            if component_type == "ParticleSystemRenderer":
+                from .particle_metadata import normalize_system
+                systems = [cid for cid in component_ids if kinds.get(cid) == "ParticleSystem"]
+                system_ref = AssetRef(str(bundle_hash), systems[0]) if len(systems) == 1 else AssetRef(str(bundle_hash), component_id)
+                config = {"version": 1}
+                try:
+                    if len(systems) != 1:
+                        raise ValueError("ParticleSystemRenderer requires exactly one ParticleSystem")
+                    config["system"] = normalize_system(trees[systems[0]], renderer_tree, abs(systems[0]))
+                except (ValueError, TypeError, KeyError) as exc:
+                    diagnostics.append(SceneDiagnostic("unsupported_particle_system", str(exc), source=AssetRef(str(bundle_hash), component_id)))
+                particle = ParticleState(system_ref, config_json=json.dumps(config, sort_keys=True, separators=(",", ":")))
             parts.append(UnityScenePart(
                 AssetRef(str(bundle_hash), game_object_id), AssetRef(str(bundle_hash), component_id),
                 names.get(game_object_id, ""), component_type, hierarchy, transform_chain, world_position,
-                bool(tree.get("m_Enabled", tree.get("enabled", True))), int(layer_value or 0),
+                bool(renderer_tree.get("m_Enabled", True)) and bool(tree.get("m_Enabled", tree.get("enabled", True))) and active(game_object_id), int(layer_value or 0),
                 int(renderer_tree.get("m_SortingOrder", renderer_tree.get("sortingOrder", 0)) or 0), depth,
                 renderer_ref, sprite_ref, sprite_texture, rect, pivot, pixels_to_units,
                 skeleton_ref, skeleton_json, atlas_refs,
@@ -625,6 +684,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
                 int(renderer_tree.get("m_DrawMode", 0) or 0),
                 int(renderer_tree.get("m_MaskInteraction", 0) or 0), sorting_layer_id,
                 blend_mode,
+                float(skeleton_tree.get("scale", 0.01)), particle,
             ))
 
         for component_id in spine_components:
@@ -651,6 +711,10 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
             if bool(tree.get("m_Enabled", True)):
                 append_part(component_id, "SpriteRenderer", component_id, tree.get("m_Sprite"))
 
+        for component_id in component_ids:
+            if kinds.get(component_id) == "ParticleSystemRenderer" and bool(trees.get(component_id, {}).get("m_Enabled", True)):
+                append_part(component_id, "ParticleSystemRenderer", component_id)
+
         if not spine_components:
             for component_id in mesh_renderers:
                 tree = trees.get(component_id, {})
@@ -660,7 +724,7 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
         for component_id in component_ids:
             kind = kinds.get(component_id, types.get(component_id, ""))
             tree = trees.get(component_id, {})
-            if kind.endswith("Renderer") and kind not in renderer_kinds and bool(tree.get("m_Enabled", True)):
+            if kind.endswith("Renderer") and kind not in renderer_kinds and bool(tree.get("m_Enabled", True)) and active(game_object_id):
                 diagnostics.append(SceneDiagnostic(
                     "unsupported_enabled_renderer", f"Enabled renderer {kind} is unsupported",
                     source=AssetRef(str(bundle_hash), component_id),
@@ -676,4 +740,4 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
     references = _pointer_records(trees, objects, str(bundle_hash))
     return UnitySceneParseResult(str(bundle_hash), game_objects, component_refs, tuple(parts),
                                 tuple(interactions), tuple(diagnostics), references, external_files,
-                                version_timestamp)
+                                version_timestamp, container_roots, tuple(ancestry.items()))

@@ -9,9 +9,25 @@ from PySide6.QtCore import QtMsgType, qInstallMessageHandler, qWarning
 from app.platform.crash_reporter import CrashReporter
 from app.platform.logger import configure_logging, logger
 from app.platform.processes import run_external_process
+
+
+
 from app.platform.runtime_config import RuntimeConfig, parse_runtime_config
 from app.platform.task_context import set_task_outcome, stage_context, task_context
 
+
+def test_external_process_cooperative_cancel_input_preserves_child_cleanup():
+    import threading
+    ready = threading.Event()
+    result = run_external_process(
+        [sys.executable, '-u', '-c', "import sys; print('ready',flush=True); line=sys.stdin.readline(); print('cleaned:'+line.strip(),flush=True); sys.exit(130)"],
+        tool='cooperative-cancel-test', capture_output=True, text=True, timeout=5,
+        on_line=lambda stream, line: ready.set() if 'ready' in line else None,
+        cancel_check=ready.is_set, cancel_input='cancel\n',
+    )
+    assert result.xl_cancelled
+    assert result.returncode == 130
+    assert 'cleaned:cancel' in result.stdout
 
 def _flush_logger():
     for handler in logger.handlers:

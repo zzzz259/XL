@@ -117,11 +117,24 @@ def normalise_categories(categories) -> frozenset[str]:
     return selected
 
 
-def build_category_commands(categories) -> tuple[tuple[str, list[str]], ...]:
+def build_category_commands(categories, *, configured_character=False) -> tuple[tuple[str, list[str]], ...]:
     """将分类规格展开为旧 AssetStudio CLI 所需的命令参数。"""
     selected = normalise_categories(categories)
     commands = []
     for category in sorted(selected):
+        if category == "character" and configured_character:
+            # Scene dependencies (including BaseFashion.spd battle roots) are
+            # extracted through the shared port. Only standalone UI textures
+            # retain the legacy AssetStudio conversion path.
+            commands.extend(
+                ("导出 character", list(rule.cli_args()))
+                for rule in EXPORT_SPECS[category].rules
+                if rule.container_regex in {
+                    "assets/art/texturesingle/bursthead",
+                    "assets/art/texturesingle/lotterybg",
+                }
+            )
+            continue
         commands.extend(
             (label, list(args)) for label, args in EXPORT_SPECS[category].commands()
         )

@@ -88,7 +88,8 @@ def build_spine_export_command(job, spine_cli, temporary_dir=None):
                 raise ValueError("mixed Spine/Sprite export requires a per-job temporary directory")
             from .portrait_scene_export import prepare_portrait_scene_export_job
             job = prepare_portrait_scene_export_job(job, temporary_dir)
-        return _build_portrait_scene_command(job, spine_cli)
+        from .scene_export_adapter import build_scene_command
+        return build_scene_command(job, spine_cli, temporary_dir)
 
     raw_records = tuple(getattr(job, "records", ()) or (job.record,))
     records = tuple(

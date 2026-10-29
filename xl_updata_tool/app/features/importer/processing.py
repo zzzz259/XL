@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 from app.platform.diagnostics import logger, set_task_outcome, timed, stage_operation, task_operation
 from app.platform.processes import run_external_process, update_process_manifest
@@ -22,6 +23,7 @@ from app.platform.bundle_parser import fix_bundle_inplace
 from app.platform.files import replace_directory
 from app.platform.lua_repository import cleanup_lua_staging, publish_lua_version
 from app.platform.tool_locator import ToolLocator
+from app.shared.character_import import CharacterAssetExporter
 from .lua_decrypt import decompile_lua_dir
 from app.features.importer.spec import CATEGORY_ROOTS, EXPORT_SPECS, build_category_commands
 
@@ -50,7 +52,8 @@ class ImportProcessor:
                  progress_stage_callback=None, stage_finished_callback=None,
                  category_finished_callback=None, category_progress_callback=None,
                  all_finished_callback=None,
-                 cancel_check=None, as_env=None):
+                 cancel_check=None, as_env=None,
+                 character_asset_exporter: CharacterAssetExporter | None = None):
         self.bundle_paths = bundle_paths
         self.bundle_dir = bundle_dir
         self.material_dir = material_dir
@@ -70,6 +73,16 @@ class ImportProcessor:
             self.as_env.update(as_env)
         self.export_types = export_types
         self.export_categories = export_categories
+        self.character_asset_exporter = character_asset_exporter
+        if character_asset_exporter is not None and not export_categories:
+            # The full production import also uses the configured character port.
+            # Explicit legacy type-only callers retain their historical behavior.
+            if not export_types:
+                self.export_categories = set(EXPORT_SPECS)
+            else:
+                raise ValueError("配置资源导入请使用分类导入，不能按全部 TextAsset/Texture2D 导出")
+        self.character_import_result = None
+        self._configured_extra_files = ()
         self.version_timestamp = version_timestamp
         self.lua_output_dir = lua_output_dir or os.path.join(get_base_dir(), "output", "lua")
         self.lua_export_result = None
@@ -208,9 +221,15 @@ class ImportProcessor:
             # Derived manifests run inside ImportWorker, after catalog/Lua output.
             if (
                 self.version_timestamp is not None
+                and self.character_asset_exporter is None
                 and self.export_categories
-                and {"lua", "character"}.issubset(self._categories_with_output)
-                and self.lua_export_result
+                and "character" in self._categories_with_output
+                and (
+                    self.lua_export_result
+                    or any(os.path.isfile(os.path.join(
+                        self.lua_output_dir, str(self.version_timestamp), name,
+                    )) for name in ("BaseFashion.lua", "BaseActivityStageConfig.lua"))
+                )
             ):
                 catalog = os.path.join(self.bundle_dir, "_map", "assets_map.json")
                 if not os.path.isfile(catalog):
@@ -367,6 +386,17 @@ class ImportProcessor:
             logger.error(f"[导入AS] AssetStudio CLI 不存在: {self.as_cli}")
             return 0, f"AssetStudio CLI 不存在: {self.as_cli}"
 
+        configured = self.character_asset_exporter is not None and "character" in (self.export_categories or ())
+        prepared_lua = False
+        if configured:
+            try:
+                prepared_lua = self._prepare_configured_inputs()
+            except InterruptedError:
+                return 0, "已取消"
+            except Exception as error:
+                logger.exception("配置资源导入准备失败")
+                return 0, f"配置资源导入准备失败: {error}"
+
         material_parent = os.path.dirname(os.path.abspath(self.material_dir))
         os.makedirs(material_parent, exist_ok=True)
         staging_root = tempfile.mkdtemp(prefix=".xl-import-", dir=material_parent)
@@ -375,11 +405,17 @@ class ImportProcessor:
         os.makedirs(self._working_material_dir, exist_ok=True)
         self._categories_with_output = set()
         self._categories_without_output = set()
+        self._configured_extra_files = ()
+        if prepared_lua and "lua" in self.export_categories:
+            self._categories_with_output.add("lua")
+        committed = False
         logger.info(f"[导入AS] 阶段3: 先导出到临时目录 {self._working_material_dir}")
 
         try:
             if self.export_categories:
                 commands = self._build_category_commands()
+                if configured:
+                    commands = [(label, args) for label, args in commands if label != "导出 lua"]
                 logger.info(f"[导入AS] 按分类导出: {sorted(self.export_categories)}")
             else:
                 all_types = sorted(set(a.get("Type", "") for a in assets if a.get("Type")))
@@ -388,13 +424,29 @@ class ImportProcessor:
                 commands = [(f"导出 {tp}", ["--types", tp]) for tp in all_types]
                 logger.info(f"[导入AS] 按类型导出（共 {len(commands)} 种）: {all_types}")
 
-            if not commands:
+            if not commands and not configured:
                 return 0, "没有可执行的导出分类"
 
             total = len(commands)
             total_bundles = len(self.bundle_paths)
             failed_labels = []
             completed_labels = []
+            if configured:
+                try:
+                    self.character_import_result = self.character_asset_exporter(
+                        version_timestamp=self.version_timestamp,
+                        catalog_path=os.path.join(self.bundle_dir, "_map", "assets_map.json"),
+                        lua_root=self.lua_output_dir, bundle_root=self.bundle_dir,
+                        material_root=self._working_material_dir,
+                        cancel_check=self.is_cancelled,
+                        progress_callback=self._emit_category_progress,
+                    )
+                except InterruptedError:
+                    return 0, "已取消"
+                self._configured_extra_files = tuple(self.character_import_result.files)
+                if self._configured_extra_files:
+                    self._categories_with_output.add("character")
+                    completed_labels.append("导出 character")
             for i, (label, extra_args) in enumerate(commands):
                 if self.is_cancelled():
                     return 0, "已取消"
@@ -484,7 +536,7 @@ class ImportProcessor:
                     for label in sorted(set(failed_labels)):
                         category = label.removeprefix("导出 ")
                         roots = CATEGORY_ROOTS.get(category, ())
-                        has_output = any(
+                        has_output = (category == "character" and bool(self._configured_extra_files)) or any(
                             self._count_files(os.path.join(self._working_material_dir, relative)) > 0
                             for relative in roots
                         )
@@ -500,11 +552,12 @@ class ImportProcessor:
                     ", ".join(sorted(set(failed_labels))),
                 )
 
-            if self.export_categories and "lua" in self.export_categories:
+            if not configured and self.export_categories and "lua" in self.export_categories:
                 if "lua" in self._categories_with_output:
                     self._decompile_lua()
 
-            self._cleanup_prefab_suffix(self._working_material_dir)
+            if not configured:
+                self._cleanup_prefab_suffix(self._working_material_dir)
             total_files = self._count_files(self._working_material_dir)
             if total_files <= 0:
                 return 0, "导出完成但文件数为 0，请检查资源"
@@ -512,11 +565,13 @@ class ImportProcessor:
             if self.export_categories:
                 self._categories_without_output = set(self.export_categories) - self._categories_with_output
             self._commit_staged_material(
-                categories=self._categories_with_output if self.export_categories else None
+                categories=(self._categories_with_output - ({"lua"} if configured else set()))
+                if self.export_categories else None
             )
-            if self.export_categories and "lua" in self._categories_with_output:
+            committed = True
+            if not configured and self.export_categories and "lua" in self._categories_with_output:
                 self.lua_export_result = self._sync_lua_output()
-            for label in completed_labels:
+            for label in dict.fromkeys(completed_labels):
                 self._emit_category_finished(label)
             if self._categories_without_output:
                 logger.warning(
@@ -525,7 +580,11 @@ class ImportProcessor:
                 )
             logger.info(f"[导入AS] 阶段3完成: 共导出 {total_files} 个文件到 {self.material_dir}")
             return total_files, ""
+        except InterruptedError:
+            return 0, "已取消"
         finally:
+            if not committed:
+                self._categories_with_output = {"lua"} if prepared_lua and "lua" in self.export_categories else set()
             self._working_material_dir = self.material_dir
             if self._staging_material_dir:
                 shutil.rmtree(self._staging_material_dir, ignore_errors=True)
@@ -548,6 +607,8 @@ class ImportProcessor:
         material_root = os.path.abspath(self.material_dir)
         backup_root = tempfile.mkdtemp(prefix=".xl-import-backup-", dir=os.path.dirname(material_root))
         replacements = []
+        backed_up = []
+        installed = []
         try:
             for category in sorted(categories if categories is not None else self.export_categories):
                 relatives = CATEGORY_ROOTS.get(category, ())
@@ -559,34 +620,60 @@ class ImportProcessor:
                     os.makedirs(source, exist_ok=True)
                     replacements.append((source, destination, relative))
 
+            # Configured PPtrs may intentionally point outside card/event model
+            # roots. Include each such exact output in this same transaction.
+            root_paths = [Path(relative).parts for _source, _destination, relative in replacements]
+            for relative in self._configured_extra_files:
+                path = Path(relative)
+                destination = Path(material_root) / path
+                if path.is_absolute() or ".." in path.parts or any(":" in part for part in path.parts):
+                    raise ValueError(f"不安全的配置资源路径: {relative}")
+                if Path(material_root).resolve() not in destination.resolve().parents:
+                    raise ValueError(f"配置资源路径越界: {relative}")
+                if any(path.parts[:len(parts)] == parts for parts in root_paths):
+                    continue
+                source = os.path.join(self._working_material_dir, relative)
+                if not os.path.isfile(source):
+                    raise ValueError(f"配置资源暂存文件缺失: {relative}")
+                replacements.append((source, str(destination), relative))
+
             replacement_details = [{"relative": relative, "source": source, "destination": destination, "staged_files": self._count_files(source), "existing_files": self._count_files(destination)} for source, destination, relative in replacements]
             logger.info("素材分类事务提交开始 categories=%s replacements=%s backup=%s", sorted(categories if categories is not None else self.export_categories), replacement_details, backup_root, extra={"event": "import.commit.start", "details": {"categories": sorted(categories if categories is not None else self.export_categories), "replacements": replacement_details, "backup": backup_root}})
 
             # 先把所有旧分类移入备份区，再开始放入新分类，避免跨分类提交留下半成品。
             for _source, destination, relative in replacements:
+                if self.is_cancelled():
+                    raise InterruptedError("已取消")
                 if os.path.exists(destination):
                     backup = os.path.join(backup_root, relative)
                     os.makedirs(os.path.dirname(backup), exist_ok=True)
                     os.replace(destination, backup)
+                    backed_up.append((destination, backup))
                     logger.info("旧分类已暂存备份 relative=%s backup=%s", relative, backup, extra={"event": "import.commit.backup", "details": {"relative": relative, "backup": backup}})
 
             for source, destination, relative in replacements:
+                if self.is_cancelled():
+                    raise InterruptedError("已取消")
                 os.makedirs(os.path.dirname(destination), exist_ok=True)
                 os.replace(source, destination)
+                installed.append(destination)
                 logger.info("新分类已提交 relative=%s destination=%s files=%s", relative, destination, self._count_files(destination), extra={"event": "import.commit.category_complete", "details": {"relative": relative, "destination": destination, "files": self._count_files(destination)}})
+            if self.is_cancelled():
+                raise InterruptedError("已取消")
             logger.info("素材分类事务提交完成 categories=%s", sorted(categories if categories is not None else self.export_categories), extra={"event": "import.commit.complete", "details": {"categories": sorted(categories if categories is not None else self.export_categories)}})
         except Exception:
             logger.error("[导入AS] 分类提交失败，开始回滚", exc_info=True)
             logger.exception("素材分类事务提交失败，开始回滚 backup=%s", backup_root, extra={"event": "import.commit.rollback_start", "error_code": "IMPORT_COMMIT_FAILED", "details": {"backup": backup_root, "replacements": [{"relative": relative, "source": source, "destination": destination} for source, destination, relative in replacements]}})
-            for _source, destination, _relative in reversed(replacements):
+            for destination in reversed(installed):
                 if os.path.isdir(destination):
                     shutil.rmtree(destination, ignore_errors=True)
-            for _source, destination, relative in replacements:
-                backup = os.path.join(backup_root, relative)
+                elif os.path.isfile(destination):
+                    os.unlink(destination)
+            for destination, backup in reversed(backed_up):
                 if os.path.exists(backup):
                     os.makedirs(os.path.dirname(destination), exist_ok=True)
                     os.replace(backup, destination)
-                    logger.info("旧分类已从备份恢复 relative=%s destination=%s", relative, destination, extra={"event": "import.commit.rollback_restore", "details": {"relative": relative, "destination": destination}})
+                    logger.info("旧分类已从备份恢复 destination=%s", destination, extra={"event": "import.commit.rollback_restore", "details": {"destination": destination}})
             raise
         finally:
             shutil.rmtree(backup_root, ignore_errors=True)
@@ -643,7 +730,50 @@ class ImportProcessor:
 
     def _build_category_commands(self):
         """根据勾选的分类构建 CLI 导出命令（label, extra_args）列表"""
-        return list(build_category_commands(self.export_categories))
+        return list(build_category_commands(
+            self.export_categories, configured_character=self.character_asset_exporter is not None,
+        ))
+
+    def _prepare_configured_inputs(self):
+        """Publish required same-version Lua and build the map before selection."""
+        if self.version_timestamp is None:
+            raise ValueError("配置资源导入需要明确版本号")
+        version_dir = Path(self.lua_output_dir) / str(int(self.version_timestamp))
+        required = ("BaseFashion.lua", "BaseActivityStageConfig.lua")
+        prepare_lua = "lua" in self.export_categories or any(not (version_dir / name).is_file() for name in required)
+        if prepare_lua:
+            lua_processor = ImportProcessor(
+                self.bundle_paths, self.bundle_dir, self.material_dir, self.as_command,
+                export_categories={"lua"}, version_timestamp=self.version_timestamp,
+                lua_output_dir=self.lua_output_dir, progress_stage_callback=self._emit_progress_stage,
+                category_progress_callback=self._emit_category_progress,
+                cancel_check=self.is_cancelled, as_env=self.as_env,
+            )
+            count, error = lua_processor._stage_export(None)
+            if self.is_cancelled():
+                raise InterruptedError("已取消")
+            if error or not count:
+                raise ValueError(f"请先导入同版 Lua 配置: {error or 'Lua 导出为空'}")
+            self.lua_export_result = lua_processor.lua_export_result
+            if "lua" in self.export_categories:
+                self._categories_with_output.add("lua")
+                # This category is already published. Report it now even if a
+                # later map/character step fails or is cancelled.
+                self._emit_category_finished("导出 lua")
+        missing = [name for name in required if not (version_dir / name).is_file()]
+        if missing:
+            raise ValueError(f"同版 Lua 配置仍缺失: {', '.join(missing)}；请检查 Lua 导出/反编译工具后重试")
+        catalog = Path(self.bundle_dir) / "_map" / "assets_map.json"
+        if not catalog.is_file():
+            # Planning needs the full version map, never the optional Lua-only
+            # hardlink input created for a category CLI invocation.
+            self._cleanup_cli_bundle_dir()
+            mapped, error = self._stage_map()
+            if self.is_cancelled():
+                raise InterruptedError("已取消")
+            if mapped is None:
+                raise ValueError(f"配置资源索引生成失败: {error}")
+        return prepare_lua
 
     @timed("导入AS-反编译Lua")
     def _decompile_lua(self):

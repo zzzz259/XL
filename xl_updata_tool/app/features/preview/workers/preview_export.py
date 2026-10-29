@@ -45,6 +45,22 @@ def _sprite_source_metadata(source):
     }
 
 
+def _scene_runtime_metadata(job):
+    return {
+        'render_scope': getattr(job, 'render_scope', 'full'),
+        'interaction_id': getattr(job, 'interaction_id', ''),
+        'particle_sources': [{
+            'part_id': source.part_id, 'profile': source.profile,
+            'texture_path': str(source.texture_path), 'config': source.config,
+            'affine': list(source.affine), 'color': list(source.color),
+            'unity_order': list(source.unity_order),
+            'system_ref': source.system_ref.to_dict() if source.system_ref else None,
+            'material_ref': source.material_ref.to_dict() if source.material_ref else None,
+            'texture_ref': source.texture_ref.to_dict() if source.texture_ref else None,
+        } for source in getattr(job, 'particle_sources', ())],
+    }
+
+
 class PreviewExportWorker(QThread):
     """图片预览导出工作线程（.skel → PNG，含配对合成 + 皮肤导出）
 
@@ -53,7 +69,8 @@ class PreviewExportWorker(QThread):
     """
     progress = Signal(int, int)            # legacy current, total
     skin_progress = Signal(int, int, str)  # skin-job current, total, label
-    finished = Signal(str)                 # summary for identity-based jobs
+    render_progress = Signal(int, int, str)  # current stage/frame only, independent of batch count
+    summary_ready = Signal(str)            # business result; QThread.finished remains lifecycle-only
     export_finished = Signal(bool, str)    # success, summary
     error = Signal(str)
 
@@ -123,6 +140,7 @@ class PreviewExportWorker(QThread):
         total = len(self.jobs)
         success_count = 0
         failure_count = 0
+        basic_count = 0
         cancelled = False
 
         for current, job in enumerate(self.jobs, start=1):
@@ -142,10 +160,16 @@ class PreviewExportWorker(QThread):
                     "loop": source.loop,
                     "skin": source.skin,
                     "unity_order": source.unity_order,
-                    "skeleton_ref": source.skeleton_ref.to_dict(),
+                    "skeleton_ref": source.skeleton_ref.to_dict() if source.skeleton_ref else None,
+                    "time_scale": source.time_scale,
+                    "affine": list(source.affine),
+                    "sequence": [asdict(step) for step in source.sequence],
+                    'tracks': [asdict(track) for track in getattr(source, 'tracks', ())],
+                    "fade_in": source.fade_in,
                     "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
                 } for source in job.sources]
                 job_details = {
+                    **_scene_runtime_metadata(job),
                     "scene": {
                         "game_version": scene.game_version,
                         "version_timestamp": scene.version_timestamp,
@@ -188,6 +212,9 @@ class PreviewExportWorker(QThread):
                 output_exists = job.output_path.is_file()
                 output_bytes = job.output_path.stat().st_size if output_exists else 0
                 output_verified = runner_ok and output_exists and output_bytes > 0
+                if self._cancelled and not output_verified:
+                    cancelled = True
+                    break
                 if not output_verified:
                     failure_count += 1
                     logger.error(
@@ -198,23 +225,33 @@ class PreviewExportWorker(QThread):
                     continue
                 self._write_metadata(job)
                 success_count += 1
+                basic_count += getattr(job, 'render_scope', 'full') == 'basic'
                 logger.info(
                     "Spine 导出项完成 label=%s output=%s bytes=%s metadata=%s",
                     label, job.output_path, output_bytes,
                     job.output_path.with_name(job.output_path.name + ".metadata.json"),
                     extra={"event": "spine.export.complete", "details": {**job_details, "output_bytes": output_bytes, "metadata_path": str(job.output_path.with_name(job.output_path.name + ".metadata.json"))}},
                 )
+            except InterruptedError:
+                cancelled = True
+                break
             except Exception:
+                if self._cancelled:
+                    cancelled = True
+                    break
+                failure_count += 1
                 logger.exception(
                     "Spine 导出项发生异常 label=%s output=%s",
                     label, job.output_path,
                     extra={"event": "spine.export.failed", "error_code": "SPINE_EXPORT_ITEM_FAILED", "details": job_details},
                 )
-                raise
+                continue
 
         if self._cancelled:
             cancelled = True
         summary = f"{success_count} succeeded, {failure_count} failed"
+        if basic_count:
+            summary += f', {basic_count} basic'
         if cancelled:
             summary += ", cancelled"
         if cancelled:
@@ -233,10 +270,10 @@ class PreviewExportWorker(QThread):
             outcome,
             error_code=error_code,
             message=summary,
-            details={"total": total, "succeeded": success_count, "failed": failure_count, "cancelled": cancelled},
+            details={"total": total, "succeeded": success_count, 'complete': success_count - basic_count, 'basic': basic_count, "failed": failure_count, "cancelled": cancelled},
         )
         logger.info("Spine 导出批次结束 outcome=%s total=%s succeeded=%s failed=%s cancelled=%s", outcome, total, success_count, failure_count, cancelled, extra={"event": "spine.export.summary", "outcome": outcome, "error_code": error_code, "details": {"total": total, "succeeded": success_count, "failed": failure_count, "cancelled": cancelled}})
-        self.finished.emit(summary)
+        self.summary_ready.emit(summary)
         self.export_finished.emit(success_count > 0 and failure_count == 0 and not cancelled, summary)
 
     @staticmethod
@@ -244,6 +281,7 @@ class PreviewExportWorker(QThread):
         if hasattr(job, "scene") and hasattr(job, "sources"):
             scene = job.scene
             metadata = {
+                **_scene_runtime_metadata(job),
                 "scene": {
                     "game_version": scene.game_version,
                     "version_timestamp": scene.version_timestamp,
@@ -259,7 +297,12 @@ class PreviewExportWorker(QThread):
                     "loop": source.loop,
                     "skin": source.skin,
                     "unity_order": source.unity_order,
-                    "skeleton_ref": source.skeleton_ref.to_dict(),
+                    "skeleton_ref": source.skeleton_ref.to_dict() if source.skeleton_ref else None,
+                    "time_scale": source.time_scale,
+                    "affine": list(source.affine),
+                    "sequence": [asdict(step) for step in source.sequence],
+                    'tracks': [asdict(track) for track in getattr(source, 'tracks', ())],
+                    "fade_in": source.fade_in,
                     "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
                 } for source in job.sources],
                 "sprite_sources": [_sprite_source_metadata(source) for source in job.sprite_sources],
@@ -291,7 +334,7 @@ class PreviewExportWorker(QThread):
 
     @timed("图片导出")
     def _do_export(self):
-        """执行完整的 .skel 导出流程，返回 (success, summary)"""
+        """Export the legacy image batch; return whether every requested stage completed."""
         logger.info(f"图片预览导出开始：material={self.material_dir}, output={self.output_dir}, force={self.force}")
         # 扫描 .skel 文件
         skel_files = []
@@ -325,6 +368,7 @@ class PreviewExportWorker(QThread):
         success_count = 0
         fail_count = 0
         skipped_count = 0
+        cached_count = 0
         composite_count = 0
         total = len(skel_files)
         processed = 0
@@ -351,7 +395,7 @@ class PreviewExportWorker(QThread):
             if not os.path.exists(atlas_path):
                 logger.warning(f"跳过 {skel_name}: 缺少对应的 .atlas 文件")
                 logger.error("Spine 输入校验失败：缺少 atlas skel=%s expected_atlas=%s", skel_path, atlas_path, extra={"event": "spine.resource.failed", "error_code": "SPINE_ATLAS_MISSING", "details": input_details})
-                skipped_count += 1
+                fail_count += 1
                 continue
 
             # 去重检查：force=False 时跳过已存在且非空的 PNG
@@ -366,6 +410,7 @@ class PreviewExportWorker(QThread):
                 logger.info(f"跳过已存在的 PNG: {base_name}.png")
                 logger.info("Spine 资源跳过（非强制模式且输出已存在） skel=%s output=%s output_bytes=%s", skel_path, main_output, os.path.getsize(main_output), extra={"event": "spine.resource.skipped", "details": {**input_details, "output": main_output, "output_bytes": os.path.getsize(main_output), "reason": "output_exists"}})
                 skipped_count += 1
+                cached_count += 1
                 continue
 
             os.makedirs(char_subdir, exist_ok=True)
@@ -391,10 +436,12 @@ class PreviewExportWorker(QThread):
                 success_count += 1
                 expected = os.path.join(char_subdir, f"{base_name}.png")
                 logger.info("Spine 静态图导出成功 name=%s output=%s exists=%s bytes=%s", base_name, expected, os.path.isfile(expected), os.path.getsize(expected) if os.path.isfile(expected) else 0, extra={"event": "spine.resource.complete", "details": {**input_details, "output": expected, "output_exists": os.path.isfile(expected), "output_bytes": os.path.getsize(expected) if os.path.isfile(expected) else 0, "animations": animations, "selected_skin": "motion_stander" if is_battlespine else None}})
-            else:
+            elif not self._cancelled:
                 fail_count += 1
                 logger.error("Spine 静态图导出失败 name=%s skel=%s atlas=%s", base_name, skel_path, atlas_path, extra={"event": "spine.resource.failed", "error_code": "SPINE_STATIC_EXPORT_FAILED", "details": {**input_details, "animations": animations, "selected_skin": "motion_stander" if is_battlespine else None}})
 
+            if self._cancelled:
+                break
             # 导出皮肤图片（各表情独立图片）
             skin_names = extract_motion_names(skel_path)
             if skin_names:
@@ -402,10 +449,12 @@ class PreviewExportWorker(QThread):
                 skin_count = export_skel_skins(
                     skel_path, atlas_path, self.spine_cli, char_subdir, base_name, skin_names
                 )
+                if not self._cancelled:
+                    fail_count += max(0, len(skin_names) - skin_count)
                 logger.info(f"皮肤导出完成: {base_name} (成功 {skin_count}/{len(skin_names)})")
 
         # 处理配对合成（UnityPy 提取背景偏移 → 按偏移合成，无偏移则回退旧合成）
-        bundle_map = build_cardspine_bundle_map(self._find_assets_map())
+        bundle_map = build_cardspine_bundle_map(self._find_assets_map()) if not self._cancelled else {}
         _offset_cache = {}  # bundle 路径 -> 像素偏移（空间换时间）
 
         for role_skel, bg_skel in pairs:
@@ -422,11 +471,11 @@ class PreviewExportWorker(QThread):
             # 检查两张图片是否存在
             if not os.path.exists(role_png):
                 logger.warning(f"跳过合成 {role_name}: 角色图不存在")
-                skipped_count += 1
+                fail_count += 1
                 continue
             if not os.path.exists(bg_png):
                 logger.warning(f"跳过合成 {role_name}: 背景图不存在")
-                skipped_count += 1
+                fail_count += 1
                 continue
 
             # 合成（去重：force=False 时跳过已存在的合成图）
@@ -458,25 +507,38 @@ class PreviewExportWorker(QThread):
                 fail_count += 1
                 logger.error("Spine 部件合成失败 role=%s background=%s output=%s offset=%s", role_png, bg_png, composite_path, offset, extra={"event": "spine.composite.failed", "error_code": "SPINE_COMPOSITE_FAILED", "details": {"role_png": role_png, "background_png": bg_png, "output": composite_path, "offset": offset}})
 
+        # Material results are part of the same user-visible batch, so collect
+        # them before emitting its summary and all-complete boolean.
+        material_summary = self._export_fgui_atlas() if not self._cancelled else None
+        material_failures = material_summary.failed if material_summary else 0
+        material_successes = material_summary.exported if material_summary else 0
+        cancelled = self._cancelled
+        failures = fail_count + material_failures
+        completed = success_count + cached_count + composite_count + material_successes
+        outcome = ('cancelled' if cancelled else 'partial' if failures and completed
+                   else 'failed' if failures or not completed else 'success')
+        labels = {'cancelled': '已取消', 'partial': '部分完成', 'failed': '失败', 'success': '完成'}
         summary = (
+            f"预览图片导出{labels[outcome]}\n"
             f"共找到 {len(skel_files)} 个 .skel 文件\n"
             f"成功导出: {success_count} 个\n"
             f"合成完成: {composite_count} 张\n"
             f"跳过: {skipped_count} 个\n"
-            f"失败: {fail_count} 个\n\n"
+            f"Spine 失败: {fail_count} 个\n"
+            f"游戏素材成功: {material_successes} 个\n"
+            f"游戏素材失败: {material_failures} 个\n"
+            f"失败: {failures} 个\n\n"
             f"输出目录:\n{self.output_dir}"
         )
+        if material_summary and material_summary.diagnostics:
+            summary += '\n问题详情:\n' + '\n'.join(material_summary.diagnostics)
         logger.info(f"预览图片完成: 成功 {success_count}, 合成 {composite_count}, 跳过 {skipped_count}, 失败 {fail_count}")
-        # 处理 FGUI 图集切割
-        material_summary = self._export_fgui_atlas()
-        material_failures = material_summary.failed if material_summary else 0
-        cancelled = self._cancelled
-        outcome = "cancelled" if cancelled else "partial" if fail_count + material_failures and success_count else "failed" if fail_count + material_failures or success_count == 0 else "success"
         set_task_outcome(outcome, error_code="SPINE_EXPORT_CANCELLED" if cancelled else "SPINE_EXPORT_PARTIAL" if outcome == "partial" else "SPINE_EXPORT_FAILED" if outcome == "failed" else None, message="预览图片导出结束", details={"skel_count": len(skel_files), "exported": success_count, "composites": composite_count, "skipped": skipped_count, "spine_failed": fail_count, "material_failed": material_failures, "cancelled": cancelled, "output_dir": self.output_dir})
         logger.info("Spine 导出汇总 outcome=%s skel_count=%s exported=%s composites=%s skipped=%s spine_failed=%s material_failed=%s", outcome, len(skel_files), success_count, composite_count, skipped_count, fail_count, material_failures, extra={"event": "spine.export.summary", "outcome": outcome, "details": {"skel_count": len(skel_files), "exported": success_count, "composites": composite_count, "skipped": skipped_count, "spine_failed": fail_count, "material_failed": material_failures, "cancelled": cancelled, "output_dir": self.output_dir}})
 
-        self.export_finished.emit(success_count > 0, summary)
-        return success_count > 0
+        complete = outcome == 'success'
+        self.export_finished.emit(complete, summary)
+        return complete
 
     def _export_fgui_atlas(self):
         """Cut every FGUI package from staging into the final output tree.

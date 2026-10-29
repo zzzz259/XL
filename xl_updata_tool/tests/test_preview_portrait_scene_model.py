@@ -86,6 +86,16 @@ def test_scene_round_trip_preserves_spine_sprite_order_and_interactions():
     assert restored.interactions[0].animation == "touch"
 
 
+def test_spine_skeleton_data_scale_survives_manifest_round_trip():
+    data = _scene().to_dict()
+    data["parts"][0]["spine"]["skeleton_scale"] = 0.003000000026077032
+
+    restored = PortraitScene.from_dict(data)
+
+    assert restored.to_dict()["parts"][0]["spine"]["skeleton_scale"] == 0.003000000026077032
+    assert not any(item.code == "unknown_field" for item in restored.diagnostics)
+
+
 def test_scene_round_trip_preserves_full_transform_chain_and_explicit_sort_order():
     scene = _scene()
     part = replace(
@@ -238,3 +248,19 @@ def test_validate_rejects_unsupported_spine_material_blend():
         diagnostics=(diagnostics[0],),
     )
     assert stored.validate().count(diagnostics[0]) == 1
+
+
+def test_validate_accepts_independent_spine_clocks():
+    scene = _scene()
+    changed = replace(scene.parts[2], spine=replace(scene.parts[2].spine, time_scale=0.5))
+    result = replace(scene, parts=(*scene.parts[:2], changed)).validate()
+    assert not any(item.code == "unsupported_spine_time_scale" for item in result)
+
+
+def test_validate_rejects_negative_spine_clock_but_allows_frozen_parts():
+    scene = _scene()
+    part = scene.parts[2]
+    frozen = replace(part, spine=replace(part.spine, time_scale=0))
+    assert not any(d.code == 'invalid_spine_time_scale' for d in replace(scene, parts=(*scene.parts[:2], frozen)).validate())
+    negative = replace(part, spine=replace(part.spine, time_scale=-1))
+    assert any(d.code == 'invalid_spine_time_scale' for d in replace(scene, parts=(*scene.parts[:2], negative)).validate())

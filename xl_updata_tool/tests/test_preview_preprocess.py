@@ -101,7 +101,7 @@ def test_preview_postprocess_skips_portrait_generation_without_both_completed_ca
     assert summary.portrait is None
 
 
-def test_preprocess_fails_import_when_game_material_export_reports_failures():
+def test_preprocess_keeps_material_failures_in_partial_import_summary():
     service = PreviewService("data/material", "output/character")
     service.discover_preview_resources = lambda: object()
     service.publish_raw_spine_resources = lambda _catalog: RawSpinePublishSummary(published=1)
@@ -112,5 +112,83 @@ def test_preprocess_fails_import_when_game_material_export_reports_failures():
         diagnostics=("burst-head export failed: access denied",),
     )
 
-    with pytest.raises(RuntimeError, match="游戏素材导出失败.*access denied"):
-        service.preprocess_preview_resources()
+    summary = service.preprocess_preview_resources()
+    assert summary.partial
+    assert summary.materials.failed == 1
+    assert 'access denied' in summary.materials.diagnostics[0]
+
+
+@pytest.mark.parametrize("completed", [frozenset({"all"}), frozenset({"character"})])
+def test_config_scenes_use_selected_version_for_full_or_separate_character_import(
+    tmp_path, monkeypatch, completed,
+):
+    calls = []
+    lua_version = tmp_path / "output" / "lua" / "402"
+    lua_version.mkdir(parents=True)
+    # A newer Lua directory must never silently replace the selected version.
+    (lua_version.parent / "999").mkdir()
+    monkeypatch.setattr(
+        "app.features.preview.service.generate_portrait_manifests",
+        lambda *args, **kwargs: calls.append(args) or PortraitImportSummary("complete", roots=1, complete=1),
+    )
+    service = PreviewService(tmp_path / "data" / "material", tmp_path / "output" / "character")
+    service.discover_preview_resources = lambda: object()
+    service.publish_raw_spine_resources = lambda _: RawSpinePublishSummary()
+    service.discover_game_materials = lambda: GameMaterialCatalog((), (), ())
+    service.export_game_materials = lambda *args, **kwargs: MaterialExportSummary()
+    summary = service.preprocess_preview_resources(import_result=ImportResult(
+        categories=completed, completed_categories=completed, version_timestamp=402,
+    ))
+    assert summary.portrait.complete == 1
+    assert calls[0][1] == 402
+    assert calls[0][3] == lua_version.parent
+
+
+def test_full_legacy_import_generates_scenes_from_verified_lua_result(tmp_path, monkeypatch):
+    calls = []
+    lua_version = tmp_path / "output" / "lua" / "402"
+    lua_version.mkdir(parents=True)
+    monkeypatch.setattr(
+        "app.features.preview.service.generate_portrait_manifests",
+        lambda *args, **kwargs: calls.append(args) or PortraitImportSummary("complete", roots=1, complete=1),
+    )
+    service = PreviewService(tmp_path / "data" / "material", tmp_path / "output" / "character")
+    service.discover_preview_resources = lambda: object()
+    service.publish_raw_spine_resources = lambda _: RawSpinePublishSummary()
+    service.discover_game_materials = lambda: GameMaterialCatalog((), (), ())
+    service.export_game_materials = lambda *args, **kwargs: MaterialExportSummary()
+    summary = service.preprocess_preview_resources(import_result=ImportResult(
+        categories=frozenset({"all"}), completed_categories=frozenset({"all"}),
+        lua_export_result={"version": 402, "directory": str(lua_version)},
+    ))
+    assert calls and summary.portrait.complete == 1
+
+
+def test_worker_records_partial_scene_outcome_instead_of_success(monkeypatch):
+    from app.features.preview.workers.preview_postprocess import PreviewPostprocessWorker
+    outcomes = []
+    monkeypatch.setattr(
+        "app.features.preview.workers.preview_postprocess.set_task_outcome",
+        lambda outcome, **kwargs: outcomes.append(outcome),
+    )
+    summary = PreviewPreprocessSummary(
+        object(), RawSpinePublishSummary(), MaterialExportSummary(),
+        PortraitImportSummary("partial", roots=2, complete=1, incomplete=1),
+    )
+    service = type("Service", (), {"preprocess_preview_resources": lambda self, **kwargs: summary})()
+    worker = PreviewPostprocessWorker(service)
+    worker.run()
+    assert outcomes == ["partial"]
+
+
+def test_character_import_without_version_reports_skipped_config_phase(tmp_path):
+    service = PreviewService(tmp_path / "data" / "material", tmp_path / "output" / "character")
+    service.discover_preview_resources = lambda: object()
+    service.publish_raw_spine_resources = lambda _: RawSpinePublishSummary()
+    service.discover_game_materials = lambda: GameMaterialCatalog((), (), ())
+    service.export_game_materials = lambda *args, **kwargs: MaterialExportSummary()
+    summary = service.preprocess_preview_resources(import_result=ImportResult(
+        categories=frozenset({"character"}), completed_categories=frozenset({"character"}),
+    ))
+    assert summary.portrait.status == "skipped"
+    assert summary.portrait.diagnostic == "portrait_version_context_missing"

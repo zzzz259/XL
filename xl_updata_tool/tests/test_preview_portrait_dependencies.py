@@ -1,3 +1,7 @@
+from types import SimpleNamespace
+
+import pytest
+
 from app.features.preview.portrait_config.asset_index import (
     AssetIndex,
     IndexedAsset,
@@ -13,6 +17,20 @@ from app.features.preview.portrait_config.unity_scene import (
 
 HASH_A = "a" * 32
 HASH_B = "b" * 32
+
+
+@pytest.fixture(autouse=True)
+def serialized_fixture_files(monkeypatch):
+    """These synthetic catalogs have real CAB identities in their fake files."""
+    from app.features.preview.portrait_config import unity_scene
+
+    def load(path):
+        return SimpleNamespace(objects=[SimpleNamespace(
+            path_id=pid, type=SimpleNamespace(name="Texture2D"),
+            assets_file=SimpleNamespace(name=f"CAB-{path.name}"),
+        ) for pid in (1, 2, 20, 21)])
+
+    monkeypatch.setattr(unity_scene, "_load_environment", load)
 
 
 def test_canonical_bundle_hash_requires_a_single_exact_cab_hash():

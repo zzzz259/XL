@@ -58,9 +58,13 @@ class PreviewPostprocessWorker(QThread):
             else:
                 materials = summary.materials
                 spine = summary.spine
+                partial = bool(materials.failed or spine.diagnostics)
+                partial = partial or (summary.portrait is not None and summary.portrait.status in {"partial", "skipped"})
+                packages = getattr(summary, "packages", None)
+                partial = partial or bool(packages and (packages.failed or packages.cancelled or packages.metadata_incomplete))
                 set_task_outcome(
-                    "success",
-                    message="图片资源预处理完成",
+                    "partial" if partial else "success",
+                    message="图片资源预处理部分完成" if partial else "图片资源预处理完成",
                     details={
                         "spine_published": spine.published,
                         "spine_copied_files": spine.copied_files,
@@ -72,6 +76,10 @@ class PreviewPostprocessWorker(QThread):
                         "portrait_complete": summary.portrait.complete if summary.portrait else 0,
                         "portrait_incomplete": summary.portrait.incomplete if summary.portrait else 0,
                         "portrait_cache_hits": summary.portrait.cache_hits if summary.portrait else 0,
+                        "portrait_not_applicable": summary.portrait.not_applicable if summary.portrait else 0,
+                        "portrait_packages_published": packages.published if packages else 0,
+                        "portrait_packages_failed": packages.failed if packages else 0,
+                        "portrait_packages_metadata_incomplete": packages.metadata_incomplete if packages else 0,
                     },
                 )
                 self.finished_processing.emit(summary)

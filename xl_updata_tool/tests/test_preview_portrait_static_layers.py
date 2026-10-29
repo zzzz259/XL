@@ -1,6 +1,8 @@
 import json
 import math
 
+import pytest
+
 from PIL import Image
 
 from app.features.preview.portrait_config.model import TransformState, AssetRef
@@ -47,6 +49,18 @@ def test_generated_static_layer_crops_sprite_rect_and_preserves_rgba(tmp_path):
     attachment_name = skeleton["slots"][0]["attachment"]
     assert skeleton["skins"][0]["attachments"]["sprite-layer"][attachment_name]["width"] == 2
     assert generated.atlas_path.is_file()
+
+
+def test_generated_sprite_texture_matches_scene_premultiplied_alpha_mode(tmp_path):
+    texture_path = tmp_path / "source.png"
+    Image.new("RGBA", (2, 2), (100, 50, 20, 128)).save(texture_path)
+    generated = generate_static_layer(StaticLayerSpec(
+        part_id="half-transparent", texture_path=texture_path, rect=(0, 0, 2, 2),
+        pivot=(0.5, 0.5), pixels_per_unit=100.0, transform_chain=(),
+        unity_order=(0, 0, 0.0, 0), pma=True,
+    ), tmp_path / "generated")
+    with Image.open(generated.texture_path) as image:
+        assert image.getpixel((0, 0)) == (50, 25, 10, 128)
 
 
 def test_generated_static_layer_applies_unity_pivot_transform_and_renderer_alpha(tmp_path):
@@ -119,3 +133,48 @@ def test_merge_source_order_is_front_to_back_and_stable_for_sort_ties():
     assert [source["name"] for source in ordered] == [
         "spine-high", "sprite-sibling-late", "sprite-sibling-early", "spine-low",
     ]
+
+
+@pytest.mark.parametrize(("ppu", "skeleton_scale", "expected_width"), [
+    (100.0, 0.01, 640.0), (100.0, 0.02, 320.0), (200.0, 0.01, 320.0),
+])
+def test_sprite_pixels_convert_to_raw_spine_units(tmp_path, ppu, skeleton_scale, expected_width):
+    texture_path = tmp_path / "sprite.png"
+    Image.new("RGBA", (640, 20), "white").save(texture_path)
+    spec = StaticLayerSpec(
+        "sprite", texture_path, (0, 0, 640, 20), (0.5, 0.5), ppu,
+        (), (0, 0, 0.0, 0), skeleton_scale=skeleton_scale,
+    )
+
+    generated = generate_static_layer(spec, tmp_path / "generated")
+
+    skeleton = json.loads(generated.skeleton_path.read_text(encoding="utf-8"))
+    root = skeleton["bones"][0]
+    name = skeleton["slots"][0]["attachment"]
+    region = skeleton["skins"][0]["attachments"]["sprite-layer"][name]
+    assert root["scaleX"] * region["width"] == pytest.approx(expected_width)
+
+
+def test_sprite_transform_is_relative_to_full_spine_transform_and_preserves_pivot_and_flips(tmp_path):
+    texture_path = tmp_path / "sprite.png"
+    Image.new("RGBA", (20, 10), "white").save(texture_path)
+    q = math.sqrt(0.5)
+    common = _transform(position=(10, 20, 0), rotation=(0, 0, q, q), scale=(3, 3, 1))
+    spine_child = _transform(position=(1, 2, 0), scale=(2, 2, 1))
+    sprite_child = _transform(position=(5, 8, 0), rotation=(0, 0, q, q), scale=(4, 4, 1))
+    spec = StaticLayerSpec(
+        "sprite", texture_path, (0, 0, 20, 10), (0.25, 0.5), 100.0,
+        (common, sprite_child), (0, 0, 0.0, 0), flip_x=True,
+        spine_transform_chain=(common, spine_child), skeleton_scale=0.01,
+    )
+
+    generated = generate_static_layer(spec, tmp_path / "generated")
+
+    root = json.loads(generated.skeleton_path.read_text(encoding="utf-8"))["bones"][0]
+    # inverse Spine(child(1,2), scale2) maps Sprite(5,8) to (2,3).
+    # Flipped quarter pivot moves its center -0.05*2=-0.1 Unity Y after 90deg.
+    assert root["x"] == pytest.approx(200.0)
+    assert root["y"] == pytest.approx(290.0)
+    assert root["rotation"] == pytest.approx(90.0)
+    assert root["scaleX"] == pytest.approx(2.0)
+    assert root["scaleY"] == pytest.approx(2.0)

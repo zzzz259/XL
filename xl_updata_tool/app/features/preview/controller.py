@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import json
 import subprocess
 import tempfile
-from contextlib import nullcontext
 from collections import OrderedDict
 
-from PySide6.QtCore import QPoint, QObject, Qt, QMimeData, QUrl, Signal
+from PySide6.QtCore import QPoint, QObject, Qt, QMimeData, QUrl, Signal, QThread
 from PySide6.QtWidgets import QApplication, QDialog, QListWidgetItem, QMenu, QMessageBox
 
 from app.platform.diagnostics import logger
@@ -23,6 +24,7 @@ from .export_plan import ExportSettings, build_default_export_plan, build_export
 from .character_names import CharacterNameResolver
 from .spine_adapter import build_spine_export_command, get_animation_metadata, get_animation_names
 from .resource_model import display_skin_key
+from .scene_capabilities import portrait_scene_capabilities
 from .portrait_config.asset_index import AssetIndex
 from .portrait_scene_export import (
     build_portrait_scene_export_jobs,
@@ -56,9 +58,18 @@ class PreviewController(QObject):
         self.image_paths: list[str] = []
         self._thumbnail_cache = {}
         self._image_worker = None
+        self._retired_image_workers = set()
+        self._closing = False
         self._export_worker = None
+        self._legacy_export_result = None
         self._selected_export_worker = None
         self._selected_export_cancelled = False
+        self._selected_export_result = None
+        self._selected_preflight_failures = ()
+        self._selected_not_applicable_count = 0
+        self._postprocess_result = None
+        self.last_postprocess_summary = None
+        self._refresh_worker = None
         self._single_composite_worker = None
         self._single_export_worker = None
         self._batch_worker = None
@@ -98,7 +109,7 @@ class PreviewController(QObject):
         """Run image discovery/material publishing after AS import."""
         del force  # The publisher is content-addressed and safe to repeat.
         worker = self._postprocess_worker
-        if worker is not None and worker.isRunning():
+        if worker is not None:
             self.status_changed.emit("图片资源预处理已在进行中")
             return False
         self.status_changed.emit("正在处理图片资源：发现 Spine、切割图集…")
@@ -108,6 +119,8 @@ class PreviewController(QObject):
         worker.finished_processing.connect(self._on_postprocess_finished)
         worker.cancelled_processing.connect(self._on_postprocess_cancelled)
         worker.error.connect(self._on_postprocess_error)
+        worker.finished.connect(self._on_postprocess_thread_finished)
+        self._postprocess_result = None
         self._postprocess_worker = worker
         self._postprocess_shared = shared_dialog is not None
         self._postprocess_dialog = shared_dialog
@@ -125,10 +138,7 @@ class PreviewController(QObject):
         if worker is None:
             return True
         worker.cancel()
-        if not worker.wait(30000):
-            logger.error("图片资源预处理线程未能在取消超时内退出")
-            return False
-        self._postprocess_worker = None
+        self.status_changed.emit("正在取消图片资源预处理…")
         return True
 
     def _on_postprocess_progress(self, current, total, message):
@@ -149,15 +159,32 @@ class PreviewController(QObject):
         self._postprocess_worker = None
 
     def _on_postprocess_finished(self, summary):
+        self._postprocess_result = ('finished', summary)
+
+    def _on_postprocess_thread_finished(self):
+        result = self._postprocess_result
+        self._finish_postprocess_worker()
+        if result is None:
+            result = ('error', '图片资源预处理未返回结果')
+        kind, value = result
+        if kind == 'cancelled':
+            self._complete_postprocess_cancelled()
+        elif kind == 'error':
+            self._complete_postprocess_error(value)
+        else:
+            self._complete_postprocess_finished(value)
+
+    def _complete_postprocess_finished(self, summary):
+        self.last_postprocess_summary = summary
         was_shared = self._postprocess_shared
         self._postprocess_shared = False
         self._postprocess_dialog = None
-        self._finish_postprocess_worker()
         self._loaded = False
         self._preloaded = False
         material_summary = summary.materials
         portrait_text = ""
         portrait = summary.portrait
+        packages = getattr(summary, "packages", None)
         if portrait is not None:
             if portrait.status in {"complete", "partial"}:
                 state = "完成" if portrait.status == "complete" else "部分完成"
@@ -168,28 +195,38 @@ class PreviewController(QObject):
                 portrait_text = f"；立绘场景跳过（{portrait.diagnostic}）"
             elif portrait.status == "cancelled":
                 portrait_text = "；立绘场景生成已取消，已完成缓存保留"
+        if packages is not None:
+            portrait_text += f"；皮肤包成功 {packages.published}，失败 {packages.failed}"
+            if packages.metadata_incomplete:
+                portrait_text += f"，元数据不完整 {packages.metadata_incomplete}"
         self.status_changed.emit(
-            f"图片资源预处理完成：Spine {summary.spine.published} 组，"
+            f"图片资源预处理{'部分完成' if summary.partial else '完成'}：Spine {summary.spine.published} 组，"
             f"游戏素材成功 {material_summary.exported}，失败 {material_summary.failed}"
             f"{portrait_text}"
         )
         self.badge_changed.emit()
+        if not self._closing:
+            self.preload_index()
         self.processing_finished.emit(was_shared)
 
     def _on_postprocess_cancelled(self):
+        self._postprocess_result = ('cancelled', None)
+
+    def _complete_postprocess_cancelled(self):
         was_shared = self._postprocess_shared
         self._postprocess_shared = False
         self._postprocess_dialog = None
-        self._finish_postprocess_worker()
         self.status_changed.emit("图片资源预处理已取消，已完成的文件已保留")
         if was_shared:
             self.processing_cancelled.emit(was_shared)
 
     def _on_postprocess_error(self, message):
+        self._postprocess_result = ('error', message)
+
+    def _complete_postprocess_error(self, message):
         was_shared = self._postprocess_shared
         self._postprocess_shared = False
         self._postprocess_dialog = None
-        self._finish_postprocess_worker()
         logger.error("图片资源预处理失败: %s", message)
         self.status_changed.emit("图片资源预处理失败")
         self.processing_error.emit(message, was_shared)
@@ -203,6 +240,8 @@ class PreviewController(QObject):
         self.page.portrait_scene_selection_changed.connect(self._on_portrait_scene_selected)
         if hasattr(self.page, "export_selected_requested"):
             self.page.export_selected_requested.connect(self._on_export_selected_requested)
+        self.page.export_basic_requested.connect(self._on_export_basic_requested)
+        self.page.portrait_refresh_requested.connect(self.start_portrait_refresh)
         if hasattr(self.page, "character_browser"):
             self.page.character_browser.path_activated.connect(self._open_character_folder)
             self.page.btn_character_up.clicked.connect(self._reset_character_output_root)
@@ -306,10 +345,76 @@ class PreviewController(QObject):
         self.status_changed.emit("已将图片预览资源全部标记为已读")
 
     def _on_export_selected_requested(self):
+        if self._export_worker is not None:
+            self.cancel_export()
+            return
+        if self._refresh_worker is not None:
+            self._refresh_worker.cancel()
+            self.page.set_export_busy(True, cancelling=True)
+            return
         if self._selected_export_worker is not None:
             self.cancel_selected_export()
             return
         self.start_selected_export()
+
+    def _on_export_basic_requested(self):
+        return self.start_selected_export(options={
+            'include_interactions': True, 'include_effects': False, 'allow_basic': True,
+        })
+
+    def start_portrait_refresh(self):
+        from .workers.portrait_refresh import PortraitRefreshWorker
+
+        if self._refresh_worker is not None or self._selected_export_worker is not None or self._postprocess_worker is not None:
+            return False
+        scenes = tuple(self.page.action_portrait_scenes())
+        if not scenes:
+            self.status_changed.emit('未选择场景工程')
+            return False
+        worker = PortraitRefreshWorker(self.service, scenes, self)
+        worker.progress.connect(self._on_portrait_refresh_progress)
+        worker.result_ready.connect(self._on_portrait_refresh_result)
+        worker.error.connect(self._on_portrait_refresh_error)
+        worker.finished.connect(self._on_portrait_refresh_finished)
+        self._refresh_worker = worker
+        self._refresh_result = None
+        self.page.set_export_busy(True)
+        self.status_changed.emit('正在更新选中场景的同版工程…')
+        worker.start()
+        return True
+
+    def _on_portrait_refresh_progress(self, event):
+        self.status_changed.emit(f"{event.get('skin_id', '')} · {event.get('phase', '更新场景工程')} · {event.get('status', '')}")
+
+    def _on_portrait_refresh_result(self, result):
+        self._refresh_result = result
+
+    def _on_portrait_refresh_error(self, message):
+        self._refresh_result = str(message)
+
+    def _on_portrait_refresh_finished(self):
+        inspected = self.page.spine_tree.selected_portrait_scenes()
+        worker = self._refresh_worker
+        self._refresh_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        result = self._refresh_result
+        self.page.set_export_busy(False)
+        self._loaded = self._preloaded = False
+        if not self._closing:
+            self.preload_index()
+            if inspected:
+                self.page.spine_tree.restore_current_portrait_scene(inspected[0])
+        if isinstance(result, str) or result is None:
+            self.status_changed.emit(f'场景工程更新失败：{result}')
+        else:
+            message = f'场景工程更新：成功 {result.published}，失败 {result.failed}'
+            if result.cancelled:
+                message += '，已取消'
+            if result.failures:
+                message += '；' + '；'.join(item['error'] for item in result.failures)
+            self.status_changed.emit(message)
+        self.badge_changed.emit()
 
     def discover_resources(self):
         """Refresh the three resource views and publish game materials.
@@ -503,6 +608,7 @@ class PreviewController(QObject):
         worker = self.sender()
         if worker is self._image_worker:
             self._image_worker = None
+        self._retired_image_workers.discard(worker)
         if worker is not None:
             worker.deleteLater()
 
@@ -547,38 +653,17 @@ class PreviewController(QObject):
         return tuple(tuple(items) for items in grouped.values())
 
     def reload_requested(self):
-        """重新选择角色并导出预览图片。"""
+        """Refresh published directories; rebuilding is an explicit separate action."""
         if self._selected_export_worker is not None:
             self.cancel_selected_export()
             return
-        from .dialogs.character_select import CharacterSelectDialog
-
-        try:
-            catalog = self.discover_resources()
-        except Exception as error:
-            self._notify_export_error(f"资源发现失败：{error}")
+        if self._refresh_worker is not None:
+            self._on_export_selected_requested()
             return
-        roles = sorted(
-            role_id for role_id, records in catalog.characters.items()
-            if role_id and any(record.status == "ready" for record in records)
-        )
-        if not roles:
-            QMessageBox.warning(self.page, "提示", "未找到角色立绘，请先导入资源")
+        if self._export_worker is not None:
+            self.cancel_export()
             return
-        dialog = CharacterSelectDialog(roles, self.page)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        selected = dialog.selected_roles()
-        if not selected:
-            QMessageBox.information(self.page, "提示", "未选择任何角色")
-            return
-        logger.info("重新加载预览图片，选中 %s 个角色", len(selected))
-        records = tuple(
-            record
-            for record in catalog.skins.values()
-            if record.status == "ready" and record.character_id in selected
-        )
-        self.start_selected_export(self._group_export_records(records))
+        self.load(force=True)
 
     def start_export(self, spine_cli: str, force=False, selected_roles=None) -> bool:
         if not self.service.material_dir.is_dir():
@@ -587,7 +672,8 @@ class PreviewController(QObject):
         if not os.path.isfile(spine_cli):
             self._notify_export_error(f"SpineViewerCLI 不存在：{spine_cli}")
             return False
-        self.cancel_export()
+        if self._export_worker is not None or self._selected_export_worker is not None:
+            return False
         self.service.ensure_output_dir()
         self.page.preview_progress.setVisible(True)
         self.page.preview_progress.setValue(0)
@@ -602,6 +688,9 @@ class PreviewController(QObject):
         self._export_worker.progress.connect(self._on_export_progress)
         self._export_worker.export_finished.connect(self._on_export_finished)
         self._export_worker.error.connect(self._on_export_error)
+        self._export_worker.finished.connect(self._on_export_thread_finished)
+        self._legacy_export_result = None
+        self.page.set_export_busy(True)
         self._export_worker.start()
         return True
 
@@ -612,17 +701,10 @@ class PreviewController(QObject):
         self.progress_changed.emit(current, total, "导出预览图片")
 
     def _on_export_finished(self, success, summary):
-        self._export_worker = None
-        self.page.preview_progress.setVisible(False)
-        self.export_finished.emit(success, summary)
-        if self.page.isVisible():
-            QMessageBox.information(self.page, "导出完成", summary)
-            self.load(force=True)
+        self._legacy_export_result = (success, summary)
 
     def _on_export_error(self, message):
-        self._export_worker = None
-        self.page.preview_progress.setVisible(False)
-        self._notify_export_error(str(message))
+        self._legacy_export_result = (False, str(message))
 
     def _notify_export_error(self, message):
         self.error.emit(str(message))
@@ -632,23 +714,41 @@ class PreviewController(QObject):
         self.cancel_selected_export()
         if self._export_worker is not None:
             self._export_worker.cancel()
-            self._export_worker.wait(2000)
-            self._export_worker = None
+            self.page.set_export_busy(True, cancelling=True)
+
+    def _on_export_thread_finished(self):
+        worker = self._export_worker
+        self._export_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        self.page.preview_progress.setVisible(False)
+        self.page.set_export_busy(False)
+        success, summary = self._legacy_export_result or (False, '导出线程未返回结果')
+        self.export_finished.emit(success, summary)
+        self.status_changed.emit(summary)
+        if not self._closing and self.page.isVisible():
+            self.load(force=True)
 
     def _default_skin_runner(self, spine_cli):
         def run_job(job):
+            from dataclasses import replace
             try:
                 scene_job = hasattr(job, "scene") and hasattr(job, "sources")
-                temporary_context = (
-                    tempfile.TemporaryDirectory(prefix="xl-portrait-scene-")
-                    if scene_job and job.sprite_sources else nullcontext(None)
-                )
+                scratch = self.service.material_dir.parent / 'cache' / 'portrait-export'
+                scratch.mkdir(parents=True, exist_ok=True)
+                temporary_context = tempfile.TemporaryDirectory(prefix="xl-portrait-scene-", dir=scratch)
                 with temporary_context as temporary_dir:
                     execution_job = (
                         prepare_portrait_scene_export_job(job, temporary_dir)
                         if scene_job and job.sprite_sources else job
                     )
-                    command = build_spine_export_command(execution_job, spine_cli)
+                    if not scene_job:
+                        execution_job = replace(job, output_path=Path(temporary_dir) / job.output_path.name)
+                    command = build_spine_export_command(execution_job, spine_cli, temporary_dir)
+                    worker = QThread.currentThread()
+                    def cancelled():
+                        return bool(getattr(worker, '_cancelled', False))
+                    rendered_output = Path(json.loads(Path(command[-1]).read_text(encoding='utf-8'))['output']) if scene_job else execution_job.output_path
                     if scene_job:
                         resource_label = f"scene {job.scene.character_id}/{job.scene.skin_id}"
                         animation_label = ",".join(source.animation for source in execution_job.sources)
@@ -660,6 +760,10 @@ class PreviewController(QObject):
                             "atlas": str(source.atlas_path),
                             "animation": source.animation,
                             "skin": source.skin,
+                            "time_scale": source.time_scale,
+                            "affine": list(source.affine),
+                            "sequence": [{"animation": step.animation, "loop": step.loop} for step in source.sequence],
+                            "fade_in": source.fade_in,
                             "unity_order": source.unity_order,
                             "skeleton_ref": source.skeleton_ref.to_dict() if source.skeleton_ref else None,
                             "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
@@ -712,9 +816,13 @@ class PreviewController(QObject):
                         capture_output=True,
                         text=True,
                         timeout=300,
+                        cancel_check=cancelled,
+                        cancel_input='cancel\n' if scene_job else None,
+                        cancel_tree=scene_job,
+                        on_line=(lambda stream, line: self._on_native_render_line(worker, resource_label, stream, line)) if scene_job else None,
                     )
-                    output_exists = job.output_path.is_file()
-                    output_bytes = job.output_path.stat().st_size if output_exists else 0
+                    output_exists = rendered_output.is_file()
+                    output_bytes = rendered_output.stat().st_size if output_exists else 0
                     update_process_manifest(
                         result,
                         input_resources=input_resources,
@@ -731,6 +839,13 @@ class PreviewController(QObject):
                             result.stderr.strip(),
                         )
                         return False
+                    if cancelled():
+                        return False
+                    if not output_exists or output_bytes <= 0:
+                        logger.error('SpineViewerCLI 未生成有效暂存输出: %s', rendered_output)
+                        return False
+                    from .scene_export_adapter import publish_scene_result
+                    publish_scene_result(rendered_output, job.output_path)
                     if not job.output_path.is_file() or job.output_path.stat().st_size <= 0:
                         logger.error("SpineViewerCLI 未生成有效输出: %s", job.output_path)
                         return False
@@ -756,18 +871,18 @@ class PreviewController(QObject):
 
         return run_job
 
-    def start_selected_export(self, records=None, settings=None, runner=None) -> bool:
+    def start_selected_export(self, records=None, settings=None, runner=None, *, options=None) -> bool:
         """Export checked Spine skins through the identity-based PNG worker."""
-        if self._selected_export_worker is not None:
+        if self._selected_export_worker is not None or self._refresh_worker is not None or self._export_worker is not None:
             return False
         selected_from_page = records is None
         if selected_from_page:
-            scenes = tuple(self.page.checked_portrait_scenes())
+            scenes = tuple(self.page.action_portrait_scenes())
             if scenes:
                 if self.page.selected_spine_record_groups():
                     self.status_changed.emit("请分别导出组装立绘场景与原始 Spine 资源")
                     return False
-                return self._start_portrait_scene_export(scenes, settings=settings, runner=runner)
+                return self._start_portrait_scene_export(scenes, settings=settings, runner=runner, options=options)
             record_groups = tuple(self.page.selected_spine_record_groups())
             records = record_groups
         else:
@@ -892,15 +1007,18 @@ class PreviewController(QObject):
             parent=self,
         )
         self._selected_export_worker.skin_progress.connect(self._on_selected_export_progress)
-        self._selected_export_worker.finished.connect(self._on_selected_export_summary)
+        self._selected_export_worker.render_progress.connect(self._on_selected_render_progress)
+        self._selected_export_worker.summary_ready.connect(self._on_selected_export_summary)
+        self._selected_export_worker.finished.connect(self._on_selected_export_thread_finished)
         self._selected_export_worker.export_finished.connect(self._on_selected_export_finished)
         self._selected_export_worker.error.connect(self._on_selected_export_error)
         self._selected_export_cancelled = False
+        self._selected_export_result = None
+        self._selected_preflight_failures = ()
+        self._selected_not_applicable_count = 0
         self.page.btn_reload.setText("取消导出")
         self.page.btn_reload.setEnabled(True)
-        if hasattr(self.page, "btn_export_selected"):
-            self.page.btn_export_selected.setText("取消导出")
-            self.page.btn_export_selected.setEnabled(True)
+        self.page.set_export_busy(True)
         self.status_changed.emit(f"准备导出 {len(jobs)} 个 Spine 皮肤")
         self._selected_export_worker.start()
         return True
@@ -913,18 +1031,58 @@ class PreviewController(QObject):
         self.status_changed.emit(f"导出中 [{current}/{total}]: {label}")
         self.progress_changed.emit(current, total, f"导出 Spine 皮肤: {label}")
 
-    def _start_portrait_scene_export(self, scenes, *, settings=None, runner=None) -> bool:
+    @staticmethod
+    def _on_native_render_line(worker, label, stream, line):
+        signal = getattr(worker, 'render_progress', None)
+        if signal is None or stream != 'stdout':
+            return
+        try:
+            event = json.loads(line)
+            phases = {'load': '准备部件', 'prepare': '准备部件', 'bounds': '计算边界',
+                      'export_start': '渲染帧', 'export': '渲染帧', 'render': '渲染帧',
+                      'encode': '编码视频', 'validate': '校验', 'publish': '发布'}
+            phase = phases.get(event.get('phase'))
+            if phase:
+                total = max(0, int(event.get('total', 0)))
+                current = max(0, int(event.get('current', 0)))
+                signal.emit(current, total, f'{label} · {phase}')
+        except (ValueError, TypeError, AttributeError, OverflowError):
+            return
+
+    def _on_selected_render_progress(self, current, total, label):
+        self.page.preview_progress.setRange(0, total)
+        if total:
+            self.page.preview_progress.setValue(current)
+        self.page.preview_progress.setFormat(f'{label} · {current}/{total}' if total else label)
+        self.status_changed.emit(label)
+        self.progress_changed.emit(current, total, label)
+
+    def _start_portrait_scene_export(self, scenes, *, settings=None, runner=None, options=None) -> bool:
         """Resolve checked manifests and queue one CLI job per scene artifact."""
         from dataclasses import replace
+        from .portrait_package import find_portrait_package, build_packaged_portrait_jobs, load_portrait_package
 
         from app.platform.tool_locator import ToolLocator
 
         if self._selected_export_worker is not None:
             return False
+        options = dict(options or {'include_interactions': True, 'include_effects': True, 'allow_basic': False})
+        preflight_failures = []
+        not_applicable_count = 0
         scene_indices = {}
+        packages = {}
         bundles_root = self.service.material_dir.parent / "bundles"
+        usable_scenes = []
         for scene in scenes:
+            if portrait_scene_capabilities(scene).state == 'not_applicable':
+                not_applicable_count += 1
+                continue
             try:
+                package = find_portrait_package(self.service.preview_dir.parent, scene)
+                if package:
+                    packages[(scene.version_timestamp, scene.skin_id)] = package
+                    usable_scenes.append(scene)
+                    continue
                 version_dir = bundles_root / str(scene.version_timestamp)
                 map_path = version_dir / "_map" / "assets_map.json"
                 if not map_path.is_file():
@@ -932,10 +1090,27 @@ class PreviewController(QObject):
                 if scene.version_timestamp not in scene_indices:
                     scene_indices[scene.version_timestamp] = AssetIndex.from_catalog(
                         map_path, version_dir, int(scene.version_timestamp),
+                        cab_cache_path=self.service.material_dir.parent / 'cache' / 'portrait-cab' / f'{scene.version_timestamp}.json',
                     )
+                usable_scenes.append(scene)
             except (OSError, ValueError, TypeError) as error:
-                self._notify_export_error(f"立绘场景资源索引不可用：{error}")
-                return False
+                preflight_failures.append(f'{scene.skin_id}: {error}')
+        scenes = tuple(usable_scenes)
+        if not scenes:
+            self.status_changed.emit(f'未适用 {not_applicable_count}；' + '；'.join(preflight_failures))
+            return False
+
+        def scene_jobs(scene, settings=None, *, planning_options=None):
+            selected_options = options if planning_options is None else planning_options
+            package = packages.get((scene.version_timestamp, scene.skin_id))
+            if package:
+                return build_packaged_portrait_jobs(
+                    scene, package, self.service.preview_dir, name_resolver, settings=settings, options=selected_options,
+                )
+            return build_portrait_scene_export_jobs(
+                scene, scene_indices[scene.version_timestamp], self.service.material_dir,
+                self.service.preview_dir, name_resolver, settings=settings, options=selected_options,
+            )
 
         spine_cli = None
         if runner is None:
@@ -944,17 +1119,47 @@ class PreviewController(QObject):
                 self._notify_export_error(f"SpineViewerCLI 不存在：{spine_cli}")
                 return False
 
+            helper = ToolLocator.create().portrait_scene_cli()
+            if not os.path.isfile(helper):
+                self._notify_export_error(f"立绘场景导出器不存在：{helper}；请运行 scripts/build-portrait-scene-renderer.py")
+                return False
+
         name_resolver = CharacterNameResolver.from_output_root(self.service.preview_dir.parent)
         if settings is None:
-            try:
-                initial_jobs = build_portrait_scene_export_jobs(
-                    scenes[0], scene_indices[scenes[0].version_timestamp],
-                    self.service.material_dir, self.service.preview_dir, name_resolver,
-                )
-            except (OSError, ValueError) as error:
-                self._notify_export_error(f"立绘场景配置无法导出：{error}")
+            initial_jobs = None
+            dialog_scene = None
+            for candidate in scenes:
+                try:
+                    initial_capability = portrait_scene_capabilities(candidate)
+                    preview_options = options
+                    if not initial_capability.can_export and initial_capability.can_export_basic:
+                        preview_options = {**options, 'allow_basic': True, 'include_effects': False}
+                    initial_jobs = scene_jobs(candidate, planning_options=preview_options)
+                    if initial_jobs:
+                        dialog_scene = candidate
+                        break
+                except (OSError, ValueError) as error:
+                    logger.warning('场景设置预检失败 skin=%s error=%s', candidate.skin_id, error)
+            if initial_jobs is None or not initial_jobs:
+                self.status_changed.emit('所选场景均未通过导出预检；查看场景诊断后更新工程')
                 return False
-            first = initial_jobs[0].sources[0]
+            if initial_jobs[0].sources:
+                first = initial_jobs[0].sources[0]
+            else:
+                # Sprite-only covers still have generated native projects in
+                # their published package, available for dialog metadata.
+                from types import SimpleNamespace
+                package_path = packages.get((dialog_scene.version_timestamp, dialog_scene.skin_id))
+                if package_path is None:
+                    self._notify_export_error("纯 Sprite 场景需要先发布皮肤包")
+                    return False
+                package = load_portrait_package(package_path)
+                part = next((p for p in package.manifest["parts"] if p.get("skeleton_path")), None)
+                if part is None:
+                    self._notify_export_error("纯 Sprite 场景缺少生成的 Spine 工程")
+                    return False
+                first = SimpleNamespace(skeleton_path=package_path.parent / part["skeleton_path"],
+                                        atlas_path=package_path.parent / part["atlas_paths"][0])
             animation_durations = {}
             animation_names = ()
             if spine_cli:
@@ -968,6 +1173,12 @@ class PreviewController(QObject):
                 source.skin or initial_jobs[0].settings.skins[0]
                 for source in initial_jobs[0].sources
             ))
+            package_path = packages.get((dialog_scene.version_timestamp, dialog_scene.skin_id))
+            if package_path:
+                from .portrait_package import package_selectors
+                animation_names, animation_durations, skin_names = package_selectors(
+                    load_portrait_package(package_path),
+                )
             family_summary = tuple(dict.fromkeys(scene_resource_family(scene) for scene in scenes))
             dialog = ExportSettingsDialog(
                 str(first.skeleton_path), str(first.atlas_path), "PNG", self.page,
@@ -977,9 +1188,14 @@ class PreviewController(QObject):
                 resource_family=family_summary[0] if family_summary else "spine",
                 selected_group_count=len(scenes),
                 family_summary=family_summary,
+                entrance=any(dict(scene.config_metadata).get('runtime_purpose') in {'entrance_only', 'entrance_stage'} for scene in scenes),
+                scene_capabilities=tuple(portrait_scene_capabilities(scene) for scene in scenes),
             )
+            if options.get('allow_basic') and hasattr(dialog, 'scene_options'):
+                dialog.scene_options.basic_checkbox.setChecked(True)
             if dialog.exec() != QDialog.Accepted:
                 return False
+            options = dict(getattr(dialog, 'scene_export_options', lambda: options)())
             if getattr(dialog, "export_mode", lambda: "custom")() == "custom":
                 if len(scenes) != 1:
                     self.status_changed.emit("自定义导出仅支持恰好一个立绘场景")
@@ -988,23 +1204,20 @@ class PreviewController(QObject):
 
         if settings is not None and not isinstance(settings, ExportSettings):
             settings = ExportSettings(**settings)
-        try:
-            jobs = []
-            for scene in scenes:
-                scene_jobs = build_portrait_scene_export_jobs(
-                    scene, scene_indices[scene.version_timestamp],
-                    self.service.material_dir, self.service.preview_dir,
-                    name_resolver, settings=settings,
-                )
+        jobs = []
+        for scene in scenes:
+            try:
+                planned_jobs = scene_jobs(scene, settings=settings)
                 jobs.extend(
                     replace(job, export_mode="custom") if settings is not None else job
-                    for job in scene_jobs
+                    for job in planned_jobs
                 )
-        except (OSError, ValueError) as error:
-            self._notify_export_error(f"立绘场景配置无法导出：{error}")
-            return False
+            except (OSError, ValueError) as error:
+                preflight_failures.append(f'{scene.skin_id}: {error}')
+                logger.warning('场景导出预检失败 skin=%s error=%s', scene.skin_id, error,
+                               extra={'event': 'portrait_export.preflight.failed', 'error_code': 'PORTRAIT_PREFLIGHT_FAILED'})
         if not jobs:
-            self.status_changed.emit("没有可导出的立绘场景")
+            self.status_changed.emit('没有可导出的立绘场景；' + '；'.join(preflight_failures))
             return False
         if runner is None:
             runner = self._default_skin_runner(spine_cli)
@@ -1013,14 +1226,18 @@ class PreviewController(QObject):
             tuple(jobs), settings=settings or jobs[0].settings, runner=runner, parent=self,
         )
         self._selected_export_worker.skin_progress.connect(self._on_selected_export_progress)
-        self._selected_export_worker.finished.connect(self._on_selected_export_summary)
+        self._selected_export_worker.render_progress.connect(self._on_selected_render_progress)
+        self._selected_export_worker.summary_ready.connect(self._on_selected_export_summary)
+        self._selected_export_worker.finished.connect(self._on_selected_export_thread_finished)
         self._selected_export_worker.export_finished.connect(self._on_selected_export_finished)
         self._selected_export_worker.error.connect(self._on_selected_export_error)
         self._selected_export_cancelled = False
+        self._selected_export_result = None
+        self._selected_preflight_failures = tuple(preflight_failures)
+        self._selected_not_applicable_count = not_applicable_count
         self.page.btn_reload.setText("取消导出")
         self.page.btn_reload.setEnabled(True)
-        self.page.btn_export_selected.setText("取消导出")
-        self.page.btn_export_selected.setEnabled(True)
+        self.page.set_export_busy(True)
         self.page.preview_progress.setVisible(True)
         self.page.preview_progress.setMaximum(len(jobs))
         self.page.preview_progress.setValue(0)
@@ -1033,26 +1250,36 @@ class PreviewController(QObject):
 
     def _on_selected_export_error(self, message):
         self.status_changed.emit(f"导出失败: {message}")
-        self._selected_export_worker = None
-        self._reset_selected_export_ui()
+        self._selected_export_result = (False, str(message))
 
     def _on_selected_export_finished(self, success, summary):
+        self._selected_export_result = (success, summary)
+
+    def _on_selected_export_thread_finished(self):
+        worker = self._selected_export_worker
+        self._selected_export_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        success, summary = self._selected_export_result or (False, '导出线程未返回结果')
+        if self._selected_not_applicable_count:
+            summary += f'；未适用 {self._selected_not_applicable_count}'
+        if self._selected_preflight_failures:
+            success = False
+            summary += f'；预检失败 {len(self._selected_preflight_failures)}：' + '；'.join(self._selected_preflight_failures)
         if self._selected_export_cancelled:
             self.status_changed.emit("导出已取消")
         else:
             self.status_changed.emit(summary if success else f"导出失败: {summary}")
-        self._selected_export_worker = None
         self._reset_selected_export_ui()
+        self.export_finished.emit(success and not self._selected_export_cancelled, summary)
         self.badge_changed.emit()
-        if success and self.page.isVisible():
+        if success and not self._closing and self.page.isVisible():
             self.load(force=True)
 
     def _reset_selected_export_ui(self):
         self.page.btn_reload.setText("重新加载图片")
         self.page.btn_reload.setEnabled(True)
-        if hasattr(self.page, "btn_export_selected"):
-            self.page.btn_export_selected.setText("导出选中 Spine")
-            self.page.btn_export_selected.setEnabled(True)
+        self.page.set_export_busy(False)
         self.page.preview_progress.setVisible(False)
         self.page.refresh_thumbnail_pagination()
 
@@ -1061,11 +1288,11 @@ class PreviewController(QObject):
         if worker is None:
             return
         worker.cancel()
-        worker.wait(5000)
         self._selected_export_cancelled = True
-        self._selected_export_worker = None
-        self._reset_selected_export_ui()
-        self.status_changed.emit("导出已取消")
+        self.page.set_export_busy(True, cancelling=True)
+        self.page.btn_reload.setText('正在取消…')
+        self.page.btn_reload.setEnabled(False)
+        self.status_changed.emit("正在取消导出，等待临时文件清理…")
 
     def cancel(self):
         self.cancel_export()
@@ -1073,17 +1300,40 @@ class PreviewController(QObject):
 
     def close(self):
         """Stop every preview worker before the Qt page is destroyed."""
+        self._closing = True
         self.cancel_export()
         self._cancel_image_worker()
         self.cancel_postprocess()
-        material_browser = getattr(self.page, "material_browser", None)
-        if material_browser is not None and hasattr(material_browser, "stop_thumbnail_loading"):
-            material_browser.stop_thumbnail_loading()
+        if self._refresh_worker is not None:
+            self._refresh_worker.cancel()
+        for name in ('character_browser', 'material_browser'):
+            browser = getattr(self.page, name, None)
+            if browser is not None and hasattr(browser, 'stop_thumbnail_loading'):
+                browser.stop_thumbnail_loading()
+        return not self.has_running_tasks
+
+    @property
+    def has_running_tasks(self):
+        return bool(self._selected_export_worker is not None or self._export_worker is not None
+                    or self._postprocess_worker is not None or self._refresh_worker is not None
+                    or self._image_worker is not None or self._retired_image_workers
+                    or any(getattr(getattr(self.page, name, None), 'has_running_thumbnail_tasks', False)
+                           for name in ('character_browser', 'material_browser')))
 
     def _cancel_image_worker(self):
         if self._image_worker is not None:
-            self._image_worker.cancel()
-            self._image_worker.wait(2000)
+            worker = self._image_worker
+            worker.cancel()
+            for name, handler in (('progress', self._on_load_progress),
+                                  ('image_loaded', self._on_thumbnail_loaded),
+                                  ('finished_loading', self._on_load_finished)):
+                signal = getattr(worker, name, None)
+                if signal is not None and hasattr(signal, 'disconnect'):
+                    signal.disconnect(handler)
+            if hasattr(worker, 'isRunning') and worker.isRunning():
+                self._retired_image_workers.add(worker)
+            elif hasattr(worker, 'deleteLater'):
+                worker.deleteLater()
             self._image_worker = None
 
     def export_with_dialog(self, skel_path, atlas_path, default_format="MP4", skin_name=None):

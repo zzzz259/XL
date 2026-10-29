@@ -26,6 +26,7 @@ class ImportController(QObject):
         self.worker = None
         self.last_result: ImportResult | None = None
         self._completed_categories: set[str] = set()
+        self._version_timestamp = None
 
     def start(self, bundle_paths, bundle_dir, as_cli, **kwargs):
         if self.worker is not None and self.worker.isRunning():
@@ -34,6 +35,8 @@ class ImportController(QObject):
         categories = self.service.categories(kwargs.get("export_categories"))
         self._completed_categories = set()
         self.last_result = None
+        self._version_timestamp = kwargs.get("version_timestamp")
+        kwargs.setdefault("character_asset_exporter", self.service.character_asset_exporter)
         self.worker = ImportWorker(
             bundle_paths,
             bundle_dir,
@@ -93,6 +96,7 @@ class ImportController(QObject):
             cancelled=cancelled,
             message=message,
             lua_export_result=lua_result,
+            version_timestamp=self._version_timestamp,
         )
         self.result_ready.emit(self.last_result)
         self.all_finished.emit(success, message)

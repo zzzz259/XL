@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .bundle_selector import select_audio_bundles, select_lua_bundles
 from app.shared.contracts import ImportResult
+from app.shared.character_import import CharacterAssetExporter
 
 from .spec import CATEGORY_ROOTS, normalise_categories
 
@@ -16,9 +17,11 @@ class ImporterService:
 
     selectors = {"lua": select_lua_bundles, "audio": select_audio_bundles}
 
-    def __init__(self, material_dir: str | os.PathLike[str], lua_output_dir: str | os.PathLike[str]):
+    def __init__(self, material_dir: str | os.PathLike[str], lua_output_dir: str | os.PathLike[str],
+                 *, character_asset_exporter: CharacterAssetExporter | None = None):
         self.material_dir = Path(material_dir)
         self.lua_output_dir = Path(lua_output_dir)
+        self.character_asset_exporter = character_asset_exporter
 
     @staticmethod
     def categories(categories) -> frozenset[str]:
@@ -52,6 +55,7 @@ class ImporterService:
         cancelled=False,
         message="",
         lua_export_result=None,
+        version_timestamp=None,
     ) -> ImportResult:
         selected = self.categories(categories)
         if not selected:
@@ -77,6 +81,7 @@ class ImporterService:
             message=str(message or ""),
             lua_export_result=lua_export_result,
             postprocess_categories=postprocess,
+            version_timestamp=version_timestamp,
         )
 
     @staticmethod

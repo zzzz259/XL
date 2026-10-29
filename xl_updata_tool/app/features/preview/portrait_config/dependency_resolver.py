@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .asset_index import AssetIndex, IndexedAsset
@@ -89,6 +89,7 @@ def resolve_scene_assets(scene: UnitySceneParseResult, index: AssetIndex) -> Res
     visited: list[AssetRef] = []
     visited_set: set[AssetRef] = set()
     queued: list[tuple[AssetRef, str, Any, str]] = []
+    parsed_sources = {pointer.source for pointer in scene.references}
     for pointer in scene.references:
         queued.append((pointer.source, pointer.field_path, pointer, "unity"))  # type: ignore[arg-type]
 
@@ -113,7 +114,8 @@ def resolve_scene_assets(scene: UnitySceneParseResult, index: AssetIndex) -> Res
                 ))
                 continue
             if pointer.file_id == 0:
-                bundle_hash = scene.bundle_hash
+                bundle_hash = source.bundle_hash
+                status, asset = _lookup(index, bundle_hash, pointer.path_id)
             elif pointer.file_id < 0:
                 references.append(ResolvedReference(
                     source, field_path, pointer, None, None, "external_file_id_invalid",
@@ -148,7 +150,22 @@ def resolve_scene_assets(scene: UnitySceneParseResult, index: AssetIndex) -> Res
                     ))
                     continue
                 bundle_hash = normalized_hashes[0]
-            status, asset = _lookup(index, bundle_hash, pointer.path_id)
+                matches = index.find_external(identifiers[0], pointer.path_id)
+                if len(matches) > 1:
+                    status, asset = "ambiguous_mapping", None
+                elif matches:
+                    asset = matches[0]
+                    bundle_hash = asset.bundle_hash
+                    status = "resolved" if asset.bundle_present else "bundle_missing"
+                else:
+                    # These statuses describe missing evidence only; they do
+                    # not bind a CAB to a physical bundle by its filename.
+                    exact = index.find_exact(bundle_hash, pointer.path_id)
+                    if exact and not any(item.bundle_present for item in exact):
+                        status = "bundle_missing"
+                    else:
+                        status = "path_id_missing" if index.has_bundle(bundle_hash) else "bundle_unknown"
+                    asset = None
             target = AssetRef(bundle_hash, pointer.path_id) if status == "resolved" else None
             references.append(ResolvedReference(
                 source, field_path, pointer, target, asset, status,
@@ -157,6 +174,7 @@ def resolve_scene_assets(scene: UnitySceneParseResult, index: AssetIndex) -> Res
             if asset is not None and status == "resolved":
                 if _visit(asset, visited, visited_set):
                     _queue_catalog_dependencies(asset, queued)
+                    _queue_object_references(asset, index, parsed_sources, queued, diagnostics)
             continue
 
         dependency = original
@@ -168,7 +186,7 @@ def resolve_scene_assets(scene: UnitySceneParseResult, index: AssetIndex) -> Res
             continue
         bundle_hash = str(dependency.get("bundle_hash", ""))
         path_id = dependency["path_id"]
-        if not isinstance(path_id, int) or isinstance(path_id, bool) or path_id <= 0:
+        if not isinstance(path_id, int) or isinstance(path_id, bool) or path_id == 0:
             references.append(ResolvedReference(
                 source, field_path, dependency, None, None,
                 "unsupported_dependency_reference_encoding",
@@ -188,7 +206,9 @@ def resolve_scene_assets(scene: UnitySceneParseResult, index: AssetIndex) -> Res
         if asset is not None and status == "resolved":
             if _visit(asset, visited, visited_set):
                 _queue_catalog_dependencies(asset, queued)
+                _queue_object_references(asset, index, parsed_sources, queued, diagnostics)
 
+    diagnostics = [item for item in diagnostics if not _resolved_external_diagnostic(item, references)]
     for item in references:
         if item.status != "resolved":
             diagnostics.append(SceneDiagnostic(
@@ -200,7 +220,7 @@ def resolve_scene_assets(scene: UnitySceneParseResult, index: AssetIndex) -> Res
     complete = (
         version_context_valid
         and all(item.status == "resolved" for item in references)
-        and not any(item.severity == "error" for item in scene.diagnostics)
+        and not any(item.severity == "error" for item in diagnostics)
     )
     return ResolvedScene(
         scene, tuple(references), tuple(visited), tuple(diagnostics),
@@ -217,7 +237,46 @@ def _visit(asset: IndexedAsset, visited: list[AssetRef], visited_set: set[AssetR
     return False
 
 
+def _resolved_external_diagnostic(diagnostic, references) -> bool:
+    """Retire a parser's provisional PPtr error only after exact resolution."""
+    if diagnostic.code != "unresolved_external_pptr":
+        return False
+    details = dict(diagnostic.details)
+    field = details.get("field", "").casefold()
+    for reference in references:
+        pointer = reference.original
+        if reference.status != "resolved" or reference.source != diagnostic.source:
+            continue
+        if not isinstance(pointer, UnityObjectPointer):
+            continue
+        path = reference.field_path.casefold()
+        if (str(pointer.file_id) == details.get("file_id")
+                and str(pointer.path_id) == details.get("path_id")
+                and (path == field or path.startswith(field + "[") or path.startswith(field + "."))):
+            return True
+    return False
+
+
 def _queue_catalog_dependencies(asset: IndexedAsset, queued: list[tuple[AssetRef, str, Any, str]]) -> None:
     source = AssetRef(asset.bundle_hash, asset.path_id)
     for index, dependency in enumerate(asset.dependencies):
         queued.append((source, f"dependencies[{index}]", dependency, "catalog"))
+
+
+def _queue_object_references(asset, index, parsed_sources, queued, diagnostics) -> None:
+    source = AssetRef(asset.bundle_hash, asset.path_id)
+    if source in parsed_sources:
+        return
+    try:
+        pointers = index.object_references(asset)
+    except Exception as error:
+        diagnostics.append(SceneDiagnostic(
+            "dependency_metadata_read_failed", f"Cannot inspect required metadata object: {error}",
+            source=source,
+        ))
+        return
+    for pointer in pointers:
+        # The PPtr captures the external table entry directly from this object's
+        # SerializedFile. It does not belong to the root scene's external table.
+        pointer = replace(pointer, serialized_file_key="")
+        queued.append((source, pointer.field_path, pointer, "unity"))

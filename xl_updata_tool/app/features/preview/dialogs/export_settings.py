@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt
 
 from ..export_plan import ExportSettings
 from ..export_presets import preset_for_family
+from ..scene_export_options import SceneExportOptions
 
 class ExportSettingsDialog(QDialog):
     """导出参数设置对话框"""
@@ -31,6 +32,8 @@ class ExportSettingsDialog(QDialog):
         resource_family=None,
         selected_group_count=1,
         family_summary=None,
+        entrance=False,
+        scene_capabilities=(),
     ):
         super().__init__(parent)
         self.setWindowTitle("导出设置")
@@ -43,7 +46,7 @@ class ExportSettingsDialog(QDialog):
         self.skel_path = skel_path
         self.atlas_path = atlas_path
         self.resource_family = str(resource_family or "").strip().casefold()
-        self._preset = preset_for_family(self.resource_family)
+        self._preset = preset_for_family(self.resource_family, entrance=entrance)
         self._allow_video = self._preset.allow_video if self._preset else True
         self.selected_group_count = max(0, int(selected_group_count or 0))
         self.family_summary = tuple(
@@ -53,6 +56,7 @@ class ExportSettingsDialog(QDialog):
         )
         self._custom_allowed = self.selected_group_count == 1
         self._advanced_expanded = False
+        self._scene_capabilities = tuple(scene_capabilities)
         self._build_ui(default_format, animation_names, animation_durations, skin_names)
 
     def _build_ui(self, default_format, animation_names=None, animation_durations=None, skin_names=None):
@@ -89,6 +93,10 @@ class ExportSettingsDialog(QDialog):
         self.mode_summary.setObjectName("exportModeSummary")
         self.mode_summary.setWordWrap(True)
         layout.addWidget(self.mode_summary)
+        self.scene_options = SceneExportOptions(self._scene_capabilities, self)
+        layout.addWidget(self.scene_options)
+        if self._scene_capabilities:
+            title.setText('导出选中场景')
 
         scroll_area = QScrollArea()
         scroll_area.setObjectName("exportSettingsScroll")
@@ -343,13 +351,16 @@ class ExportSettingsDialog(QDialog):
         if "battlespine" in families:
             parts.append("战斗小人：带 motion_stander 的静态 PNG")
         if "eventcovers" in families:
-            parts.append("活动封面：静态 PNG")
+            parts.append("入场封面：静态 PNG + 完整 MP4" if self._allow_video else "活动封面：静态 PNG")
         if not parts:
             parts.append("按资源类型使用内置静态导出配置")
         return "内置配置：" + "；".join(parts)
 
     def export_mode(self):
         return "custom" if self.custom_radio.isChecked() else "builtin"
+
+    def scene_export_options(self):
+        return self.scene_options.options()
 
     def _on_mode_changed(self):
         custom = self.export_mode() == "custom"

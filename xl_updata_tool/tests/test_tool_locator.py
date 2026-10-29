@@ -164,5 +164,6 @@ def test_lua_and_viewer_tool_paths(tmp_path):
     assert locator.unluac_jar().endswith(str(Path("lua") / "unluac.jar"))
     assert locator.unluac_opmap().endswith(str(Path("lua") / "opmap"))
     assert locator.spineviewer_cli().endswith("SpineViewerCLI.exe")
+    assert locator.portrait_scene_cli().endswith("PortraitSceneCLI.dll")
     assert locator.spineviewer_gui().endswith("SpineViewer.exe")
     assert locator.vgmstream().endswith("vgmstream-cli.exe")

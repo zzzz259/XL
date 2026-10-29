@@ -19,7 +19,7 @@ class SpineExportPreset:
     video_background: str = "#7f7f7f"
 
 
-def preset_for_family(resource_family: str | None) -> SpineExportPreset | None:
+def preset_for_family(resource_family: str | None, *, entrance: bool = False) -> SpineExportPreset | None:
     family = str(resource_family or "").strip().casefold()
     if family == "cardspine":
         return SpineExportPreset(
@@ -44,20 +44,20 @@ def preset_for_family(resource_family: str | None) -> SpineExportPreset | None:
             resource_family=family,
             default_animation="idle",
             default_skins=("default",),
-            allow_video=False,
+            allow_video=entrance,
             static_scale=1,
             video_scale=1,
         )
     return None
 
 
-def default_export_settings(resource_family, output_format, animation_duration=None):
+def default_export_settings(resource_family, output_format, animation_duration=None, *, entrance=False):
     """Build immutable settings for one builtin output artifact."""
     from .export_plan import ExportSettings
 
     family = str(resource_family or "").strip().casefold()
     normalized_format = str(output_format or "").strip().casefold()
-    preset = preset_for_family(family)
+    preset = preset_for_family(family, entrance=entrance)
     if normalized_format not in {"png", "mp4"}:
         raise ValueError("Builtin Spine export supports PNG or MP4")
     if normalized_format == "mp4" and (preset is None or not preset.allow_video):

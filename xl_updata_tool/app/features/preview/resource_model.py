@@ -115,6 +115,8 @@ def portrait_scene_key(scene: PortraitScene) -> str:
 
 def portrait_scene_status(scene: PortraitScene) -> str:
     """Map scene diagnostics to an explicit catalog status."""
+    if dict(scene.config_metadata).get("export_status") == "not_applicable":
+        return "not_applicable"
     diagnostics = scene.validate()
     if any(item.severity == "error" and item.code.startswith("unsupported_") for item in diagnostics):
         return "unsupported"
