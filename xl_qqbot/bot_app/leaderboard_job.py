@@ -1,22 +1,27 @@
 """Opt-in scheduled leaderboard archive job for one game account.
 
-Scheduling anchors on the guild war metadata window (season/phase/start/end):
+Every mode (guild war / illusion / nightmare) is scheduled independently from
+its own metadata window (season/phase/start/end); a closed mode never blocks
+another mode:
 
-- Open period: routine slots at every half-hour mark, fired 30-60s early.
-  The random advance is persisted before the slot may fire. Each routine slot
-  runs the full pipeline (three rankings, illusion lineups, guild 2306
-  index) strictly serially through one session at a time.
-- Endgame: PRE_END_300S/120S/60S/30S/15S fire ranking-only collections at
-  end - offset. They take priority over routine slots, are never caught up
-  once expired, and an imminent pre-end slot suppresses a routine slot.
-- Closed period: only low-frequency metadata probes leave; all other RPCs
-  are silent.
-- POST_CLOSE_1H: one controlled catch-up at end + 3600s. An RPC rejection is
-  recorded as POST_CLOSE_UNAVAILABLE; the SeasonPackager then seals every
-  mode that has runs for the season.
+- Probing: one bounded session reads all three mode metadata RPCs at
+  metadata_probe_interval; each result updates only its own mode's window.
+- Open period: each mode gets routine slots at every half-hour mark, fired
+  30-60s early (the random advance is persisted before the slot may fire). A
+  routine slot runs only its own mode's pipeline (ranking plus, for guild war,
+  the 2306 index, and for illusion, the lineups) strictly serially.
+- Endgame: PRE_END_300S/120S/60S/30S/15S fire ranking-only collections per
+  mode at that mode's end - offset. They take priority over routine slots,
+  are never caught up once expired, and an imminent pre-end slot suppresses
+  only its own mode's routine slot.
+- Closed period: closed modes issue nothing beyond the low-frequency
+  metadata probes.
+- POST_CLOSE_1H: each mode catches up independently at its own end + 3600s
+  (ranking reads opt into closed windows); an RPC rejection is recorded as
+  POST_CLOSE_UNAVAILABLE, and the SeasonPackager seals only that mode.
 
 Per-mode sessions enforce bounded request/duration budgets; any error trips
-the circuit for the whole slot (no automatic retries). All network I/O runs
+the circuit for that slot only (no automatic retries). All network I/O runs
 in asyncio.to_thread; stopping is cooperative via the stop event.
 """
 
@@ -55,7 +60,13 @@ _logger = logging.getLogger(__name__)
 
 CODE_VERSION = "leaderboard-job/1"
 MODES = ("guild_war", "illusion", "nightmare")
-FULL_COMPONENTS = ("ranking", "lineup", "guild_index")
+# Each routine slot runs only its own mode's pipeline; closed modes have no
+# slots at all and stay silent beyond the low-frequency metadata probes.
+ROUTINE_COMPONENTS = {
+    "guild_war": ("ranking", "guild_index"),
+    "illusion": ("ranking", "lineup"),
+    "nightmare": ("ranking",),
+}
 
 PRE_END_OFFSETS = (300, 120, 60, 30, 15)
 PRE_END_TRIGGER = {seconds: f"PRE_END_{seconds}S" for seconds in PRE_END_OFFSETS}
@@ -79,7 +90,7 @@ FAILURE_DECODE = "DECODE_FAILED"
 FAILURE_SAVE = "ARCHIVE_SAVE_FAILED"
 FAILURE_NO_SEASON = "NO_SEASON"
 
-_STATE_VERSION = 2
+_STATE_VERSION = 3
 
 _SAFE_ERROR_CODES = frozenset({
     "REQUEST_LIMIT", "SESSION_TIMEOUT", "RESPONSE_TIMEOUT", "RPC_REJECTED",
@@ -105,6 +116,7 @@ def _error_code(error: Exception) -> str:
 
 @dataclass(frozen=True)
 class Slot:
+    mode: str
     key: str
     trigger: str
     kind: str  # "routine" | "pre_end" | "post_close"
@@ -128,9 +140,10 @@ class SlotPlanner:
     def offsets(self) -> dict[str, int]:
         return dict(self._offsets)
 
-    def observe_window(self, *, season_id, phase, start, end, now, persist):
+    def observe_window(self, *, mode, season_id, phase, start, end, now, persist):
         season_id = str(season_id)
-        new_window = (season_id, phase, float(start), float(end))
+        start_value = None if start is None else float(start)
+        new_window = (season_id, phase, start_value, float(end))
         if self.window == new_window:
             return []
         # The window changed (new season, or the same season/phase with moved
@@ -141,31 +154,36 @@ class SlotPlanner:
         self._slots = []
         self.window = new_window
         planned = []
-        first = int(start) - int(start) % ROUTINE_SLOT_SPACING + ROUTINE_SLOT_SPACING
+        # Modes without a startStamp (illusion) schedule from the next
+        # half-hour mark after the observation.
+        base = int(now) if start_value is None else int(start_value)
+        first = base - base % ROUTINE_SLOT_SPACING + ROUTINE_SLOT_SPACING
         for mark in range(first, int(end) + 1, ROUTINE_SLOT_SPACING):
-            key = f"ROUTINE@{mark}"
+            key = f"{mode}:ROUTINE@{mark}"
             advance = self._offsets.get(key)
             if advance is None:
                 advance = self._random_int(*ROUTINE_ADVANCE_RANGE)
                 self._offsets[key] = advance
                 persist(dict(self._offsets))
-            planned.append(Slot(key, "ROUTINE", "routine", mark - advance))
+            planned.append(Slot(mode, key, "ROUTINE", "routine", mark - advance))
         for seconds in PRE_END_OFFSETS:
             trigger = PRE_END_TRIGGER[seconds]
-            planned.append(Slot(trigger, trigger, "pre_end", float(end) - seconds))
-        planned.append(Slot("POST_CLOSE_1H", "POST_CLOSE_1H", "post_close",
-                            float(end) + POST_CLOSE_DELAY_SECONDS))
+            planned.append(Slot(mode, f"{mode}:{trigger}", trigger, "pre_end",
+                                float(end) - seconds))
+        planned.append(Slot(mode, f"{mode}:POST_CLOSE_1H", "POST_CLOSE_1H",
+                            "post_close", float(end) + POST_CLOSE_DELAY_SECONDS))
         self._slots.extend(planned)
         return planned
 
-    def observe_post_close_recovery(self, *, season_id, phase, start, end):
+    def observe_post_close_recovery(self, *, mode, season_id, phase, start, end):
         """An already-ended window we only just learned about (e.g. after a
         restart between end and end+3600s): schedule the single catch-up slot
         at end + 3600s; expired endgame slots are never recreated."""
         self._settled.clear()
         self._slots = []
-        self.window = (str(season_id), phase, float(start), float(end))
-        slot = Slot("POST_CLOSE_1H", "POST_CLOSE_1H", "post_close",
+        self.window = (str(season_id), phase,
+                       None if start is None else float(start), float(end))
+        slot = Slot(mode, f"{mode}:POST_CLOSE_1H", "POST_CLOSE_1H", "post_close",
                     float(end) + POST_CLOSE_DELAY_SECONDS)
         self._slots.append(slot)
         return [slot]
@@ -245,46 +263,122 @@ class LeaderboardArchiveJob:
         self._now = now
         self._sleep = sleep or asyncio.sleep
         state = self._load_state()
-        self._planner = SlotPlanner(random_int=random_int, offsets=state["offsets"])
+        self._planners = {
+            mode: SlotPlanner(random_int=random_int, offsets=state["offsets"])
+            for mode in MODES
+        }
         self._last_probe = state["last_probe"]
-        self._closed_out = state["closed_out"]
-        self._open_triggers: set[str] = set()
-        if state["window"] is not None and state["pending_slots"]:
-            self._planner.restore(state["window"], state["pending_slots"])
-            self._open_triggers = {slot.trigger for slot in state["pending_slots"]}
+        self._closed_out = {mode: state["modes"][mode]["closed_out"] for mode in MODES}
+        self._open_triggers: set[tuple[str, str]] = set()
+        for mode in MODES:
+            mode_state = state["modes"][mode]
+            if mode_state["window"] is not None and mode_state["pending_slots"]:
+                self._planners[mode].restore(mode_state["window"],
+                                             mode_state["pending_slots"])
+                self._open_triggers |= {
+                    (mode, slot.trigger) for slot in mode_state["pending_slots"]}
 
     # -- persisted schedule state ------------------------------------------
 
     def _state_path(self) -> Path:
         return Path(self._config.data_dir) / "schedule_state.json"
 
+    def _empty_state(self):
+        return {
+            "offsets": {},
+            "last_probe": None,
+            "modes": {mode: {"window": None, "pending_slots": [], "closed_out": []}
+                      for mode in MODES},
+        }
+
     def _load_state(self):
-        empty = {"offsets": {}, "last_probe": None, "window": None,
-                 "pending_slots": [], "closed_out": []}
+        empty = self._empty_state()
         try:
             raw = json.loads(self._state_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return empty
-        if not isinstance(raw, dict) or raw.get("version") != _STATE_VERSION:
+        if not isinstance(raw, dict):
             return empty
+        version = raw.get("version")
+        if version == 3:
+            return self._load_state_v3(raw, empty)
+        if version in (1, 2):
+            # Safe migration: the pre-v3 state anchored everything on the
+            # guild war window; move it under guild_war and prefix the shared
+            # offset keys so no existing plan is lost.
+            migrated = self._empty_state()
+            offsets = raw.get("offsets")
+            if isinstance(offsets, dict):
+                for key, value in offsets.items():
+                    key = str(key)
+                    head, _, tail = key.partition(":")
+                    if head not in MODES:
+                        key = f"guild_war:{key}"
+                        tail = key.partition(":")[2]
+                    if tail.startswith("ROUTINE@"):
+                        try:
+                            migrated["offsets"][key] = int(value)
+                        except (TypeError, ValueError):
+                            continue
+            last_probe = raw.get("last_probe")
+            if isinstance(last_probe, (int, float)):
+                migrated["last_probe"] = float(last_probe)
+            if version == 2:
+                guild = migrated["modes"]["guild_war"]
+                guild["window"] = self._load_window(raw.get("window"))
+                raw_slots = raw.get("pending_slots")
+                if isinstance(raw_slots, list):
+                    # v2 slots predate the per-mode scheduler: they all belong
+                    # to the guild war planner.
+                    migrated_slots = [
+                        dict(item, mode="guild_war")
+                        if isinstance(item, dict) and "mode" not in item else item
+                        for item in raw_slots]
+                    guild["pending_slots"] = self._load_pending_slots(migrated_slots)
+                if guild["window"] is None:
+                    guild["pending_slots"] = []
+                closed_out = raw.get("closed_out")
+                if isinstance(closed_out, list):
+                    guild["closed_out"] = [
+                        list(item) for item in closed_out
+                        if isinstance(item, (list, tuple)) and len(item) == 3]
+            return migrated
+        return empty
+
+    def _load_state_v3(self, raw, empty):
+        state = self._empty_state()
         offsets = raw.get("offsets")
-        if not isinstance(offsets, dict):
-            offsets = {}
-        offsets = {str(key): int(value) for key, value in offsets.items()
-                   if str(key).startswith("ROUTINE@")}
+        if isinstance(offsets, dict):
+            for key, value in offsets.items():
+                key = str(key)
+                head, _, tail = key.partition(":")
+                if head in MODES and tail.startswith("ROUTINE@"):
+                    try:
+                        state["offsets"][key] = int(value)
+                    except (TypeError, ValueError):
+                        continue
         last_probe = raw.get("last_probe")
-        probe = float(last_probe) if isinstance(last_probe, (int, float)) else None
-        window = self._load_window(raw.get("window"))
-        pending = self._load_pending_slots(raw.get("pending_slots"))
-        if window is None:
-            pending = []
-        closed_out = raw.get("closed_out")
-        if not isinstance(closed_out, list):
-            closed_out = []
-        closed_out = [list(item) for item in closed_out
-                      if isinstance(item, (list, tuple)) and len(item) == 3]
-        return {"offsets": offsets, "last_probe": probe, "window": window,
-                "pending_slots": pending, "closed_out": closed_out}
+        if isinstance(last_probe, (int, float)):
+            state["last_probe"] = float(last_probe)
+        modes = raw.get("modes")
+        if isinstance(modes, dict):
+            for mode in MODES:
+                entry = modes.get(mode)
+                if not isinstance(entry, dict):
+                    continue
+                mode_state = state["modes"][mode]
+                mode_state["window"] = self._load_window(entry.get("window"))
+                mode_state["pending_slots"] = [
+                    slot for slot in self._load_pending_slots(entry.get("pending_slots"))
+                    if slot.mode == mode]
+                if mode_state["window"] is None:
+                    mode_state["pending_slots"] = []
+                closed_out = entry.get("closed_out")
+                if isinstance(closed_out, list):
+                    mode_state["closed_out"] = [
+                        list(item) for item in closed_out
+                        if isinstance(item, (list, tuple)) and len(item) == 3]
+        return state
 
     @staticmethod
     def _load_window(raw):
@@ -295,10 +389,11 @@ class LeaderboardArchiveJob:
         start, end = raw.get("start"), raw.get("end")
         if (not isinstance(season, str) or not season
                 or (phase is not None and type(phase) is not int)
-                or not isinstance(start, (int, float))
-                or not isinstance(end, (int, float)) or not start < end):
+                or (start is not None and not isinstance(start, (int, float)))
+                or not isinstance(end, (int, float)) or end <= 0):
             return None
-        return (season, phase, float(start), float(end))
+        return (season, phase,
+                None if start is None else float(start), float(end))
 
     @staticmethod
     def _load_pending_slots(raw):
@@ -308,37 +403,53 @@ class LeaderboardArchiveJob:
         for item in raw:
             if not isinstance(item, dict):
                 continue
+            mode = item.get("mode")
             key, trigger, kind = item.get("key"), item.get("trigger"), item.get("kind")
             fire_at = item.get("fire_at")
-            if (not isinstance(key, str) or not isinstance(trigger, str)
+            if (mode not in MODES or not isinstance(key, str)
+                    or not isinstance(trigger, str)
                     or kind not in ("routine", "pre_end", "post_close")
                     or not isinstance(fire_at, (int, float))):
                 continue
-            slots.append(Slot(key, trigger, kind, float(fire_at)))
+            slots.append(Slot(mode, key, trigger, kind, float(fire_at)))
         return slots
 
+    def _merged_offsets(self) -> dict:
+        merged = {}
+        for mode in MODES:
+            merged.update(self._planners[mode].offsets())
+        return merged
+
     def _persist_offsets(self, offsets) -> None:
-        self._write_state(offsets=offsets)
+        merged = self._merged_offsets()
+        merged.update(offsets)
+        self._write_state(offsets=merged)
 
     def _persist_last_probe(self) -> None:
-        self._write_state(offsets=self._planner.offsets())
+        self._write_state(offsets=self._merged_offsets())
 
     def _write_state(self, *, offsets) -> None:
         path = self._state_path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            window = self._planner.window
+            modes = {}
+            for mode in MODES:
+                window = self._planners[mode].window
+                modes[mode] = {
+                    "window": None if window is None else {
+                        "season_id": window[0], "phase": window[1],
+                        "start": window[2], "end": window[3]},
+                    "pending_slots": [
+                        {"mode": slot.mode, "key": slot.key, "trigger": slot.trigger,
+                         "kind": slot.kind, "fire_at": slot.fire_at}
+                        for slot in self._planners[mode].pending_slots()],
+                    "closed_out": self._closed_out[mode],
+                }
             payload = json.dumps({
                 "version": _STATE_VERSION,
                 "offsets": {key: int(value) for key, value in offsets.items()},
                 "last_probe": self._last_probe,
-                "window": None if window is None else {
-                    "season_id": window[0], "phase": window[1],
-                    "start": window[2], "end": window[3]},
-                "pending_slots": [{"key": slot.key, "trigger": slot.trigger,
-                                   "kind": slot.kind, "fire_at": slot.fire_at}
-                                  for slot in self._planner.pending_slots()],
-                "closed_out": self._closed_out,
+                "modes": modes,
             }, sort_keys=True)
             tmp = path.with_suffix(".tmp")
             tmp.write_text(payload, encoding="utf-8")
@@ -348,30 +459,45 @@ class LeaderboardArchiveJob:
 
     # -- main loop -----------------------------------------------------------
 
+    def _next_due(self, now: float) -> Slot | None:
+        due = []
+        for mode in MODES:
+            slot = self._planners[mode].next_due(now)
+            if slot is not None:
+                due.append(slot)
+        if not due:
+            return None
+        return min(due, key=lambda slot: (_slot_priority(slot), slot.fire_at))
+
+    def _next_fire_delay(self, now: float) -> float | None:
+        delays = [delay for mode in MODES
+                  if (delay := self._planners[mode].next_fire_delay(now)) is not None]
+        return min(delays) if delays else None
+
     async def run(self, stop_event) -> None:
         while not stop_event.is_set():
             now = self._now()
-            slot = self._planner.next_due(now)
+            slot = self._next_due(now)
             if slot is None:
-                delay = self._planner.next_fire_delay(now)
-                if self._planner.window is None:
-                    probe_in = 0.0 if self._last_probe is None else max(
-                        0.0, self._last_probe + self._config.metadata_probe_interval - now)
-                    delay = probe_in if delay is None else min(delay, probe_in)
+                delay = self._next_fire_delay(now)
+                probe_in = 0.0 if self._last_probe is None else max(
+                    0.0, self._last_probe + self._config.metadata_probe_interval - now)
+                delay = probe_in if delay is None else min(delay, probe_in)
                 if delay is None:
                     delay = 1.0
                 stopped = await self._wait(delay, stop_event)
                 if stopped:
                     break
-                if self._planner.window is None and not stop_event.is_set():
-                    woke = self._now()
-                    if (self._last_probe is None
-                            or woke - self._last_probe >= self._config.metadata_probe_interval):
-                        await self._probe(woke)
+                woke = self._now()
+                if (self._last_probe is None
+                        or woke - self._last_probe >= self._config.metadata_probe_interval):
+                    await self._probe(woke)
                 continue
             await self._fire(slot, stop_event)
-            if self._planner.window is not None and not self._planner.has_pending():
-                self._planner.clear_window()
+            planner = self._planners[slot.mode]
+            if planner.window is not None and not planner.has_pending():
+                planner.clear_window()
+                self._write_state(offsets=self._merged_offsets())
 
     async def _wait(self, delay: float, stop_event) -> bool:
         if delay <= 0:
@@ -394,114 +520,133 @@ class LeaderboardArchiveJob:
         except CredentialError:
             return
         try:
-            result = await asyncio.to_thread(self._probe_metadata, web)
+            results = await asyncio.to_thread(self._probe_all_metadata, web)
         except GachaError as error:
             _logger.warning("leaderboard metadata probe failed: %s", error.code)
             return
         except Exception:  # noqa: BLE001 - never persist raw transport text
             _logger.warning("leaderboard metadata probe failed: PROBE_FAILED")
             return
+        for mode in MODES:
+            self._handle_probe_result(mode, results.get(mode) or {}, now)
+        self._write_state(offsets=self._merged_offsets())
+
+    def _handle_probe_result(self, mode: str, result: dict, now: float) -> None:
+        planner = self._planners[mode]
         availability = result.get("availability")
         season = result.get("season_id")
         metadata = result.get("metadata", {})
         start, end = metadata.get("startStamp"), metadata.get("endStamp")
-        ended = isinstance(start, int) and isinstance(end, int) and 0 < start < end
+        start_value = float(start) if isinstance(start, int) and start > 0 else None
+        ended = isinstance(end, int) and end > 0
         if season and availability in ("ACTIVE", "SETTLING", "SETTLED_CANDIDATE") \
                 and ended and end > now:
-            planned = self._planner.observe_window(
-                season_id=season, phase=metadata.get("phase"),
-                start=float(start), end=float(end), now=now,
+            planned = planner.observe_window(
+                mode=mode, season_id=season, phase=metadata.get("phase"),
+                start=start_value, end=float(end), now=now,
                 persist=self._persist_offsets)
             for slot in planned:
                 self._plan_history_slot(slot)
-            self._write_state(offsets=self._planner.offsets())
         elif (season and availability in ("SETTLED_CANDIDATE", "CLOSED") and ended
                 and float(end) <= now
                 and float(end) + POST_CLOSE_DELAY_SECONDS
                 > now - POST_CLOSE_TOLERANCE_SECONDS
                 and [str(season), metadata.get("phase"), float(end)]
-                not in self._closed_out):
+                not in self._closed_out[mode]):
             # The window already ended (e.g. a restart between end and the
             # catch-up): schedule only the post-close slot at end + 3600s.
-            planned = self._planner.observe_post_close_recovery(
-                season_id=season, phase=metadata.get("phase"),
-                start=float(start), end=float(end))
+            planned = planner.observe_post_close_recovery(
+                mode=mode, season_id=season, phase=metadata.get("phase"),
+                start=start_value, end=float(end))
             for slot in planned:
                 self._plan_history_slot(slot)
-            self._write_state(offsets=self._planner.offsets())
         elif availability not in ("CLOSED", "NOT_OPEN", "SETTLED_CANDIDATE"):
-            _logger.info("leaderboard metadata probe state=%s", availability or "UNKNOWN")
+            _logger.info("leaderboard %s metadata probe state=%s",
+                         mode, availability or "UNKNOWN")
 
-    def _probe_metadata(self, web):
+    def _probe_all_metadata(self, web):
         bodies: list[bytes] = []
         session = self._open_session(web, METADATA_MAX_REQUESTS, METADATA_MAX_SECONDS, bodies)
         with session as active:
-            return collect_mode(active, "guild_war", scope=self._config.scope,
+            return {
+                mode: collect_mode(active, mode, scope=self._config.scope,
+                                   metadata_only=True, now=self._now)
+                for mode in MODES
+            }
+
+    def _probe_mode_metadata(self, mode: str, web):
+        bodies: list[bytes] = []
+        session = self._open_session(web, METADATA_MAX_REQUESTS, METADATA_MAX_SECONDS, bodies)
+        with session as active:
+            return collect_mode(active, mode, scope=self._config.scope,
                                 metadata_only=True, now=self._now)
 
     def _plan_history_slot(self, slot: Slot) -> None:
-        window = self._planner.window
+        window = self._planners[slot.mode].window
         if window is None:
             return
-        self._open_triggers.add(slot.trigger)
+        self._open_triggers.add((slot.mode, slot.trigger))
         try:
             self._history.plan_schedule_slot(
-                self._config.scope, "guild_war", window[0], slot.trigger, _iso(slot.fire_at))
+                self._config.scope, slot.mode, window[0], slot.trigger, _iso(slot.fire_at))
         except (ValueError, KeyError):
             _logger.warning("leaderboard schedule slot plan failed: %s", slot.trigger)
 
-    def _settle_history_slot(self, trigger: str, status: str, run_id=None) -> None:
-        window = self._planner.window
+    def _settle_history_slot(self, mode: str, trigger: str, status: str, run_id=None) -> None:
+        window = self._planners[mode].window
         if window is None:
             return
         try:
             self._history.fire_schedule_slot(
-                self._config.scope, "guild_war", window[0], trigger,
+                self._config.scope, mode, window[0], trigger,
                 run_id=run_id, status=status)
         except (ValueError, KeyError):
             _logger.warning("leaderboard schedule slot settle failed: %s", trigger)
 
     def _settle_slot(self, slot: Slot, status: str, run_id=None) -> None:
-        self._planner.settle(slot)
-        self._open_triggers.discard(slot.trigger)
-        self._settle_history_slot(slot.trigger, status, run_id=run_id)
-        self._write_state(offsets=self._planner.offsets())
+        self._planners[slot.mode].settle(slot)
+        self._open_triggers.discard((slot.mode, slot.trigger))
+        self._settle_history_slot(slot.mode, slot.trigger, status, run_id=run_id)
+        self._write_state(offsets=self._merged_offsets())
 
     # -- slot firing -----------------------------------------------------------
 
     async def _fire(self, slot: Slot, stop_event) -> None:
+        planner = self._planners[slot.mode]
         now = self._now()
-        if self._planner.is_stale(slot, now):
+        if planner.is_stale(slot, now):
             self._settle_slot(slot, "SKIPPED")
             return
-        if self._planner.conflicts_with_pre_end(slot, now):
+        if planner.conflicts_with_pre_end(slot, now):
             self._settle_slot(slot, "SKIPPED")
             return
         if slot.kind == "post_close":
             await self._fire_post_close(slot, stop_event)
             return
-        components = ("ranking",) if slot.kind == "pre_end" else FULL_COMPONENTS
+        components = ("ranking",) if slot.kind == "pre_end" \
+            else ROUTINE_COMPONENTS[slot.mode]
         try:
-            run_ids, failure = await self._run_pipeline(slot.trigger, components, stop_event)
+            run_ids, failure = await self._run_pipeline(slot, components, stop_event)
         except CredentialError:
             self._settle_slot(slot, "UNAVAILABLE")
             return
         status = "FIRED" if failure is None else "UNAVAILABLE"
-        self._settle_slot(slot, status, run_id=run_ids.get("guild_war"))
+        self._settle_slot(slot, status, run_id=run_ids.get(slot.mode))
 
-    async def _post_close_was_extended(self) -> bool:
+    async def _post_close_was_extended(self, slot: Slot) -> bool:
         """Verify the season really ended before the catch-up purges anything.
 
         Returns True when the metadata shows the same season with an end still
         in the future (extension or still-active): the window is replanned by
         the new end and the catch-up is postponed instead of fired or sealed.
         """
-        window = self._planner.window
+        planner = self._planners[slot.mode]
+        window = planner.window
         if window is None:
             return False
         try:
             web = await self._provider.credentials()
-            result = await asyncio.to_thread(self._probe_metadata, web)
+            result = await asyncio.to_thread(self._probe_mode_metadata, slot.mode, web)
         except CredentialError:
             return False
         except GachaError as error:
@@ -513,103 +658,93 @@ class LeaderboardArchiveJob:
         season = result.get("season_id")
         metadata = result.get("metadata", {})
         start, end = metadata.get("startStamp"), metadata.get("endStamp")
+        start_value = float(start) if isinstance(start, int) and start > 0 else None
         now = self._now()
         if (season and str(season) == window[0]
-                and isinstance(start, int) and isinstance(end, int)
-                and 0 < start < end and float(end) > now):
-            planned = self._planner.observe_window(
-                season_id=season, phase=metadata.get("phase"),
-                start=float(start), end=float(end), now=now,
+                and isinstance(end, int) and end > 0 and float(end) > now):
+            planned = planner.observe_window(
+                mode=slot.mode, season_id=season, phase=metadata.get("phase"),
+                start=start_value, end=float(end), now=now,
                 persist=self._persist_offsets)
-            for slot in planned:
-                self._plan_history_slot(slot)
-            replanned = {slot.trigger for slot in planned}
-            for trigger in sorted(self._open_triggers - replanned):
-                self._settle_history_slot(trigger, "SKIPPED")
-            self._open_triggers &= replanned
-            self._write_state(offsets=self._planner.offsets())
-            _logger.info("leaderboard season extended: post-close postponed")
+            for new_slot in planned:
+                self._plan_history_slot(new_slot)
+            replanned = {(slot.mode, new_slot.trigger) for new_slot in planned}
+            stale = {item for item in self._open_triggers
+                     if item[0] == slot.mode} - replanned
+            for mode, trigger in sorted(stale):
+                self._settle_history_slot(mode, trigger, "SKIPPED")
+            self._open_triggers -= stale
+            self._write_state(offsets=self._merged_offsets())
+            _logger.info("leaderboard season extended: %s post-close postponed", slot.mode)
             return True
         return False
 
     async def _fire_post_close(self, slot: Slot, stop_event) -> None:
-        if await self._post_close_was_extended():
+        if await self._post_close_was_extended(slot):
             return
-        window = self._planner.window
+        planner = self._planners[slot.mode]
+        window = planner.window
         rejected = False
         try:
             _run_ids, failure = await self._run_pipeline(
-                slot.trigger, FULL_COMPONENTS, stop_event)
+                slot, ROUTINE_COMPONENTS[slot.mode], stop_event)
             rejected = failure == "RPC_REJECTED"
         except CredentialError:
             rejected = False
         if rejected:
-            self._settle_history_slot("POST_CLOSE_UNAVAILABLE", "UNAVAILABLE")
+            self._settle_history_slot(slot.mode, "POST_CLOSE_UNAVAILABLE", "UNAVAILABLE")
         self._settle_slot(slot, "UNAVAILABLE" if rejected else "FIRED")
-        await self._seal_seasons(stop_event)
-        self._planner.clear_window()
+        await self._seal_season(slot, stop_event)
+        planner.clear_window()
         if window is not None:
-            self._closed_out.append([window[0], window[1], window[3]])
+            self._closed_out[slot.mode].append([window[0], window[1], window[3]])
         # The catch-up pipeline just validated the season metadata; treat it as
         # a fresh probe so the closed loop does not immediately re-login.
         self._last_probe = self._now()
         self._persist_last_probe()
 
-    async def _seal_seasons(self, stop_event) -> None:
+    async def _seal_season(self, slot: Slot, stop_event) -> None:
         if self._packager is None:
             return
-        window = self._planner.window
+        window = self._planners[slot.mode].window
         if window is None:
             return
-        season = window[0]
-        for mode in MODES:
-            if stop_event.is_set():
-                return
-            try:
-                state = await asyncio.to_thread(
-                    self._history.last_run_state, self._config.scope, mode, season)
-            except (ValueError, KeyError):
-                state = None
-            if state is None:
-                continue
-            try:
-                entry = await asyncio.to_thread(
-                    self._packager.seal_season, self._config.scope, mode, season)
-            except Exception as exc:  # noqa: BLE001 - fixed code only
-                _logger.warning("leaderboard season seal failed: %s", type(exc).__name__)
-            else:
-                _logger.info("leaderboard season sealed: %s %s %s",
-                             mode, season, entry["package"])
+        mode, season = slot.mode, window[0]
+        try:
+            state = await asyncio.to_thread(
+                self._history.last_run_state, self._config.scope, mode, season)
+        except (ValueError, KeyError):
+            state = None
+        if state is None or stop_event.is_set():
+            return
+        try:
+            entry = await asyncio.to_thread(
+                self._packager.seal_season, self._config.scope, mode, season)
+        except Exception as exc:  # noqa: BLE001 - fixed code only
+            _logger.warning("leaderboard season seal failed: %s", type(exc).__name__)
+        else:
+            _logger.info("leaderboard season sealed: %s %s %s",
+                         mode, season, entry["package"])
 
     # -- collection pipeline ----------------------------------------------------
 
-    async def _run_pipeline(self, trigger: str, components, stop_event):
+    async def _run_pipeline(self, slot: Slot, components, stop_event):
         web = await self._provider.credentials()
-        run_ids: dict[str, str] = {}
-        ranking_results: dict[str, dict] = {}
-        failure = None
-        for mode in MODES:
-            if stop_event.is_set():
-                failure = failure or INTERRUPT_STOPPED
-                break
-            run_id, result, error = await self._collect_ranking(mode, web, trigger)
-            if run_id is not None:
-                run_ids[mode] = run_id
-            if error is not None:
-                failure = error
-                break
-            ranking_results[mode] = result
+        mode = slot.mode
+        run_id, result, error = await self._collect_ranking(mode, web, slot.trigger)
+        failure = error
+        if run_id is None:
+            result = None
         if (failure is None and not stop_event.is_set()
-                and "lineup" in components and "illusion" in ranking_results):
-            failure = await self._collect_lineups(
-                web, trigger, ranking_results["illusion"], stop_event)
+                and "lineup" in components):
+            failure = await self._collect_lineups(web, slot.trigger, result, stop_event)
         if (failure is None and not stop_event.is_set()
-                and "guild_index" in components and "guild_war" in ranking_results):
+                and "guild_index" in components):
             failure = await self._collect_guild_index(
-                web, trigger, ranking_results["guild_war"], stop_event)
+                web, slot.trigger, result, stop_event)
         if stop_event.is_set() and failure is None:
             failure = INTERRUPT_STOPPED
-        return run_ids, failure
+        return ({mode: run_id} if run_id is not None else {}), failure
 
     def _open_session(self, web, max_requests: int, max_seconds: int, bodies) -> object:
         def observer(command, body):

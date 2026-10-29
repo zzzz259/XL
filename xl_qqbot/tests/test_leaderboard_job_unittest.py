@@ -117,8 +117,9 @@ class World:
         self.schedule = schedule_pb(season, phase, 2, start, end)
         self.guild_meta = guild_meta_pb(season, phase, 2, start, end)
         self.illusion_meta = illusion_meta_pb(season, end)
+        self.nightmare_meta = b(1, self.schedule)
         self.lineup_alt_season = lineup_alt_season
-        self._illusion_meta_calls = 0
+        self._alt_lineup_probe = False
         self.guild_rank_page = guild_page_pb(
             [guild_row_pb(9001, 1, 100), guild_row_pb(9002, 2, 90)],
             [member_row_pb(1001, rank=1), member_row_pb(1002, rank=2)])
@@ -157,10 +158,9 @@ class World:
         if command == 10033:
             return self.guild_ext_page
         if command == 2001:
-            self._illusion_meta_calls += 1
-            if self.lineup_alt_season is not None and self._illusion_meta_calls >= 3:
-                # the ranking collector consumed calls 1-2; the lineup probe sees a
-                # season change and must abort before any 2003 lineup request
+            if self.lineup_alt_season is not None and self._alt_lineup_probe:
+                # the lineup probe sees a season change and must abort before
+                # any 2003 lineup request
                 return illusion_meta_pb(self.lineup_alt_season)
             return self.illusion_meta
         if command == 2002:
@@ -169,7 +169,7 @@ class World:
                 return self.boss_pages[cursor]
             return self.boss_page
         if command == 3001:
-            return b(1, self.schedule)
+            return self.nightmare_meta
         if command == 3004:
             return self.world_page
         if command == 2003:
@@ -195,13 +195,17 @@ def world_with_stages(world, stages=None, *, share_first=2):
 
 
 def settle_world_after_end(world):
-    """After the window the server keeps serving SETTLED_CANDIDATE reads."""
+    """After the window the server keeps serving SETTLED_CANDIDATE reads.
+
+    Illusion metadata is left at its real end: the post-close catch-up opts
+    into closed reads, and moving the end would replan the illusion window.
+    """
     settled = schedule_pb(27, 2, 4, T0 - 300, T0 + 3600)
     world.schedule = settled
     world.guild_meta = guild_meta_pb(27, 2, 4, T0 - 300, T0 + 3600)
+    world.nightmare_meta = b(1, settled)
     world.world_page = world_page_pb(
         [world_row_pb(5001, 1, 777), world_row_pb(5002, 2, 555)], settled, 2)
-    world.illusion_meta = illusion_meta_pb(27, T0 + 100_000)
 
 
 def multi_page_illusion_world():
@@ -354,8 +358,8 @@ class PlannerTests(unittest.TestCase):
         persisted = []
         planner = SlotPlanner(random_int=lambda a, b: 45)
         planned = planner.observe_window(
-            season_id="27", phase=2, start=T0 - 300, end=T0 + 3600, now=T0,
-            persist=persisted.append)
+            mode="guild_war", season_id="27", phase=2, start=T0 - 300,
+            end=T0 + 3600, now=T0, persist=persisted.append)
         routine = [slot for slot in planned if slot.kind == "routine"]
         self.assertEqual(len(routine), 3)
         self.assertEqual([slot.fire_at for slot in routine],
@@ -364,21 +368,32 @@ class PlannerTests(unittest.TestCase):
         current = {}
         for mark in (T0, T0 + 1800, T0 + 3600):
             current = dict(current)
-            current[f"ROUTINE@{mark}"] = 45
+            current[f"guild_war:ROUTINE@{mark}"] = 45
             cumulative.append(current)
         self.assertEqual(persisted, cumulative)
         again = SlotPlanner(random_int=lambda a, b: 99, offsets=planner.offsets())
         replanned = again.observe_window(
-            season_id="27", phase=2, start=T0 - 300, end=T0 + 3600, now=T0,
-            persist=persisted.append)
+            mode="guild_war", season_id="27", phase=2, start=T0 - 300,
+            end=T0 + 3600, now=T0, persist=persisted.append)
         self.assertEqual(
             [slot.fire_at for slot in replanned if slot.kind == "routine"],
             [T0 - 45, T0 + 1755, T0 + 3555], "stored offsets must be reused")
 
+    def test_start_less_mode_plans_from_the_next_half_hour_mark(self):
+        planner = SlotPlanner(random_int=lambda a, b: 45)
+        planned = planner.observe_window(
+            mode="illusion", season_id="27", phase=1, start=None,
+            end=T0 + 3600, now=T0, persist=lambda offsets: None)
+        routine = [slot for slot in planned if slot.kind == "routine"]
+        self.assertEqual([slot.fire_at for slot in routine],
+                         [T0 + 1755, T0 + 3555],
+                         "illusion has no startStamp: first mark is the next one")
+
     def test_pre_end_priority_stale_routine_conflict_and_clear(self):
         planner = SlotPlanner(random_int=lambda a, b: 45)
-        planner.observe_window(season_id="27", phase=2, start=T0 - 300,
-                               end=T0 + 200, now=T0, persist=lambda offsets: None)
+        planner.observe_window(mode="guild_war", season_id="27", phase=2,
+                               start=T0 - 300, end=T0 + 200, now=T0,
+                               persist=lambda offsets: None)
         due = planner.next_due(T0)
         self.assertEqual(due.trigger, "PRE_END_300S",
                          "expired pre-end wins over the routine slot")
@@ -402,7 +417,9 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_closed_period_only_probes_metadata(self):
         world = World()
-        world.guild_meta = guild_meta_pb(27, 2, 5)  # CLOSED
+        world.guild_meta = guild_meta_pb(27, 2, 5)  # guild CLOSED
+        world.nightmare_meta = b(1, schedule_pb(27, 2, 4))  # nightmare CLOSED
+        world.illusion_meta = illusion_meta_pb(27, T0 - 1000)  # illusion CLOSED
         clock = Clock()
         job, history, factory = make_job(self.root, world, clock)
         await drive(job, self.stop, predicate=lambda: (
@@ -410,8 +427,84 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(factory.sessions), 4)
         for session, max_requests, max_seconds in factory.sessions:
             self.assertEqual((max_requests, max_seconds), (8, 60))
-            self.assertEqual([command for command, _ in session.calls], [2301])
+            self.assertEqual(
+                sorted(command for command, _ in session.calls), [2001, 2301, 3001])
         self.assertEqual(history.snapshots(), [])
+
+    async def test_guild_closed_does_not_block_illusion_scheduling(self):
+        world = world_with_stages(World())
+        world.guild_meta = guild_meta_pb(27, 2, 5)  # guild CLOSED
+        world.nightmare_meta = b(1, schedule_pb(27, 2, 4))  # nightmare CLOSED
+        clock = Clock()
+        job, history, factory = make_job(self.root, world, clock)
+        await drive(job, self.stop, predicate=lambda: (
+            len(history.snapshots(mode="illusion", season_id=SEASON)) >= 1))
+        commands = {command for session, _, _ in factory.sessions
+                    for command, _ in session.calls}
+        self.assertTrue(
+            commands <= {2301, 2001, 3001, 2002, 2003},
+            f"closed modes must stay silent beyond metadata probes: {commands}")
+        self.assertIn(2002, commands, "the open illusion ranking is collected")
+        self.assertEqual(
+            {row["mode"] for row in history.snapshots(season_id=SEASON)},
+            {"illusion"})
+
+    async def test_illusion_closed_guild_active_only_guild_is_collected(self):
+        world = world_with_stages(World())
+        world.illusion_meta = illusion_meta_pb(27, T0 - 1000)  # illusion CLOSED
+        world.nightmare_meta = b(1, schedule_pb(27, 2, 4))  # nightmare CLOSED
+        clock = Clock()
+        job, history, factory = make_job(self.root, world, clock)
+        await drive(job, self.stop, predicate=lambda: (
+            len(history.snapshots(mode="guild_war", season_id=SEASON)) >= 2))
+        commands = {command for session, _, _ in factory.sessions
+                    for command, _ in session.calls}
+        self.assertTrue(
+            commands <= {2301, 2001, 3001, 2307, 10033, 2306},
+            f"closed modes must stay silent beyond metadata probes: {commands}")
+        self.assertIn(2307, commands, "the open guild ranking is collected")
+        self.assertIn(2306, commands, "the guild index is collected")
+        self.assertEqual(
+            {row["mode"] for row in history.snapshots(season_id=SEASON)},
+            {"guild_war"})
+
+    async def test_modes_with_different_ends_fire_post_close_independently(self):
+        world = world_with_stages(World())
+        # guild war ends at T0 + 3600; illusion keeps running to T0 + 5600;
+        # nightmare stays CLOSED with a far-future end (never any window).
+        world.illusion_meta = illusion_meta_pb(27, T0 + 5600)
+        world.nightmare_meta = b(1, schedule_pb(27, 2, 4, T0 - 300, T0 + 100_000))
+        clock = Clock()
+        packager = FakePackager()
+
+        def settle_guild_only(count, session, max_requests):
+            if T0 + 3600 <= clock.t < T0 + 5600:
+                settled = schedule_pb(27, 2, 4, T0 - 300, T0 + 3600)
+                world.guild_meta = guild_meta_pb(27, 2, 4, T0 - 300, T0 + 3600)
+                world.world_page = world_page_pb(
+                    [world_row_pb(5001, 1, 777), world_row_pb(5002, 2, 555)],
+                    settled, 2)
+
+        job, history, factory = make_job(
+            self.root, world, clock, packager=packager,
+            on_session=settle_guild_only)
+        await drive(job, self.stop, predicate=lambda: (
+            ("test:scope", "illusion", SEASON) in packager.sealed))
+
+        self.assertEqual(packager.sealed[0], ("test:scope", "guild_war", SEASON),
+                         "the earlier guild end seals first, on its own schedule")
+        self.assertEqual(packager.sealed[-1], ("test:scope", "illusion", SEASON))
+        guild_slots = {row["slot"]: row["status"]
+                       for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
+        illusion_slots = {row["slot"]: row["status"]
+                          for row in history.schedule_slots("test:scope", "illusion", SEASON)}
+        self.assertEqual(guild_slots["POST_CLOSE_1H"], "FIRED")
+        self.assertEqual(illusion_slots["POST_CLOSE_1H"], "FIRED")
+        self.assertNotIn("nightmare",
+                         {mode for _, mode, _ in packager.sealed})
+        commands = {command for session, _, _ in factory.sessions
+                    for command, _ in session.calls}
+        self.assertNotIn(3004, commands, "the closed nightmare ranking is never read")
 
     async def test_open_window_persists_offsets_before_any_pipeline_session(self):
         world = world_with_stages(World())
@@ -425,7 +518,7 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
                     raw = json.loads(state_path.read_text(encoding="utf-8"))
                     offsets = raw.get("offsets", {})
                     seen["persisted_before_pipeline"] = (
-                        len([key for key in offsets if key.startswith("ROUTINE@")]) == 3)
+                        len([key for key in offsets if ":ROUTINE@" in key]) >= 3)
 
         job, _history, factory = make_job(self.root, world, clock, on_session=on_session)
         await drive(job, self.stop, predicate=lambda: len(factory.sessions) >= 6)
@@ -437,15 +530,19 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         job, history, _factory = make_job(self.root, world, clock)
 
         def pipeline_done():
-            snaps = history.snapshots(mode="guild_war", season_id=SEASON)
-            return (len(snaps) == 2 and snaps[1]["battles_count"] == 12
-                    and history.last_run_state("test:scope", "illusion", SEASON)["pages_count"] == 2)
+            index_done = any(
+                snap["battles_count"] == 12
+                for snap in history.snapshots(mode="guild_war", season_id=SEASON))
+            lineup_done = any(
+                snap["battles_count"] == 52
+                for snap in history.snapshots(mode="illusion", season_id=SEASON))
+            return index_done and lineup_done
 
         await drive(job, self.stop, predicate=pipeline_done)
 
         guild_snaps = history.snapshots(mode="guild_war", season_id=SEASON)
-        self.assertEqual(len(guild_snaps), 2)  # ranking + guild index run
-        ranking_snap = history.export_snapshot(guild_snaps[0]["snapshot_id"])
+        ranking_row = next(row for row in guild_snaps if row["entries_count"])
+        ranking_snap = history.export_snapshot(ranking_row["snapshot_id"])
         self.assertEqual([entry["entity_id"] for entry in ranking_snap["entries"]],
                          ["9001", "9002", "9003"])
         self.assertEqual(ranking_snap["entries"][0]["score"], 100)
@@ -543,36 +640,55 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
                     predicate=lambda: len(packager.sealed) >= 3)
         budgets = [(max_requests, max_seconds)
                    for _, max_requests, max_seconds in factory.sessions]
-        expected_business = {(80, 300): 24, (400, 900): 3, (200, 600): 3}
+        # 23 ranking sessions: 5 routine (guild/nightmare x2 marks, illusion
+        # #3 skipped by its own endgame) + 15 pre-end + 3 post-close; illusion
+        # lineup runs only for its own routine/post-close slots; metadata
+        # sessions are the initial + periodic three-mode probes and the three
+        # post-close verification probes.
+        expected_business = {(80, 300): 23, (400, 900): 2, (200, 600): 3}
         for budget, count in expected_business.items():
             self.assertEqual(budgets.count(budget), count, budget)
         metadata_sessions = [budget for budget in budgets if budget not in expected_business]
-        self.assertGreaterEqual(len(metadata_sessions), 2)
-        self.assertLessEqual(len(metadata_sessions), 3,
-                               "one optional closed-period metadata probe is allowed")
-        slots = {row["slot"]: row["status"]
-                 for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
-        self.assertEqual(slots["ROUTINE"], "SKIPPED",
-                         "last routine slot overlaps the endgame and is skipped")
-        for trigger in ("PRE_END_300S", "PRE_END_120S", "PRE_END_60S",
-                        "PRE_END_30S", "PRE_END_15S", "POST_CLOSE_1H"):
-            self.assertEqual(slots[trigger], "FIRED", trigger)
+        self.assertGreaterEqual(len(metadata_sessions), 8)
+        self.assertLessEqual(len(metadata_sessions), 30)
+        slots = self._slot_status(history)
+        for mode in ("guild_war", "illusion", "nightmare"):
+            self.assertEqual(slots[mode]["ROUTINE"], "SKIPPED",
+                             f"last {mode} routine slot overlaps its own endgame")
+            for trigger in ("PRE_END_300S", "PRE_END_120S", "PRE_END_60S",
+                            "PRE_END_30S", "PRE_END_15S", "POST_CLOSE_1H"):
+                self.assertEqual(slots[mode][trigger], "FIRED", f"{mode} {trigger}")
         ranking_runs = [s for s in history.snapshots(mode="guild_war", season_id=SEASON)
                         if s["entries_count"]]
         self.assertEqual(len(ranking_runs), 8)  # 2 routine + 5 pre-end + 1 post-close
         lineup_runs = [s for s in history.snapshots(mode="illusion", season_id=SEASON)
                        if s["battles_count"]]
-        self.assertEqual(len(lineup_runs), 3)  # 2 routine + post-close only
+        self.assertEqual(len(lineup_runs), 2)  # 1 routine + post-close only
         index_runs = [s for s in history.snapshots(mode="guild_war", season_id=SEASON)
                       if s["battles_count"]]
-        self.assertEqual(len(index_runs), 3)
+        self.assertEqual(len(index_runs), 3)  # 2 routine + post-close
         self.assertEqual(packager.sealed,
                          [("test:scope", mode, SEASON) for mode in
                           ("guild_war", "illusion", "nightmare")])
         state = json.loads((self.root / "schedule_state.json").read_text(encoding="utf-8"))
-        self.assertEqual(state["offsets"],
-                         {f"ROUTINE@{mark}": 45
-                          for mark in (T0, T0 + 1800, T0 + 3600)})
+        expected_offsets = {
+            f"{mode}:ROUTINE@{mark}": 45
+            for mode, marks in (
+                ("guild_war", (T0, T0 + 1800, T0 + 3600)),
+                ("illusion", (T0 + 1800, T0 + 3600)),
+                ("nightmare", (T0, T0 + 1800, T0 + 3600)))
+            for mark in marks}
+        self.assertEqual(state["offsets"], expected_offsets)
+
+    def _slot_status(self, history):
+        slots = {}
+        for mode in ("guild_war", "illusion", "nightmare"):
+            try:
+                slots[mode] = {row["slot"]: row["status"]
+                               for row in history.schedule_slots("test:scope", mode, SEASON)}
+            except KeyError:
+                slots[mode] = {}
+        return slots
 
     async def test_season_extension_postpones_post_close_without_purging(self):
         world = world_with_stages(World())
@@ -584,24 +700,25 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
                 extended = schedule_pb(27, 2, 2, T0 - 300, T0 + 20000)
                 world.schedule = extended
                 world.guild_meta = guild_meta_pb(27, 2, 2, T0 - 300, T0 + 20000)
+                world.nightmare_meta = b(1, extended)
                 world.world_page = world_page_pb(
                     [world_row_pb(5001, 1, 777), world_row_pb(5002, 2, 555)],
                     extended, 2)
-                world.illusion_meta = illusion_meta_pb(27, T0 + 100_000)
+                world.illusion_meta = illusion_meta_pb(27, T0 + 20_000)
 
         job, history, _factory = make_job(
             self.root, world, clock, packager=packager, on_session=extend_after_end)
-        # Reach the old post-close time: the server reports an extension, so the
-        # catch-up must be postponed and nothing may be sealed from the old end.
+        # Reach the old post-close time: every mode reports an extension, so
+        # each catch-up is postponed and nothing may be sealed from the old end.
         await drive(job, self.stop, predicate=lambda: clock.t >= T0 + 7300)
         self.assertEqual(packager.sealed, [],
                          "the old-end post-close must never seal or purge data")
         self.assertTrue(history.snapshots(season_id=SEASON),
                         "runtime data must stay intact while the season is extended")
-        slots = {row["slot"]: row["status"]
-                 for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
-        self.assertEqual(slots["POST_CLOSE_1H"], "SCHEDULED",
-                         "postponed to the new end, not marked FIRED")
+        slots = self._slot_status(history)
+        for mode in ("guild_war", "illusion", "nightmare"):
+            self.assertEqual(slots[mode]["POST_CLOSE_1H"], "SCHEDULED",
+                             f"{mode} postponed to the new end, not marked FIRED")
 
         # The new post-close at end+3600 (T0 + 23600) finally catches up and seals.
         self.stop = asyncio.Event()
@@ -609,9 +726,9 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(packager.sealed,
                          [("test:scope", mode, SEASON) for mode in
                           ("guild_war", "illusion", "nightmare")])
-        slots = {row["slot"]: row["status"]
-                 for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
-        self.assertEqual(slots["POST_CLOSE_1H"], "FIRED")
+        slots = self._slot_status(history)
+        for mode in ("guild_war", "illusion", "nightmare"):
+            self.assertEqual(slots[mode]["POST_CLOSE_1H"], "FIRED", mode)
 
     async def test_restart_between_end_and_post_close_recovers_catch_up(self):
         world = world_with_stages(World())
@@ -654,21 +771,26 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         clock.t = T0 + 4000
         self.stop = asyncio.Event()
         job2, history2, factory2 = restart_job(self.root, world, clock)
-        await drive(job2, self.stop, predicate=lambda: (
-            {row["slot"]: row["status"] for row in
-             history2.schedule_slots("test:scope", "guild_war", SEASON)}.get("POST_CLOSE_1H") == "FIRED"))
+        await drive(job2, self.stop, predicate=lambda: all(
+            self._slot_status(history2)[mode].get("POST_CLOSE_1H") == "FIRED"
+            for mode in ("guild_war", "illusion", "nightmare")))
 
-        slots = {row["slot"]: row["status"]
-                 for row in history2.schedule_slots("test:scope", "guild_war", SEASON)}
-        for trigger in ("PRE_END_300S", "PRE_END_120S", "PRE_END_60S",
-                        "PRE_END_30S", "PRE_END_15S"):
-            self.assertEqual(slots[trigger], "SKIPPED", trigger)
+        slots = self._slot_status(history2)
+        for mode in ("guild_war", "illusion", "nightmare"):
+            for trigger in ("PRE_END_300S", "PRE_END_120S", "PRE_END_60S",
+                            "PRE_END_30S", "PRE_END_15S"):
+                self.assertEqual(slots[mode][trigger], "SKIPPED", f"{mode} {trigger}")
+            self.assertEqual(slots[mode]["POST_CLOSE_1H"], "FIRED", mode)
         fired = {row["trigger"] for row in history2.snapshots(season_id=SEASON)}
         self.assertNotIn("PRE_END_300S", fired)
-        self.assertEqual(slots["POST_CLOSE_1H"], "FIRED")
-        # One post-close verification probe + one full pipeline; zero sessions
-        # were spent catching up the expired endgame slots.
-        self.assertEqual(len(factory2.sessions), 1 + 5)
+        # Exactly one pipeline per mode (ranking/index, ranking/lineup,
+        # ranking) plus the three verification probes: zero sessions were
+        # spent catching up the expired endgame slots.
+        budgets = [(max_requests, max_seconds)
+                   for _, max_requests, max_seconds in factory2.sessions]
+        for budget, count in {(80, 300): 3, (400, 900): 1, (200, 600): 1}.items():
+            self.assertEqual(budgets.count(budget), count, budget)
+        self.assertGreaterEqual(budgets.count((8, 60)), 4)
 
     async def test_expired_pre_end_slot_is_never_caught_up(self):
         world = world_with_stages(World())
@@ -696,9 +818,11 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         # slot (T0 - 45); probing at T0 - 100 leaves both fresh, not stale
         world.schedule = schedule_pb(27, 2, 2, T0 - 300, T0 + 255)
         world.guild_meta = guild_meta_pb(27, 2, 2, T0 - 300, T0 + 255)
+        world.nightmare_meta = b(1, schedule_pb(27, 2, 2, T0 - 300, T0 + 255))
         world.world_page = world_page_pb(
             [world_row_pb(5001, 1, 777), world_row_pb(5002, 2, 555)],
             world.schedule, 2)
+        world.illusion_meta = illusion_meta_pb(27, T0 - 1000)  # illusion CLOSED
         order = []
 
         def on_session(count, session, max_requests):
@@ -708,18 +832,20 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
 
         clock = Clock(T0 - 100)
         job, history, _factory = make_job(self.root, world, clock, on_session=on_session)
-        await drive(job, self.stop, predicate=lambda: clock.t >= T0 + 4000)
+        # Stop well before the illusion recovery post-close (end-1000 + 3600):
+        # this test only exercises the coincident routine/pre-end priority.
+        await drive(job, self.stop, predicate=lambda: clock.t >= T0 + 200)
         # probe(8) then the first pipeline sessions are ranking-only (80)
         self.assertEqual(order[0], 8)
         self.assertEqual(order[1:4], [80, 80, 80], "pre-end ranking-only fires first")
         self.assertNotIn(400, order[1:4])
-        slots = {row["slot"]: row["status"]
-                 for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
-        self.assertEqual(slots["ROUTINE"], "SKIPPED")
-        self.assertEqual(slots["PRE_END_300S"], "FIRED")
-        lineup_runs = [s for s in history.snapshots(mode="illusion", season_id=SEASON)
-                       if s["battles_count"]]
-        self.assertEqual(len(lineup_runs), 1, "only the post-close catch-up collects lineups")
+        slots = self._slot_status(history)
+        for mode in ("guild_war", "nightmare"):
+            self.assertEqual(slots[mode]["ROUTINE"], "SKIPPED", mode)
+            self.assertEqual(slots[mode]["PRE_END_300S"], "FIRED", mode)
+        self.assertEqual(
+            {row["trigger"] for row in history.snapshots(mode="illusion", season_id=SEASON)},
+            set(), "a closed illusion mode is never collected")
 
     async def test_post_close_rejection_records_unavailable_and_still_seals(self):
         world = world_with_stages(World())
@@ -736,10 +862,11 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         job, history, _factory = make_job(
             self.root, world, clock, packager=packager, on_session=settle_and_reject)
         await drive(job, self.stop, predicate=lambda: len(packager.sealed) >= 3)
-        slots = {row["slot"]: row["status"]
-                 for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
-        self.assertEqual(slots["POST_CLOSE_1H"], "UNAVAILABLE")
-        self.assertEqual(slots["POST_CLOSE_UNAVAILABLE"], "UNAVAILABLE")
+        slots = self._slot_status(history)
+        self.assertEqual(slots["guild_war"]["POST_CLOSE_1H"], "UNAVAILABLE")
+        self.assertEqual(slots["guild_war"]["POST_CLOSE_UNAVAILABLE"], "UNAVAILABLE")
+        for mode in ("illusion", "nightmare"):
+            self.assertEqual(slots[mode]["POST_CLOSE_1H"], "FIRED", mode)
         self.assertEqual(packager.sealed,
                          [("test:scope", mode, SEASON) for mode in
                           ("guild_war", "illusion", "nightmare")])
@@ -768,25 +895,41 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["interrupt_reason"], "UNKNOWN_PHASE")
 
     async def test_circuit_breaker_stops_after_first_error_without_retry(self):
-        world = World()
+        world = world_with_stages(World())
         world.reject = {2002: GachaError("RPC_REJECTED")}
         clock = Clock()
         job, history, factory = make_job(self.root, world, clock)
-        await drive(job, self.stop, predicate=lambda: len(factory.sessions) >= 3)
-        self.assertEqual(len(factory.sessions), 3)  # probe + guild + illusion rankings
+        await drive(job, self.stop, predicate=lambda: (
+            self._slot_status(history)["illusion"].get("ROUTINE") == "UNAVAILABLE"))
         illusion_calls = [c for s, _, _ in factory.sessions for c in s.calls
                           if c[0] == 2002]
         self.assertEqual(len(illusion_calls), 1, "no automatic retry")
         state = history.last_run_state("test:scope", "illusion", SEASON)
         self.assertEqual(state["interrupt_reason"], "RPC_REJECTED")
-        slots = {row["slot"]: row["status"]
-                 for row in history.schedule_slots("test:scope", "guild_war", SEASON)}
-        self.assertEqual(slots["ROUTINE"], "UNAVAILABLE")
+        slots = self._slot_status(history)
+        self.assertEqual(slots["illusion"]["ROUTINE"], "UNAVAILABLE",
+                         "only the failing mode's slot trips")
+        self.assertEqual(slots["guild_war"]["ROUTINE"], "FIRED",
+                         "other modes keep their own schedule")
+        commands = {command for session, _, _ in factory.sessions
+                    for command, _ in session.calls}
+        self.assertIn(2306, commands, "the guild index still collected")
+        self.assertTrue(
+            any(row["entries_count"] for row in
+                history.snapshots(mode="nightmare", season_id=SEASON)),
+            "nightmare kept its own schedule")
 
     async def test_lineup_season_mismatch_interrupts_without_lineup_requests(self):
         world = World(illusion_players=2, lineup_alt_season=28)
         clock = Clock()
-        job, history, factory = make_job(self.root, world, clock)
+
+        def on_session(count, session, max_requests):
+            if max_requests == 400:
+                # the lineup component session just opened: its metadata probe
+                # now reports a different season
+                world._alt_lineup_probe = True
+
+        job, history, factory = make_job(self.root, world, clock, on_session=on_session)
         await drive(job, self.stop, predicate=lambda: (
             history.last_run_state("test:scope", "illusion", SEASON) is not None
             and history.last_run_state("test:scope", "illusion", SEASON)["interrupt_reason"] == "SEASON_OR_PHASE_CHANGED"))
@@ -802,7 +945,10 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         clock = Clock()
 
         def on_session(count, session, max_requests):
-            if count == 5:  # probe + 3 rankings + lineup session
+            # probe(1), guild rank/index(2,3), nightmare rank(4), periodic
+            # probes(5,6), second guild round(7,8), then the illusion
+            # ranking(9) before its lineup session(10)
+            if count == 10:
                 self.stop.set()
 
         job, history, _factory = make_job(self.root, world, clock, on_session=on_session)
@@ -851,8 +997,10 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
             row["trigger"] == "POST_CLOSE_1H" and row["mode"] == "illusion"
             and row["entries_count"] == 2
             for row in history.snapshots(season_id=SEASON)))
-        post_snaps = {row["mode"]: row for row in history.snapshots(season_id=SEASON)
-                      if row["trigger"] == "POST_CLOSE_1H"}
+        post_snaps = {}
+        for row in history.snapshots(season_id=SEASON):
+            if row["trigger"] == "POST_CLOSE_1H" and row["entries_count"]:
+                post_snaps[row["mode"]] = row
         self.assertEqual(post_snaps["guild_war"]["entries_count"], 3)
         self.assertEqual(post_snaps["illusion"]["entries_count"], 2)
         self.assertEqual(post_snaps["illusion"]["availability"], "CLOSED",
@@ -878,6 +1026,48 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
                          "a failed run never fabricates a complete snapshot")
         with sqlite_blobs(history, snap["snapshot_id"]) as blobs:
             self.assertEqual(blobs, 2)  # metadata + first page raw PBs
+
+    async def test_v2_schedule_state_migrates_without_losing_the_plan(self):
+        (self.root / "schedule_state.json").write_text(json.dumps({
+            "version": 2,
+            "offsets": {"ROUTINE@1800000000": 45},
+            "last_probe": T0,
+            "window": {"season_id": "27", "phase": 2,
+                       "start": T0 - 300, "end": T0 + 3600},
+            "pending_slots": [
+                {"key": "ROUTINE@1800001800", "trigger": "ROUTINE",
+                 "kind": "routine", "fire_at": T0 + 1755},
+                {"key": "POST_CLOSE_1H", "trigger": "POST_CLOSE_1H",
+                 "kind": "post_close", "fire_at": T0 + 7200},
+            ],
+            "closed_out": [["27", 2, T0 - 9000]],
+        }), encoding="utf-8")
+        world = world_with_stages(World())
+        clock = Clock()
+        job, history, _factory = make_job(self.root, world, clock)
+
+        # The old single-window plan moves under guild_war with its offsets,
+        # pending slots, and closed-out history intact.
+        self.assertEqual(job._planners["guild_war"].window,
+                         ("27", 2, float(T0 - 300), float(T0 + 3600)))
+        self.assertEqual(job._planners["illusion"].window, None)
+        pending = job._planners["guild_war"].pending_slots()
+        self.assertEqual([(slot.trigger, slot.fire_at) for slot in pending],
+                         [("ROUTINE", T0 + 1755), ("POST_CLOSE_1H", T0 + 7200)])
+        self.assertEqual(job._merged_offsets(), {"guild_war:ROUTINE@1800000000": 45})
+        self.assertEqual(job._closed_out["guild_war"], [["27", 2, T0 - 9000]])
+
+        # And the recovered schedule actually runs: the pending routine slot is
+        # stale and skipped, the future post-close still fires and seals.
+        packager = FakePackager()
+        job._packager = packager
+        clock.t = T0 + 4000
+        await drive(job, self.stop, predicate=lambda: (
+            ("test:scope", "guild_war", SEASON) in packager.sealed))
+        self.assertIn(("test:scope", "guild_war", SEASON), packager.sealed)
+        slots = self._slot_status(history)
+        self.assertEqual(slots["guild_war"]["ROUTINE"], "SKIPPED")
+        self.assertEqual(slots["guild_war"]["POST_CLOSE_1H"], "FIRED")
 
 
 class sqlite_blobs:
