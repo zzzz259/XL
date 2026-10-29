@@ -91,14 +91,14 @@
  HTMLAnchorElement.prototype.click=function(){if(this.href.startsWith('blob:')){exportBlob(this).catch(exportError);return;}return click.call(this);};
  document.addEventListener('click',e=>{const a=e.target.closest?.('a[download]');if(a?.href.startsWith('blob:')){e.preventDefault();exportBlob(a).catch(exportError);}});
  document.addEventListener('DOMContentLoaded',()=>{
-  const note=document.querySelector('.storage-note p:last-child');if(note)note.textContent='记录保存在此应用的本机存储。更新应用会保留；卸载或清除应用数据会删除，请定期备份 JSON。登录会话与抽卡存档独立。';
-  const summary=document.querySelector('.storage-note summary');if(summary)summary.textContent='记录保存在这台手机 · 查看存档说明';
+  const note=document.querySelector('.archive-storage-note p:last-child')||document.querySelector('.storage-note p:last-child');if(note)note.textContent='记录保存在此应用的本机存储。更新应用会保留；卸载或清除应用数据会删除，请定期备份 JSON。登录会话与抽卡存档独立。';
+  const summary=document.querySelector('.archive-storage-note summary')||document.querySelector('.storage-note summary');if(summary)summary.textContent='记录保存在这台手机 · 查看存档说明';
   for(const help of document.querySelectorAll('.guide-open'))help.hidden=true;
   const guide=document.querySelector('.guide-card');if(guide)guide.hidden=true;
   const query=document.querySelector('.query-layout');if(query)query.style.gridTemplateColumns='1fr';
   const p=document.querySelector('.portal-login>.field-help');if(p)p.textContent='在独立的官方登录页面正常登录后自动查询。默认清理官网会话；开启记住登录仅保留最近一次官网登录状态。';
   const start=document.querySelector('#portal-start');
-  if(start){const other=document.createElement('button');other.type='button';other.className='outline-button';other.textContent='登录其他账号';other.onclick=()=>{if(start.disabled)return;document.querySelector('#login-profile').value='';start.click();};start.after(other);}
+  if(start){const other=document.getElementById('other-login')||document.createElement('button');other.type='button';other.className='outline-button';other.textContent='登录其他账号';other.onclick=()=>{if(start.disabled)return;document.querySelector('#login-profile').value='';start.click();};if(!other.isConnected)start.after(other);}
   document.getElementById('bili-copy-diagnostics')?.addEventListener('click',()=>native('copyBiliDiagnostics').then(()=>status('已复制脱敏诊断，可粘贴反馈；不含账号 UID 或令牌。')).catch(()=>status('复制失败，请重试。','error')));
   document.getElementById('tap-copy-diagnostics')?.addEventListener('click',()=>native('copyTapDiagnostics').catch(()=>status('复制失败，请重试。','error')));
   window.mobileReady=true;
