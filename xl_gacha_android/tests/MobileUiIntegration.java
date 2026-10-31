@@ -20,6 +20,7 @@ public final class MobileUiIntegration extends Instrumentation {
   throw new AssertionError("WebView condition timeout: "+script);
  }
  void check(String script,String name)throws Exception{ok("true".equals(evaluate(script)),name);}
+ int textZoom()throws Exception{AtomicInteger value=new AtomicInteger();runOnMainSync(()->value.set(web.getSettings().getTextZoom()));return value.get();}
  void tab(String name)throws Exception{
   check("(()=>{document.querySelector('.bottom-nav [data-tab=\""+name+"\"]').click();return true;})()","open "+name);
   await("!document.getElementById('view-"+name+"').hidden");
@@ -147,11 +148,11 @@ public final class MobileUiIntegration extends Instrumentation {
   tab("profile");
   check("(()=>{document.querySelector('#text-zoom-options [data-zoom=\"125\"]').click();return true;})()","select 125 percent text zoom");
   await("document.body.dataset.textZoom==='125'&&document.querySelector('#text-zoom-options [data-zoom=\"125\"]').getAttribute('aria-pressed')==='true'");
-  ok(web.getSettings().getTextZoom()==125,"native text zoom is applied");
+  ok(textZoom()==125,"native text zoom is applied");
   evaluate("window.mobileReady=false");runOnMainSync(()->web.reload());await("window.mobileReady===true");
   tab("profile");
   check("document.body.dataset.textZoom==='125'&&document.querySelector('#text-zoom-options [data-zoom=\"125\"]').getAttribute('aria-pressed')==='true'","text zoom persists across reload");
-  ok(web.getSettings().getTextZoom()==125,"native text zoom also persists across reload");
+  ok(textZoom()==125,"native text zoom also persists across reload");
   check("(()=>{document.querySelector('#text-zoom-options [data-zoom=\"100\"]').click();return true;})()","restore standard text zoom");
   await("document.body.dataset.textZoom==='100'");
   tab("records");
