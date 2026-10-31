@@ -22,15 +22,16 @@ sealed partial class FloatCanvas {
         BlendMode.Equation.ReverseSubtract=>d-s,BlendMode.Equation.Min=>Math.Min(src,dst),
         BlendMode.Equation.Max=>Math.Max(src,dst),_=>throw new ArgumentException("Unsupported Spine blend equation")
     };
-    public void CaptureBlend(byte[] bytes, BlendMode mode,int x0=0,int y0=0,int x1=-1,int y1=-1) {
+    public void CaptureBlend(byte[] bytes, BlendMode mode,int x0=0,int y0=0,int x1=-1,int y1=-1,int sourceFirstRow=0) {
         x1=x1<0?Width:Math.Min(Width,x1);y1=y1<0?Height:Math.Min(Height,y1);
         int standard=mode==SFMLBlendMode.NormalPma?1:mode==SFMLBlendMode.AdditivePma?2:mode==SFMLBlendMode.MultiplyPma?3:mode==SFMLBlendMode.ScreenPma?4:0;
-        for(int y=Math.Max(0,y0);y<y1;y++)for(int i=(y*Width+Math.Max(0,x0))*4,end=(y*Width+x1)*4;i<end;i+=4) {
+        for(int y=Math.Max(0,y0);y<y1;y++) { int row=RowIndex(y);
+        for(int x=Math.Max(0,x0);x<x1;x++) { int i=row+x*4,sourceIndex=((y-sourceFirstRow)*Width+x)*4;
             // Only all-zero RGBA is identity. PMA additive RGB with alpha0 is meaningful.
-            if(standard!=0&&(bytes[i]|bytes[i+1]|bytes[i+2]|bytes[i+3])==0)continue;
-            float sa=bytes[i+3]/255f,da=Pixels[i+3];
+            if(standard!=0&&(bytes[sourceIndex]|bytes[sourceIndex+1]|bytes[sourceIndex+2]|bytes[sourceIndex+3])==0)continue;
+            float sa=bytes[sourceIndex+3]/255f,da=Pixels[i+3];
             for(int c=0;c<3;c++) {
-                float src=bytes[i+c]/255f,dst=Pixels[i+c];
+                float src=bytes[sourceIndex+c]/255f,dst=Pixels[i+c];
                 Pixels[i+c]=standard switch {
                     1=>src+dst*(1-sa),2=>src+dst,3=>src*dst+dst*(1-sa),4=>src+dst*(1-src),
                     _=>Equation(mode.ColorEquation,src,dst,src*Factor(mode.ColorSrcFactor,src,dst,sa,da),dst*Factor(mode.ColorDstFactor,src,dst,sa,da))
@@ -38,6 +39,7 @@ sealed partial class FloatCanvas {
             }
             Pixels[i+3]=Math.Clamp(Equation(mode.AlphaEquation,sa,da,sa*Factor(mode.AlphaSrcFactor,sa,da,sa,da),da*Factor(mode.AlphaDstFactor,sa,da,sa,da)),0,1);
             Peak=Math.Max(Peak,Math.Max(Pixels[i],Math.Max(Pixels[i+1],Pixels[i+2])));
+        }
         }
     }
 }
@@ -47,7 +49,7 @@ sealed partial class ScenePart {
         // own source image because their destination is the existing scene.
         if(Skeleton.IterDrawOrder().All(slot=>slot.Blend==SFMLBlendMode.NormalPma)) {
             target.Clear(Color.Transparent);Draw(target,RenderStates.Default);target.Display();
-            using var image=target.Texture.CopyToImage();canvas.Capture(image.Pixels);return;
+            canvas.CaptureTarget(target,token);return;
         }
         using var captureView=target.GetView();
         float projectionX=target.Size.X/captureView.Size.X,projectionY=target.Size.Y/captureView.Size.Y;
@@ -58,7 +60,7 @@ sealed partial class ScenePart {
         void FlushNormal() {
             if(!normalPending)return;
             target.Display();
-            using var image=target.Texture.CopyToImage();canvas.Capture(image.Pixels);
+            canvas.CaptureTarget(target,token);
             normalPending=false;
         }
         try {
@@ -93,7 +95,7 @@ sealed partial class ScenePart {
                 if(normal)normalPending=true;
                 else {
                     target.Display();
-                    using var image=target.Texture.CopyToImage();canvas.CaptureBlend(image.Pixels,slot.Blend,
+                    canvas.CaptureTarget(target,token,slot.Blend,
                         (int)MathF.Floor(minX)-1,(int)MathF.Floor(minY)-1,(int)MathF.Ceiling(maxX)+1,(int)MathF.Ceiling(maxY)+1);
                 }
             }

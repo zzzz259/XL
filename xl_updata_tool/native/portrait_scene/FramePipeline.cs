@@ -15,13 +15,18 @@ using SkiaSharp;
 
 static class FramePipeline {
     public const long MaxCanvasPixels=64L*1024*1024;
-    public static long ValidateCanvasDimensions(int width,int height,long? memoryBudget=null) {
+    public static long ValidateCanvasDimensions(int width,int height,long? memoryBudget=null,int workingRows=0) {
         long pixels=(long)width*height;
         if(width<=0||height<=0||pixels>MaxCanvasPixels)throw new ArgumentException($"Canvas {width}x{height} exceeds supported {MaxCanvasPixels} pixel limit");
-        // Float RGBA + source/readback/output/Skia buffers and native target allowance.
-        long estimated=checked(pixels*40);
+        if(workingRows<0||workingRows>1024)throw new ArgumentException("workingRows must be in 0..1024");
+        // Allocation screening only, not a whole-process or cgroup budget.
+        // Default: float RGBA + readback/output/native allowances, as before.
+        // Disk: conservative full GPU + encode RGBA allowance, bounded float
+        // rows and two conversion/readback rows. Driver/base/assets/file cache
+        // remain outside this estimate and require measured resource limits.
+        long estimated=workingRows==0?checked(pixels*40):checked(pixels*8+16L*width*Math.Min(workingRows,height)+8L*width);
         long available=memoryBudget??Math.Max(0,GC.GetGCMemoryInfo().TotalAvailableMemoryBytes-GC.GetTotalMemory(false));
-        if(estimated>available)throw new ArgumentException($"Canvas {width}x{height} requires approximately {estimated} bytes; available process memory budget is {available} bytes");
+        if(estimated>available)throw new ArgumentException($"Canvas {width}x{height} requires approximately {estimated} bytes; allocation screening allowance is {available} bytes");
         return estimated;
     }
     static void Log(object value) => Console.WriteLine(JsonSerializer.Serialize(value));
@@ -60,10 +65,11 @@ static class FramePipeline {
     }
     public static int Run(Scene scene,CancellationToken token) {
         var s=scene.settings; var parts=new List<ScenePart>(); var particles=new Dictionary<Part,ParticleLayer>();
+        using var textures=s.png_working_rows>0?new SceneTextureLoader():null;
         string? staged=null; Process? encoder=null;
         try {
             Log(new {phase="load",parts=scene.parts.Length,material_buffer="cpu_float32",output_mapping="clip_at_presentation",alpha_policy="premultiplied_accumulation_coverage_alpha",color_space="encoded_rgb_game_space_unverified"});
-            foreach(var spec in scene.parts) {token.ThrowIfCancellationRequested();if(spec.kind=="particle")particles[spec]=new ParticleLayer(spec);else parts.Add(new ScenePart(spec,s));}
+            foreach(var spec in scene.parts) {token.ThrowIfCancellationRequested();if(spec.kind=="particle")particles[spec]=new ParticleLayer(spec);else parts.Add(new ScenePart(spec,s,textures));}
             float natural=Math.Max(parts.Count>0?parts.Max(p=>p.TimelineDuration()):0,particles.Count>0?particles.Values.Max(p=>p.Natural):0);
             float snapshot=scene.snapshot_policy=="entrance_complete"?Math.Max(s.time_offset,parts.Count>0?parts.Max(p=>p.TimelineDuration(true)):0):s.time_offset;
             bool still=s.format.Equals("Png",StringComparison.OrdinalIgnoreCase)||s.format.Equals("Jpg",StringComparison.OrdinalIgnoreCase);
@@ -86,14 +92,14 @@ static class FramePipeline {
             if(!double.IsFinite(canvasWidth)||!double.IsFinite(canvasHeight)||canvasWidth>int.MaxValue||canvasHeight>int.MaxValue)
                 throw new ArgumentException("Canvas dimensions are nonfinite or exceed integer range");
             int w=checked((int)canvasWidth),h=checked((int)canvasHeight);
-            ValidateCanvasDimensions(w,h);
+            ValidateCanvasDimensions(w,h,workingRows:s.png_working_rows);
             float cx=(left+right)/2,cy=(top+bottom)/2;
             foreach(var p in parts)p.Reset(s);Advance(parts,(float)initial,s.fps,token);
             string output=Path.GetFullPath(scene.output); Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             staged=Path.Combine(Path.GetDirectoryName(output)!,"."+Path.GetFileNameWithoutExtension(output)+"."+Guid.NewGuid().ToString("N")+".partial"+Path.GetExtension(output));
             using var target=new RenderTexture((uint)w,(uint)h);
             using var view=new View(new Vector2f(cx,cy),new Vector2f(w/fit,h/fit));target.SetView(view);
-            var canvas=new FloatCanvas(w,h);
+            using var canvas=s.png_working_rows==0?new FloatCanvas(w,h):new FloatCanvas(w,h,staged+".float",s.png_working_rows);
             var layers=scene.parts.Select((spec,index)=>(spec,index)).OrderBy(x=>x.spec.Order[0]).ThenBy(x=>x.spec.Order[1]).ThenBy(x=>x.spec.Order[2]).ThenBy(x=>x.spec.Order[3]).ThenByDescending(x=>x.index).ToArray();
             var bySpec=parts.ToDictionary(p=>p.Spec);
             int frames=still?1:Math.Max(1,(int)Math.Ceiling(duration*s.fps));
@@ -105,7 +111,7 @@ static class FramePipeline {
             var renderWatch=Stopwatch.StartNew();
             for(int frame=0;frame<frames;frame++) {
                 token.ThrowIfCancellationRequested();
-                canvas.Clear(Background(s));
+                canvas.Clear(Background(s),token);
                 foreach(var item in layers) {
                     token.ThrowIfCancellationRequested();
                     long layerStarted=Stopwatch.GetTimestamp();
@@ -115,13 +121,18 @@ static class FramePipeline {
                     }
                     layerMilliseconds[item.spec.id]=layerMilliseconds.GetValueOrDefault(item.spec.id)+Stopwatch.GetElapsedTime(layerStarted).TotalMilliseconds;
                 }
-                byte[] bytes=canvas.Bytes(still ? s.pma : s.format.Equals("Mp4",StringComparison.OrdinalIgnoreCase));
                 if(still) {
+                    target.Dispose();
                     using var bitmap=new SKBitmap(new SKImageInfo(w,h,SKColorType.Rgba8888,s.pma?SKAlphaType.Premul:SKAlphaType.Unpremul));
-                    Marshal.Copy(bytes,0,bitmap.GetPixels(),bytes.Length);
-                    using var image=SKImage.FromBitmap(bitmap);using var data=image.Encode(s.format.Equals("Jpg",StringComparison.OrdinalIgnoreCase)?SKEncodedImageFormat.Jpeg:SKEncodedImageFormat.Png,100);
-                    using var stream=File.Create(staged);data.SaveTo(stream);
-                } else encoder!.StandardInput.BaseStream.WriteAsync(bytes.AsMemory(),token).AsTask().GetAwaiter().GetResult();
+                    canvas.WritePixels(bitmap.GetPixels(),bitmap.RowBytes,s.pma,token);
+                    using var pixels=bitmap.PeekPixels();
+                    using var stream=File.Create(staged);
+                    if(!pixels.Encode(stream,s.format.Equals("Jpg",StringComparison.OrdinalIgnoreCase)?SKEncodedImageFormat.Jpeg:SKEncodedImageFormat.Png,100))
+                        throw new IOException("Image encoding failed");
+                } else {
+                    byte[] bytes=canvas.Bytes(s.format.Equals("Mp4",StringComparison.OrdinalIgnoreCase));
+                    encoder!.StandardInput.BaseStream.WriteAsync(bytes.AsMemory(),token).AsTask().GetAwaiter().GetResult();
+                }
                 if(frame+1==frames||frame%(Math.Max(1,(int)s.fps))==0) {Log(new {phase="export",total=frames,current=frame+1});Log(new {phase="render_profile",current=frame+1,elapsed_ms=renderWatch.Elapsed.TotalMilliseconds,layer_ms=layerMilliseconds});}
                 if(frame+1<frames)Advance(parts,s.speed/s.fps,s.fps,token);
             }

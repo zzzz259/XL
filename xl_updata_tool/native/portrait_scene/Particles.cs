@@ -63,13 +63,14 @@ sealed partial class FloatCanvas {
     public readonly float[] Pixels;
     public float Peak;
     public FloatCanvas(int width, int height) { Width = width; Height = height; Pixels = new float[checked(width * height * 4)]; }
-    public void Clear(Color color) {
+    public void Clear(Color color,CancellationToken token=default) {
         float a = color.A / 255f;
-        for (int i = 0; i < Pixels.Length; i += 4) { Pixels[i] = color.R / 255f * a; Pixels[i+1] = color.G / 255f * a; Pixels[i+2] = color.B / 255f * a; Pixels[i+3] = a; }
+        for(int y=0;y<Height;y++) { token.ThrowIfCancellationRequested(); int start=RowIndex(y); for (int i = start; i < start+Width*4; i += 4) { Pixels[i] = color.R / 255f * a; Pixels[i+1] = color.G / 255f * a; Pixels[i+2] = color.B / 255f * a; Pixels[i+3] = a; } }
     }
     // RGB storage is premultiplied, with an independent coverage alpha for portable PNG output.
     // Keep HDR until Bytes(): later normal layers must be able to attenuate over-white values.
     public void Blend(int i, float r, float g, float b, float a, bool additive) {
+        i=RowIndex(i/(Width*4)) + i%(Width*4);
         float dst = additive ? 1 : 1 - Math.Clamp(a, 0, 1);
         Pixels[i] = r * a + Pixels[i] * dst;
         Pixels[i+1] = g * a + Pixels[i+1] * dst;
@@ -78,28 +79,47 @@ sealed partial class FloatCanvas {
         Peak = Math.Max(Peak, Math.Max(Pixels[i], Math.Max(Pixels[i+1], Pixels[i+2])));
     }
     public void Capture(byte[] rgba) {
-        // Captured RGB is already premultiplied: avoid divide then multiply per pixel.
-        for (int i = 0; i < Pixels.Length; i += 4) {
-            float a = rgba[i+3] / 255f;
-            // PMA normal slots may carry emissive RGB even when alpha is zero.
-            if ((rgba[i] | rgba[i+1] | rgba[i+2] | rgba[i+3]) == 0) continue;
+        for(int y=0;y<Height;y++)CaptureRow(rgba,y,y*Width*4);
+    }
+    void CaptureRow(byte[] rgba,int y,int sourceOffset) {
+        int start=RowIndex(y);
+        for(int x=0;x<Width*4;x+=4) {
+            int i=start+x,src=sourceOffset+x;
+            float a=rgba[src+3]/255f;
+            if((rgba[src]|rgba[src+1]|rgba[src+2]|rgba[src+3])==0)continue;
             float inverse=1-a;
-            Pixels[i]=rgba[i]/255f+Pixels[i]*inverse;
-            Pixels[i+1]=rgba[i+1]/255f+Pixels[i+1]*inverse;
-            Pixels[i+2]=rgba[i+2]/255f+Pixels[i+2]*inverse;
+            Pixels[i]=rgba[src]/255f+Pixels[i]*inverse;
+            Pixels[i+1]=rgba[src+1]/255f+Pixels[i+1]*inverse;
+            Pixels[i+2]=rgba[src+2]/255f+Pixels[i+2]*inverse;
             Pixels[i+3]=a+Pixels[i+3]*inverse;
             Peak=Math.Max(Peak,Math.Max(Pixels[i],Math.Max(Pixels[i+1],Pixels[i+2])));
         }
     }
-    public byte[] Bytes(bool pma) {
-        var bytes = new byte[Pixels.Length];
-        for (int i = 0; i < Pixels.Length; i += 4) {
+    void ConvertPixels(byte[] bytes, int start, int count, bool pma) {
+        for (int offset = 0; offset < count; offset += 4) {
+            int i = start + offset;
             float a = Pixels[i+3];
-            for (int c = 0; c < 3; c++) bytes[i+c] = (byte)Math.Clamp((int)MathF.Round(Pixels[i+c] * (pma || a <= 0 ? 1 : 1 / a) * 255), 0, 255);
-            bytes[i+3] = (byte)Math.Clamp((int)MathF.Round(a * 255), 0, 255);
+            for (int c = 0; c < 3; c++) bytes[offset+c] = (byte)Math.Clamp((int)MathF.Round(Pixels[i+c] * (pma || a <= 0 ? 1 : 1 / a) * 255), 0, 255);
+            bytes[offset+3] = (byte)Math.Clamp((int)MathF.Round(a * 255), 0, 255);
         }
+    }
+    public byte[] Bytes(bool pma) {
+        var bytes = new byte[checked(Width*Height*4)];
+        var row=new byte[Width*4];
+        for(int y=0;y<Height;y++){ConvertPixels(row,RowIndex(y,false),row.Length,pma);Buffer.BlockCopy(row,0,bytes,y*row.Length,row.Length);}
         return bytes;
     }
+    public void WritePixels(IntPtr destination, int rowBytes, bool pma,CancellationToken token=default) {
+        int length = checked(Width * 4);
+        if (destination == IntPtr.Zero || rowBytes < length) throw new ArgumentException("Invalid pixel destination");
+        var row = new byte[length];
+        for (int y = 0; y < Height; y++) {
+            token.ThrowIfCancellationRequested();
+            ConvertPixels(row, RowIndex(y,false), length, pma);
+            System.Runtime.InteropServices.Marshal.Copy(row, 0, IntPtr.Add(destination, checked(y * rowBytes)), length);
+        }
+    }
+
 }
 sealed class ParticleLayer {
     public readonly Part Spec;
@@ -190,16 +210,19 @@ sealed class ParticleLayer {
             double dies=birth.time+life;deaths.Enqueue(dies,dies);
             double age=t-birth.time;if(age>=0&&age<life)live.Add((birth.id,age,life));
         }
+        void DrawRows(int rowStart,int rowEnd) {
         foreach(var item in live) {
             long id=item.id;float age=(float)item.age,life=item.life;
             float x=R(id,2,-Math.Abs(s.shape_size[0])/2,Math.Abs(s.shape_size[0])/2)+s.shape_position[0]+R(id,3,s.velocity_min[0],s.velocity_max[0])*age+.5f*s.gravity[0]*s.gravity_modifier*age*age;
             float y=R(id,4,-Math.Abs(s.shape_size[1])/2,Math.Abs(s.shape_size[1])/2)+s.shape_position[1]+R(id,5,s.velocity_min[1],s.velocity_max[1])*age+.5f*s.gravity[1]*s.gravity_modifier*age*age;
             float size=R(id,6,s.size[0],s.size[1]), angle=R(id,7,s.rotation_radians[0],s.rotation_radians[1]);
             int frame=Math.Min(s.tiles[0]*s.tiles[1]-1,(int)(Math.Min(1,(age/life*s.cycles)%1*s.uv_frame_end)*s.tiles[0]*s.tiles[1]));
-            Stamp(canvas,x,y,size,angle,frame,fit,centerX,centerY,token);
+            Stamp(canvas,x,y,size,angle,frame,fit,centerX,centerY,token,rowStart,rowEnd);
         }
+        }
+        canvas.ForEachWindow(DrawRows,token);
     }
-    void Stamp(FloatCanvas canvas,float x,float y,float size,float angle,int frame,float fit,float cx,float cy,CancellationToken token) {
+    void Stamp(FloatCanvas canvas,float x,float y,float size,float angle,int frame,float fit,float cx,float cy,CancellationToken token,int rowStart,int rowEnd) {
         var a=Spec.affine; float co=MathF.Cos(angle),si=MathF.Sin(angle);
         float aa=(a[0]*co+a[1]*si)*size*fit, bb=(-a[0]*si+a[1]*co)*size*fit;
         float cc=-(a[2]*co+a[3]*si)*size*fit, dd=-(-a[2]*si+a[3]*co)*size*fit;
@@ -207,7 +230,7 @@ sealed class ParticleLayer {
         float det=aa*dd-bb*cc;
         float rx=(Math.Abs(aa)+Math.Abs(bb))/2,ry=(Math.Abs(cc)+Math.Abs(dd))/2;
         int x0=Math.Max(0,(int)MathF.Floor(px-rx)),x1=Math.Min(canvas.Width,(int)MathF.Ceiling(px+rx));
-        int y0=Math.Max(0,(int)MathF.Floor(py-ry)),y1=Math.Min(canvas.Height,(int)MathF.Ceiling(py+ry));
+        int y0=Math.Max(rowStart,(int)MathF.Floor(py-ry)),y1=Math.Min(rowEnd,(int)MathF.Ceiling(py+ry));
         int cw=tw/s.tiles[0],ch=th/s.tiles[1],col=frame%s.tiles[0],row=s.tiles[1]-1-frame/s.tiles[0];
         for (int iy=y0; iy<y1; iy++) {
             token.ThrowIfCancellationRequested();

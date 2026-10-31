@@ -37,6 +37,7 @@ sealed class Part {
     public float fade_in { get; set; }
 }
 sealed class Settings {
+    public int png_working_rows { get; set; }
     public string format { get; set; } = "Png";
     [JsonPropertyName("static")] public bool Static { get; set; } = true;
     public float scale { get; set; } = 1;
@@ -87,7 +88,7 @@ sealed partial class ScenePart : SpineObject {
     readonly Transform affine;
     float elapsed;
     public float ClockTime => elapsed * Spec.time_scale;
-    public ScenePart(Part spec, Settings settings) : base(spec.skeleton, spec.atlas, SpineVersion.GetVersion(spec.skeleton), TextureLoader.DefaultLoader) {
+    public ScenePart(Part spec, Settings settings, TextureLoader? loader=null) : base(spec.skeleton, spec.atlas, SpineVersion.GetVersion(spec.skeleton), loader??TextureLoader.DefaultLoader) {
         Spec = spec;
         var m = spec.affine;
         // Bundled DrawTexture submits raw Spine Y-up vertices to SFML.
@@ -189,6 +190,7 @@ static class Program {
         Require(!string.IsNullOrWhiteSpace(scene.output), "Scene output is missing");
         Require(scene.snapshot_policy is "time_offset" or "entrance_complete", "Unknown snapshot_policy");
         var s = scene.settings;
+        FloatCanvas.ValidateWorkingRows(scene.scene_schema_version,s);
         Require(Finite(s.scale) && s.scale > 0, "scale must be finite and positive");
         Require(Finite(s.speed) && s.speed > 0, "speed must be finite and positive");
         Require(Finite(s.fps) && s.fps > 0 && s.fps <= 1000, "fps must be in (0,1000]");
