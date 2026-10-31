@@ -12,7 +12,7 @@ Android：内置本地域名 UI（0.4 起为独立的移动端页面 `web/index.
 
 ## Android 长图保存与分享
 
-共享 `image-export.js` 在内存中生成 PNG，安卓桥提供 `imageAlbum`、`imageStage`、`imageShare` 三个操作。保存到相册与分享独立：前者 Android 10+ 写入本应用贡献的 MediaStore.Images，目录 Pictures/星落抽卡手记，IS_PENDING 完成后发布，失败撤销本次条目；Android 9 按需申请 WRITE_EXTERNAL_STORAGE，仅该系统版本声明权限，写入 Pictures 后触发媒体扫描。JSON/CSV/ZIP 沿用 Downloads/文件选择器。
+共享 `image-export.js` 在内存中生成 PNG，`planPages(report, category, maximum, poolIds)` 第四参可按具体卡池 ID 过滤；缺省/null 保持旧调用契约，空数组产生空白页而 Android UI 在空勾选时直接提示且不出图。Android 默认全选，同一报告重开保留勾选，换报告重新全选；新渲染使用初始角色方图、新界面配色与生涯信息，MobileAssets 不可用时保留原文字布局。安卓桥提供 `imageAlbum`、`imageStage`、`imageShare` 三个操作。保存到相册与分享独立：前者 Android 10+ 写入本应用贡献的 MediaStore.Images，目录 Pictures/星落抽卡手记，IS_PENDING 完成后发布，失败撤销本次条目；Android 9 按需申请 WRITE_EXTERNAL_STORAGE，仅该系统版本声明权限，写入 Pictures 后触发媒体扫描。JSON/CSV/ZIP 沿用 Downloads/文件选择器。
 
 分享每张 PNG 分别写入内部 cache/shared-images，返回不含账号信息的 UUID 文件 ID。ImageShareProvider 不导出，只允许临时 URI 授权，只读打开精确 UUID PNG，禁止枚举、目录穿越、query/fragment、写入或任意文件路径；存档、配置、登录目录不在提供范围。单图 ACTION_SEND，多图 ACTION_SEND_MULTIPLE，EXTRA_STREAM 和 ClipData 按所选页顺序携带 content URI，仅授予读取权限。
 
@@ -20,7 +20,7 @@ PNG 每张最多 8 MiB，并校验格式、尺寸和像素上限；一次最多 
 
 ## 统计
 
-`analysis.py` 与 `mobile-engine.js` 保持普通、限定、典藏、启程和未知分类一致。保底组来自 catalog 的 `pity_group`，跨池继承只在同组连续历史成立；未知不伪造 UP。界面展示卡池 UP 时只引用已验证 catalog 的 `pool_meta.featured_ids`。角色头像由 `mobile-assets.js` 按 item_id 从本地 manifest 映射到 HeadRect，屏幕内方形图取左侧人物区，长图按 `(0,0,140,140)` 源区域裁切，未知 ID 保留首字 fallback，不联网取图。玩家资料由 `GachaClient` 从现有 EnterGameRsp.actor 解析昵称、游戏 UID、等级、faceId 与 actorHead，不新增 RPC；存档主键仍为 channel + openId，旧别名保留。玩家头像按 fashionId→headId→faceId 映射，头像框独立叠加，限时框按响应中的 sysStamp 判断，名次角标只按实际字段显示。查询页 gugu 使用本地 WebP，点击随机播放互动后回 idle，减少动态效果时显示静态图。不显示累计消耗金额。平均抽数=可见分类总抽数/五星数；首个五星与断档为下界；序号 80→1 连续。具体用户边界见使用指南，不将可见历史推断当成官方实时状态。
+`analysis.py` 与 `mobile-engine.js` 保持普通、限定、典藏、启程和未知分类一致。保底组来自 catalog 的 `pity_group`，跨池继承只在同组连续历史成立；未知不伪造 UP。界面展示卡池 UP 时只引用已验证 catalog 的 `pool_meta.featured_ids`。角色头像由 `mobile-assets.js` 按 item_id 从本地 manifest 映射到初始 `_1` 的 256×256 BurstHead 方图；312 个时装 ID 统一回到所属角色的默认初始头像，屏幕与长图均完整使用方图并居中显示，未知 ID 保留首字 fallback，不联网取图。素材生成器只按非透明区域水平重居中，两张特殊 140×270 方图先左右补透明再整体缩放，不裁切人物。玩家资料由 `GachaClient` 从现有 EnterGameRsp.actor 解析昵称、游戏 UID、等级、faceId 与 actorHead，不新增 RPC；存档主键仍为 channel + openId，旧别名保留。玩家头像按 fashionId→headId→faceId 映射，头像框独立叠加，限时框按响应中的 sysStamp 判断，名次角标只按实际字段显示。查询页 gugu 使用本地 WebP，四套动作统一为 864×864 画布与相同落地基线，点击随机播放互动后回 idle，减少动态效果时显示同尺寸静态图。页面字号由 localStorage `starfall-text-zoom` 保存 90/100/110/125/140 档，启动时通过原生 `textZoom` 恢复，非法或越界输入拒绝。不显示累计消耗金额。平均抽数=可见分类总抽数/五星数；首个五星与断档为下界；序号 80→1 连续。具体用户边界见使用指南，不将可见历史推断当成官方实时状态。
 
 移动端评价与事件标签由 `mobile-insights.js` 派生：输入为 `mobile-engine.js` 的 report，只统计普通/限定/典藏且 `hard_pity>0` 的卡池，记录按 pool/timestamp/index/record_id 去重；生涯覆盖全部可见历史，近 45 天窗口含端点并剔除未来记录。状态机为 empty（暂无记录）、small（样本较少）、zero（暂未见金）、unknown（星级待确认）、rated（按「抽数÷硬保底」均值分档评级），不足 100 抽或五星少于 3 个时 rated 也标 `lowConfidence` 并在界面加「暂估」。标签只来自有规则的事件：十连 2 金及以上（含未知稀有度时按「十连至少双金」计）、`pulls_since_five` 达到 `hard_pity` 的抽满井、跨池连续 2 次及以上的 UP/歪 连击；不产出无规则依据的标签。`mobile-probability.js` 按本地 BaseWord_cn 静态规则建模：五星基础 2%、UP 占五星 50%、60 抽未出五星后 2%→7% 起每抽 +5%、70 抽硬保底、非 UP 后下一五星必 UP；以状态转移求首次 UP 的 1–140 抽累计分布，`thresholds` 固定为超欧 ≤6、超非 ≥122（约 5% 分位），`eventGrade` 还要求 `interval_exact`、`category` 为限定/典藏、`hard_pity===70` 且 `guaranteed===false` 才判超非。评价阈值与事件分位是两套口径，均只描述可见历史，不代表官方概率或未来预测。
 
