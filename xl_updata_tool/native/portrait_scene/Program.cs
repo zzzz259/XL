@@ -232,6 +232,10 @@ static class Program {
         return new Color(r, g, b, a);
     }
     static int Main(string[] args) {
+        if(args.Length==1&&args[0]=="--capabilities") {
+            Log(new {phase="capabilities",protocol_version=1,descriptor_schemas=new[]{1,2},png_working_rows_max=1024,render_semantics="float32_scene2_v1"});
+            return 0;
+        }
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; Cancellation.Cancel(); };
         // Optional cooperative cancellation for pipe-based worker hosts.
         if (Console.IsInputRedirected) _ = Task.Run(() => {

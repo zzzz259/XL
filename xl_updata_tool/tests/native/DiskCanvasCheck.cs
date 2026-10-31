@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using SFML.System;
 using SFML.Graphics;
 using Spine.Utils;
@@ -51,6 +52,15 @@ static class DiskCanvasCheck {
     }
     static int Main(string[] args) {
         if(args.Length>1&&args[1]=="--tmpfs") {TmpfsCheck(args[0]);return 0;}
+        if(args.Length>1&&args[1]=="--capabilities") {
+            var output=new StringWriter();var original=Console.Out;
+            int code;
+            try {Console.SetOut(output);code=(int)typeof(Program).GetMethod("Main",BindingFlags.NonPublic|BindingFlags.Static)!.Invoke(null,new object[]{new[]{"--capabilities"}})!;}
+            finally {Console.SetOut(original);}
+            using var payload=JsonDocument.Parse(output.ToString());
+            Check(code==0&&payload.RootElement.GetProperty("png_working_rows_max").GetInt32()==1024,"native bounded-row capabilities missing");
+            Console.WriteLine("PASS no-render bounded-row capabilities");return 0;
+        }
         EstimateChecks();
         var ctor=typeof(FloatCanvas).GetConstructor(new[]{typeof(int),typeof(int),typeof(string),typeof(int)});
         Check(ctor!=null,"disk row canvas constructor is missing");

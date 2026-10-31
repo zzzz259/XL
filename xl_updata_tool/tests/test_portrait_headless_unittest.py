@@ -32,6 +32,12 @@ class PortraitHeadlessTest(unittest.TestCase):
         from app.features.preview import portrait_headless
         return portrait_headless
 
+    def test_working_rows_are_strict_resource_configuration(self):
+        api = self.api()
+        for value in (True, -1, 1025, 1.5, '128'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                api.validate_request(dict(self.request, png_working_rows=value))
+
     def package(self, with_sprite=False):
         from app.features.preview.portrait_package import publish_portrait_packages
         from app.features.preview.portrait_config.asset_index import AssetIndex, IndexedAsset
@@ -127,25 +133,58 @@ assert not any(x.startswith('PySide6') for x in sys.modules)
         with self.assertRaisesRegex(ValueError, 'identity'):
             api.plan_request(self.request, self.root / 'work/planning')
 
-    def native(self, mode):
+    def native(self, mode, schema=1, capability='valid'):
         from app.features.preview.scene_export_adapter import write_scene_descriptor
         script = self.root / 'native.py'
         script.write_text('''import json,sys
 from pathlib import Path
 from PIL import Image
+capability=__CAPABILITY__
+if sys.argv[1]=='--capabilities':
+ if capability=='old': sys.exit(1)
+ print(json.dumps(dict(phase='capabilities',protocol_version=1,descriptor_schemas=[1,2],png_working_rows_max=True if capability=='malformed' else 1024)))
+ sys.exit(0)
+Path(__file__).with_suffix('.rendered').write_text('started')
 p=json.loads(Path(sys.argv[1]).read_text())
 assert p['settings']['scale'] == 2
 mode=sys.argv[2]
-if mode in ('valid','clamped','nolog'): Image.new('RGBA',(28,26),(100,30,20,255)).save(p['output'])
+if mode=='bounded': assert p['settings'].get('png_working_rows')==128
+if p['scene_schema_version']==1: assert not p['settings'].get('png_working_rows')
+if mode in ('valid','bounded','clamped','nolog'): Image.new('RGBA',(28,26),(100,30,20,255)).save(p['output'])
 if mode=='transparent': Image.new('RGBA',(28,26),(0,0,0,0)).save(p['output'])
 if mode=='corrupt': Path(p['output']).write_bytes(b'not png')
 if mode=='failure': sys.exit(3)
 if mode!='nolog': print(json.dumps(dict(phase='complete',output=p['output'],width=28,height=26,bounds=[0,0,8 if mode=='clamped' else 4,3])))
-''')
+'''.replace('__CAPABILITY__',repr(capability)))
         def command(job, cli, temporary_dir):
             descriptor = write_scene_descriptor(job, temporary_dir)
+            data=json.loads(descriptor.read_text());data['scene_schema_version']=schema
+            descriptor.write_text(json.dumps(data))
             return [sys.executable, str(script), str(descriptor), mode]
         return command
+
+    def test_bounded_rows_handshake_and_original_schema_are_preserved(self):
+        api=self.api();self.package();self.request['png_working_rows']=128
+        with patch.object(api,'build_scene_command',self.native('bounded',schema=2)):
+            result=api.run_request(self.request)
+        self.assertEqual(result['status'],'success',result)
+        self.assertEqual(result['resource_mode'],'disk_rows')
+        self.assertEqual(result['png_working_rows'],128)
+        with patch.object(api,'build_scene_command',self.native('valid',schema=1,capability='old')):
+            legacy=api.run_request(self.request)
+        self.assertEqual(legacy['status'],'success',legacy)
+        self.assertEqual(legacy['resource_mode'],'legacy_schema1')
+        self.assertEqual(legacy['png_working_rows'],0)
+
+    def test_unsupported_bounded_native_never_starts_render(self):
+        api=self.api();self.package();self.request['png_working_rows']=128
+        target=self.root/'output/job-1.png';target.write_bytes(b'previous')
+        for capability in ('old','malformed'):
+            with self.subTest(capability=capability),patch.object(api,'build_scene_command',self.native('bounded',schema=2,capability=capability)):
+                result=api.run_request(self.request)
+                self.assertEqual(result['status'],'error',result)
+                self.assertFalse((self.root/'native.rendered').exists())
+                self.assertEqual(target.read_bytes(),b'previous')
 
     def test_real_child_png_and_failure_preserve_previous_artifact(self):
         api = self.api()

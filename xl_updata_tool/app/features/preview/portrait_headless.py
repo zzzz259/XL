@@ -38,6 +38,9 @@ def validate_request(payload):
         raise ValueError('unsupported schema_version')
     if payload.get('profile') != PROFILE or type(payload['profile'].get('scale')) is not int:
         raise ValueError('only full 2x PNG profile is supported')
+    rows = payload.get('png_working_rows', 0)
+    if type(rows) is not int or not 0 <= rows <= 1024:
+        raise ValueError('png_working_rows must be an integer in 0..1024')
     for key in ('job_id', 'version', 'character_id', 'skin_id'):
         value = payload.get(key)
         if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', value):
@@ -59,6 +62,7 @@ def validate_request(payload):
         raise ValueError('package_path must be an absolute local path')
     package = _inside(value, roots['input_root'], 'package_path')
     result = dict(payload)
+    result['png_working_rows'] = rows
     result.update({key: str(value) for key, value in roots.items()})
     result['package_path'] = str(package)
     return result
@@ -152,6 +156,28 @@ def run_request(payload):
         staged = _inside(descriptor['output'], work, 'native output')
         if staged.exists():
             raise ValueError('native output must not exist before this attempt')
+        rows = request['png_working_rows']
+        actual_rows = rows if descriptor['scene_schema_version'] == 2 else 0
+        result.update(png_working_rows=actual_rows, resource_mode=(
+            'disk_rows' if actual_rows else 'legacy_schema1' if rows else 'memory_default'))
+        if actual_rows:
+            # Query this exact command's renderer, not a different PATH tool.
+            probe = subprocess.run([*command[:2], '--capabilities'], cwd=work,
+                env=locator.subprocess_env(), capture_output=True, text=True,
+                timeout=15, check=False)
+            if probe.returncode or len(probe.stdout.encode('utf-8')) > 65536:
+                raise ValueError('native bounded PNG capability query failed')
+            caps = json.loads(probe.stdout)
+            if (not isinstance(caps, dict) or caps.get('phase') != 'capabilities'
+                    or type(caps.get('protocol_version')) is not int or caps['protocol_version'] != 1
+                    or type(caps.get('png_working_rows_max')) is not int or caps['png_working_rows_max'] < actual_rows
+                    or not isinstance(caps.get('descriptor_schemas'), list)
+                    or not all(type(value) is int for value in caps['descriptor_schemas'])
+                    or 2 not in caps['descriptor_schemas']):
+                raise ValueError('native does not support the requested bounded PNG mode')
+            descriptor['settings']['png_working_rows'] = actual_rows
+            descriptors[0].write_text(json.dumps(descriptor, ensure_ascii=False, indent=2), encoding='utf-8')
+            (work / 'capabilities.json').write_text(json.dumps(caps), encoding='utf-8')
         with (work / 'stdout.jsonl').open('w', encoding='utf-8') as stdout, (
                 work / 'stderr.log').open('w', encoding='utf-8') as stderr:
             process = subprocess.run(command, cwd=work, env=locator.subprocess_env(),
