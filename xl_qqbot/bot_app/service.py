@@ -17,6 +17,7 @@ from .config import Config, load_config
 from .matcher import CharacterMatcher
 from .query_handler import QueryHandler
 from .querier import CharacterQuerier
+from .portrait_querier import PortraitQuerier
 from .rerun_schedule_querier import RerunScheduleQuerier
 from .selection import SelectionStore
 from .gateway import gateway_transport_for_config
@@ -36,6 +37,11 @@ def QQSender(config, instance_id=None):
 
 def build_app(config: Config, instance_id: str | None = None) -> web.Application:
     """Assemble an instance worker that sends through the shared Gateway."""
+    effective_instance_id = instance_id or config.instance.instance_id
+    if config.portrait_query.enabled and not (
+        instance_id or config.instance.explicitly_configured or config.instance.instance_id != "default"
+    ):
+        raise ValueError("portrait_query requires explicit instance identity in config or runtime arguments")
     sender = QQSender(config) if instance_id is None else QQSender(config, instance_id)
     handler = QueryHandler(
         CharacterQuerier(config.watch.character_data, config.watch.versions_dir),
@@ -43,6 +49,13 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
         SelectionStore(),
         sender,
         bot_openid=config.bot.openid,
+        portrait_querier=(PortraitQuerier(config.portrait_query.data_dir,
+            effective_instance_id, config.portrait_query.source_id,
+            max_decode_pixels=config.portrait_query.max_decode_pixels,
+            max_manifest_bytes=config.portrait_query.max_manifest_bytes,
+            max_catalog_bytes=config.portrait_query.max_catalog_bytes,
+            max_image_bytes=config.portrait_query.max_image_bytes)
+            if config.portrait_query.enabled else None),
         rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
     )
 
@@ -56,7 +69,7 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
 
     app = web.Application()
     app[QUERY_HANDLER_KEY] = handler
-    app[INSTANCE_ID_KEY] = instance_id or config.instance.instance_id
+    app[INSTANCE_ID_KEY] = effective_instance_id
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     app.router.add_post("/event", _handle_event)
@@ -118,8 +131,10 @@ def resolve_instance_id(args, config: Config) -> str:
     if args.instance_id:
         return args.instance_id
     configured_instance_id = config.instance.instance_id
-    if configured_instance_id != "default":
+    if config.instance.explicitly_configured or configured_instance_id != "default":
         return configured_instance_id
+    if config.portrait_query.enabled and not args.tier:
+        raise ValueError("portrait_query requires explicit instance identity in config or runtime arguments")
     return args.tier or configured_instance_id
 
 

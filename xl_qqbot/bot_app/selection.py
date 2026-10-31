@@ -14,6 +14,10 @@ class PendingSelection:
     options: list  # Match 候选列表（不含"都不是"项）
     created_at: float = field(default_factory=time.time)
 
+    intent: str = "card"
+    portrait_ordinal: int | None = None
+    catalog_version: str | None = None
+
     def expired(self) -> bool:
         return time.time() - self.created_at > TTL_SECONDS
 
@@ -24,9 +28,9 @@ class SelectionStore:
     def __init__(self) -> None:
         self._pending: dict[tuple[str, str], PendingSelection] = {}
 
-    def set(self, group_openid: str, member_openid: str, query: str, options: list) -> None:
+    def set(self, group_openid: str, member_openid: str, query: str, options: list, *, intent="card", portrait_ordinal=None, catalog_version=None) -> None:
         self._pending[(group_openid, member_openid)] = PendingSelection(
-            query=query, options=list(options)
+            query=query, options=list(options), intent=intent, portrait_ordinal=portrait_ordinal, catalog_version=catalog_version
         )
 
     def get(self, group_openid: str, member_openid: str) -> PendingSelection | None:

@@ -93,6 +93,7 @@ class GroupsConfig:
 @dataclass(frozen=True)
 class InstanceConfig:
     instance_id: str = "default"
+    explicitly_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,17 @@ LEADERBOARD_SCOPE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 
 
 @dataclass(frozen=True)
+class PortraitQueryConfig:
+    enabled: bool = False
+    data_dir: str = ""
+    source_id: str = ""
+    max_decode_pixels: int = 8_000_000
+    max_manifest_bytes: int = 65536
+    max_catalog_bytes: int = 4194304
+    max_image_bytes: int = 20971520
+
+
+@dataclass(frozen=True)
 class Config:
     bot: BotConfig
     watch: WatchConfig
@@ -191,6 +203,7 @@ class Config:
     server_status: ServerStatusConfig = field(default_factory=ServerStatusConfig)
     instance: InstanceConfig = field(default_factory=InstanceConfig)
     leaderboard: LeaderboardConfig = field(default_factory=LeaderboardConfig)
+    portrait_query: PortraitQueryConfig = field(default_factory=PortraitQueryConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -567,7 +580,27 @@ def load_config(path: str = "config.toml") -> Config:
         **lb_budgets,
     )
 
+    portrait_raw = raw.get("portrait_query", {})
+    if type(portrait_raw.get("enabled", False)) is not bool:
+        raise ValueError("[portrait_query] enabled must be boolean")
+    portrait_query = PortraitQueryConfig(
+        enabled=portrait_raw.get("enabled", False),
+        data_dir=str(portrait_raw.get("data_dir", "")).strip(),
+        source_id=str(portrait_raw.get("source_id", "")).strip(),
+        max_decode_pixels=portrait_raw.get("max_decode_pixels", 8_000_000),
+        **{key: portrait_raw.get(key, default) for key, default in (
+            ("max_manifest_bytes", 65536), ("max_catalog_bytes", 4194304), ("max_image_bytes", 20971520))},
+    )
+    if type(portrait_query.max_decode_pixels) is not int or portrait_query.max_decode_pixels < 1:
+        raise ValueError("[portrait_query] invalid max_decode_pixels")
+    for key in ("max_manifest_bytes", "max_catalog_bytes", "max_image_bytes"):
+        if type(getattr(portrait_query, key)) is not int or getattr(portrait_query, key) < 1:
+            raise ValueError(f"[portrait_query] invalid {key}")
+    if portrait_query.enabled and (not portrait_query.data_dir or not portrait_query.source_id):
+        raise ValueError("[portrait_query] enabled requires explicit data_dir and source_id")
+
     return Config(
+        portrait_query=portrait_query,
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
             outbox_dir=outbox_dir,
@@ -589,7 +622,7 @@ def load_config(path: str = "config.toml") -> Config:
         notification=notification_config,
         gateway=gateway_config,
         server_status=server_status,
-        instance=InstanceConfig(instance_id=instance_id),
+        instance=InstanceConfig(instance_id=instance_id, explicitly_configured="id" in instance_raw),
         leaderboard=leaderboard,
     )
 
