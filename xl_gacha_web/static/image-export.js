@@ -3,9 +3,11 @@
 // Drawing from the report avoids remote scripts, screenshots of credentials, and DOM canvas limits.
 const LongImage = (() => {
   const W = 1080, HEADER = 380, FOOTER = 100, POOL_BASE = 180, ROW = 66;
-  function planPages(report, category = 'all', maximum = 10000) {
+  function planPages(report, category = 'all', maximum = 10000, poolIds = null) {
     const pages = []; let page = {chunks: [], height: HEADER + FOOTER};
-    const pools = (report.analysis?.pools || []).filter(p => category === 'all' || p.category === category);
+    const wanted = poolIds == null ? null : new Set([...poolIds].map(String));
+    const pools = (report.analysis?.pools || []).filter(p =>
+      (category === 'all' || p.category === category) && (!wanted || wanted.has(String(p.pool_id))));
     for (const pool of pools) {
       const events = [...pool.events].reverse(); let offset = 0;
       do {
@@ -58,7 +60,13 @@ const LongImage = (() => {
     } catch { brandCache = null; }
     return brandCache;
   }
-  async function prepare(report, pages) {
+  function detectCategory(report, poolIds) {
+    if (!poolIds) return 'all';
+    const wanted = new Set([...poolIds].map(String)), cats = new Set();
+    for (const p of report?.analysis?.pools || []) if (wanted.has(String(p.pool_id))) cats.add(p.category);
+    return cats.size === 1 ? [...cats][0] : 'all';
+  }
+  async function prepare(report, pages, poolIds = null) {
     const bridge = assetsBridge();
     if (!bridge) return null;
     try {
@@ -72,7 +80,12 @@ const LongImage = (() => {
         const entry = await resolveCharacter(bridge, itemId);
         if (entry) characters.set(itemId, entry);
       }));
-      return {brand: await resolveBrand(bridge), characters};
+      let insights = null;
+      try {
+        if (typeof MobileInsights !== 'undefined' && MobileInsights && typeof MobileInsights.analyze === 'function')
+          insights = MobileInsights.analyze(report, {category: detectCategory(report, poolIds)});
+      } catch { insights = null; }
+      return {brand: await resolveBrand(bridge), characters, insights};
     } catch { return null; }
   }
 
@@ -111,6 +124,7 @@ const LongImage = (() => {
   function headRect(image, crop) {
     if (crop === 'left') return [0, 0, 140, 140];
     const w = image.naturalWidth || image.width || 140, h = image.naturalHeight || image.height || 140;
+    if (crop === 'center') return [0, 0, w, h];
     return [Math.max(0, (w - 140) / 2), Math.max(0, (h - 140) / 2), 140, 140];
   }
 
@@ -130,6 +144,7 @@ const LongImage = (() => {
       }
       c.fillText(s,x,y,max);
     }
+    if (!assets) {
     rect(0,0,W,canvas.height,'#111820'); rect(40,40,6,56,'#d8bb86');
     if (brand) c.drawImage(brand.image, W-40-56, 51, 56, 34);
     label(report.account?.label || (report.preview_source ? '本地记录预览' : '招募档案'),64,80,38,'#f3e4c7',650,brand?W-40-56-64-24:950);
@@ -173,6 +188,111 @@ const LongImage = (() => {
     label('¹ 保底与间隔依据可见历史推断，不代表官方实时状态。',42,canvas.height-60,21,'#96a5b7');
     label('本机存档未必涵盖全部生涯 · 玩家工具，非官方服务 · 最新记录在前',42,canvas.height-25,21,'#96a5b7');
     return canvas;
+    }
+    // Modern interface (Android assets present): dark charcoal base, fluorescent yellow-green
+    // interactive accents, a little gold, and green/yellow/red/gray semantic interval colors.
+    const P = {bg:'#161c20', panel:'#20272b', track:'#10171b', text:'#f2f3f4', muted:'#a7afb5', faint:'#7e898f',
+      accent:'#d8f553', gold:'#e4c789', teal:'#14c7a7', green:'#54e0b9', yellow:'#f0c84d', red:'#ff5d50',
+      rough:'#ff9c91', blue:'#168ddd', gray:'#7c878e', dark:'#111a18', onAccent:'#162014'};
+    const catNames = {normal:'普通池',limited:'限定池',collection:'典藏池',beginner:'启程池',unknown:'未分类'};
+    const insights = assets.insights || null;
+    const measure = (s,size,weight=400) => {c.font = `${weight} ${size}px "Microsoft YaHei", "PingFang SC", sans-serif`; return c.measureText(String(s)).width;};
+    rect(0,0,W,canvas.height,P.bg); rect(40,40,6,56,P.accent);
+    let logoW = 0;
+    if (brand) {
+      const img = brand.image, iw = img.naturalWidth || img.width || 56, ih = img.naturalHeight || img.height || 34;
+      let lh = 36, lw = Math.round(lh*iw/ih);
+      if (lw > 240) {lw = 240; lh = Math.round(lw*ih/iw);}
+      logoW = lw;
+      c.drawImage(img, W-40-lw, 68-lh/2, lw, lh);
+    }
+    label(report.account?.label || (report.preview_source ? '本地记录预览' : '招募档案'),64,80,38,P.gold,650,logoW?W-40-logoW-64-24:950);
+    label(`星落 · 抽卡手记    ${category === 'all' ? '全部卡池' : (catNames[category] || category)}    ${index+1}/${total}`,42,124,24,P.muted);
+    const evalText = v => !v ? '暂无记录' : v.status==='rated' ? v.label + (v.lowConfidence ? ' · 暂估' : '') :
+      v.status==='small' ? '样本较少' : v.status==='zero' ? '暂未见金' : v.status==='unknown' ? '星级待确认' : '暂无记录';
+    const toneColor = t => ({lucky:P.green,good:P.green,steady:P.gold,rough:P.rough,quiet:P.faint}[t] || P.faint);
+    if (insights) {
+      label(`生涯 · ${evalText(insights.career)}`,42,162,22,toneColor(insights.career?.tone),600,410);
+      label(`近45天 · ${evalText(insights.recent)}`,470,162,22,toneColor(insights.recent?.tone),600,420);
+    }
+    for (const [i, key] of ['normal','limited','collection'].entries()) {
+      const s = report.analysis?.categories[key]; if (!s) continue;
+      const x = 40+i*338; rect(x,186,324,130,P.panel);
+      label(s.name,x+16,218,22,P.text,600,140);
+      label(`${s.pull_count} 抽`,x+16,258,32,P.accent,650,150);
+      label(key === 'normal' ? `${s.five_count} 出卡` : `UP ${s.up_count} / 歪 ${s.off_count}`,x+170,242,20,P.text,500,138);
+      const avg = s.average_five_interval === null || s.average_five_interval === undefined ? '—' : Number(s.average_five_interval).toFixed(1);
+      label(`平均 ${avg}`,x+170,268,18,P.muted,400,138);
+      rect(x+16,284,292,22,P.track);
+      const hard = s.hard_pity || 70, since = s.since_five || 0;
+      if (s.pull_count) rect(x+16,284,Math.round(292*Math.min(1,since/hard)),22,s.since_five_exact ? (key === 'collection' ? P.blue : P.teal) : P.gray);
+      label(`已垫 ${s.pull_count ? `${s.since_five_exact ? '' : '≥'}${since}` : '—'} / ${s.hard_pity || '—'}`,x+162,300,17,P.text,650,146);
+    }
+    let tx = 42;
+    for (const tag of insights?.tags || []) {
+      const text = tag.count > 1 ? `${tag.text} ×${tag.count}` : tag.text;
+      const w = Math.round(measure(text,19,650)) + 26;
+      if (tx + w > 1038) break;
+      const risky = tag.key === 'pity_70' || tag.key === 'off_streak';
+      rect(tx,324,w,26,risky ? '#33201d' : '#173129');
+      label(text,tx+13,342,19,risky ? P.rough : P.green,650,w-26);
+      tx += w + 8;
+    }
+    label('五星间隔：绿 1–30 · 黄 31–60 · 红 61+ · 灰 前序未知',42,372,20,P.faint);
+    let y = HEADER;
+    const numerals = ['','单','双','三','四','五','六','七','八','九','十'];
+    for (const part of page.chunks) {
+      const p = part.pool, height = POOL_BASE - 16 + Math.max(part.events.length,1)*ROW;
+      rect(40,y,1000,height,P.panel); rect(40,y,4,42,P.accent);
+      label(p.pool_name + (part.continuation ? '（续）' : ''),60,y+39,30,P.text,650,748);
+      rect(822,y+8,198,40,P.accent);
+      label(`${p.pull_count} 抽`,842,y+36,26,P.onAccent,800,158);
+      const ups = part.events.filter(e => e.outcome === 'up').length, offs = part.events.filter(e => e.outcome === 'off').length;
+      let sub = `${p.category_name}  ·  ${p.first_date} — ${p.last_date}  ·  ${p.five_count ?? part.events.length} 个五星`;
+      if (p.category === 'limited' || p.category === 'collection') sub += `  ·  UP ${ups} / 歪 ${offs}`;
+      label(sub,60,y+73,21,P.muted,400,950);
+      const burstByPos = new Map();
+      for (const burst of insights?.multi?.byPool?.[String(p.pool_id)] || [])
+        for (const pos of burst.positions || []) burstByPos.set(pos,burst);
+      let ey = y+94;
+      for (const e of part.events) {
+        const entry = characters ? characters.get(e.item_id) : null;
+        const avatar = entry && entry.image ? entry : null;
+        const nameX = avatar ? 132 : 60, nameMax = avatar ? 290-nameX-12 : 218;
+        if (avatar) c.drawImage(avatar.image, ...headRect(avatar.image, avatar.info.crop), 60, ey+2, 60, 60);
+        label(e.name,nameX,ey+34,27,P.text,600,nameMax);
+        const meta = `${e.time_beijing ? e.time_beijing.slice(0,10)+' · ' : ''}本池第 ${e.in_pool_pull ?? '—'} 抽${e.carried_pulls ? ` · 跨池 ${e.carried_pulls} 抽` : ''}`;
+        label(meta,nameX,ey+60,17,P.faint,400,avatar ? 560 : 950);
+        const count = e.pulls_since_five, exact = e.interval_exact, hard = p.hard_pity || 70;
+        const fillW = Math.max(105, Math.min(470, count/hard*470));
+        rect(290,ey+4,470,40,P.track);
+        rect(290,ey+4,fillW,40,!exact ? P.gray : count<=30 ? P.teal : count<=60 ? P.yellow : P.red);
+        label(`${exact ? '' : '≥'}${count} 抽`,302,ey+32,24,P.dark,800,fillW-20);
+        const chips = [];
+        if (e.outcome === 'up') chips.push(['UP',P.teal]); else if (e.outcome === 'off') chips.push(['歪',P.red]);
+        const burst = burstByPos.get(e.in_pool_pull);
+        if (burst) chips.push([`十连${burst.exact ? '' : '至少'}${numerals[burst.five_count] || burst.five_count}金`,P.blue]);
+        if (e.guaranteed === true) chips.push(['大保底',P.gold]);
+        if (e.guarantee_conflict) chips.push(['待核验',P.red]);
+        if (!exact) chips.push(['前序不完整',P.gray]);
+        let cx = 1040;
+        for (const [text,bg] of chips.reverse()) {
+          const w = Math.round(measure(text,19,700)) + 26;
+          if (cx - w < 772) break;
+          cx -= w;
+          rect(cx,ey+13,w,30,bg);
+          label(text,cx+13,ey+34,19,P.dark,700,w-26);
+          cx -= 8;
+        }
+        ey += ROW;
+      }
+      if(!part.events.length) {label('可见记录中尚未出现五星角色。',60,ey+36,24,P.faint); ey += ROW;}
+      label(`截至本池记录末 · 已垫 ${p.tail_exact?'':'≥'}${p.tail_since_five} 抽${p.next_guaranteed === true ? ' · 下个五星为大保底¹' : ''}`,60,ey+31,21,P.muted,400,950);
+      y += height+16;
+    }
+    label('¹ 保底与间隔依据可见历史推断，不代表官方实时状态。',42,canvas.height-60,20,P.faint);
+    label('本机存档未必涵盖全部生涯 · 玩家工具，非官方服务 · 最新记录在前',42,canvas.height-25,20,P.faint);
+    return canvas;
   }
 
   async function deliver(files, selected, action, bridge, progress=()=>{}) {
@@ -185,7 +305,7 @@ const LongImage = (() => {
     catch(error){error.completed=completed;throw error;}
     return {saved:true,count:completed};
   }
-  return {planPages, makeZip, draw, deliver, prepare};
+  return {planPages, makeZip, draw, deliver, prepare, headRect};
 })();
 
 if (typeof module !== 'undefined') module.exports = LongImage;

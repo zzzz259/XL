@@ -6,6 +6,17 @@
  window.mobileReady=false;
  const active=()=>['opening','waiting','querying','cancelling'].includes(state.login.phase);
  function notify(text,kind=''){clearTimeout(toastTimer);const toast=$('toast');toast.textContent=text;toast.className=`toast ${kind}`;toast.hidden=!text;if(text)toastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:4000);}
+ let zoomTask=Promise.resolve();
+ function applyTextZoom(percent,save=true){
+  const value=Number(percent);if(![90,100,110,125,140].includes(value))return zoomTask;
+  zoomTask=zoomTask.then(async()=>{
+   if(window.AndroidBridge?.textZoom)await AndroidBridge.textZoom(value);else document.body.style.fontSize=`${15*value/100}px`;
+   document.body.dataset.textZoom=String(value);document.querySelectorAll('#text-zoom-options [data-zoom]').forEach(button=>button.setAttribute('aria-pressed',String(Number(button.dataset.zoom)===value)));$('text-zoom-status').textContent=`${value}%`;
+   if(save)try{localStorage.setItem('starfall-text-zoom',String(value));}catch{}
+  }).catch(()=>{notify('字号设置未应用，请重试。','error');});
+  return zoomTask;
+ }
+ function initialTextZoom(){let value=100;try{value=Number(localStorage.getItem('starfall-text-zoom'))||100;}catch{}return [90,100,110,125,140].includes(value)?value:100;}
  function openDialog(id){const dialog=$(id);if(!dialog.open)dialog.showModal();}
  function closeDialog(id){const dialog=$(id);if(dialog?.open&&dialog.dataset.busy!=='true')dialog.close();}
  function applyPage(name,scrollY=0){state.tab=name;MobileRender.tabs(state);mascot?.reset();requestAnimationFrame(()=>{if(state.tab===name)window.scrollTo(0,scrollY);});}
@@ -73,12 +84,14 @@
   $('record-filter-toggle').addEventListener('click',()=>{const hidden=$('record-filters').hidden;$('record-filters').hidden=!hidden;$('record-filter-toggle').setAttribute('aria-expanded',String(hidden));});
   $('record-prev').addEventListener('click',()=>{state.recordPage--;renderRecords();});$('record-next').addEventListener('click',()=>{state.recordPage++;renderRecords();});
   $('catalog-check').addEventListener('click',()=>checkCatalog(true));$('catalog-source-save').addEventListener('click',()=>run(async()=>{const value=await MobileServices.api('/catalog/source',{url:$('catalog-source').value.trim()});await updateCatalog(value);notify('配置地址已保存，正在检查更新。');}));
+  $('text-zoom-options').addEventListener('click',event=>{const button=event.target.closest('[data-zoom]');if(button)applyTextZoom(Number(button.dataset.zoom));});
   document.addEventListener('visibilitychange',()=>{mascot?.reset();if(!document.hidden)checkCatalog(false);});
  }
  window.mobileBack=()=>{const dialogs=[...document.querySelectorAll('dialog[open]')];if(dialogs.length){const dialog=dialogs.at(-1);if(dialog.dataset.busy==='true')return true;dialog.close();return true;}if(state.tab==='query'&&state.manualOpen){if(state.working||active()){notify('正在查询，请稍候。','error');return true;}setManualOpen(false);return true;}const previous=navigation.back(window.scrollY);if(previous){applyPage(previous.page,previous.scrollY);return true;}return false;};
  async function init(){
   bind();MobileImage.init({notify});renderAll();
   try{
+   await applyTextZoom(initialTextZoom(),false);
    state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());
    try{await MobileAssets.init();const brand=MobileAssets.brand();if(brand?.logo){const image=document.querySelector('.brand-logo');image.hidden=false;image.src=brand.logo;}const instance=MobileMascot.create();instance.init();mascot=instance;}catch{notify('部分视觉素材未加载，已使用占位显示。','error');}
    await refreshLibrary(true);

@@ -6,7 +6,8 @@
   async saveImage(file){return native('imageAlbum',{name:file.name,data:await imageData(file.blob)});},
   async shareImages(files){const images=[];for(const file of files){const v=await native('imageStage',{data:await imageData(file.blob)});images.push(v.image);}return native('imageShare',{images});},
   copyBiliDiagnostics(){return native('copyBiliDiagnostics');},
-  copyTapDiagnostics(){return native('copyTapDiagnostics');}
+  copyTapDiagnostics(){return native('copyTapDiagnostics');},
+  textZoom(percent){return native('textZoom',{percent});}
  };
  async function imageData(blob){if(blob.size>8*1024*1024)throw new Error('IMAGE_INVALID');return base64(blob);}
  function base64(blob){return new Promise((resolve,reject)=>{const f=new FileReader();f.onload=()=>resolve(String(f.result).split(',')[1]);f.onerror=()=>reject(new Error('FILE_READ_FAILED'));f.readAsDataURL(blob);});}

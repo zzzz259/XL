@@ -7,7 +7,7 @@ function freshLongImage() {
   return require('../static/image-export.js');
 }
 
-function mockImage(w = 280, h = 140) {
+function mockImage(w = 256, h = 256) {
   return {naturalWidth: w, naturalHeight: h, width: w, height: h};
 }
 
@@ -16,21 +16,21 @@ function mockCanvas() {
   return {width: 0, height: 0, ops,
     getContext: () => ({fillStyle: '', font: '',
       fillRect: (...a) => ops.push(['fillRect', ...a]),
-      fillText: (...a) => ops.push(['fillText', ...a]),
+      fillText(...a) {ops.push(['fillText', ...a, this.font]);},
       measureText: s => ({width: String(s).length * 10}),
       drawImage: (...a) => ops.push(['drawImage', ...a])})};
 }
 
-function assetBridge({throwIds = new Set(), nullIds = new Set(), failSrc = new Set(), failBrand = false} = {}) {
+function assetBridge({throwIds = new Set(), nullIds = new Set(), failSrc = new Set(), failBrand = false, crop = 'center'} = {}) {
   const calls = {init: 0, character: [], load: []};
   globalThis.MobileAssets = {
     init: async () => {calls.init++;},
     character: async id => {calls.character.push(id);
       if (throwIds.has(id)) throw new Error('bad character');
-      return nullIds.has(id) ? null : {src: `assets/char/${id}.png`, name: `角色${id}`, rarity: 5, crop: 'left'};},
+      return nullIds.has(id) ? null : {src: `assets/char/${id}.png`, name: `角色${id}`, rarity: 5, crop};},
     loadImage: async src => {calls.load.push(src);
       if (failSrc.has(src) || (failBrand && src.includes('brand'))) throw new Error('decode failed');
-      return mockImage();},
+      return src.includes('brand') ? mockImage(280, 140) : mockImage();},
     brand: async () => ({logo: 'assets/brand/starfall-logo.png', name: '星落'}),
   };
   return calls;
@@ -38,22 +38,29 @@ function assetBridge({throwIds = new Set(), nullIds = new Set(), failSrc = new S
 
 function imageReport() {
   const events = [
-    {name: '角色甲', item_id: 11, pulls_since_five: 20, interval_exact: true, outcome: 'up'},
-    {name: '角色乙', item_id: 22, pulls_since_five: 40, interval_exact: true, outcome: 'off', guaranteed: true, carried_pulls: 3},
-    {name: '角色甲', item_id: 11, pulls_since_five: 10, interval_exact: true, outcome: 'up'},
+    {name: '角色甲', item_id: 11, pulls_since_five: 20, interval_exact: true, outcome: 'up', in_pool_pull: 20, time_beijing: '2026-01-02 03:04:05'},
+    {name: '角色乙', item_id: 22, pulls_since_five: 40, interval_exact: true, outcome: 'off', guaranteed: true, carried_pulls: 3, in_pool_pull: 60, time_beijing: '2026-01-03 03:04:05'},
+    {name: '角色甲', item_id: 11, pulls_since_five: 10, interval_exact: true, outcome: 'up', in_pool_pull: 70, time_beijing: '2026-01-04 03:04:05'},
   ];
   return {account: {label: '主号'}, preview_source: false,
     summary: {pull_count: 200, rarity_counts: {'5': 3}, pool_pull_counts: {池: 200}},
-    analysis: {categories: {normal: {name: '普通池', pull_count: 200, five_count: 3}},
-      pools: [{pool_name: '池', category: 'normal', category_name: '普通池', first_date: '2026-01-01',
-        last_date: '2026-01-03', pull_count: 200, hard_pity: 70, tail_since_five: 5, tail_exact: true,
+    analysis: {categories: {normal: {name: '普通池', pull_count: 200, five_count: 3, up_count: 0, off_count: 0, average_five_interval: 66.67, since_five: 5, since_five_exact: true, hard_pity: 70}},
+      pools: [{pool_id: 1, pool_name: '池', category: 'normal', category_name: '普通池', first_date: '2026-01-01',
+        last_date: '2026-01-03', pull_count: 200, five_count: 3, hard_pity: 70, tail_since_five: 5, tail_exact: true,
         next_guaranteed: false, events}]}};
+}
+
+function multiPoolReport() {
+  const mk = (pool_id, category, tag, n) => ({pool_id, pool_name: `池${tag}`, category, category_name: category, first_date: '2026-01-01',
+    last_date: '2026-01-02', pull_count: n, five_count: n, hard_pity: 70, tail_since_five: 1, tail_exact: true, next_guaranteed: false,
+    events: Array.from({length: n}, (_, i) => ({name: `${tag}${i}`, item_id: i + 1, pulls_since_five: 10, interval_exact: true, outcome: 'up'}))});
+  return {analysis: {pools: [mk(1, 'limited', '甲', 3), mk(2, 'limited', '乙', 2), mk(3, 'normal', '丙', 1)]}};
 }
 
 test('pagination keeps newest first, each event exactly once and respects canvas limits', () => {
   const events = Array.from({length: 320}, (_, i) => ({name: `角色${i}`}));
-  const report = {analysis: {pools: [{category: 'limited', pool_name: '池', events},
-    {category: 'normal', pool_name: '排除', events: [{name: '不应出现'}]}]}};
+  const report = {analysis: {pools: [{pool_id: 7, category: 'limited', pool_name: '池', events},
+    {pool_id: 8, category: 'normal', pool_name: '排除', events: [{name: '不应出现'}]}]}};
   const pages = planPages(report, 'limited', 2400);
   assert.ok(pages.length > 1);
   assert.ok(pages.every(p => p.height <= 2400));
@@ -62,6 +69,65 @@ test('pagination keeps newest first, each event exactly once and respects canvas
   assert.equal(new Set(names).size, 320);
   assert.equal(names[0], '角色319');
   assert.equal(names.at(-1), '角色0');
+});
+
+test('planPages with null or omitted pool ids keeps the legacy contract', () => {
+  const report = imageReport();
+  const baseline = planPages(report, 'all');
+  assert.deepEqual(planPages(report, 'all', 10000, null), baseline);
+  assert.deepEqual(planPages(report, 'all', 10000, undefined), baseline);
+  assert.equal(baseline[0].chunks.length, 1);
+  assert.equal(baseline[0].chunks[0].events.length, 3);
+});
+
+test('planPages filters by specific pool ids given as a Set or an array', () => {
+  const report = multiPoolReport();
+  const bySet = planPages(report, 'all', 10000, new Set([1, 3]));
+  const byArray = planPages(report, 'all', 10000, [1, 3]);
+  const names = pages => pages.flatMap(p => p.chunks.flatMap(c => c.events.map(e => e.name)));
+  assert.deepEqual(names(bySet), ['甲2', '甲1', '甲0', '丙0']);
+  assert.deepEqual(byArray.map(p => p.height), bySet.map(p => p.height));
+  const limitedOnly = planPages(report, 'limited', 10000, new Set([1, 3]));
+  assert.deepEqual(names(limitedOnly), ['甲2', '甲1', '甲0']);
+  const stringIds = planPages(report, 'all', 10000, new Set(['2']));
+  assert.deepEqual(names(stringIds), ['乙1', '乙0']);
+  const unknown = planPages(report, 'all', 10000, new Set([999]));
+  assert.equal(unknown.length, 1);
+  assert.equal(unknown[0].chunks.length, 0);
+});
+
+test('planPages keeps pagination identical when every pool is selected', () => {
+  const events = Array.from({length: 320}, (_, i) => ({name: `角色${i}`}));
+  const report = {analysis: {pools: [{pool_id: 7, category: 'limited', pool_name: '池', events},
+    {pool_id: 8, category: 'normal', pool_name: '别的池', events: Array.from({length: 5}, (_, i) => ({name: `其他${i}`}))}]}};
+  const shape = pages => pages.map(p => ({height: p.height, counts: p.chunks.map(c => c.events.length)}));
+  const all = planPages(report, 'all', 2400);
+  const selected = planPages(report, 'all', 2400, new Set([7, 8]));
+  assert.deepEqual(shape(selected), shape(all));
+  assert.deepEqual(shape(planPages(report, 'limited', 2400, new Set([7]))), shape(planPages(report, 'limited', 2400)));
+});
+
+test('planPages with an empty selection yields a single blank page that still draws', () => {
+  const LongImage = freshLongImage();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const report = imageReport();
+  const pages = LongImage.planPages(report, 'all', 10000, []);
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0].chunks.length, 0);
+  assert.equal(pages[0].height, 480);
+  const modern = LongImage.draw(report, pages[0], 0, 1, 'all', {brand: null, characters: new Map(), insights: null});
+  assert.equal(modern.ops.filter(op => op[0] === 'drawImage').length, 0);
+  const legacy = LongImage.draw(report, pages[0], 0, 1, 'all');
+  assert.equal(legacy.ops.filter(op => op[0] === 'drawImage').length, 0);
+  delete globalThis.document;
+});
+
+test('headRect uses the full square for center crops and keeps the left crop for wide banners', () => {
+  const LongImage = freshLongImage();
+  assert.deepEqual(LongImage.headRect(mockImage(256, 256), 'center'), [0, 0, 256, 256]);
+  assert.deepEqual(LongImage.headRect(mockImage(280, 140), 'left'), [0, 0, 140, 140]);
+  assert.deepEqual(LongImage.headRect(mockImage(280, 140), 'center'), [0, 0, 280, 140]);
+  assert.deepEqual(LongImage.headRect(mockImage(280, 140)), [70, 0, 140, 140]);
 });
 
 test('zip stores independent PNG bytes with readable UTF-8 filenames', async () => {
@@ -119,7 +185,7 @@ test('prepare preloads unique characters once, caches across calls and includes 
 test('prepare only preloads characters referenced by the given pages', async () => {
   const calls = assetBridge();
   const LongImage = freshLongImage(), report = imageReport();
-  report.analysis.pools.push({pool_name: '别的池', category: 'limited', category_name: '限定池',
+  report.analysis.pools.push({pool_id: 2, pool_name: '别的池', category: 'limited', category_name: '限定池',
     first_date: '2026-01-01', last_date: '2026-01-02', pull_count: 1, hard_pity: 70,
     tail_since_five: 1, tail_exact: true, next_guaranteed: false,
     events: [{name: '角色丙', item_id: 99, pulls_since_five: 1, interval_exact: true, outcome: 'up'}]});
@@ -147,9 +213,25 @@ test('prepare drops failed character images and brand failures without rejecting
   delete globalThis.MobileAssets;
 });
 
+test('prepare scopes insights to the selected pools category and degrades without MobileInsights', async () => {
+  const calls = assetBridge();
+  const LongImage = freshLongImage(), report = imageReport();
+  const seen = [];
+  globalThis.MobileInsights = {analyze: (value, options) => {seen.push(options); return {career: null, recent: null, tags: [], multi: {byPool: {}}}}};
+  const assets = await LongImage.prepare(report, LongImage.planPages(report, 'all'), [1]);
+  assert.deepEqual(seen, [{category: 'normal'}]);
+  assert.deepEqual(assets.insights, {career: null, recent: null, tags: [], multi: {byPool: {}}});
+  await LongImage.prepare(report, LongImage.planPages(report, 'all'));
+  assert.deepEqual(seen[1], {category: 'all'});
+  delete globalThis.MobileInsights;
+  const plain = await LongImage.prepare(report, LongImage.planPages(report, 'all'), [1]);
+  assert.equal(plain.insights, null);
+  delete globalThis.MobileAssets;
+});
+
 test('draw keeps the legacy text layout when no assets are passed', () => {
   const LongImage = freshLongImage();
-  globalThis.document = {createElement: () => mockCanvas()};
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
   const report = imageReport(), page = LongImage.planPages(report, 'all')[0];
   const canvas = LongImage.draw(report, page, 0, 1, 'all');
   assert.equal(canvas.ops.filter(op => op[0] === 'drawImage').length, 0);
@@ -160,9 +242,9 @@ test('draw keeps the legacy text layout when no assets are passed', () => {
   delete globalThis.document;
 });
 
-test('draw renders the brand logo and square-cropped avatars while keeping rows inside the row height', async () => {
+test('draw renders the new interface with proportional logo, square avatars and App-style progress', async () => {
   const LongImage = freshLongImage();
-  globalThis.document = {createElement: () => mockCanvas()};
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
   assetBridge();
   const report = imageReport(), pages = LongImage.planPages(report, 'all');
   const assets = await LongImage.prepare(report, pages);
@@ -170,15 +252,94 @@ test('draw renders the brand logo and square-cropped avatars while keeping rows 
   const draws = canvas.ops.filter(op => op[0] === 'drawImage');
   assert.equal(draws.length, 4);
   assert.equal(draws[0][1], assets.brand.image);
-  assert.deepEqual(draws[0].slice(2), [1080 - 40 - 56, 51, 56, 34]);
+  // logo keeps the 2:1 asset ratio at height 36
+  assert.deepEqual(draws[0].slice(2), [1080 - 40 - 72, 50, 72, 36]);
   for (const avatar of draws.slice(1)) {
-    assert.deepEqual(avatar.slice(2, 6), [0, 0, 140, 140]);
+    assert.deepEqual(avatar.slice(2, 6), [0, 0, 256, 256]);
     assert.deepEqual(avatar.slice(6), [60, avatar[7], 60, 60]);
   }
   const nameOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '角色甲');
   assert.equal(nameOp[2], 132);
   const accountOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '主号');
-  assert.equal(accountOp[4], 1080 - 40 - 56 - 64 - 24);
+  assert.equal(accountOp[4], 1080 - 40 - 72 - 64 - 24);
+  // career cards use the overlaid (叠字) pity progress text
+  const pityText = canvas.ops.find(op => op[0] === 'fillText' && String(op[1]).startsWith('已垫 '));
+  assert.ok(pityText);
+  // account label appears exactly once and no UID is written by default
+  assert.equal(canvas.ops.filter(op => op[0] === 'fillText' && op[1] === '主号').length, 1);
+  assert.equal(canvas.ops.some(op => op[0] === 'fillText' && /UID/.test(String(op[1]))), false);
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('draw shows career and recent evaluations plus rule tags when insights exist and omits them when missing', async () => {
+  const LongImage = freshLongImage();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  assetBridge();
+  const report = imageReport(), pages = LongImage.planPages(report, 'all');
+  globalThis.MobileInsights = {analyze: () => ({
+    career: {status: 'rated', label: '绝世欧皇', lowConfidence: true, tone: 'lucky'},
+    recent: {status: 'small', label: null, tone: 'quiet'},
+    tags: [{key: 'ten_2', text: '十连双金', count: 2}, {key: 'pity_70', text: '抽满70井', count: 1}],
+    multi: {byPool: {}},
+  })};
+  const assets = await LongImage.prepare(report, pages);
+  const withInsights = LongImage.draw(report, pages[0], 0, pages.length, 'all', assets);
+  assert.ok(withInsights.ops.some(op => op[0] === 'fillText' && op[1] === '生涯 · 绝世欧皇 · 暂估'));
+  assert.ok(withInsights.ops.some(op => op[0] === 'fillText' && op[1] === '近45天 · 样本较少'));
+  assert.ok(withInsights.ops.some(op => op[0] === 'fillText' && op[1] === '十连双金 ×2'));
+  assert.ok(withInsights.ops.some(op => op[0] === 'fillText' && op[1] === '抽满70井'));
+  delete globalThis.MobileInsights;
+  const plain = await LongImage.prepare(report, pages);
+  const without = LongImage.draw(report, pages[0], 0, pages.length, 'all', plain);
+  assert.equal(without.ops.some(op => op[0] === 'fillText' && String(op[1]).startsWith('生涯 ·')), false);
+  assert.equal(without.ops.some(op => op[0] === 'fillText' && String(op[1]).startsWith('十连')), false);
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('draw keeps the new interface non-overlapping with overlaid bar text', async () => {
+  const LongImage = freshLongImage();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  assetBridge();
+  const report = imageReport(), pages = LongImage.planPages(report, 'all');
+  const assets = await LongImage.prepare(report, pages);
+  const canvas = LongImage.draw(report, pages[0], 0, pages.length, 'all', assets);
+  const ops = canvas.ops;
+  const texts = ops.filter(op => op[0] === 'fillText').map(op => {
+    const size = Number(/(\d+(?:\.\d+)?)px/.exec(op[5])[1]);
+    return {s: String(op[1]), x: op[2], y: op[3], max: op[4], size, w: Math.min(op[4], String(op[1]).length * 10)};
+  });
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y - a.size < b.y && b.y - b.size < a.y;
+  for (const [i, a] of texts.entries())
+    for (const b of texts.slice(i + 1))
+      assert.ok(!overlap(a, b), `texts overlap: ${a.s} vs ${b.s}`);
+  const rects = ops.filter(op => op[0] === 'fillRect');
+  // interval bar: track then fill, with the dark count text overlaid inside the fill
+  const tracks = rects.filter(r => r[1] === 290 && r[4] === 40 && r[3] === 470);
+  assert.equal(tracks.length, 3);
+  for (const track of tracks) {
+    const at = ops.indexOf(track);
+    const fill = ops.slice(at + 1).find(op => op[0] === 'fillRect' && op[1] === 290 && op[2] === track[2]);
+    assert.ok(fill);
+    assert.ok(fill[3] >= 105 && fill[3] <= 470);
+    const count = texts.find(t => t.x === 302 && t.y === track[2] + 28);
+    assert.ok(count, 'missing overlaid interval text');
+    assert.ok(count.x + count.w <= 290 + fill[3]);
+  }
+  // chips stay right of the bar; avatars stay left of the names
+  for (const chip of rects.filter(r => r[4] === 30 && r[3] >= 26))
+    assert.ok(chip[1] >= 772 && chip[1] + chip[3] <= 1040);
+  for (const avatar of ops.filter(op => op[0] === 'drawImage').slice(1)) {
+    assert.equal(avatar[6], 60);
+    assert.ok(avatar[6] + avatar[8] <= 132);
+  }
+  // career pity track hosts its overlaid centered text
+  const pityTracks = rects.filter(r => r[3] === 292 && r[4] === 22);
+  assert.equal(pityTracks.length, 1);
+  const pity = texts.find(t => String(t.s).startsWith('已垫 '));
+  assert.ok(pity.x >= pityTracks[0][1] && pity.x + pity.w <= pityTracks[0][1] + 292);
+  assert.ok(pity.y <= pityTracks[0][2] + 22 && pity.y > pityTracks[0][2]);
   delete globalThis.document;
   delete globalThis.MobileAssets;
 });

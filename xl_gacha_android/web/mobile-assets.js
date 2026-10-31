@@ -44,12 +44,12 @@ const MobileAssets=(()=>{
  function character(itemId){
   const entry=resolveManifest().characters?.[String(itemId)];
   if(!entry||!entry.path)return null;
-  return {src:entry.path,name:entry.name??null,rarity:entry.rarity??null,crop:'left'};
+  return {src:entry.path,name:entry.name??null,rarity:entry.rarity??null,crop:'center'};
  }
 
  const fashionHead=id=>{
   const entry=resolveManifest().fashions?.[String(id)];
-  return entry&&entry.path?{src:entry.path,crop:'left'}:null;
+  return entry&&entry.path?{src:entry.path,crop:'center'}:null;
  };
  const accountHead=id=>{
   const entry=resolveManifest().account_items?.[String(id)];

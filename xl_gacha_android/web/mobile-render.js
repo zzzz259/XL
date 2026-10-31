@@ -122,10 +122,10 @@ const MobileRender=(()=>{
   const report=state.report;$('records-empty').hidden=Boolean(report);$('records-content').hidden=!report;$('record-floating-actions').hidden=!report;document.body.dataset.demo=String(state.demo);
   if(!report)return;
   const account=report.account||{},uid=String(account.game_uid||account.uid||'');
-  $('record-account-name').textContent=account.nickname||'招募档案';$('demo-badge').hidden=!state.demo;
+  $('record-account-name').textContent=(account.nickname||'招募档案')+(uid?` · UID ${uid}`:'');$('demo-badge').hidden=!state.demo;
   document.querySelector('.account-name-line .player-level')?.remove();if(Number(account.level)>0)document.querySelector('.account-name-line').append(el('span',`Lv.${Number(account.level)}`,'player-level'));
   $('record-account-avatar').replaceChildren(playerAvatar(account,'record-player'));
-  const meta=$('record-account-meta'),pulls=el('strong',MobileView.number(report.summary.pull_count)),fives=el('strong',MobileView.number(report.summary.rarity_counts['5']||0)),poolCount=el('strong',MobileView.number(Object.keys(report.summary.pool_pull_counts||{}).length));pulls.id='summary-pulls';fives.id='summary-fives';poolCount.id='summary-pools';meta.replaceChildren(document.createTextNode(uid?`UID ${uid} · `:'') ,document.createTextNode('总抽数 '),pulls,document.createTextNode(' · 五星 '),fives,document.createTextNode(' · 卡池 '),poolCount);
+  const meta=$('record-account-meta'),pulls=el('strong',MobileView.number(report.summary.pull_count)),fives=el('strong',MobileView.number(report.summary.rarity_counts['5']||0)),poolCount=el('strong',MobileView.number(Object.keys(report.summary.pool_pull_counts||{}).length));pulls.id='summary-pulls';fives.id='summary-fives';poolCount.id='summary-pools';meta.replaceChildren(document.createTextNode('总抽数 '),pulls,document.createTextNode(' · 五星 '),fives,document.createTextNode(' · 卡池 '),poolCount);
   $('partial-warning').hidden=!report.partial;state.insights=MobileInsights.analyze(report,{category:state.poolCategory});
   career(state);pools(state);distribution(state);$('record-coverage').textContent=report.coverage||'展示本机已累计保存的可见历史，不保证覆盖账号全部生涯。';
  }

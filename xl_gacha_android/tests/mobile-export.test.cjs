@@ -46,28 +46,28 @@ function freshLongImage(){
  return require('../../xl_gacha_web/static/image-export.js');
 }
 
-function mockImage(w=280,h=140){return {naturalWidth:w,naturalHeight:h,width:w,height:h};}
+function mockImage(w=256,h=256){return {naturalWidth:w,naturalHeight:h,width:w,height:h};}
 
 function mockCanvas(){
  const ops=[];
  return {width:0,height:0,ops,
   getContext:()=>({fillStyle:'',font:'',
    fillRect:(...a)=>ops.push(['fillRect',...a]),
-   fillText:(...a)=>ops.push(['fillText',...a]),
+   fillText(...a){ops.push(['fillText',...a,this.font]);},
    measureText:s=>({width:String(s).length*10}),
    drawImage:(...a)=>ops.push(['drawImage',...a])})};
 }
 
-function assetBridge({failIds=new Set(),missingIds=new Set(),failBrand=false}={}){
+function assetBridge({failIds=new Set(),missingIds=new Set(),failBrand=false,crop='center'}={}){
  const calls={init:0,character:[],load:[]};
  globalThis.MobileAssets={
   init:async()=>{calls.init++;},
   character:async id=>{calls.character.push(id);
    if(failIds.has(id))throw new Error('bad character');
-   return missingIds.has(id)?null:{src:`assets/char/${id}.png`,name:`角色${id}`,rarity:5,crop:'left'};},
+   return missingIds.has(id)?null:{src:`assets/char/${id}.png`,name:`角色${id}`,rarity:5,crop};},
   loadImage:async src=>{calls.load.push(src);
    if(failBrand&&src.includes('brand'))throw new Error('logo decode failed');
-   return mockImage();},
+   return src.includes('brand')?mockImage(280,140):mockImage();},
   brand:async()=>({logo:'assets/brand/starfall-logo.png',name:'星落'}),
  };
  return calls;
@@ -75,15 +75,15 @@ function assetBridge({failIds=new Set(),missingIds=new Set(),failBrand=false}={}
 
 function imageReport(){
  const events=[
-  {name:'角色甲',item_id:11,pulls_since_five:20,interval_exact:true,outcome:'up'},
-  {name:'角色乙',item_id:22,pulls_since_five:40,interval_exact:true,outcome:'off',guaranteed:true},
-  {name:'角色甲',item_id:11,pulls_since_five:10,interval_exact:true,outcome:'up'},
+  {name:'角色甲',item_id:11,pulls_since_five:20,interval_exact:true,outcome:'up',in_pool_pull:20,time_beijing:'2026-01-02 03:04:05'},
+  {name:'角色乙',item_id:22,pulls_since_five:40,interval_exact:true,outcome:'off',guaranteed:true,in_pool_pull:60,time_beijing:'2026-01-03 03:04:05'},
+  {name:'角色甲',item_id:11,pulls_since_five:10,interval_exact:true,outcome:'up',in_pool_pull:70,time_beijing:'2026-01-04 03:04:05'},
  ];
  return {account:{label:'主号'},preview_source:false,
   summary:{pull_count:200,rarity_counts:{'5':3},pool_pull_counts:{池:200}},
-  analysis:{categories:{normal:{name:'普通池',pull_count:200,five_count:3}},
-   pools:[{pool_name:'池',category:'normal',category_name:'普通池',first_date:'2026-01-01',
-    last_date:'2026-01-03',pull_count:200,hard_pity:70,tail_since_five:5,tail_exact:true,
+  analysis:{categories:{normal:{name:'普通池',pull_count:200,five_count:3,up_count:0,off_count:0,average_five_interval:66.67,since_five:5,since_five_exact:true,hard_pity:70}},
+   pools:[{pool_id:1,pool_name:'池',category:'normal',category_name:'普通池',first_date:'2026-01-01',
+    last_date:'2026-01-03',pull_count:200,five_count:3,hard_pity:70,tail_since_five:5,tail_exact:true,
     next_guaranteed:false,events}]}};
 }
 
@@ -115,9 +115,31 @@ test('prepare drops failed character lookups without rejecting',async()=>{
  delete globalThis.MobileAssets;
 });
 
-test('draw keeps the legacy layout without assets and renders avatars plus logo with assets',async()=>{
+test('planPages filters specific pool ids and keeps legacy behavior without them',()=>{
  const LongImage=freshLongImage();
- globalThis.document={createElement:()=>mockCanvas()};
+ const mk=(pool_id,category,tag,n)=>({pool_id,pool_name:`池${tag}`,category,category_name:category,first_date:'2026-01-01',last_date:'2026-01-02',pull_count:n,five_count:n,hard_pity:70,tail_since_five:1,tail_exact:true,next_guaranteed:false,events:Array.from({length:n},(_,i)=>({name:`${tag}${i}`,item_id:i+1,pulls_since_five:10,interval_exact:true,outcome:'up'}))});
+ const report={analysis:{pools:[mk(1,'limited','甲',3),mk(2,'limited','乙',2),mk(3,'normal','丙',1)]}};
+ const names=pages=>pages.flatMap(p=>p.chunks.flatMap(c=>c.events.map(e=>e.name)));
+ assert.deepEqual(names(LongImage.planPages(report,'all',10000,new Set([1,3]))),['甲2','甲1','甲0','丙0']);
+ assert.deepEqual(names(LongImage.planPages(report,'limited',10000,[2])),['乙1','乙0']);
+ const baseline=LongImage.planPages(report,'all');
+ assert.deepEqual(names(LongImage.planPages(report,'all',10000,null)),names(baseline));
+ assert.deepEqual(LongImage.planPages(report,'all',10000,[1,2,3]).map(p=>p.height),baseline.map(p=>p.height));
+ const empty=LongImage.planPages(report,'all',10000,[]);
+ assert.equal(empty.length,1);
+ assert.equal(empty[0].chunks.length,0);
+});
+
+test('headRect uses the full square for center crops and keeps the left crop for banners',()=>{
+ const LongImage=freshLongImage();
+ assert.deepEqual(LongImage.headRect(mockImage(256,256),'center'),[0,0,256,256]);
+ assert.deepEqual(LongImage.headRect(mockImage(280,140),'left'),[0,0,140,140]);
+ assert.deepEqual(LongImage.headRect(mockImage(280,140)),[70,0,140,140]);
+});
+
+test('draw keeps the legacy layout without assets and renders the new interface with assets',async()=>{
+ const LongImage=freshLongImage();
+ globalThis.document={createElement:()=>mockCanvas(),getElementById:()=>null};
  const report=imageReport(),page=LongImage.planPages(report,'all')[0];
  const legacy=LongImage.draw(report,page,0,1,'all');
  assert.equal(legacy.ops.filter(op=>op[0]==='drawImage').length,0);
@@ -127,9 +149,38 @@ test('draw keeps the legacy layout without assets and renders avatars plus logo 
  const canvas=LongImage.draw(report,page,0,1,'all',assets);
  const draws=canvas.ops.filter(op=>op[0]==='drawImage');
  assert.equal(draws.length,4);
- assert.deepEqual(draws[0].slice(2),[1080-40-56,51,56,34]);
- for(const avatar of draws.slice(1))assert.deepEqual(avatar.slice(2,6),[0,0,140,140]);
+ // proportional logo (280x140 -> 72x36) plus full-square center-cropped avatars
+ assert.deepEqual(draws[0].slice(2),[1080-40-72,50,72,36]);
+ for(const avatar of draws.slice(1)){
+  assert.deepEqual(avatar.slice(2,6),[0,0,256,256]);
+  assert.equal(avatar[6],60);
+ }
  assert.equal(canvas.ops.find(op=>op[0]==='fillText'&&op[1]==='角色甲')[2],132);
+ // left-crop banners still crop 140x140 from the left
+ const BannerLongImage=freshLongImage();
+ assetBridge({crop:'left'});
+ const bannerReport=imageReport();
+ const bannerAssets=await BannerLongImage.prepare(bannerReport,BannerLongImage.planPages(bannerReport,'all'));
+ const bannerCanvas=BannerLongImage.draw(bannerReport,page,0,1,'all',bannerAssets);
+ for(const avatar of bannerCanvas.ops.filter(op=>op[0]==='drawImage').slice(1))
+  assert.deepEqual(avatar.slice(2,6),[0,0,140,140]);
+ delete globalThis.document;
+ delete globalThis.MobileAssets;
+});
+
+test('draw degrades gracefully when the brand logo or insights are missing',async()=>{
+ const LongImage=freshLongImage();
+ globalThis.document={createElement:()=>mockCanvas(),getElementById:()=>null};
+ assetBridge({failBrand:true});
+ const report=imageReport(),page=LongImage.planPages(report,'all')[0];
+ const assets=await LongImage.prepare(report,[page]);
+ const canvas=LongImage.draw(report,page,0,1,'all',assets);
+ const draws=canvas.ops.filter(op=>op[0]==='drawImage');
+ assert.equal(draws.length,3);
+ assert.ok(draws.every(op=>op[1]!==null));
+ assert.ok(canvas.ops.some(op=>op[0]==='fillText'&&op[1]==='主号'));
+ assert.equal(canvas.ops.some(op=>op[0]==='fillText'&&String(op[1]).startsWith('生涯 ·')),false);
+ assert.equal(assets.insights,null);
  delete globalThis.document;
  delete globalThis.MobileAssets;
 });
@@ -139,4 +190,73 @@ test('catalog feedback recognizes native updates and actual revision changes',()
  assert.equal(MobileServices.catalogView({phase:'current',revision:'same',updated:false},'same').updated,false);
  assert.equal(MobileServices.catalogView({phase:'current',revision:'cached',updated:false},undefined).updated,false);
  assert.equal(MobileServices.catalogView({phase:'current',revision:'new',updated:true},'old').updated,true);
+});
+
+function mobileImageHarness(){
+ const fs=require('node:fs'),vm=require('node:vm'),elements=new Map();
+ class Element{
+  constructor(tag='div'){this.tagName=tag;this.children=[];this.dataset={};this.attributes={};this.listeners={};this.textContent='';this.disabled=false;this.hidden=false;this.checked=false;this.open=false;this.value='all';}
+  append(...children){this.children.push(...children);}
+  replaceChildren(...children){this.children=[...children];}
+  addEventListener(type,listener){(this.listeners[type]??=[]).push(listener);}
+  dispatchEvent(event){event.target??=this;for(const listener of this.listeners[event.type]||[])listener(event);}
+  setAttribute(name,value){this.attributes[name]=String(value);}
+  querySelectorAll(selector){
+   const matches=[];const visit=node=>{for(const child of node.children||[]){if(selector==='input[type=checkbox]'&&child.tagName==='input'&&child.type==='checkbox')matches.push(child);visit(child);}};visit(this);return matches;
+  }
+  showModal(){this.open=true;}
+  close(){this.open=false;this.dispatchEvent({type:'close'});}
+ }
+ for(const id of ['image-pool-list','image-pool-count','image-selected','image-save','image-share','image-select-all','image-clear','image-category','image-zip','image-previews','mobile-image-dialog','image-status','image-pool-picker','image-pool-all','image-pool-none','image-close'])elements.set(id,new Element());
+ const document={fonts:{ready:Promise.resolve()},createElement:tag=>new Element(tag),createTextNode:text=>({textContent:text})};
+ let deliveryResolve=null;
+ const LongImage={
+  planPages:(report,category,maximum,poolIds)=>[{poolIds}],
+  prepare:async()=>null,
+  draw:()=>({width:1080,height:1000,toBlob:callback=>callback(new Blob(['png'],{type:'image/png'}))}),
+  deliver:()=>new Promise(resolve=>{deliveryResolve=resolve;}),makeZip:async()=>new Blob(),
+ };
+ const context={document,LongImage,MobileRender:{el:(tag,text,className)=>{const element=new Element(tag);element.textContent=text??'';element.className=className??'';return element;}},MobileServices:{messages:{}},window:{},URL:{createObjectURL:()=>`blob:${Math.random()}`,revokeObjectURL:()=>{}},requestAnimationFrame:callback=>setImmediate(callback),setImmediate,Blob,console};
+ context.$=id=>elements.get(id);
+ vm.runInNewContext(`${fs.readFileSync(require.resolve('../web/mobile-image.js'),'utf8')}\nglobalThis.controller=MobileImage;`,context);
+ context.controller.init({notify:()=>{}});
+ return {elements,open:report=>context.controller.open(report),completeDelivery:()=>deliveryResolve?.({opened:true,count:1}),settle:async()=>{for(let i=0;i<12;i++)await new Promise(setImmediate);}};
+}
+
+function poolReport(id,poolIds){
+ return {account:{id,label:id},analysis:{pools:poolIds.map((poolId,index)=>({pool_id:poolId,pool_name:`池${poolId}`,category:index?'normal':'limited',pull_count:10,index}))}};
+}
+
+test('long image pool choices persist for one report and reset to all for another report',async()=>{
+ const harness=mobileImageHarness(),first=poolReport('甲',[1,2]),second=poolReport('乙',[3,4]);
+ harness.open(first);await harness.settle();
+ let choices=harness.elements.get('image-pool-list').querySelectorAll('input[type=checkbox]');
+ assert.deepEqual(choices.map(choice=>choice.checked),[true,true]);
+ choices[1].checked=false;choices[1].dispatchEvent({type:'change'});await harness.settle();
+ harness.elements.get('mobile-image-dialog').close();
+ harness.open(first);await harness.settle();
+ choices=harness.elements.get('image-pool-list').querySelectorAll('input[type=checkbox]');
+ assert.deepEqual(choices.map(choice=>choice.checked),[true,false]);
+ harness.elements.get('mobile-image-dialog').close();
+ harness.open(second);await harness.settle();
+ choices=harness.elements.get('image-pool-list').querySelectorAll('input[type=checkbox]');
+ assert.deepEqual(choices.map(choice=>choice.dataset.poolId),['3','4']);
+ assert.deepEqual(choices.map(choice=>choice.checked),[true,true]);
+});
+
+test('long image pool changes stay locked during system delivery',async()=>{
+ const harness=mobileImageHarness();harness.open(poolReport('甲',[1,2]));await harness.settle();
+ const elements=harness.elements,choices=elements.get('image-pool-list').querySelectorAll('input[type=checkbox]');
+ elements.get('image-share').dispatchEvent({type:'click'});
+ assert.equal(elements.get('image-status').textContent,'正在准备系统分享…');
+ choices[1].checked=false;choices[1].dispatchEvent({type:'change'});await harness.settle();
+ assert.equal(choices[1].checked,true);
+ assert.equal(elements.get('image-pool-count').textContent,'已选 2/2 个卡池');
+ assert.equal(elements.get('image-status').textContent,'正在准备系统分享…');
+ assert.equal(elements.get('image-previews').children.length,1);
+ harness.completeDelivery();await harness.settle();
+ assert.equal(elements.get('image-status').textContent,'已打开系统分享，请在选择器中确认。');
+ assert.ok(choices.every(choice=>!choice.disabled));
+ choices[1].checked=false;choices[1].dispatchEvent({type:'change'});await harness.settle();
+ assert.equal(elements.get('image-pool-count').textContent,'已选 1/2 个卡池');
 });

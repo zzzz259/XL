@@ -1,12 +1,32 @@
 'use strict';
 
 const MobileImage=(()=>{
- let report=null,category='all',files=[],selected=new Set(),urls=[],generation=0,generating=false,delivering=false,notify=()=>{};
+ let report=null,category='all',files=[],selected=new Set(),urls=[],generation=0,generating=false,delivering=false,notify=()=>{},poolChoice=null;
  const el=MobileRender.el;
+ function poolsForCategory(){return (report?.analysis?.pools||[]).filter(pool=>category==='all'||pool.category===category);}
+ function updatePoolCount(){
+  const list=poolsForCategory();let chosen=0;
+  for(const choice of $('image-pool-list').querySelectorAll('input[type=checkbox]'))if(choice.checked)chosen++;
+  $('image-pool-count').textContent=`已选 ${chosen}/${list.length} 个卡池`;
+ }
+ function renderPoolChoices(){
+  const list=poolsForCategory(),box=$('image-pool-list');box.replaceChildren();
+  for(const pool of list){
+   const id=String(pool.pool_id),label=el('label'),choice=document.createElement('input');
+   choice.type='checkbox';choice.checked=poolChoice.has(id);choice.dataset.poolId=id;
+   choice.setAttribute('aria-label',`选择卡池 ${pool.pool_name}`);
+   choice.addEventListener('change',()=>{if(delivering){choice.checked=poolChoice.has(id);return;}choice.checked?poolChoice.add(id):poolChoice.delete(id);updatePoolCount();generate();});
+   label.append(choice,document.createTextNode(`${pool.pool_name} · ${pool.pull_count} 抽`));
+   box.append(label);
+  }
+  $('image-pool-picker').hidden=!list.length;
+  updatePoolCount();
+ }
  function update(){
   $('image-selected').textContent=`已选 ${selected.size}/${files.length} 张`;
   for(const id of ['image-save','image-share'])$(id).disabled=generating||delivering||!selected.size;
-  for(const id of ['image-select-all','image-clear','image-category'])$(id).disabled=generating||delivering;
+  for(const id of ['image-select-all','image-clear','image-category','image-pool-all','image-pool-none'])$(id).disabled=generating||delivering;
+  for(const choice of $('image-pool-list').querySelectorAll('input[type=checkbox]'))choice.disabled=delivering;
   $('image-zip').disabled=generating||delivering||!files.length;
  }
  function clear(){for(const url of urls)URL.revokeObjectURL(url);urls=[];files=[];selected.clear();$('image-previews').replaceChildren();update();}
@@ -30,8 +50,11 @@ const MobileImage=(()=>{
   if(typeof LongImage==='undefined'){notify('长图组件未加载，请重新构建应用后再试。','error');return;}
   const run=++generation;generating=true;clear();update();$('image-status').textContent='正在本机生成图片…';
   try{
-   await document.fonts.ready;const pages=LongImage.planPages(report,category),base=`星落-${(report.account?.label||'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;
-   const assets=typeof LongImage.prepare==='function'?await LongImage.prepare(report,pages):null;
+   await document.fonts.ready;
+   const poolIds=poolsForCategory().filter(pool=>poolChoice.has(String(pool.pool_id))).map(pool=>pool.pool_id);
+   if(!poolIds.length){$('image-status').textContent='请先在下方勾选一个具体卡池。';notify('请至少勾选一个具体卡池。','error');return;}
+   const pages=LongImage.planPages(report,category,10000,poolIds),base=`星落-${(report.account?.label||'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;
+   const assets=typeof LongImage.prepare==='function'?await LongImage.prepare(report,pages,poolIds):null;
    for(let index=0;index<pages.length;index++){
     if(run!==generation||!$('mobile-image-dialog').open)break;
     const canvas=LongImage.draw(report,pages[index],index,pages.length,category,assets),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png')),width=canvas.width,height=canvas.height;canvas.width=canvas.height=1;
@@ -40,16 +63,23 @@ const MobileImage=(()=>{
     const url=URL.createObjectURL(blob),file={name:`${base}-${String(index+1).padStart(2,'0')}.png`,blob,url,width,height};urls.push(url);files.push(file);selected.add(files.length-1);$('image-previews').append(preview(file,index));
     $('image-status').textContent=`已生成 ${index+1}/${pages.length} 张图片。`;update();await new Promise(resolve=>requestAnimationFrame(resolve));
    }
-   if(files.length)$('image-status').textContent=`已生成 ${files.length} 张图片，默认全部选中。`;
+   if(run===generation&&files.length)$('image-status').textContent=`已生成 ${files.length} 张图片，默认全部选中。`;
   }catch(error){if(run===generation)$('image-status').textContent=error.message||'图片生成失败，请重试。';}
   finally{if(run===generation){generating=false;update();}}
  }
  function open(value,selectedCategory='all'){
-  if(!value){notify('没有可生成长图的记录。','error');return;}report=value;category=selectedCategory;$('image-category').value=category;
-  if(!$('mobile-image-dialog').open)$('mobile-image-dialog').showModal();generate();
+  if(!value){notify('没有可生成长图的记录。','error');return;}
+  const changed=report!==value;report=value;category=selectedCategory;
+  if(changed||!poolChoice)poolChoice=new Set((report.analysis?.pools||[]).map(pool=>String(pool.pool_id)));
+  $('image-category').value=category;
+  renderPoolChoices();
+  if(!$('mobile-image-dialog').open)$('mobile-image-dialog').showModal();
+  generate();
  }
  function init(options={}){notify=options.notify||notify;
-  $('image-category').addEventListener('change',()=>{category=$('image-category').value;if(report)generate();});
+  $('image-category').addEventListener('change',()=>{category=$('image-category').value;renderPoolChoices();if(report)generate();});
+  $('image-pool-all').addEventListener('click',()=>{if(generating||delivering)return;for(const pool of (report?.analysis?.pools||[]))poolChoice.add(String(pool.pool_id));renderPoolChoices();generate();});
+  $('image-pool-none').addEventListener('click',()=>{if(generating||delivering)return;poolChoice.clear();renderPoolChoices();generate();});
   $('image-select-all').addEventListener('click',()=>{selected=new Set(files.map((file,index)=>index));for(const choice of $('image-previews').querySelectorAll('input[type=checkbox]'))choice.checked=true;update();});
   $('image-clear').addEventListener('click',()=>{selected.clear();for(const choice of $('image-previews').querySelectorAll('input[type=checkbox]'))choice.checked=false;update();});
   $('image-save').addEventListener('click',()=>perform('album'));$('image-share').addEventListener('click',()=>perform('share'));

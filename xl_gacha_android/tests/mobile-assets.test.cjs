@@ -55,13 +55,13 @@ test('manifest keeps resource version, mappings and sha256 for controlled files'
  assert.equal(manifest.mascot.reactions.map(r=>r.durationMs).join(','),'1699,1366,1333');
 });
 
-test('default character resolves account rect to controlled fashion asset',()=>{
+test('default character resolves the initial square portrait to a controlled asset',()=>{
  const view=MobileAssets.character('10000101');
- assert.deepEqual(view,{src:'assets/fashions/HeadRect_10001_1.png',name:'菲尼斯',rarity:1,crop:'left'});
+ assert.deepEqual(view,{src:'assets/portraits/10000101.webp',name:'菲尼斯',rarity:1,crop:'center'});
  for(const id of Object.keys(manifest.characters)){
   const entry=MobileAssets.character(id);
   assert.ok(entry,`character ${id} must resolve`);
-  assert.equal(entry.crop,'left');
+  assert.equal(entry.crop,'center');
   assert.equal(entry.src,manifest.characters[id].path);
   assert.ok(fs.existsSync(path.join(__dirname,'..','web',entry.src)));
  }
@@ -77,11 +77,11 @@ test('player head follows fashion_id then head_id then face_id priority',()=>{
  const headSrc=manifest.account_items[headItemId].path;
  const faceSrc=manifest.fashions[otherFashionId].path;
  const withFashion=MobileAssets.player({fashion_id:Number(anyFashionId),head_id:Number(headItemId),face_id:Number(otherFashionId)});
- assert.deepEqual(withFashion.head,{src:fashionSrc,crop:'left'});
+ assert.deepEqual(withFashion.head,{src:fashionSrc,crop:'center'});
  const withHead=MobileAssets.player({fashion_id:0,head_id:Number(headItemId),face_id:Number(otherFashionId)});
  assert.deepEqual(withHead.head,{src:headSrc,crop:'left'});
  const withFace=MobileAssets.player({fashion_id:0,head_id:0,face_id:Number(otherFashionId)});
- assert.deepEqual(withFace.head,{src:faceSrc,crop:'left'});
+ assert.deepEqual(withFace.head,{src:faceSrc,crop:'center'});
  assert.equal(MobileAssets.player({fashion_id:0,head_id:Number(permanentFrameId),face_id:0}).head,null,'frame item must not be used as a player head');
  assert.equal(MobileAssets.player({fashion_id:0,head_id:0,face_id:0}).head,null);
  assert.equal(MobileAssets.player({}).head,null);
@@ -131,7 +131,7 @@ test('player leaves rank and frame independent of head resolution',()=>{
 });
 
 test('loadImage resolves manifest and assets-relative paths with caching',async()=>{
- const known='assets/fashions/HeadRect_10001_1.png';
+ const known='assets/portraits/10000101.webp';
  const first=MobileAssets.loadImage(known);
  const second=MobileAssets.loadImage(known);
  assert.equal(first,second,'loadImage must cache by src');
@@ -149,8 +149,8 @@ test('loadImage rejects urls, parent traversal and absolute paths',async()=>{
  await assert.rejects(MobileAssets.loadImage('data:image/png;base64,AAAA'));
  await assert.rejects(MobileAssets.loadImage('assets/../../secrets.txt'));
  await assert.rejects(MobileAssets.loadImage('../outside.png'));
- await assert.rejects(MobileAssets.loadImage('/assets/fashions/HeadRect_10001_1.png'));
- await assert.rejects(MobileAssets.loadImage('assets/fashions/HeadRect_10001_1.png?next=..%2f..'));
+ await assert.rejects(MobileAssets.loadImage('/assets/portraits/10000101.webp'));
+ await assert.rejects(MobileAssets.loadImage('assets/portraits/10000101.webp?next=..%2f..'));
  await assert.rejects(MobileAssets.loadImage('assets/%2e%2e/outside.png'));
  await assert.rejects(MobileAssets.loadImage(''));
  await assert.rejects(MobileAssets.loadImage(null));
@@ -165,9 +165,9 @@ test('loadImage rejects when the image element errors',async()=>{
   Image:BrokenImage,
  });
  await MobileAssets.init();
- await assert.rejects(MobileAssets.loadImage('assets/fashions/HeadRect_10001_1.png'));
+ await assert.rejects(MobileAssets.loadImage('assets/portraits/10000101.webp'));
  MobileAssets._inject({Image:FakeImage});
- const recovered=await MobileAssets.loadImage('assets/fashions/HeadRect_10001_1.png');
+ const recovered=await MobileAssets.loadImage('assets/portraits/10000101.webp');
  assert.ok(recovered instanceof FakeImage,'a transient image failure must allow a later retry');
 });
 

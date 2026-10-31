@@ -1,0 +1,312 @@
+"""可复现素材生成器与已提交视觉产物的 unittest 验收。"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import statistics
+import sys
+import unittest
+from pathlib import Path
+
+from PIL import Image, ImageChops
+
+ROOT = Path(__file__).resolve().parents[1]
+WEB = ROOT / "web"
+ASSETS = WEB / "assets"
+MANIFEST_PATH = ASSETS / "manifest.json"
+MANIFEST = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+_SPEC = importlib.util.spec_from_file_location(
+    "prepare_visual_assets", ROOT / "scripts" / "prepare_visual_assets.py"
+)
+pva = importlib.util.module_from_spec(_SPEC)
+sys.modules.setdefault("prepare_visual_assets", pva)
+_SPEC.loader.exec_module(pva)
+
+PACK_ROOT = Path(os.environ.get("STARFALL_ASSET_PACK", pva.DEFAULT_PACK))
+requires_source = unittest.skipUnless(
+    PACK_ROOT.is_dir(), "原始素材包不存在；设置 STARFALL_ASSET_PACK 后执行源图对照"
+)
+MASCOT_SETS = ("idle", "jump_all", "relive", "die")
+MASCOT_TOTALS = {"idle": 1366, "jump_all": 1699, "relive": 1366, "die": 1333}
+
+
+def sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def alpha_bbox(image):
+    return pva.alpha_bbox(image)
+
+
+def opaque_count(image):
+    return sum(image.convert("RGBA").getchannel("A").histogram()[1:])
+
+
+def visible_pixels_equal(left, right):
+    if left.size != right.size:
+        return False
+    left = left.convert("RGBA")
+    right = right.convert("RGBA")
+    if ImageChops.difference(left.getchannel("A"), right.getchannel("A")).getbbox() is not None:
+        return False
+    difference = ImageChops.difference(left.convert("RGB"), right.convert("RGB"))
+    visible = left.getchannel("A").point(lambda alpha: 255 if alpha else 0)
+    masked = Image.composite(difference, Image.new("RGB", left.size), visible)
+    return masked.getbbox() is None
+
+
+def matches_under_horizontal_shift(output, reference):
+    output_box = alpha_bbox(output)
+    reference_box = alpha_bbox(reference)
+    if output_box is None or reference_box is None or output.size != reference.size:
+        return False
+    dx = output_box[0] - reference_box[0]
+    for candidate in (dx - 1, dx, dx + 1):
+        shifted = Image.new("RGBA", reference.size)
+        shifted.paste(reference, (candidate, 0))
+        if visible_pixels_equal(output, shifted):
+            return True
+    return False
+
+
+def mascot_webp(name):
+    if name == "idle":
+        return WEB / MANIFEST["mascot"]["idle"]["path"]
+    for reaction in MANIFEST["mascot"]["reactions"]:
+        if reaction["name"] == name:
+            return WEB / reaction["path"]
+    raise AssertionError(f"manifest 缺少 mascot 动画 {name}")
+
+
+def source_mascot(name):
+    return PACK_ROOT / "previews" / "mascot" / f"minigame017_gugu-{name}.webp"
+
+
+class CharacterTests(unittest.TestCase):
+    def test_manifest_matches_repository_character_catalog(self):
+        catalog = json.loads(
+            (ROOT.parent / "xl_gacha_web" / "data" / "catalog.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(MANIFEST["characters"]), 108)
+        self.assertEqual(set(MANIFEST["characters"]), set(catalog["cards"]))
+
+    def test_every_character_maps_to_initial_portrait(self):
+        for item_id, entry in MANIFEST["characters"].items():
+            with self.subTest(item_id=item_id):
+                self.assertEqual(entry["path"], f"assets/portraits/{item_id}.webp")
+                self.assertTrue((WEB / entry["path"]).is_file())
+
+    def test_portrait_count_on_disk(self):
+        self.assertEqual(len(list((ASSETS / "portraits").glob("*.webp"))), 108)
+
+    def test_portraits_are_256_lossless_webp(self):
+        for item_id, entry in MANIFEST["characters"].items():
+            with self.subTest(item_id=item_id):
+                path = WEB / entry["path"]
+                riff = pva.parse_webp_riff(path)
+                self.assertEqual(riff["canvas"], (256, 256))
+                self.assertTrue(riff["lossless"])
+                with Image.open(path) as image:
+                    self.assertEqual(image.size, (256, 256))
+
+
+@requires_source
+class CharacterSourceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = pva.load_catalog(PACK_ROOT, "characters.json")
+
+    def test_source_catalog_mapping(self):
+        self.assertEqual(set(MANIFEST["characters"]), set(self.catalog))
+
+    def test_portraits_match_initial_bursthead_under_horizontal_shift(self):
+        checked = 0
+        for item_id, entry in self.catalog.items():
+            if not entry.get("bursthead"):
+                continue
+            with self.subTest(item_id=item_id):
+                output = Image.open(WEB / MANIFEST["characters"][item_id]["path"]).convert("RGBA")
+                reference = Image.open(PACK_ROOT / entry["bursthead"]).convert("RGBA")
+                self.assertTrue(matches_under_horizontal_shift(output, reference))
+            checked += 1
+        self.assertEqual(checked, 106)
+
+    def test_special_square_portraits_are_not_cropped(self):
+        for item_id in ("10000199", "10000200"):
+            with self.subTest(item_id=item_id):
+                entry = self.catalog[item_id]
+                self.assertIsNone(entry["bursthead"])
+                source = Image.open(PACK_ROOT / entry["square"]).convert("RGBA")
+                output = Image.open(WEB / MANIFEST["characters"][item_id]["path"]).convert("RGBA")
+                self.assertEqual(source.size, (140, 270))
+                self.assertEqual(output.size, (256, 256))
+                source_box = alpha_bbox(source)
+                output_box = alpha_bbox(output)
+                scale = 256 / 270
+                self.assertGreater(output_box[0], 0)
+                self.assertLess(output_box[2], 256)
+                self.assertLessEqual(abs((output_box[0] + output_box[2]) / 2 - 128), 1.5)
+                self.assertLessEqual(abs(output_box[1] - source_box[1] * scale), 3.0)
+                self.assertLessEqual(abs(output_box[3] - source_box[3] * scale), 3.0)
+                expected_opaque = opaque_count(source) * scale**2
+                self.assertLess(abs(opaque_count(output) - expected_opaque) / expected_opaque, 0.10)
+
+
+class FashionTests(unittest.TestCase):
+    def test_all_fashions_use_bundled_default_portraits(self):
+        portrait_paths = {entry["path"] for entry in MANIFEST["characters"].values()}
+        self.assertEqual(len(MANIFEST["fashions"]), 312)
+        for fashion_id, entry in MANIFEST["fashions"].items():
+            with self.subTest(fashion_id=fashion_id):
+                self.assertIn(entry["path"], portrait_paths)
+                self.assertTrue((WEB / entry["path"]).is_file())
+        self.assertFalse((ASSETS / "fashions").exists())
+
+    @requires_source
+    def test_fashions_map_to_owning_character(self):
+        catalog = pva.load_catalog(PACK_ROOT, "fashions.json")
+        self.assertEqual(set(MANIFEST["fashions"]), set(catalog))
+        for fashion_id, entry in catalog.items():
+            with self.subTest(fashion_id=fashion_id):
+                card_id = str(entry["card_id"])
+                self.assertEqual(
+                    MANIFEST["fashions"][fashion_id]["path"],
+                    f"assets/portraits/{card_id}.webp",
+                )
+
+
+class StaticAssetTests(unittest.TestCase):
+    def test_account_brand_and_ui_mappings(self):
+        self.assertEqual(len(MANIFEST["account_items"]), 99)
+        paths = {entry["path"] for entry in MANIFEST["account_items"].values()}
+        self.assertEqual(len(paths), 98)
+        for path in paths:
+            self.assertTrue(path.startswith("assets/account/"), path)
+            self.assertTrue((WEB / path).is_file(), path)
+        self.assertEqual(
+            MANIFEST["brand"],
+            {
+                "logo": "assets/brand/starfall-logo.png",
+                "noise": "assets/ui/perlinNoise.png",
+                "primary_button": "assets/ui/primary-button.png",
+            },
+        )
+        for key in ("logo", "noise", "primary_button"):
+            self.assertTrue((WEB / MANIFEST["brand"][key]).is_file(), key)
+
+    @requires_source
+    def test_ui_files_match_source(self):
+        pairs = {
+            "assets/ui/perlinNoise.png": "images/masks/perlinNoise.png",
+            "assets/ui/primary-button.png": pva.UI_PRIMARY_BUTTON_SRC,
+            "assets/brand/starfall-logo.png": "images/brand/starfall-logo.png",
+        }
+        for output, source in pairs.items():
+            with self.subTest(output=output):
+                self.assertEqual(sha256(WEB / output), sha256(PACK_ROOT / source))
+
+
+class ManifestTests(unittest.TestCase):
+    def test_files_count_is_214(self):
+        self.assertEqual(len(MANIFEST["files"]), 108 + 98 + 1 + 2 + 5)
+
+    def test_hashes_match_disk(self):
+        for relative, expected in MANIFEST["files"].items():
+            with self.subTest(path=relative):
+                path = WEB / relative
+                self.assertTrue(path.is_file())
+                self.assertEqual(sha256(path), expected)
+
+    def test_no_unlisted_output_files(self):
+        listed = set(MANIFEST["files"])
+        for path in ASSETS.rglob("*"):
+            if path.is_file() and path.name != "manifest.json":
+                relative = path.relative_to(WEB).as_posix()
+                self.assertIn(relative, listed)
+
+
+class MascotTests(unittest.TestCase):
+    def test_all_frames_use_864_canvas(self):
+        for name in MASCOT_SETS:
+            with self.subTest(name=name):
+                path = mascot_webp(name)
+                with Image.open(path) as image:
+                    self.assertEqual(image.size, (864, 864))
+                    self.assertEqual(image.n_frames, len(pva.parse_webp_riff(path)["frames"]))
+                    for index in range(image.n_frames):
+                        image.seek(index)
+                        self.assertEqual(image.size, (864, 864))
+
+    def test_duration_totals_and_loop(self):
+        for name, total in MASCOT_TOTALS.items():
+            with self.subTest(name=name):
+                riff = pva.parse_webp_riff(mascot_webp(name))
+                durations = [frame["duration"] for frame in riff["frames"]]
+                self.assertTrue(durations)
+                self.assertLessEqual(set(durations), {33, 34})
+                self.assertEqual(sum(durations), total)
+                self.assertEqual(riff["loop"], 0)
+
+    @requires_source
+    def test_source_durations_are_preserved(self):
+        for name in MASCOT_SETS:
+            with self.subTest(name=name):
+                output = pva.parse_webp_riff(mascot_webp(name))
+                source = pva.parse_webp_riff(source_mascot(name))
+                self.assertEqual(
+                    [frame["duration"] for frame in output["frames"]],
+                    [frame["duration"] for frame in source["frames"]],
+                )
+
+    def test_baseline_centering_and_complete_frames(self):
+        for name in MASCOT_SETS:
+            with self.subTest(name=name):
+                frames = pva.decode_frames(mascot_webp(name))
+                boxes = [alpha_bbox(frame) for frame in frames]
+                bottoms = [box[3] for box in boxes]
+                centers_x = [(box[0] + box[2]) / 2 for box in boxes]
+                ground = max(bottoms)
+                landing = [index for index, bottom in enumerate(bottoms) if bottom >= ground - 2]
+                base_bottom = statistics.median(bottoms[index] for index in landing)
+                base_center = statistics.median(centers_x[index] for index in landing)
+                self.assertLessEqual(abs(base_bottom - 848), 1)
+                self.assertLessEqual(abs(base_center - 432), 2)
+                self.assertGreaterEqual(min(box[1] for box in boxes), 0)
+                self.assertLessEqual(max(bottoms), 864)
+
+    def test_poster_matches_idle_first_frame(self):
+        poster_path = WEB / MANIFEST["mascot"]["idle"]["poster"]
+        self.assertEqual(poster_path.name, "minigame017_gugu-idle.png")
+        poster = Image.open(poster_path).convert("RGBA")
+        idle_first = pva.decode_frames(mascot_webp("idle"))[0]
+        self.assertEqual(poster.size, (864, 864))
+        self.assertTrue(visible_pixels_equal(poster, idle_first))
+
+    def test_manifest_mascot_durations(self):
+        mascot = MANIFEST["mascot"]
+        self.assertEqual(mascot["idle"]["durationMs"], 1366)
+        self.assertEqual(mascot["idle"]["path"], "assets/mascot/minigame017_gugu-idle.webp")
+        self.assertEqual(mascot["idle"]["poster"], "assets/mascot/minigame017_gugu-idle.png")
+        self.assertEqual(
+            [(reaction["name"], reaction["durationMs"]) for reaction in mascot["reactions"]],
+            [("jump_all", 1699), ("relive", 1366), ("die", 1333)],
+        )
+
+    @requires_source
+    def test_character_content_is_not_scaled(self):
+        for name in MASCOT_SETS:
+            with self.subTest(name=name):
+                output = [alpha_bbox(frame) for frame in pva.decode_frames(mascot_webp(name))]
+                source = [alpha_bbox(frame) for frame in pva.decode_frames(source_mascot(name))]
+                self.assertEqual(
+                    [(box[2] - box[0], box[3] - box[1]) for box in output],
+                    [(box[2] - box[0], box[3] - box[1]) for box in source],
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
