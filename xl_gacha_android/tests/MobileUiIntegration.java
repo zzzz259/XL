@@ -40,10 +40,10 @@ public final class MobileUiIntegration extends Instrumentation {
   check("document.getElementById('manual-open')!==null&&document.getElementById('manual-dialog')===null&&document.getElementById('manual-panel')!==null","manual credential uses the login card back");
   check("!document.getElementById('query-flip').classList.contains('flipped')&&document.getElementById('manual-panel').getAttribute('aria-hidden')==='true'&&document.getElementById('manual-credential').disabled","manual face starts inactive");
   await("document.getElementById('gugu-idle').complete&&document.getElementById('gugu-idle').naturalWidth>0");
-  check("document.querySelector('.query-secondary').nextElementSibling.id==='gugu-button'&&document.getElementById('gugu-button').dataset.state==='idle'","gugu sits below query actions in idle state");
-  check("(()=>{document.getElementById('gugu-button').click();return true;})()","click gugu for a random reaction");
-  await("document.getElementById('gugu-button').dataset.state==='reacting'&&document.getElementById('gugu-reaction').src.includes('/assets/mascot/')");
-  await("document.getElementById('gugu-button').dataset.state==='idle'");
+  check("document.querySelector('.query-secondary').nextElementSibling.id==='gugu-button'&&document.getElementById('gugu-button').dataset.state===(matchMedia('(prefers-reduced-motion: reduce)').matches?'poster':'idle')","gugu sits below query actions and respects motion preference");
+  check("(()=>{window.__qaReducedMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;document.getElementById('gugu-button').click();return true;})()","click gugu for a random reaction or reduced-motion poster");
+  await("window.__qaReducedMotion?document.getElementById('gugu-button').dataset.state==='poster':document.getElementById('gugu-button').dataset.state==='reacting'&&document.getElementById('gugu-reaction').src.includes('/assets/mascot/')");
+  await("window.__qaReducedMotion||document.getElementById('gugu-button').dataset.state==='idle'");
   check("(()=>{document.getElementById('manual-open').click();return true;})()","flip to manual credentials");
   await("document.getElementById('query-flip').classList.contains('flipped')&&document.getElementById('manual-panel').getAttribute('aria-hidden')==='false'&&!document.getElementById('manual-credential').disabled");
   check("document.getElementById('manual-open-label').textContent==='返回登录方式'&&document.getElementById('query-front').getAttribute('aria-hidden')==='true'&&document.getElementById('official-login').disabled","manual flip exposes only the active face");
