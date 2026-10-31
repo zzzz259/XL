@@ -4,7 +4,9 @@
  function native(action,payload={}){return new Promise((resolve,reject)=>{const id=String(++serial);pending.set(id,{resolve,reject});AndroidHost.request(id,action,JSON.stringify(payload));});}
  window.AndroidBridge={receive(id,status,value){const p=pending.get(id);if(!p)return;pending.delete(id);if(status>=400)p.reject(new Error(value.error||'QUERY_FAILED'));else p.resolve(value);},
   async saveImage(file){return native('imageAlbum',{name:file.name,data:await imageData(file.blob)});},
-  async shareImages(files){const images=[];for(const file of files){const v=await native('imageStage',{data:await imageData(file.blob)});images.push(v.image);}return native('imageShare',{images});}
+  async shareImages(files){const images=[];for(const file of files){const v=await native('imageStage',{data:await imageData(file.blob)});images.push(v.image);}return native('imageShare',{images});},
+  copyBiliDiagnostics(){return native('copyBiliDiagnostics');},
+  copyTapDiagnostics(){return native('copyTapDiagnostics');}
  };
  async function imageData(blob){if(blob.size>8*1024*1024)throw new Error('IMAGE_INVALID');return base64(blob);}
  function base64(blob){return new Promise((resolve,reject)=>{const f=new FileReader();f.onload=()=>resolve(String(f.result).split(',')[1]);f.onerror=()=>reject(new Error('FILE_READ_FAILED'));f.readAsDataURL(blob);});}
@@ -23,7 +25,7 @@
    if(!source||!Array.isArray(source.records))MobileEngine.fail();
    let id=await MobileEngine.identity(source.account,label);
    if(target){const old=map.get(target);if(!old)MobileEngine.fail('ACCOUNT_NOT_FOUND');if(source.account&&id.id!==target)MobileEngine.fail('ACCOUNT_ID_MISMATCH');id=old.account;}
-   const old=map.get(id.id);if(old)id=old.account;
+   const old=map.get(id.id);if(old)id={...old.account,...id,id:old.account.id,label:old.account.label};
    const r=MobileEngine.buildReport([...(old?.records||[]),...source.records],cfg,{...(old?.pool_metadata||{}),...(source.pool_metadata||{})});
    r.account=id;r.partial=Boolean(source.partial);
    if(source.queries)r.query_receipt={at:new Date().toISOString(),queries:source.queries.map(q=>({selector:q.selector,ret_code:q.ret_code,record_count:q.record_count}))};
@@ -41,7 +43,7 @@
   if(path==='/api/login'){
    const v=await native('loginStatus');
    if(v.phase==='done'&&v.raw){
-    if(savedSession!==v.id){const [r]=await merge([{records:v.raw.records,queries:v.raw.queries,partial:v.raw.partial,account:{uid:v.raw.uid,channel:v.raw.channel}}],null,null,v.raw.catalog_snapshot);savedSession=v.id;v.report=r;}
+    if(savedSession!==v.id){const [r]=await merge([{records:v.raw.records,queries:v.raw.queries,partial:v.raw.partial,account:{...v.raw.profile,uid:v.raw.uid,channel:v.raw.channel}}],null,null,v.raw.catalog_snapshot);savedSession=v.id;v.report=r;}
     else{const rows=await all();v.report=rows.find(r=>r.account.uid===v.raw.uid&&r.account.channel===v.raw.channel);}
     delete v.raw;
     await native('loginAck',{id:v.id});
@@ -50,7 +52,7 @@
   if(path==='/api/login/start')return native('loginStart',body);
   if(path==='/api/login/cancel')return native('loginCancel');
   if(path==='/api/login/forget')return native('loginForget',body);
-  if(path==='/api/query'){const raw=await native('query',body);return (await merge([{records:raw.records,partial:raw.partial,account:{uid:raw.uid,channel:raw.channel}}],null,null,raw.catalog_snapshot))[0];}
+  if(path==='/api/query'){const raw=await native('query',body);return (await merge([{records:raw.records,partial:raw.partial,account:{...raw.profile,uid:raw.uid,channel:raw.channel}}],null,null,raw.catalog_snapshot))[0];}
   const rows=await all();
   if(path==='/api/library')return {accounts:rows.map(r=>({...r.account,pull_count:r.summary.pull_count,updated_at:r.captured_at})).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)),last_account:await last(),directory:'此应用的本地存储（更新应用会保留，卸载或清除应用数据会删除）'};
   if(path==='/api/library/backup')return {format:'starfall-local-backup',version:1,exported_at:new Date().toISOString(),accounts:rows};
@@ -80,35 +82,15 @@
   }
   return originalFetch(input,options);
  };
+ function notify(text,kind=''){document.dispatchEvent(new CustomEvent('mobile-status',{detail:{text,kind}}));}
  async function exportBlob(a){
   const response=await originalFetch(a.href),blob=await response.blob();
   const data=await base64(blob);
   const result=await native('save',{name:a.download||'星落记录',mime:blob.type||'application/octet-stream',data});
-  if(result.saved&&typeof status==='function')status(result.location?`文件已保存到${result.location}。`:'文件已保存到所选位置。');
+  if(result.saved)notify(result.location?`文件已保存到${result.location}。`:'文件已保存。');
  }
  const click=HTMLAnchorElement.prototype.click;
- const exportError=e=>{if(typeof status==='function')status(e.message==='SAVE_IN_PROGRESS'?'请先完成当前文件保存。':'文件保存失败，请重试。','error');};
+ const exportError=e=>notify(e.message==='SAVE_IN_PROGRESS'?'请先完成当前文件保存。':'文件保存失败，请重试。','error');
  HTMLAnchorElement.prototype.click=function(){if(this.href.startsWith('blob:')){exportBlob(this).catch(exportError);return;}return click.call(this);};
  document.addEventListener('click',e=>{const a=e.target.closest?.('a[download]');if(a?.href.startsWith('blob:')){e.preventDefault();exportBlob(a).catch(exportError);}});
- document.addEventListener('DOMContentLoaded',()=>{
-  const note=document.querySelector('.storage-note p:last-child');if(note)note.textContent='记录保存在此应用的本机存储。更新应用会保留；卸载或清除应用数据会删除，请定期备份 JSON。登录会话与抽卡存档独立。';
-  const summary=document.querySelector('.storage-note summary');if(summary)summary.textContent='记录保存在这台手机 · 查看存档说明';
-  for(const help of document.querySelectorAll('.guide-open'))help.hidden=true;
-  const guide=document.querySelector('.guide-card');if(guide)guide.hidden=true;
-  const query=document.querySelector('.query-layout');if(query)query.style.gridTemplateColumns='1fr';
-  const p=document.querySelector('.portal-login>.field-help');if(p)p.textContent='在独立的官方登录页面正常登录后自动查询。默认清理官网会话；开启记住登录仅保留最近一次官网登录状态。';
-  const start=document.querySelector('#portal-start');
-  if(start){const other=document.createElement('button');other.type='button';other.className='outline-button';other.textContent='登录其他账号';other.onclick=()=>{if(start.disabled)return;document.querySelector('#login-profile').value='';start.click();};start.after(other);}
-  document.getElementById('bili-copy-diagnostics')?.addEventListener('click',()=>native('copyBiliDiagnostics').then(()=>status('已复制脱敏诊断，可粘贴反馈；不含账号 UID 或令牌。')).catch(()=>status('复制失败，请重试。','error')));
-  document.getElementById('tap-copy-diagnostics')?.addEventListener('click',()=>native('copyTapDiagnostics').catch(()=>status('复制失败，请重试。','error')));
-  window.mobileReady=true;
- });
- // Show the receipt for the selected archive, including after an application restart.
- const renderReceipt=report=>{
-  const panel=document.getElementById('bili-receipt'),text=document.getElementById('bili-receipt-text');if(!panel||!text)return;
-  const r=report?.query_receipt;panel.hidden=!r;
-  if(r)text.textContent=`查询时间：${new Date(r.at).toLocaleString()}\n`+r.queries.map(q=>`卡池 ${q.selector}：返回码 ${q.ret_code}，${q.record_count} 条记录`).join('\n');
- };
- document.addEventListener('report-shown',()=>renderReceipt(state.report));
- document.addEventListener('DOMContentLoaded',()=>document.getElementById('clear-results')?.addEventListener('click',()=>renderReceipt(null)));
 })();

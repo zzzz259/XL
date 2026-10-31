@@ -1,0 +1,2429 @@
+{
+ "resource_version": "134359843258232660",
+ "characters": {
+  "10000101": {
+   "name": "菲尼斯",
+   "rarity": 1,
+   "path": "assets/fashions/HeadRect_10001_1.png"
+  },
+  "10000102": {
+   "name": "露露",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10002_1.png"
+  },
+  "10000103": {
+   "name": "奥菲利亚",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10003_1.png"
+  },
+  "10000104": {
+   "name": "尼莉莎",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10004_1.png"
+  },
+  "10000105": {
+   "name": "慈悲者",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10005_1.png"
+  },
+  "10000107": {
+   "name": "马尔可",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10007_1.png"
+  },
+  "10000108": {
+   "name": "瓦莱沙",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10008_1.png"
+  },
+  "10000109": {
+   "name": "烈风",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10052_1.png"
+  },
+  "10000110": {
+   "name": "罗宾",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10010_1.png"
+  },
+  "10000111": {
+   "name": "米哈尔",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10011_1.png"
+  },
+  "10000113": {
+   "name": "汐",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10013_1.png"
+  },
+  "10000114": {
+   "name": "狄莉丝",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10046_1.png"
+  },
+  "10000115": {
+   "name": "炎狼",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10015_1.png"
+  },
+  "10000116": {
+   "name": "薇",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10016_1.png"
+  },
+  "10000117": {
+   "name": "芙蕾雅",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10017_1.png"
+  },
+  "10000118": {
+   "name": "安妮斯",
+   "rarity": 1,
+   "path": "assets/fashions/HeadRect_10018_1.png"
+  },
+  "10000119": {
+   "name": "茉莉",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10019_1.png"
+  },
+  "10000120": {
+   "name": "莱娜",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10020_1.png"
+  },
+  "10000121": {
+   "name": "赛格丽特",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10021_1.png"
+  },
+  "10000122": {
+   "name": "艾米莉",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10022_1.png"
+  },
+  "10000124": {
+   "name": "欧培拉",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10024_1.png"
+  },
+  "10000125": {
+   "name": "卡莎",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10025_1.png"
+  },
+  "10000126": {
+   "name": "杰西卡",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10026_1.png"
+  },
+  "10000127": {
+   "name": "姬玛",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10027_1.png"
+  },
+  "10000129": {
+   "name": "颂道使",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10029_1.png"
+  },
+  "10000130": {
+   "name": "云雀",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10030_1.png"
+  },
+  "10000131": {
+   "name": "辉夜",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10031_1.png"
+  },
+  "10000132": {
+   "name": "白鸢",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10032_1.png"
+  },
+  "10000133": {
+   "name": "安伦",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10033_1.png"
+  },
+  "10000134": {
+   "name": "蒂娜",
+   "rarity": 1,
+   "path": "assets/fashions/HeadRect_10034_1.png"
+  },
+  "10000135": {
+   "name": "露米娅",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10035_1.png"
+  },
+  "10000136": {
+   "name": "苏西",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10036_1.png"
+  },
+  "10000137": {
+   "name": "埃玛",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10037_1.png"
+  },
+  "10000138": {
+   "name": "朗姆",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10038_1.png"
+  },
+  "10000140": {
+   "name": "赛珂",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10040_1.png"
+  },
+  "10000141": {
+   "name": "龙舌兰",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10041_1.png"
+  },
+  "10000142": {
+   "name": "莱克西",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10042_1.png"
+  },
+  "10000143": {
+   "name": "赦罪人",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10043_1.png"
+  },
+  "10000145": {
+   "name": "星云",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10045_1.png"
+  },
+  "10000146": {
+   "name": "岫",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10014_1.png"
+  },
+  "10000147": {
+   "name": "猎鹰",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10047_1.png"
+  },
+  "10000148": {
+   "name": "舒芙蕾",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10048_1.png"
+  },
+  "10000149": {
+   "name": "缇米",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10049_1.png"
+  },
+  "10000150": {
+   "name": "海蒂",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10050_1.png"
+  },
+  "10000152": {
+   "name": "艾莉亚",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10009_1.png"
+  },
+  "10000153": {
+   "name": "希尔",
+   "rarity": 2,
+   "path": "assets/fashions/HeadRect_10053_1.png"
+  },
+  "10000154": {
+   "name": "月蚀",
+   "rarity": 3,
+   "path": "assets/fashions/HeadRect_10054_1.png"
+  },
+  "10000155": {
+   "name": "鬼魅",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10055_1.png"
+  },
+  "10000170": {
+   "name": "伊涅利丝",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10070_1.png"
+  },
+  "10000151": {
+   "name": "莫妮卡",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10051_1.png"
+  },
+  "10000161": {
+   "name": "黑羽",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10061_1.png"
+  },
+  "10000180": {
+   "name": "鬼侍",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10080_1.png"
+  },
+  "10000139": {
+   "name": "弗拉克",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10039_1.png"
+  },
+  "10000169": {
+   "name": "阿斯特莉亚",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10069_1.png"
+  },
+  "10000162": {
+   "name": "灵遥",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10062_1.png"
+  },
+  "10000182": {
+   "name": "蕾米",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10082_1.png"
+  },
+  "10000195": {
+   "name": "艾瑟儿",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10095_1.png"
+  },
+  "10000156": {
+   "name": "罗亚",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10056_1.png"
+  },
+  "10000159": {
+   "name": "蒙娜",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10059_1.png"
+  },
+  "10000173": {
+   "name": "抚慰师",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10073_1.png"
+  },
+  "10000198": {
+   "name": "列蒂西雅",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10098_1.png"
+  },
+  "10000197": {
+   "name": "奥萨丁",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10097_1.png"
+  },
+  "10000196": {
+   "name": "莉娃",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10096_1.png"
+  },
+  "10000160": {
+   "name": "米亚姆",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10060_1.png"
+  },
+  "10000167": {
+   "name": "尼基塔",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10067_1.png"
+  },
+  "10000128": {
+   "name": "岚",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10028_1.png"
+  },
+  "10000199": {
+   "name": "雪拉シェラ",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10099_1.png"
+  },
+  "10000200": {
+   "name": "蕾姆レム",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10100_1.png"
+  },
+  "10000164": {
+   "name": "菲莉亚",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10064_1.png"
+  },
+  "10000189": {
+   "name": "埃斯特拉",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10089_1.png"
+  },
+  "10000191": {
+   "name": "威士忌",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10091_1.png"
+  },
+  "10000201": {
+   "name": "枭",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10101_1.png"
+  },
+  "10000186": {
+   "name": "鬼王",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10086_1.png"
+  },
+  "10000112": {
+   "name": "鬼姬",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10044_1.png"
+  },
+  "10000171": {
+   "name": "圣光使",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10071_1.png"
+  },
+  "10000202": {
+   "name": "蕾妮希雅",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10102_1.png"
+  },
+  "10000203": {
+   "name": "守护者",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10103_1.png"
+  },
+  "10000204": {
+   "name": "拉斯特",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10104_1.png"
+  },
+  "10000205": {
+   "name": "伊莎贝尔",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10105_1.png"
+  },
+  "10000177": {
+   "name": "渡鸦",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10077_1.png"
+  },
+  "10000178": {
+   "name": "夜莺",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10078_1.png"
+  },
+  "10000206": {
+   "name": "艾拉",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10106_1.png"
+  },
+  "10000207": {
+   "name": "星轨",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10107_1.png"
+  },
+  "10000208": {
+   "name": "风痕",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10108_1.png"
+  },
+  "10000175": {
+   "name": "永夜",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10075_1.png"
+  },
+  "10000194": {
+   "name": "霏",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10094_1.png"
+  },
+  "10000193": {
+   "name": "湄",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10093_1.png"
+  },
+  "10000209": {
+   "name": "燧影",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10109_1.png"
+  },
+  "10000210": {
+   "name": "安瑞丝",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10110_1.png"
+  },
+  "10000106": {
+   "name": "诺玛",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10006_1.png"
+  },
+  "10000176": {
+   "name": "玛德莲",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10076_1.png"
+  },
+  "10000211": {
+   "name": "谢利",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10111_1.png"
+  },
+  "10000212": {
+   "name": "雪莉",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10112_1.png"
+  },
+  "10000213": {
+   "name": "尤娜",
+   "rarity": 4,
+   "path": "assets/fashions/HeadRect_10113_1.png"
+  },
+  "10000214": {
+   "name": "朝雾",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10114_1.png"
+  },
+  "10000215": {
+   "name": "鎺",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10115_1.png"
+  },
+  "10000174": {
+   "name": "司礼者",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10074_1.png"
+  },
+  "10000183": {
+   "name": "云罗",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10083_1.png"
+  },
+  "10000144": {
+   "name": "浮光",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10012_1.png"
+  },
+  "10000216": {
+   "name": "艾格尼丝",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10116_1.png"
+  },
+  "10000217": {
+   "name": "認",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10117_1.png"
+  },
+  "10000220": {
+   "name": "玛琳娜",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10120_1.png"
+  },
+  "10000219": {
+   "name": "莉莉安",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10119_1.png"
+  },
+  "10000218": {
+   "name": "莎尔拉",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10118_1.png"
+  },
+  "10000221": {
+   "name": "阿芙佳朵",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10121_1.png"
+  },
+  "10000222": {
+   "name": "迷迭香",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10122_1.png"
+  },
+  "10000223": {
+   "name": "罗蕾娜",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10123_1.png"
+  },
+  "10000224": {
+   "name": "雾铃",
+   "rarity": 5,
+   "path": "assets/fashions/HeadRect_10124_1.png"
+  }
+ },
+ "fashions": {
+  "12001011": {
+   "path": "assets/fashions/HeadRect_10001_1.png"
+  },
+  "12001012": {
+   "path": "assets/fashions/HeadRect_10001_2.png"
+  },
+  "12001021": {
+   "path": "assets/fashions/HeadRect_10002_1.png"
+  },
+  "12001022": {
+   "path": "assets/fashions/HeadRect_10002_2.png"
+  },
+  "12001031": {
+   "path": "assets/fashions/HeadRect_10003_1.png"
+  },
+  "12001032": {
+   "path": "assets/fashions/HeadRect_10003_2.png"
+  },
+  "12001041": {
+   "path": "assets/fashions/HeadRect_10004_1.png"
+  },
+  "12001042": {
+   "path": "assets/fashions/HeadRect_10004_2.png"
+  },
+  "12001051": {
+   "path": "assets/fashions/HeadRect_10005_1.png"
+  },
+  "12001052": {
+   "path": "assets/fashions/HeadRect_10005_2.png"
+  },
+  "12001071": {
+   "path": "assets/fashions/HeadRect_10007_1.png"
+  },
+  "12001072": {
+   "path": "assets/fashions/HeadRect_10007_2.png"
+  },
+  "12001073": {
+   "path": "assets/fashions/HeadRect_10007_3.png"
+  },
+  "12001081": {
+   "path": "assets/fashions/HeadRect_10008_1.png"
+  },
+  "12001082": {
+   "path": "assets/fashions/HeadRect_10008_2.png"
+  },
+  "12001091": {
+   "path": "assets/fashions/HeadRect_10052_1.png"
+  },
+  "12001092": {
+   "path": "assets/fashions/HeadRect_10052_2.png"
+  },
+  "12001101": {
+   "path": "assets/fashions/HeadRect_10010_1.png"
+  },
+  "12001102": {
+   "path": "assets/fashions/HeadRect_10010_2.png"
+  },
+  "12001103": {
+   "path": "assets/fashions/HeadRect_10010_3.png"
+  },
+  "12001111": {
+   "path": "assets/fashions/HeadRect_10011_1.png"
+  },
+  "12001112": {
+   "path": "assets/fashions/HeadRect_10011_2.png"
+  },
+  "12001113": {
+   "path": "assets/fashions/HeadRect_10011_3.png"
+  },
+  "12001131": {
+   "path": "assets/fashions/HeadRect_10013_1.png"
+  },
+  "12001132": {
+   "path": "assets/fashions/HeadRect_10013_2.png"
+  },
+  "12001133": {
+   "path": "assets/fashions/HeadRect_10013_3.png"
+  },
+  "12001141": {
+   "path": "assets/fashions/HeadRect_10046_1.png"
+  },
+  "12001142": {
+   "path": "assets/fashions/HeadRect_10046_2.png"
+  },
+  "12001143": {
+   "path": "assets/fashions/HeadRect_10046_3.png"
+  },
+  "12001151": {
+   "path": "assets/fashions/HeadRect_10015_1.png"
+  },
+  "12001152": {
+   "path": "assets/fashions/HeadRect_10015_2.png"
+  },
+  "12001161": {
+   "path": "assets/fashions/HeadRect_10016_1.png"
+  },
+  "12001162": {
+   "path": "assets/fashions/HeadRect_10016_2.png"
+  },
+  "12001163": {
+   "path": "assets/fashions/HeadRect_10016_3.png"
+  },
+  "12001164": {
+   "path": "assets/fashions/HeadRect_10016_4.png"
+  },
+  "12001171": {
+   "path": "assets/fashions/HeadRect_10017_1.png"
+  },
+  "12001172": {
+   "path": "assets/fashions/HeadRect_10017_2.png"
+  },
+  "12001173": {
+   "path": "assets/fashions/HeadRect_10017_3.png"
+  },
+  "12001181": {
+   "path": "assets/fashions/HeadRect_10018_1.png"
+  },
+  "12001182": {
+   "path": "assets/fashions/HeadRect_10018_2.png"
+  },
+  "12001183": {
+   "path": "assets/fashions/HeadRect_10018_3.png"
+  },
+  "12001184": {
+   "path": "assets/fashions/HeadRect_10018_4.png"
+  },
+  "12001191": {
+   "path": "assets/fashions/HeadRect_10019_1.png"
+  },
+  "12001192": {
+   "path": "assets/fashions/HeadRect_10019_2.png"
+  },
+  "12001201": {
+   "path": "assets/fashions/HeadRect_10020_1.png"
+  },
+  "12001202": {
+   "path": "assets/fashions/HeadRect_10020_2.png"
+  },
+  "12001203": {
+   "path": "assets/fashions/HeadRect_10020_3.png"
+  },
+  "12001211": {
+   "path": "assets/fashions/HeadRect_10021_1.png"
+  },
+  "12001212": {
+   "path": "assets/fashions/HeadRect_10021_2.png"
+  },
+  "12001221": {
+   "path": "assets/fashions/HeadRect_10022_1.png"
+  },
+  "12001222": {
+   "path": "assets/fashions/HeadRect_10022_2.png"
+  },
+  "12001241": {
+   "path": "assets/fashions/HeadRect_10024_1.png"
+  },
+  "12001242": {
+   "path": "assets/fashions/HeadRect_10024_2.png"
+  },
+  "12001251": {
+   "path": "assets/fashions/HeadRect_10025_1.png"
+  },
+  "12001252": {
+   "path": "assets/fashions/HeadRect_10025_2.png"
+  },
+  "12001261": {
+   "path": "assets/fashions/HeadRect_10026_1.png"
+  },
+  "12001262": {
+   "path": "assets/fashions/HeadRect_10026_2.png"
+  },
+  "12001263": {
+   "path": "assets/fashions/HeadRect_10026_3.png"
+  },
+  "12001271": {
+   "path": "assets/fashions/HeadRect_10027_1.png"
+  },
+  "12001272": {
+   "path": "assets/fashions/HeadRect_10027_2.png"
+  },
+  "12001273": {
+   "path": "assets/fashions/HeadRect_10027_3.png"
+  },
+  "12001291": {
+   "path": "assets/fashions/HeadRect_10029_1.png"
+  },
+  "12001292": {
+   "path": "assets/fashions/HeadRect_10029_2.png"
+  },
+  "12001293": {
+   "path": "assets/fashions/HeadRect_10029_3.png"
+  },
+  "12001301": {
+   "path": "assets/fashions/HeadRect_10030_1.png"
+  },
+  "12001302": {
+   "path": "assets/fashions/HeadRect_10030_2.png"
+  },
+  "12001303": {
+   "path": "assets/fashions/HeadRect_10030_3.png"
+  },
+  "12001311": {
+   "path": "assets/fashions/HeadRect_10031_1.png"
+  },
+  "12001312": {
+   "path": "assets/fashions/HeadRect_10031_2.png"
+  },
+  "12001313": {
+   "path": "assets/fashions/HeadRect_10031_3.png"
+  },
+  "12001321": {
+   "path": "assets/fashions/HeadRect_10032_1.png"
+  },
+  "12001322": {
+   "path": "assets/fashions/HeadRect_10032_2.png"
+  },
+  "12001323": {
+   "path": "assets/fashions/HeadRect_10032_3.png"
+  },
+  "12001331": {
+   "path": "assets/fashions/HeadRect_10033_1.png"
+  },
+  "12001332": {
+   "path": "assets/fashions/HeadRect_10033_2.png"
+  },
+  "12001333": {
+   "path": "assets/fashions/HeadRect_10033_3.png"
+  },
+  "12001341": {
+   "path": "assets/fashions/HeadRect_10034_1.png"
+  },
+  "12001342": {
+   "path": "assets/fashions/HeadRect_10034_2.png"
+  },
+  "12001351": {
+   "path": "assets/fashions/HeadRect_10035_1.png"
+  },
+  "12001352": {
+   "path": "assets/fashions/HeadRect_10035_2.png"
+  },
+  "12001361": {
+   "path": "assets/fashions/HeadRect_10036_1.png"
+  },
+  "12001362": {
+   "path": "assets/fashions/HeadRect_10036_2.png"
+  },
+  "12001371": {
+   "path": "assets/fashions/HeadRect_10037_1.png"
+  },
+  "12001372": {
+   "path": "assets/fashions/HeadRect_10037_2.png"
+  },
+  "12001381": {
+   "path": "assets/fashions/HeadRect_10038_1.png"
+  },
+  "12001382": {
+   "path": "assets/fashions/HeadRect_10038_2.png"
+  },
+  "12001401": {
+   "path": "assets/fashions/HeadRect_10040_1.png"
+  },
+  "12001402": {
+   "path": "assets/fashions/HeadRect_10040_2.png"
+  },
+  "12001403": {
+   "path": "assets/fashions/HeadRect_10040_3.png"
+  },
+  "12001411": {
+   "path": "assets/fashions/HeadRect_10041_1.png"
+  },
+  "12001412": {
+   "path": "assets/fashions/HeadRect_10041_2.png"
+  },
+  "12001421": {
+   "path": "assets/fashions/HeadRect_10042_1.png"
+  },
+  "12001422": {
+   "path": "assets/fashions/HeadRect_10042_2.png"
+  },
+  "12001423": {
+   "path": "assets/fashions/HeadRect_10042_3.png"
+  },
+  "12001431": {
+   "path": "assets/fashions/HeadRect_10043_1.png"
+  },
+  "12001432": {
+   "path": "assets/fashions/HeadRect_10043_2.png"
+  },
+  "12001433": {
+   "path": "assets/fashions/HeadRect_10043_3.png"
+  },
+  "12001451": {
+   "path": "assets/fashions/HeadRect_10045_1.png"
+  },
+  "12001452": {
+   "path": "assets/fashions/HeadRect_10045_2.png"
+  },
+  "12001453": {
+   "path": "assets/fashions/HeadRect_10045_3.png"
+  },
+  "12001454": {
+   "path": "assets/fashions/HeadRect_10045_4.png"
+  },
+  "12001461": {
+   "path": "assets/fashions/HeadRect_10014_1.png"
+  },
+  "12001462": {
+   "path": "assets/fashions/HeadRect_10014_2.png"
+  },
+  "12001463": {
+   "path": "assets/fashions/HeadRect_10014_3.png"
+  },
+  "12001471": {
+   "path": "assets/fashions/HeadRect_10047_1.png"
+  },
+  "12001472": {
+   "path": "assets/fashions/HeadRect_10047_2.png"
+  },
+  "12001473": {
+   "path": "assets/fashions/HeadRect_10047_3.png"
+  },
+  "12001481": {
+   "path": "assets/fashions/HeadRect_10048_1.png"
+  },
+  "12001482": {
+   "path": "assets/fashions/HeadRect_10048_2.png"
+  },
+  "12001483": {
+   "path": "assets/fashions/HeadRect_10048_3.png"
+  },
+  "12001491": {
+   "path": "assets/fashions/HeadRect_10049_1.png"
+  },
+  "12001492": {
+   "path": "assets/fashions/HeadRect_10049_2.png"
+  },
+  "12001493": {
+   "path": "assets/fashions/HeadRect_10049_3.png"
+  },
+  "12001501": {
+   "path": "assets/fashions/HeadRect_10050_1.png"
+  },
+  "12001502": {
+   "path": "assets/fashions/HeadRect_10050_2.png"
+  },
+  "12001521": {
+   "path": "assets/fashions/HeadRect_10009_1.png"
+  },
+  "12001522": {
+   "path": "assets/fashions/HeadRect_10009_2.png"
+  },
+  "12001523": {
+   "path": "assets/fashions/HeadRect_10009_3.png"
+  },
+  "12001531": {
+   "path": "assets/fashions/HeadRect_10053_1.png"
+  },
+  "12001532": {
+   "path": "assets/fashions/HeadRect_10053_2.png"
+  },
+  "12001533": {
+   "path": "assets/fashions/HeadRect_10053_3.png"
+  },
+  "12001541": {
+   "path": "assets/fashions/HeadRect_10054_1.png"
+  },
+  "12001542": {
+   "path": "assets/fashions/HeadRect_10054_2.png"
+  },
+  "12001551": {
+   "path": "assets/fashions/HeadRect_10055_1.png"
+  },
+  "12001552": {
+   "path": "assets/fashions/HeadRect_10055_2.png"
+  },
+  "12001553": {
+   "path": "assets/fashions/HeadRect_10055_3.png"
+  },
+  "12001511": {
+   "path": "assets/fashions/HeadRect_10051_1.png"
+  },
+  "12001512": {
+   "path": "assets/fashions/HeadRect_10051_2.png"
+  },
+  "12001513": {
+   "path": "assets/fashions/HeadRect_10051_3.png"
+  },
+  "12001701": {
+   "path": "assets/fashions/HeadRect_10070_1.png"
+  },
+  "12001702": {
+   "path": "assets/fashions/HeadRect_10070_2.png"
+  },
+  "12001703": {
+   "path": "assets/fashions/HeadRect_10070_3.png"
+  },
+  "12001704": {
+   "path": "assets/fashions/HeadRect_10070_4.png"
+  },
+  "12001611": {
+   "path": "assets/fashions/HeadRect_10061_1.png"
+  },
+  "12001612": {
+   "path": "assets/fashions/HeadRect_10061_2.png"
+  },
+  "12001613": {
+   "path": "assets/fashions/HeadRect_10061_3.png"
+  },
+  "12001801": {
+   "path": "assets/fashions/HeadRect_10080_1.png"
+  },
+  "12001802": {
+   "path": "assets/fashions/HeadRect_10080_2.png"
+  },
+  "12001803": {
+   "path": "assets/fashions/HeadRect_10080_3.png"
+  },
+  "12001804": {
+   "path": "assets/fashions/HeadRect_10080_4.png"
+  },
+  "12001391": {
+   "path": "assets/fashions/HeadRect_10039_1.png"
+  },
+  "12001392": {
+   "path": "assets/fashions/HeadRect_10039_2.png"
+  },
+  "12001393": {
+   "path": "assets/fashions/HeadRect_10039_3.png"
+  },
+  "12001691": {
+   "path": "assets/fashions/HeadRect_10069_1.png"
+  },
+  "12001692": {
+   "path": "assets/fashions/HeadRect_10069_2.png"
+  },
+  "12001693": {
+   "path": "assets/fashions/HeadRect_10069_3.png"
+  },
+  "12001621": {
+   "path": "assets/fashions/HeadRect_10062_1.png"
+  },
+  "12001622": {
+   "path": "assets/fashions/HeadRect_10062_2.png"
+  },
+  "12001623": {
+   "path": "assets/fashions/HeadRect_10062_3.png"
+  },
+  "12001821": {
+   "path": "assets/fashions/HeadRect_10082_1.png"
+  },
+  "12001822": {
+   "path": "assets/fashions/HeadRect_10082_2.png"
+  },
+  "12001823": {
+   "path": "assets/fashions/HeadRect_10082_3.png"
+  },
+  "12001951": {
+   "path": "assets/fashions/HeadRect_10095_1.png"
+  },
+  "12001952": {
+   "path": "assets/fashions/HeadRect_10095_2.png"
+  },
+  "12001953": {
+   "path": "assets/fashions/HeadRect_10095_3.png"
+  },
+  "12001561": {
+   "path": "assets/fashions/HeadRect_10056_1.png"
+  },
+  "12001562": {
+   "path": "assets/fashions/HeadRect_10056_2.png"
+  },
+  "12001563": {
+   "path": "assets/fashions/HeadRect_10056_3.png"
+  },
+  "12001591": {
+   "path": "assets/fashions/HeadRect_10059_1.png"
+  },
+  "12001592": {
+   "path": "assets/fashions/HeadRect_10059_2.png"
+  },
+  "12001593": {
+   "path": "assets/fashions/HeadRect_10059_3.png"
+  },
+  "12001731": {
+   "path": "assets/fashions/HeadRect_10073_1.png"
+  },
+  "12001732": {
+   "path": "assets/fashions/HeadRect_10073_2.png"
+  },
+  "12001733": {
+   "path": "assets/fashions/HeadRect_10073_3.png"
+  },
+  "12001981": {
+   "path": "assets/fashions/HeadRect_10098_1.png"
+  },
+  "12001982": {
+   "path": "assets/fashions/HeadRect_10098_2.png"
+  },
+  "12001983": {
+   "path": "assets/fashions/HeadRect_10098_3.png"
+  },
+  "12001984": {
+   "path": "assets/fashions/HeadRect_10098_4.png"
+  },
+  "12001985": {
+   "path": "assets/fashions/HeadRect_10098_5.png"
+  },
+  "12001971": {
+   "path": "assets/fashions/HeadRect_10097_1.png"
+  },
+  "12001972": {
+   "path": "assets/fashions/HeadRect_10097_2.png"
+  },
+  "12001973": {
+   "path": "assets/fashions/HeadRect_10097_3.png"
+  },
+  "12001961": {
+   "path": "assets/fashions/HeadRect_10096_1.png"
+  },
+  "12001962": {
+   "path": "assets/fashions/HeadRect_10096_2.png"
+  },
+  "12001963": {
+   "path": "assets/fashions/HeadRect_10096_3.png"
+  },
+  "12001601": {
+   "path": "assets/fashions/HeadRect_10060_1.png"
+  },
+  "12001602": {
+   "path": "assets/fashions/HeadRect_10060_2.png"
+  },
+  "12001603": {
+   "path": "assets/fashions/HeadRect_10060_3.png"
+  },
+  "12001671": {
+   "path": "assets/fashions/HeadRect_10067_1.png"
+  },
+  "12001672": {
+   "path": "assets/fashions/HeadRect_10067_2.png"
+  },
+  "12001673": {
+   "path": "assets/fashions/HeadRect_10067_3.png"
+  },
+  "12001281": {
+   "path": "assets/fashions/HeadRect_10028_1.png"
+  },
+  "12001282": {
+   "path": "assets/fashions/HeadRect_10028_2.png"
+  },
+  "12001283": {
+   "path": "assets/fashions/HeadRect_10028_3.png"
+  },
+  "12001991": {
+   "path": "assets/fashions/HeadRect_10099_1.png"
+  },
+  "12001992": {
+   "path": "assets/fashions/HeadRect_10099_2.png"
+  },
+  "12001993": {
+   "path": "assets/fashions/HeadRect_10099_3.png"
+  },
+  "12002001": {
+   "path": "assets/fashions/HeadRect_10100_1.png"
+  },
+  "12002002": {
+   "path": "assets/fashions/HeadRect_10100_2.png"
+  },
+  "12002003": {
+   "path": "assets/fashions/HeadRect_10100_3.png"
+  },
+  "12001641": {
+   "path": "assets/fashions/HeadRect_10064_1.png"
+  },
+  "12001642": {
+   "path": "assets/fashions/HeadRect_10064_2.png"
+  },
+  "12001643": {
+   "path": "assets/fashions/HeadRect_10064_3.png"
+  },
+  "12001891": {
+   "path": "assets/fashions/HeadRect_10089_1.png"
+  },
+  "12001892": {
+   "path": "assets/fashions/HeadRect_10089_2.png"
+  },
+  "12001893": {
+   "path": "assets/fashions/HeadRect_10089_3.png"
+  },
+  "12001911": {
+   "path": "assets/fashions/HeadRect_10091_1.png"
+  },
+  "12001912": {
+   "path": "assets/fashions/HeadRect_10091_2.png"
+  },
+  "12001913": {
+   "path": "assets/fashions/HeadRect_10091_3.png"
+  },
+  "12002011": {
+   "path": "assets/fashions/HeadRect_10101_1.png"
+  },
+  "12002012": {
+   "path": "assets/fashions/HeadRect_10101_2.png"
+  },
+  "12002013": {
+   "path": "assets/fashions/HeadRect_10101_3.png"
+  },
+  "12001861": {
+   "path": "assets/fashions/HeadRect_10086_1.png"
+  },
+  "12001862": {
+   "path": "assets/fashions/HeadRect_10086_2.png"
+  },
+  "12001863": {
+   "path": "assets/fashions/HeadRect_10086_3.png"
+  },
+  "12001121": {
+   "path": "assets/fashions/HeadRect_10044_1.png"
+  },
+  "12001122": {
+   "path": "assets/fashions/HeadRect_10044_2.png"
+  },
+  "12001123": {
+   "path": "assets/fashions/HeadRect_10044_3.png"
+  },
+  "12001711": {
+   "path": "assets/fashions/HeadRect_10071_1.png"
+  },
+  "12001712": {
+   "path": "assets/fashions/HeadRect_10071_2.png"
+  },
+  "12001713": {
+   "path": "assets/fashions/HeadRect_10071_3.png"
+  },
+  "12002021": {
+   "path": "assets/fashions/HeadRect_10102_1.png"
+  },
+  "12002022": {
+   "path": "assets/fashions/HeadRect_10102_2.png"
+  },
+  "12002023": {
+   "path": "assets/fashions/HeadRect_10102_3.png"
+  },
+  "12002024": {
+   "path": "assets/fashions/HeadRect_10102_4.png"
+  },
+  "12002031": {
+   "path": "assets/fashions/HeadRect_10103_1.png"
+  },
+  "12002032": {
+   "path": "assets/fashions/HeadRect_10103_2.png"
+  },
+  "12002033": {
+   "path": "assets/fashions/HeadRect_10103_3.png"
+  },
+  "12002034": {
+   "path": "assets/fashions/HeadRect_10103_4.png"
+  },
+  "12002041": {
+   "path": "assets/fashions/HeadRect_10104_1.png"
+  },
+  "12002042": {
+   "path": "assets/fashions/HeadRect_10104_2.png"
+  },
+  "12002043": {
+   "path": "assets/fashions/HeadRect_10104_3.png"
+  },
+  "12002051": {
+   "path": "assets/fashions/HeadRect_10105_1.png"
+  },
+  "12002052": {
+   "path": "assets/fashions/HeadRect_10105_2.png"
+  },
+  "12002053": {
+   "path": "assets/fashions/HeadRect_10105_3.png"
+  },
+  "12001771": {
+   "path": "assets/fashions/HeadRect_10077_1.png"
+  },
+  "12001772": {
+   "path": "assets/fashions/HeadRect_10077_2.png"
+  },
+  "12001773": {
+   "path": "assets/fashions/HeadRect_10077_3.png"
+  },
+  "12001781": {
+   "path": "assets/fashions/HeadRect_10078_1.png"
+  },
+  "12001782": {
+   "path": "assets/fashions/HeadRect_10078_2.png"
+  },
+  "12001783": {
+   "path": "assets/fashions/HeadRect_10078_3.png"
+  },
+  "12002061": {
+   "path": "assets/fashions/HeadRect_10106_1.png"
+  },
+  "12002062": {
+   "path": "assets/fashions/HeadRect_10106_2.png"
+  },
+  "12002063": {
+   "path": "assets/fashions/HeadRect_10106_3.png"
+  },
+  "12002071": {
+   "path": "assets/fashions/HeadRect_10107_1.png"
+  },
+  "12002072": {
+   "path": "assets/fashions/HeadRect_10107_2.png"
+  },
+  "12002073": {
+   "path": "assets/fashions/HeadRect_10107_3.png"
+  },
+  "12002081": {
+   "path": "assets/fashions/HeadRect_10108_1.png"
+  },
+  "12002082": {
+   "path": "assets/fashions/HeadRect_10108_2.png"
+  },
+  "12002083": {
+   "path": "assets/fashions/HeadRect_10108_3.png"
+  },
+  "12001751": {
+   "path": "assets/fashions/HeadRect_10075_1.png"
+  },
+  "12001752": {
+   "path": "assets/fashions/HeadRect_10075_2.png"
+  },
+  "12001753": {
+   "path": "assets/fashions/HeadRect_10075_3.png"
+  },
+  "12001941": {
+   "path": "assets/fashions/HeadRect_10094_1.png"
+  },
+  "12001942": {
+   "path": "assets/fashions/HeadRect_10094_2.png"
+  },
+  "12001943": {
+   "path": "assets/fashions/HeadRect_10094_3.png"
+  },
+  "12001931": {
+   "path": "assets/fashions/HeadRect_10093_1.png"
+  },
+  "12001932": {
+   "path": "assets/fashions/HeadRect_10093_2.png"
+  },
+  "12001933": {
+   "path": "assets/fashions/HeadRect_10093_3.png"
+  },
+  "12002091": {
+   "path": "assets/fashions/HeadRect_10109_1.png"
+  },
+  "12002092": {
+   "path": "assets/fashions/HeadRect_10109_2.png"
+  },
+  "12002093": {
+   "path": "assets/fashions/HeadRect_10109_3.png"
+  },
+  "12002101": {
+   "path": "assets/fashions/HeadRect_10110_1.png"
+  },
+  "12002102": {
+   "path": "assets/fashions/HeadRect_10110_2.png"
+  },
+  "12002103": {
+   "path": "assets/fashions/HeadRect_10110_3.png"
+  },
+  "12001061": {
+   "path": "assets/fashions/HeadRect_10006_1.png"
+  },
+  "12001062": {
+   "path": "assets/fashions/HeadRect_10006_2.png"
+  },
+  "12001063": {
+   "path": "assets/fashions/HeadRect_10006_3.png"
+  },
+  "12001761": {
+   "path": "assets/fashions/HeadRect_10076_1.png"
+  },
+  "12001762": {
+   "path": "assets/fashions/HeadRect_10076_2.png"
+  },
+  "12001763": {
+   "path": "assets/fashions/HeadRect_10076_3.png"
+  },
+  "12002111": {
+   "path": "assets/fashions/HeadRect_10111_1.png"
+  },
+  "12002112": {
+   "path": "assets/fashions/HeadRect_10111_2.png"
+  },
+  "12002113": {
+   "path": "assets/fashions/HeadRect_10111_3.png"
+  },
+  "12002121": {
+   "path": "assets/fashions/HeadRect_10112_1.png"
+  },
+  "12002122": {
+   "path": "assets/fashions/HeadRect_10112_2.png"
+  },
+  "12002123": {
+   "path": "assets/fashions/HeadRect_10112_3.png"
+  },
+  "12002131": {
+   "path": "assets/fashions/HeadRect_10113_1.png"
+  },
+  "12002132": {
+   "path": "assets/fashions/HeadRect_10113_2.png"
+  },
+  "12002133": {
+   "path": "assets/fashions/HeadRect_10113_3.png"
+  },
+  "12002141": {
+   "path": "assets/fashions/HeadRect_10114_1.png"
+  },
+  "12002142": {
+   "path": "assets/fashions/HeadRect_10114_2.png"
+  },
+  "12002143": {
+   "path": "assets/fashions/HeadRect_10114_3.png"
+  },
+  "12002151": {
+   "path": "assets/fashions/HeadRect_10115_1.png"
+  },
+  "12002152": {
+   "path": "assets/fashions/HeadRect_10115_2.png"
+  },
+  "12002153": {
+   "path": "assets/fashions/HeadRect_10115_3.png"
+  },
+  "12001741": {
+   "path": "assets/fashions/HeadRect_10074_1.png"
+  },
+  "12001742": {
+   "path": "assets/fashions/HeadRect_10074_2.png"
+  },
+  "12001743": {
+   "path": "assets/fashions/HeadRect_10074_3.png"
+  },
+  "12001831": {
+   "path": "assets/fashions/HeadRect_10083_1.png"
+  },
+  "12001832": {
+   "path": "assets/fashions/HeadRect_10083_2.png"
+  },
+  "12001833": {
+   "path": "assets/fashions/HeadRect_10083_3.png"
+  },
+  "12001441": {
+   "path": "assets/fashions/HeadRect_10012_1.png"
+  },
+  "12001442": {
+   "path": "assets/fashions/HeadRect_10012_2.png"
+  },
+  "12001443": {
+   "path": "assets/fashions/HeadRect_10012_3.png"
+  },
+  "12002161": {
+   "path": "assets/fashions/HeadRect_10116_1.png"
+  },
+  "12002162": {
+   "path": "assets/fashions/HeadRect_10116_2.png"
+  },
+  "12002163": {
+   "path": "assets/fashions/HeadRect_10116_3.png"
+  },
+  "12002171": {
+   "path": "assets/fashions/HeadRect_10117_1.png"
+  },
+  "12002172": {
+   "path": "assets/fashions/HeadRect_10117_2.png"
+  },
+  "12002173": {
+   "path": "assets/fashions/HeadRect_10117_3.png"
+  },
+  "12002201": {
+   "path": "assets/fashions/HeadRect_10120_1.png"
+  },
+  "12002202": {
+   "path": "assets/fashions/HeadRect_10120_2.png"
+  },
+  "12002203": {
+   "path": "assets/fashions/HeadRect_10120_3.png"
+  },
+  "12002191": {
+   "path": "assets/fashions/HeadRect_10119_1.png"
+  },
+  "12002192": {
+   "path": "assets/fashions/HeadRect_10119_2.png"
+  },
+  "12002193": {
+   "path": "assets/fashions/HeadRect_10119_3.png"
+  },
+  "12002181": {
+   "path": "assets/fashions/HeadRect_10118_1.png"
+  },
+  "12002182": {
+   "path": "assets/fashions/HeadRect_10118_2.png"
+  },
+  "12002183": {
+   "path": "assets/fashions/HeadRect_10118_3.png"
+  },
+  "12002211": {
+   "path": "assets/fashions/HeadRect_10121_1.png"
+  },
+  "12002212": {
+   "path": "assets/fashions/HeadRect_10121_2.png"
+  },
+  "12002213": {
+   "path": "assets/fashions/HeadRect_10121_3.png"
+  },
+  "12002221": {
+   "path": "assets/fashions/HeadRect_10122_1.png"
+  },
+  "12002222": {
+   "path": "assets/fashions/HeadRect_10122_2.png"
+  },
+  "12002223": {
+   "path": "assets/fashions/HeadRect_10122_3.png"
+  },
+  "12002231": {
+   "path": "assets/fashions/HeadRect_10123_1.png"
+  },
+  "12002232": {
+   "path": "assets/fashions/HeadRect_10123_2.png"
+  },
+  "12002233": {
+   "path": "assets/fashions/HeadRect_10123_3.png"
+  },
+  "12002241": {
+   "path": "assets/fashions/HeadRect_10124_1.png"
+  },
+  "12002242": {
+   "path": "assets/fashions/HeadRect_10124_2.png"
+  },
+  "12002243": {
+   "path": "assets/fashions/HeadRect_10124_3.png"
+  }
+ },
+ "account_items": {
+  "21180001": {
+   "path": "assets/account/Frame_1001.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21180002": {
+   "path": "assets/account/Frame_1002.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21180003": {
+   "path": "assets/account/Frame_1003.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181001": {
+   "path": "assets/account/Frame_2004.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181002": {
+   "path": "assets/account/Frame_2005.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181003": {
+   "path": "assets/account/Frame_2006.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181004": {
+   "path": "assets/account/Frame_2001.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181005": {
+   "path": "assets/account/Frame_2002.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181006": {
+   "path": "assets/account/Frame_2003.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181007": {
+   "path": "assets/account/Frame_2007.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181008": {
+   "path": "assets/account/Frame_2008.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181009": {
+   "path": "assets/account/Frame_2009.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181010": {
+   "path": "assets/account/Frame_2010.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181011": {
+   "path": "assets/account/Frame_2011.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181012": {
+   "path": "assets/account/Frame_2012.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181013": {
+   "path": "assets/account/Frame_2013.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181014": {
+   "path": "assets/account/Frame_2014.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181015": {
+   "path": "assets/account/Frame_2015.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181101": {
+   "path": "assets/account/Frame_4001.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181102": {
+   "path": "assets/account/Frame_4002.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181103": {
+   "path": "assets/account/Frame_4003.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181104": {
+   "path": "assets/account/Frame_5004.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181105": {
+   "path": "assets/account/Frame_4002.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181106": {
+   "path": "assets/account/Frame_4004.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181107": {
+   "path": "assets/account/Frame_5005.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181108": {
+   "path": "assets/account/Frame_4005.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181201": {
+   "path": "assets/account/Frame_3001.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181202": {
+   "path": "assets/account/Frame_3002.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181203": {
+   "path": "assets/account/Frame_3003.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181204": {
+   "path": "assets/account/Frame_3004.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181205": {
+   "path": "assets/account/Frame_3005.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181206": {
+   "path": "assets/account/Frame_3006.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181207": {
+   "path": "assets/account/Frame_3007.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181208": {
+   "path": "assets/account/Frame_3008.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181209": {
+   "path": "assets/account/Frame_3009.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181210": {
+   "path": "assets/account/Frame_3010.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181211": {
+   "path": "assets/account/Frame_3011.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181212": {
+   "path": "assets/account/Frame_3012.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181213": {
+   "path": "assets/account/Frame_3013.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181214": {
+   "path": "assets/account/Frame_3014.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181215": {
+   "path": "assets/account/Frame_3015.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181216": {
+   "path": "assets/account/Frame_3016.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181217": {
+   "path": "assets/account/Frame_3017.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181218": {
+   "path": "assets/account/Frame_3018.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181219": {
+   "path": "assets/account/Frame_3019.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181220": {
+   "path": "assets/account/Frame_3020.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181221": {
+   "path": "assets/account/Frame_3021.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181222": {
+   "path": "assets/account/Frame_3022.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181223": {
+   "path": "assets/account/Frame_3023.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181224": {
+   "path": "assets/account/Frame_3024.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181225": {
+   "path": "assets/account/Frame_3025.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181226": {
+   "path": "assets/account/Frame_3026.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181227": {
+   "path": "assets/account/Frame_3027.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181228": {
+   "path": "assets/account/Frame_3028.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181229": {
+   "path": "assets/account/Frame_3029.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181230": {
+   "path": "assets/account/Frame_3030.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181231": {
+   "path": "assets/account/Frame_3031.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181232": {
+   "path": "assets/account/Frame_3032.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181233": {
+   "path": "assets/account/Frame_3033.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181234": {
+   "path": "assets/account/Frame_3034.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181235": {
+   "path": "assets/account/Frame_3035.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181236": {
+   "path": "assets/account/Frame_3036.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181237": {
+   "path": "assets/account/Frame_3037.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181238": {
+   "path": "assets/account/Frame_3038.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181239": {
+   "path": "assets/account/Frame_3039.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181281": {
+   "path": "assets/account/Frame_3101.png",
+   "type": 109,
+   "effect_value": null
+  },
+  "21181301": {
+   "path": "assets/account/Frame_5001.png",
+   "type": 109,
+   "effect_value": "1"
+  },
+  "21181302": {
+   "path": "assets/account/Frame_5002.png",
+   "type": 109,
+   "effect_value": "1"
+  },
+  "21181303": {
+   "path": "assets/account/Frame_5003.png",
+   "type": 109,
+   "effect_value": "1"
+  },
+  "21182001": {
+   "path": "assets/account/HeadRect_20031_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182002": {
+   "path": "assets/account/HeadRect_20045_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182003": {
+   "path": "assets/account/HeadRect_20054_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182004": {
+   "path": "assets/account/HeadRect_20062_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182005": {
+   "path": "assets/account/HeadRect_20082_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182006": {
+   "path": "assets/account/HeadRect_20098_2.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182007": {
+   "path": "assets/account/HeadRect_20098_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182008": {
+   "path": "assets/account/HeadRect_20097_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182009": {
+   "path": "assets/account/HeadRect_20096_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182010": {
+   "path": "assets/account/HeadRect_20099_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182011": {
+   "path": "assets/account/HeadRect_20100_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182012": {
+   "path": "assets/account/HeadRect_20089_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182013": {
+   "path": "assets/account/HeadRect_20091_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182014": {
+   "path": "assets/account/HeadRect_20103_2.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182015": {
+   "path": "assets/account/HeadRect_20102_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182016": {
+   "path": "assets/account/HeadRect_20103_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182017": {
+   "path": "assets/account/HeadRect_20104_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182018": {
+   "path": "assets/account/HeadRect_20094_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182019": {
+   "path": "assets/account/HeadRect_20093_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182020": {
+   "path": "assets/account/HeadRect_20111_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182021": {
+   "path": "assets/account/HeadRect_20112_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182022": {
+   "path": "assets/account/HeadRect_20113_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182023": {
+   "path": "assets/account/HeadRect_20083_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182024": {
+   "path": "assets/account/HeadRect_20118_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182025": {
+   "path": "assets/account/HeadRect_20119_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182026": {
+   "path": "assets/account/HeadRect_20120_1.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21182027": {
+   "path": "assets/account/HeadRect_20120_2.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21183001": {
+   "path": "assets/account/HeadRect_30001.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21183002": {
+   "path": "assets/account/HeadRect_30002.png",
+   "type": 108,
+   "effect_value": null
+  },
+  "21183003": {
+   "path": "assets/account/HeadRect_30003.png",
+   "type": 108,
+   "effect_value": null
+  }
+ },
+ "brand": {
+  "logo": "assets/brand/starfall-logo.png",
+  "noise": "assets/ui/perlinNoise.png",
+  "primary_button": "assets/ui/primary-button.png"
+ },
+ "mascot": {
+  "idle": {
+   "path": "assets/mascot/minigame017_gugu-idle.webp",
+   "poster": "assets/mascot/minigame017_gugu-idle.png",
+   "durationMs": 1366
+  },
+  "reactions": [
+   {
+    "name": "jump_all",
+    "path": "assets/mascot/minigame017_gugu-jump_all.webp",
+    "durationMs": 1699
+   },
+   {
+    "name": "relive",
+    "path": "assets/mascot/minigame017_gugu-relive.webp",
+    "durationMs": 1366
+   },
+   {
+    "name": "die",
+    "path": "assets/mascot/minigame017_gugu-die.webp",
+    "durationMs": 1333
+   }
+  ]
+ },
+ "files": {
+  "assets/account/Frame_1001.png": "85736ced1c0fb681f760219279f698ba7c40acc4090988f88dee943edfbab0f4",
+  "assets/account/Frame_1002.png": "5f44bf9bc917bd33ca4d378201a6bce0d41052269716d0c4ef6424dd1886da8c",
+  "assets/account/Frame_1003.png": "8146b96a1b0599ef41f5005c28248d709e46b58ee0f8f22d5af7acf81c1434e5",
+  "assets/account/Frame_2001.png": "63210320e63fa4e8f613e8782df84858e7f843f819b211636a2d1055651583ca",
+  "assets/account/Frame_2002.png": "81919fa7c6c9ad2ddfd51bc22c8624b72ace3587060a556aa08a5cda1f6c17f9",
+  "assets/account/Frame_2003.png": "055a3dc3b61d02b97c13274377249f663d2cb0961c31079c2801c443f75b0c1f",
+  "assets/account/Frame_2004.png": "06d2f2245857299a220caf34336a61ccce6a5446000db06d3349fafd580a5eae",
+  "assets/account/Frame_2005.png": "9eb9c1bd9f3483b2d68b254be5e25cb6b44b897e2c62ecea7a0cdef46ed0bb27",
+  "assets/account/Frame_2006.png": "db90e17665787d7e17578c2a16c7e668377407c0d046fcd91950aa2542765940",
+  "assets/account/Frame_2007.png": "ea786be1aeb4e10cee308406b68a9c237b75d318b3b3d867b2a77ade306cc35c",
+  "assets/account/Frame_2008.png": "28a7874b1d851170be5d7ccf72fac27e8ebe8ef978f30f787584d0b519488db4",
+  "assets/account/Frame_2009.png": "01bc7b6045acc199cf1d2946f243d348e82b2689d1e0c1fcaf106aac79a2d482",
+  "assets/account/Frame_2010.png": "2392ae1c815f0b028ab9ffaab4953b19ed748bd00432557a10edcd25f252588c",
+  "assets/account/Frame_2011.png": "aec116e6492fbef95f606b2cf0dd66a7c9bb1ef8cbc3099d2d58a63ff59ff64d",
+  "assets/account/Frame_2012.png": "72271e68d0e05537f2bfe50b9194f6090c3604d72301d70ae9d89b863927d17b",
+  "assets/account/Frame_2013.png": "3d3878a72ea1840a86c63e270daf9ea3243b0a174c4950b985311b05c4dc4357",
+  "assets/account/Frame_2014.png": "5557e74e0469e8e9a2a925879a8ea419da2fae2df35a96e1602f49906c6bded9",
+  "assets/account/Frame_2015.png": "8c1923df6f11898c5b510129105dbc467aef80e9f9cc22a786dcad5360bb3a25",
+  "assets/account/Frame_3001.png": "2da26bd0bec6f1fc2ad661365a1b92a4c3fbe8428a1ab10ef273fe1e5fa24add",
+  "assets/account/Frame_3002.png": "eb0079cdc621c068690d05ebc7e01cf056b783c23bac823fddd56e5eb552979e",
+  "assets/account/Frame_3003.png": "e3ab43e00ce11df2b348a4d9b07143218b1ade98daf97aecb1581eabcd57e2bf",
+  "assets/account/Frame_3004.png": "65c88445bd24fee5d98e8007fce8eaaf568eeda8bb248e2888b8dbfa7695b9b0",
+  "assets/account/Frame_3005.png": "d5de0844b9d26060f40d003fd5f6edbba604e795deeeb5b8897e0f28e40aa60e",
+  "assets/account/Frame_3006.png": "1c86a0be98c73e24f629a99f742785f6d9159bb75c274b259698ededda8d8f6a",
+  "assets/account/Frame_3007.png": "a5bdcb92d508eeebd74f7acfac3523d57198b020ce3ec97b835bd320f6a6e3f5",
+  "assets/account/Frame_3008.png": "8c27b5ad05c56ce0e464077ca9de3133104b4b777399fbadd686ee6517cb76c5",
+  "assets/account/Frame_3009.png": "b7e30c454b450b68c2794be29ef23780b5c34ec3fdc7a9297c86e4b0e5437150",
+  "assets/account/Frame_3010.png": "80ed7faaa429f96c064003c5f91cb85a4cb76239444c964bb47e92e03fd793b3",
+  "assets/account/Frame_3011.png": "0cc298430bb9c42b6e4a702e48df25ab44bc11f038a8defc9e0d7833486c3e78",
+  "assets/account/Frame_3012.png": "b6cc3ea191d099541b225a64e78ee20ff7eba1aad0a1ba92cbf81ca0466d86e7",
+  "assets/account/Frame_3013.png": "519fe13f4561c987f04ad97f9869f47c0f0543eaaed4f7f80786154f997be969",
+  "assets/account/Frame_3014.png": "be7b0812b447f5b6bddd69865ca1c89420605974b34f4aa88ae1e6445c7bf055",
+  "assets/account/Frame_3015.png": "19ba4d7069cb0068f3dd8068423b21c26a77f95b831d2e8fbccc5c450f865d05",
+  "assets/account/Frame_3016.png": "c8bfa71a7a19ee17a3b149e90ab5e2f0635801feb85fc5020f033917e6507075",
+  "assets/account/Frame_3017.png": "f835dadf9fcb9c8731109204d349a1fc2986a0284db19d81f1a9842bde0ddaa9",
+  "assets/account/Frame_3018.png": "9fd7c4eb70aef61dbc59075bf3231da746fee677ac746921304c104aa7a7429b",
+  "assets/account/Frame_3019.png": "2675237bdfad20c70cce696d806fd32cd269f142a159fbffed3b6467318919c3",
+  "assets/account/Frame_3020.png": "c9d63984203179f7921f2681595398456965afeb28c405debb4543b1b59d6241",
+  "assets/account/Frame_3021.png": "1b0af923844eed9ee88e0c9fab7b860a74951cfe04a0ee75f1c1d9a382343734",
+  "assets/account/Frame_3022.png": "c030baaa50657ce122a0869e2779cf2a83a6756273c6fdd460ccae40e3879dfc",
+  "assets/account/Frame_3023.png": "743524c66eab05cbb632def9758d127a27d632044fc9de81217c2a70636e1f48",
+  "assets/account/Frame_3024.png": "e44c5c94d1e429573f7e3b36649b8bddbafbbc596e0cb9b514a2099d496ef76d",
+  "assets/account/Frame_3025.png": "f3ae8c28193d2becb3f77ba413c634198496a4dc4a334d390eeb2a996e71e0e9",
+  "assets/account/Frame_3026.png": "bea026c261f15aaa6c9504465474af37211c089a6afc4f7ab660c7ba03cbffe1",
+  "assets/account/Frame_3027.png": "f4322fbbc48a5481dff2cb0dfef54baca977adbf233e4214e1083919c41c8a7d",
+  "assets/account/Frame_3028.png": "d14ec24e5df1151a53df1b38684fb8398ce8c13216e7519c9047a5363b58ca84",
+  "assets/account/Frame_3029.png": "c5a01dba9cea0ef6f86ed80e273c005f7f99e1c895497590e321c771d5b91a46",
+  "assets/account/Frame_3030.png": "a6c40a6af9dccd90c7dd7f429ffc87dba6e2e4985fedf10749db050084b89409",
+  "assets/account/Frame_3031.png": "e1a5ba88f5468b408069082569112f8ffc92becdb721d561bc5ddeb4397abefb",
+  "assets/account/Frame_3032.png": "ae71d1acfe4e139cfe1c0f123babc73029720074129ef4a21f39bb5cf8efa7ed",
+  "assets/account/Frame_3033.png": "1b548e0198e62798b21f199e6ff7f1c5ac433b993a81a2489d1e390b2ebe81a6",
+  "assets/account/Frame_3034.png": "e0484f44020381149a73976dddca219668d88da98dc8a08d24c5d6e7c3e880e7",
+  "assets/account/Frame_3035.png": "5b63e639c64544fc9f7ca626f476eeaad696185382d753ba2f718ad24c232297",
+  "assets/account/Frame_3036.png": "9550056be83fd2be276ebdeb6856b068ec58ddd3308fc0c55e24343e315d91d8",
+  "assets/account/Frame_3037.png": "745c847215d29c0c373e56b6576c49471a204af4305eea3c8b9a442a6da57e79",
+  "assets/account/Frame_3038.png": "bbd9beed473d6407ee5ee3da60922f2ba1fb3fff0e7849058d6e14230f26c2ea",
+  "assets/account/Frame_3039.png": "74c8c7c8da1527f666720d32c8b29562d793e47e2db37ffe1d8838e23dba1270",
+  "assets/account/Frame_3101.png": "62391fdd7a9b03943d87fa6ff34280d896b693ceca48b9cc5e3b3bea794a2537",
+  "assets/account/Frame_4001.png": "c1e5340f9ce740709221cdfb8f3644c68604b3b2971ce3bc70a55dcc58ffee5f",
+  "assets/account/Frame_4002.png": "529e817f74aa052ec2d01f73623d9d20bfeeff19a817ccb39076fb46ce8ee3d9",
+  "assets/account/Frame_4003.png": "a8c66996812fe5a7868b9bcf050b2aad971591e511677f8b69b41aa6b7d32261",
+  "assets/account/Frame_4004.png": "f09ef2d6d80dbdb1610f1c724da057548eb387b9c94778c909872cbe16c9ee81",
+  "assets/account/Frame_4005.png": "afa8dec7b230b3fb3cac78ead1ab97a285c12c959170546aec9328c77741dd5b",
+  "assets/account/Frame_5001.png": "c1662f6be955797001b06714e531cad07fa8ced351bcb6c8b80a1a0577fffa1e",
+  "assets/account/Frame_5002.png": "d0cf7e67f2c302779e87b4c8d0c010fed939bbc8660454f160c260a9fe17b6ad",
+  "assets/account/Frame_5003.png": "eb3a1f8830d18e71b383b16e30b1dd563806d1de7462e1a3f6076f31cec3e9ff",
+  "assets/account/Frame_5004.png": "53dd960803c1f6fe3a9979a3b1f25bb5fcabf4279a29c4f72b629f1312a8e697",
+  "assets/account/Frame_5005.png": "772c14f52957786f82d6bde73fca3d9d750c09f83d4f8623863d2f93216e2cdc",
+  "assets/account/HeadRect_20031_1.png": "a8c827751f5d42b0529b37454ebfc3e76125da0a043c66f33fe4f1efd4743845",
+  "assets/account/HeadRect_20045_1.png": "b44f4d162ce034d05ec543f40999fdea34f9a5a7d38fd2016caecb89e541c2e4",
+  "assets/account/HeadRect_20054_1.png": "255dffa87244d467580dc48b4aa99fa24da9ec4b0efdcb7fced6f50613ac5775",
+  "assets/account/HeadRect_20062_1.png": "e990f8450168cb0dff2a5085625599ae65867b85b70b3681c065b8d6563bc825",
+  "assets/account/HeadRect_20082_1.png": "e70eb3a8095b8058e8322fae89652ebe259cc9c25db90fcdd6f69bab6276d75b",
+  "assets/account/HeadRect_20083_1.png": "bcb961e68aefd5ebad2f7a10efbce5c2541f8370735f59ae3f6c65ae0f163963",
+  "assets/account/HeadRect_20089_1.png": "ab80944b8d302896150c55aaebc098de78510270dea4a54e2036adedb9c091c8",
+  "assets/account/HeadRect_20091_1.png": "06bef83f8fa0b4a0fd32c8ed9dab6e71d68523b6503b4d34a417f44bfbda5cce",
+  "assets/account/HeadRect_20093_1.png": "1e58e7a8f61d03f42e54b326ce5d863bd6cca461f0d59fd3c501dd3209bdffb8",
+  "assets/account/HeadRect_20094_1.png": "5b3522811e906726e7be34b8b747a23e801856f5ca1d8c63e685dae386d58785",
+  "assets/account/HeadRect_20096_1.png": "7a1ad4a253b8d2932d139e74f9c3364b1da8b6bb426617b7bd6855b1da08abc9",
+  "assets/account/HeadRect_20097_1.png": "f70d7132883a79f5299ba8b898b335a286617c5e230effd6e4f2590daf36b6a6",
+  "assets/account/HeadRect_20098_1.png": "595c1ea20affc45f86840af49bc2389ebdfc2a0a840829a4175cf81a5886c14f",
+  "assets/account/HeadRect_20098_2.png": "8beb3743f3d28ba9bbe19b20969af2cae7fae1d4ce04e099fceff96d60c3e45d",
+  "assets/account/HeadRect_20099_1.png": "cd561aab4c3f8bab61e92c79b5520ba8e727733bb316e3aa164b4edecbf846e1",
+  "assets/account/HeadRect_20100_1.png": "1e0d8238180b320b4f507f9e96c697848e74487aef2d16de1747fa98c922075d",
+  "assets/account/HeadRect_20102_1.png": "7d0c7878aa1941ff2d2ea3a4828bc6b5c0c7076e955446a94989ca6cf32185b8",
+  "assets/account/HeadRect_20103_1.png": "5dcfb0d96022ebfc80ac8139aae78fedadc005d16e06e067cc92810d8c3e0041",
+  "assets/account/HeadRect_20103_2.png": "4d097eb9b2a1b155617d85e4d317be723886089742bd5309cfaf543977b61acf",
+  "assets/account/HeadRect_20104_1.png": "e98aca1f2f030fe1552d98fbfdb948de310a2a598ab0650ccb1090aba51651a1",
+  "assets/account/HeadRect_20111_1.png": "20e6f2116b0a0bef10d0933b5a3936d13b35dc03bebda9a965fe977a8f98aea2",
+  "assets/account/HeadRect_20112_1.png": "4d73fc897b5a8759d8600ffc25e4ba930fe61cae9c6c753e76cd4e2f50a8f117",
+  "assets/account/HeadRect_20113_1.png": "88da8a1ce06e0fb2fdcafc4807434f4255f432cff50a0dfaef640ec5a71dee3a",
+  "assets/account/HeadRect_20118_1.png": "bc06e54d5227d7183ee9256cad093d485b804898052a3573e75cc7a425a957fe",
+  "assets/account/HeadRect_20119_1.png": "dff3cad48b78039a465c922bafc6f6f96246223f28b14efc6d2645e08a3cdbc4",
+  "assets/account/HeadRect_20120_1.png": "69a00812af5760aca0011b837ad8f40e826e0805c15fd2c098275ebdcee527bd",
+  "assets/account/HeadRect_20120_2.png": "2c6a2d2977a72c6bc5e5c65510182aadf7835fffbff40c3aba2c349fae466836",
+  "assets/account/HeadRect_30001.png": "df3f74d1e70efb055c0f0400c04bb6cf45c59dad19870206f697648e3b44679a",
+  "assets/account/HeadRect_30002.png": "16ff0b885076a9fb84aebf112c01c407a3d67daed2ef4d3408936a2c75961bd1",
+  "assets/account/HeadRect_30003.png": "8f474600ea67d34c32ae304392daa6b952eb1641a7b6ae08274b3b1a1e131d7c",
+  "assets/brand/starfall-logo.png": "2c09127a12f081e128f3aa71ff4220b4a4da63ebecf1cd4cd1a1190483d3292a",
+  "assets/fashions/HeadRect_10001_1.png": "c79daf756ee9406a86315a40412d5d19ce77eaffeab0ae8f41ebc09da0f4d190",
+  "assets/fashions/HeadRect_10001_2.png": "373fde1f1e8a7a7ef8956c3b303660bb571f89da6bc094ccc163278c5f645723",
+  "assets/fashions/HeadRect_10002_1.png": "0ebf65f6a971132dc0cc54af20c43ecca7b1ca6ab8f4822e0fbdd3016c411941",
+  "assets/fashions/HeadRect_10002_2.png": "7a78f4ff1eb50162e8e12daef5fb34e890981a9318cee9e12fbecd4cdf788466",
+  "assets/fashions/HeadRect_10003_1.png": "b5255547e3f2999a55098b8387b96e7b8d47ed0ead6d2e741746b0840147ab77",
+  "assets/fashions/HeadRect_10003_2.png": "000a5a7bea19d8f66587cbe0edc37963c9bf1a2225e5b54da88be9efb44c06a3",
+  "assets/fashions/HeadRect_10004_1.png": "b534e32dbf830b14d4f1041e35b0180897ba889c88620a2342929489e82ba760",
+  "assets/fashions/HeadRect_10004_2.png": "616b39233ba4cc34c529dc6b2739ed41f589d12dba100076f9e9ee53fd312a9e",
+  "assets/fashions/HeadRect_10005_1.png": "a64e892f28f9b5fe737b0a5444316219b2859aa444da03a82f5de1404ace3606",
+  "assets/fashions/HeadRect_10005_2.png": "e5e2b191926c4005a7a1171c898ff44b7429b25bc12e9b868421d653eca1f74c",
+  "assets/fashions/HeadRect_10006_1.png": "7e5b5c08457afe007d34fc5ad252046241e34196892b47dacc0d3a2232ee811e",
+  "assets/fashions/HeadRect_10006_2.png": "284512f277f5483b867a5230d43c39bbd278b3d9c33f9ebae22dea431d0eb0ce",
+  "assets/fashions/HeadRect_10006_3.png": "5d75e610ec8079d5d0d3f0e8a10a7ad129ac6c7dd611859529808af5cb17c234",
+  "assets/fashions/HeadRect_10007_1.png": "f21f5bc353f5b631e82421687f413f6355dbfdd9cfb9fc5931284f3d04aedd43",
+  "assets/fashions/HeadRect_10007_2.png": "12f73342f3c64e252f29bc446d1d0a844bb0a41f4a2a27125ec48ebb6bb24c37",
+  "assets/fashions/HeadRect_10007_3.png": "d0b183737ddd1dd76ad3159be19204fff2e65b84fefbc41549b6ee0ec29068c1",
+  "assets/fashions/HeadRect_10008_1.png": "91321adf8c3dde0d452acbb3e3a04b5cbf51dd3c6122ecba5aeef5719d7f5a0a",
+  "assets/fashions/HeadRect_10008_2.png": "ffb80cd29c78d21e78a373981777cf151ca0b50a01dbf582c7d9bc4b3505939d",
+  "assets/fashions/HeadRect_10009_1.png": "789ca287f9c1f3ad278546026b0ebdac6036e0b1818246361867b150931df6d3",
+  "assets/fashions/HeadRect_10009_2.png": "ed0fdc2b8c092fde5250e68c5532ae5345afe8e707e9fe573896c896e82951a0",
+  "assets/fashions/HeadRect_10009_3.png": "e066bd644a38a0cb3b7b8730dbbf484ae31546a0e1159db085977bb4d9170c3a",
+  "assets/fashions/HeadRect_10010_1.png": "6be737e05d06e8af485595992dfed68c123c678f75b90312e73ff6b39f0dbea8",
+  "assets/fashions/HeadRect_10010_2.png": "29a360d59f3cac8c6f9571e9c4e178c45908280f867322de75df3b4dbe2d7a82",
+  "assets/fashions/HeadRect_10010_3.png": "d4f598b43b192a56ba72f935ab95d2cbd12468acc78ee3c404ffcae0c615bd8b",
+  "assets/fashions/HeadRect_10011_1.png": "71e7fb157ad2be545b18c4d9085eb977b9a1d7f259588c448b96333b757c1746",
+  "assets/fashions/HeadRect_10011_2.png": "69e83d856186fbe0aacc3587239bdee8a3bbeea82bc8670d506df7b344a8834d",
+  "assets/fashions/HeadRect_10011_3.png": "810ffa35a834115488a7b9103674fc7c03e918c269096a9b226364133aa445ec",
+  "assets/fashions/HeadRect_10012_1.png": "7d900bd3bc8fd9931980475fdde21df3de13d9828eb45241222d1f9db75f6d8a",
+  "assets/fashions/HeadRect_10012_2.png": "6bc92add7424b0ece4fe945b28e46e24cbd79853b1142a938d31d4b1590e9695",
+  "assets/fashions/HeadRect_10012_3.png": "cbc81f763513125a4766b7f694dd7de34159f1a5a9ce92c68c0d731394abf225",
+  "assets/fashions/HeadRect_10013_1.png": "ee59074c0deb3ebb09c26b3e4a8130499d92ce38cebc40646b78f958a4139c60",
+  "assets/fashions/HeadRect_10013_2.png": "c3e4bec33b4365617b291418ace54d85ac01708799ff7ec8de4c1f1c01b9b15c",
+  "assets/fashions/HeadRect_10013_3.png": "92f882b4021d10ba597d6cef596f5b8dfa88865ec437dc935b033f324a8b1d49",
+  "assets/fashions/HeadRect_10014_1.png": "309c779135df72e6caa7c563b3d4079e6da44466ecbf35391ff288e2a6aef4a1",
+  "assets/fashions/HeadRect_10014_2.png": "cc08cc957605954b1c24ea18071cff536fb99f75957c168a686a526de3a6b932",
+  "assets/fashions/HeadRect_10014_3.png": "36ecd20e5e9c5a310e918342d1d0e559a290011f4740097b91728a5e08e7874a",
+  "assets/fashions/HeadRect_10015_1.png": "ed4be51eeb8db0b752146f305fd1eb908131c08f017d8cd7436f90530dc5573c",
+  "assets/fashions/HeadRect_10015_2.png": "d30bdbf5aa4c60680fec8c0080b2cab2841a83a9b4ad37470a459e3b74209f96",
+  "assets/fashions/HeadRect_10016_1.png": "7d738f8bffcffa8dc7cccd9754aa7d2fcc671ad3d573d2d59edba72378810c20",
+  "assets/fashions/HeadRect_10016_2.png": "a4bfd1e19f24c46c31b2e61ec088f6cd1b991af15954a8760f46cfbba9b228e4",
+  "assets/fashions/HeadRect_10016_3.png": "488883558d984f648db00907f6eff1f6224c4296575cc80a82f771169d472c8e",
+  "assets/fashions/HeadRect_10016_4.png": "a7beca03dd914ebb1dd196bba4c83dcbd4391711cff197936032698b60e2f134",
+  "assets/fashions/HeadRect_10017_1.png": "082d5081f580d0e64ccdc77e7d0d498ba7b7b8dbf6e9bdb4ef0bad4b5c883bc5",
+  "assets/fashions/HeadRect_10017_2.png": "9b8edf774de58b6948a6fb642b6b8d6b26dd3c5ecfc0137af1249fdfa37c80e6",
+  "assets/fashions/HeadRect_10017_3.png": "eda5e2b1b04c3afdd3c16f0c9c0917695f5be3361730c895eaa9a0f54cfdedd7",
+  "assets/fashions/HeadRect_10018_1.png": "c55ece4012e600dc473f8f17d000b4510bcad25579bf85397daa4230f1235eda",
+  "assets/fashions/HeadRect_10018_2.png": "1276b1d38dd33f1140c8ea4353fbf5fd2a0821444cc4de2eacc3c038cbd68415",
+  "assets/fashions/HeadRect_10018_3.png": "504e5d73366deb8a1be6dd5b6e8e1f41a224ead9c0bc36ecf80b199c62bdca29",
+  "assets/fashions/HeadRect_10018_4.png": "dd02e28cc4d360761a06839c1fe42601abf469268f9e848ee94861f180bb305f",
+  "assets/fashions/HeadRect_10019_1.png": "fdce7edd4a5566e1712f1a8fdf27ef5c22fe21049bd3a946556cd7a57feea49f",
+  "assets/fashions/HeadRect_10019_2.png": "f45f0d7515d7ee3d71233b18aa5ca88273497ec933d428b73dffcf93d96b93a4",
+  "assets/fashions/HeadRect_10020_1.png": "5b678198f06342af7697c05addb4eb89d0cf0f8e7ccae3e3ef73d4589471375e",
+  "assets/fashions/HeadRect_10020_2.png": "ac815b9ea1f9affa06753575f4f580160cd74d98c6075aa5e5f3de920130f90d",
+  "assets/fashions/HeadRect_10020_3.png": "fe0d43c27a5d0fed25efe4c049bde18d0bc91aaab88a6c5630295511b7cd3cfb",
+  "assets/fashions/HeadRect_10021_1.png": "b7f04c526cfb05d51f4dead7d332ef8dbcba22dfc527905ca50af07de9815cb1",
+  "assets/fashions/HeadRect_10021_2.png": "69bbcd1b7ef4afa6cd25e4dc131b1099828ed0eb0b3adf1326282cd92d5cc12f",
+  "assets/fashions/HeadRect_10022_1.png": "022e5bc426d6e527d38378854b8759bf3e199d301b0ec2afb73a807b531c8a58",
+  "assets/fashions/HeadRect_10022_2.png": "de50bfc1028d623bdf8962739a7b5fce9ec41d2cde66e7297072c7e2eb1d805d",
+  "assets/fashions/HeadRect_10024_1.png": "98d76df3500f94f7f964e05331588328df4ad182e6db86c55f3ac3aa4b8b89a0",
+  "assets/fashions/HeadRect_10024_2.png": "7e1acc8eb901a343b791a8e4b46c77a843887774eb90781d8b39bc2834ffbd49",
+  "assets/fashions/HeadRect_10025_1.png": "6c70763f16173791f83baac23d84dba4ac929437390f3fe83cf1b018f008e4ff",
+  "assets/fashions/HeadRect_10025_2.png": "f56babf2373fdc86d4163d8abb7447a03c3ca41590659c52fdc39e14a0a76f54",
+  "assets/fashions/HeadRect_10026_1.png": "839f4a2a01be368ef5363bbac8d9bd51741c53c62cfca2b852f481b33e19e4a6",
+  "assets/fashions/HeadRect_10026_2.png": "d660b80d60a9b05048cbb023060a4895948facc632b8cdd8a1249d5019ea1428",
+  "assets/fashions/HeadRect_10026_3.png": "de42cf58b244aec26a90c02db48728a4df5d517f2f328331137c72f8585045b5",
+  "assets/fashions/HeadRect_10027_1.png": "7774dfbc23c6718b51f5bf3db857670f2ad7a09aa5f701ecbe37f128a05799a5",
+  "assets/fashions/HeadRect_10027_2.png": "b48d2868d8db7ed3062a2a032413d910e8de73ee07706d9e8ef08a1f173767d6",
+  "assets/fashions/HeadRect_10027_3.png": "cc423f522324fc4d58440bb02e1a4fe1871c166910a83a368f943fa95b82339e",
+  "assets/fashions/HeadRect_10028_1.png": "d8deeb46dc2552f0ddef0628e62226d00c22121440402cdd32adb2a639f72c85",
+  "assets/fashions/HeadRect_10028_2.png": "d16254e9db89e6e5a46b1e96456e79c363cbad9862836f378e0d6b1aa8f44c72",
+  "assets/fashions/HeadRect_10028_3.png": "961d57e9b0457b76a92638cc64927ed95a5c010dd9ded870a1f5d4f3b196756d",
+  "assets/fashions/HeadRect_10029_1.png": "128c3595ed55b22f2a74472ebe5c1679039194669636ff643e8d6c3ff032ffc4",
+  "assets/fashions/HeadRect_10029_2.png": "cd69f36942219a2295559d6c631baba44655765074e4a13a9320431c61838923",
+  "assets/fashions/HeadRect_10029_3.png": "6028e69991c97bd08e5435a414cdbadcd5c10d4935526cfb4cca84a56081c3b5",
+  "assets/fashions/HeadRect_10030_1.png": "fcca0265a6d102ab23050d63204427065d8befd76c174861b578581301e3a298",
+  "assets/fashions/HeadRect_10030_2.png": "ccba3399473e60669ce3338440d60f20ebef8a49e115deeb54ec383d40cdee7e",
+  "assets/fashions/HeadRect_10030_3.png": "e7a4e22a0ec8f798491b14bbd33e6fc0238b3b1a8e2d45d1c81f82d5bf716642",
+  "assets/fashions/HeadRect_10031_1.png": "48787e3adfbd425527fe4dce631b106efb7cf8cdb1e49b301e6514fe0be948ad",
+  "assets/fashions/HeadRect_10031_2.png": "196f2c7d33d1aa1fd8cd39e2cac4fe5cee7c2bc2acc025f6fbe5da6e2aa72f07",
+  "assets/fashions/HeadRect_10031_3.png": "162dcf5844aaba21122cb2d811928b03fad9b4cbf8c0ecd90344751ec6d4a3ec",
+  "assets/fashions/HeadRect_10032_1.png": "ca42036fc376b2ba24b9456d2906882a7495b68f56a57525da506cd4f74efbd2",
+  "assets/fashions/HeadRect_10032_2.png": "789d50c6cb266891bb2eb96fbf5156770ec6c689abee617dd28747885a486838",
+  "assets/fashions/HeadRect_10032_3.png": "431e9cca3d95e30145104b471a10aa94ac709c8cefb580126640bdc791908388",
+  "assets/fashions/HeadRect_10033_1.png": "ee4e9e347f78d95a34690bf94fd04ae220a8723645c5f92543c05280a21fad8e",
+  "assets/fashions/HeadRect_10033_2.png": "168e90d5e1246b93aa3ee8a4c451e5e45f1e1d290ac9cf55166aea9fa636a1e9",
+  "assets/fashions/HeadRect_10033_3.png": "3edbaf5df693edad6394bd58cc60c0aeebf3808507a9ff5a57aa1d0a7f140f0f",
+  "assets/fashions/HeadRect_10034_1.png": "96d67c7d4f789771c49322ae061b28604f98cbd6fd2350d578f989353d826ac6",
+  "assets/fashions/HeadRect_10034_2.png": "5c0813296042f0985b0280690d497a8824f9a321ea9cd050d4bd51043a154900",
+  "assets/fashions/HeadRect_10035_1.png": "96996d229a4735711cd657e3346c6fb8ea5fe855b3e4603e94d02b43518da34c",
+  "assets/fashions/HeadRect_10035_2.png": "f7d85ebd3b71640d81c28c69bb69df17dc8c53e214a9f422defd1c8709f9b83c",
+  "assets/fashions/HeadRect_10036_1.png": "fbecc8b13050b7d09c845fa33c3a83c1f8e73d005d4bd4d60a8697537c370194",
+  "assets/fashions/HeadRect_10036_2.png": "90b5e152d3e1b3c854727be59b532d5aedc8071a9fe4cf56f3bcd87ae9609ea6",
+  "assets/fashions/HeadRect_10037_1.png": "7be9b096ee74a1a2aa9374e61ab8b6f75f79b6f10fb81ae8514dfac0df22064a",
+  "assets/fashions/HeadRect_10037_2.png": "dc1597071b07a65615dc74d427e1a197edfc20b16892dbee534200d7085a066a",
+  "assets/fashions/HeadRect_10038_1.png": "bfdcef4a7b029464a168953f44dae0ce603286ad11d91a53ad719d1c16633350",
+  "assets/fashions/HeadRect_10038_2.png": "706635432f3c4cdda7053a9b6b47a5a8d14eef6f9717cbc1b1ae9f67c240436d",
+  "assets/fashions/HeadRect_10039_1.png": "2abf3731c113f37eb271238d1ef9ad75d6c5e7ba2c0df5bb4d7d351697d3bb78",
+  "assets/fashions/HeadRect_10039_2.png": "7a64ce30feb0051a5ee051be7ff0c5bb7ebc7410e09a1ee45987d868285deea5",
+  "assets/fashions/HeadRect_10039_3.png": "b0259b7542e4b198f442fe1d1d4ab4e151dc3d42e2cdca89080169447f7e4aed",
+  "assets/fashions/HeadRect_10040_1.png": "8f1ba9ea63239798e4eb045b9e31af1189ef98a9a3d7c4664183cfbd51ee96f0",
+  "assets/fashions/HeadRect_10040_2.png": "a5d51daab96d0c82cb1270394f89eb1f2ef06e290e218a35711d2a6437d43f9d",
+  "assets/fashions/HeadRect_10040_3.png": "d200af18ab2594e5be12c6c56e826e305aaf6dfc8e619980377d42b8f0683305",
+  "assets/fashions/HeadRect_10041_1.png": "85cce8603585ed033f0c79e389a129be65376da5ccdb180795d4a6e3a7c5255d",
+  "assets/fashions/HeadRect_10041_2.png": "929eac3154ed99b0461e49143e9828a513e02e715ae2aa4e58156dad7912ee0d",
+  "assets/fashions/HeadRect_10042_1.png": "f2ec818cf5079b943e0b9768ac64a23d4a4329fa9327409c040a5553200302d0",
+  "assets/fashions/HeadRect_10042_2.png": "aa3f43dc44cf3efc16e6b0e5304b6601d507a14824c3ea9f701f3086c767fdb3",
+  "assets/fashions/HeadRect_10042_3.png": "544adc846c58c31b3cba6088ee1ddfd3377a7fa43bb36419a9fe4aa06c912e5e",
+  "assets/fashions/HeadRect_10043_1.png": "fbb18bcae49f567d06e565419746023d6b953d47341a330279f76d51698cc7ec",
+  "assets/fashions/HeadRect_10043_2.png": "142f703d76d99c08d10f01323b50a361cdd063affe1831b0aef4114bdd6c9982",
+  "assets/fashions/HeadRect_10043_3.png": "dc973d38480a33f4d6860b34d5590cff010954ad625ad621717b922b6db494ea",
+  "assets/fashions/HeadRect_10044_1.png": "bba2c86f670a9b7edac464a61dc9ad1822834db02e8a0791e68d25c222619709",
+  "assets/fashions/HeadRect_10044_2.png": "1e44f63d4daf222143e2a4f0e022b28b284d8f6f72807d2ff2b305ff27089044",
+  "assets/fashions/HeadRect_10044_3.png": "aebadf02c63b8eacb6cb52e6738cbc008e18e354b03fdfe1b77dc277281cf52d",
+  "assets/fashions/HeadRect_10045_1.png": "eedf4f8ea206ef7bcbf04c82c463fb66c13c857b28df068f10c730e31c9a4d10",
+  "assets/fashions/HeadRect_10045_2.png": "4b2d4f8e1a26a41bd875b3fe6b317fa134e36f496a8930aa530d96348b0954c8",
+  "assets/fashions/HeadRect_10045_3.png": "4c1b14c87b17cd0d2eb91554726d601b93c1f50792a12dba8dbf47cce290c133",
+  "assets/fashions/HeadRect_10045_4.png": "1d0b95b6f96f4e71d4b66ad522fb16be2673899e301834d0e0201be35d4cbb5e",
+  "assets/fashions/HeadRect_10046_1.png": "3ef6dab1e879f9ba7fd5d1cce4d529e7b0740488dd7627b1d57c85d3e2f2c2b9",
+  "assets/fashions/HeadRect_10046_2.png": "e8550bbc5af4f45d7c6b1821c504153fa445d808d503bec954041f2057ceeb2b",
+  "assets/fashions/HeadRect_10046_3.png": "f7ea9bee403efd204b1e712dd3d1fa15f6d4d16fea871d9112be3d396b5342ba",
+  "assets/fashions/HeadRect_10047_1.png": "f7dd65642e86ee1e8e614c33c5384c2a8d032612bf8aae78225ba51b00685cc4",
+  "assets/fashions/HeadRect_10047_2.png": "5139701edc73cece41605d71bcf0d71e896a487ea5d4732abe53562a90614184",
+  "assets/fashions/HeadRect_10047_3.png": "e17a6914f0004043e44dbd2b096cd28ccd9dca28715aef6eeb4bb971d1a278fd",
+  "assets/fashions/HeadRect_10048_1.png": "967de551293d5749e33017ad175ab0a38b21834796f1508db5f4e8728528be70",
+  "assets/fashions/HeadRect_10048_2.png": "9f71b60cbdf95069a6636e866a2fde77a613b7c695c829531f69fad3b787c99f",
+  "assets/fashions/HeadRect_10048_3.png": "7c8d9a009e7b4749cb584a217b4cbb32f21407d95b443af7fe7d565113d10177",
+  "assets/fashions/HeadRect_10049_1.png": "26f122743f9ce713bbc0ab5c6de49f7bc1ac42a0b37884e394cb5a528e498660",
+  "assets/fashions/HeadRect_10049_2.png": "f1be893a485e38cdc3a2efc0671643b69961f3ee21c0d4a1473b1ca32c1a296c",
+  "assets/fashions/HeadRect_10049_3.png": "a2527fb7edb6ffe22fa3b41b566f6a3018b2d0533ed74781ade5acee18d0ab70",
+  "assets/fashions/HeadRect_10050_1.png": "2236310d69eb6753e7e8ba878f579bd57bd03130d2332eed597e6d71487480fe",
+  "assets/fashions/HeadRect_10050_2.png": "210ae8ea81ad2a3924b463029d02e2a5a932e7e73ee61c689775e1a17e59e5cd",
+  "assets/fashions/HeadRect_10051_1.png": "96113366782a01e07243b14a9f787f38a1f5ecebcfb222432b4047c43a125e1d",
+  "assets/fashions/HeadRect_10051_2.png": "d8dc6ea91f51dfd1c1d32bc989b6f9c10abd7c50a73cec13b0b6539bacbf5078",
+  "assets/fashions/HeadRect_10051_3.png": "1061c297b88d48b23504c37f59aae6f5c42c810dbcc1fad92d6c249b525f5d36",
+  "assets/fashions/HeadRect_10052_1.png": "2ae8d1ff647d4a2ec80819fd43bb82b7cf5b421b70b3d869dc8aec21a8fdd04c",
+  "assets/fashions/HeadRect_10052_2.png": "0cfd622912e18cfe30ee75979633fe4c6ba4858d5816009f0f36bf5b11597bdb",
+  "assets/fashions/HeadRect_10053_1.png": "ad5fc7b422b0d1ebf35e70e6606a055fab718bb6a8f8cc1cac3d71da1f3d06f4",
+  "assets/fashions/HeadRect_10053_2.png": "1771350e8c1fe312ec4ebe26a80a2acdb027544426030f52c88aecf641b321bf",
+  "assets/fashions/HeadRect_10053_3.png": "b36f046d66735fafe60d7b31bf9fa4d551a5e1276e668630aea004ec7f1e528b",
+  "assets/fashions/HeadRect_10054_1.png": "2db6eb294f25eaaeea83bb2ff65382977e4abf8b9ec8428a5f09ae2d267c9100",
+  "assets/fashions/HeadRect_10054_2.png": "4a34942da8c1b6990b9efed5bb5f5957fdf162b3bc22534155051188c18483a4",
+  "assets/fashions/HeadRect_10055_1.png": "3d31bf130d1f08f7bd6c7784df896ff190cf7a4969ecf4b3fc6f5113f62749f0",
+  "assets/fashions/HeadRect_10055_2.png": "f9f7f4073231163a4e84e6f2998c091abf940abbbb5c2b8c9c8b87c77b4f265d",
+  "assets/fashions/HeadRect_10055_3.png": "35a7902e11cfa6474bb75be0f649c6707cac860d266e1e7adf235a12fc3eefcb",
+  "assets/fashions/HeadRect_10056_1.png": "d6cf11c0ae4fa58335c3d13d3cd6525f5caf1d237bdeba113b2a6ce20ea38d87",
+  "assets/fashions/HeadRect_10056_2.png": "2c9e6367a4296b26179c591d0cea8a6188023208794de4f077a50040725390ff",
+  "assets/fashions/HeadRect_10056_3.png": "58e1fd7b42776f713945d409b8de11c8085b33633e1a1fd753f7ec4a5efe87ae",
+  "assets/fashions/HeadRect_10059_1.png": "1ab2b91afdb012671d2480799df5265182937992a01c58aab6fdc32f7ff9642e",
+  "assets/fashions/HeadRect_10059_2.png": "84f278f99f6d0c20aa169b3f3de96cb802defa38739aec4304c0f7558c097415",
+  "assets/fashions/HeadRect_10059_3.png": "80117362f85c6f571fc8843bb79f706f165fa3f85276ce1e6f163ed4d97bf41e",
+  "assets/fashions/HeadRect_10060_1.png": "4c4dc0a47029aba2d67a27ea2bf171f82065b84784d079633204073ef0737b35",
+  "assets/fashions/HeadRect_10060_2.png": "abdc6ff46facf154d5895b5391ffc20882d3e38669cf85bcfabd93d1f0bfb93a",
+  "assets/fashions/HeadRect_10060_3.png": "8bfcde0e06e10d858c0f46d9eb308def6b5ecfebf9b74000fdc738e586d228de",
+  "assets/fashions/HeadRect_10061_1.png": "ea1cf2fb6f527322ee3ac2d2edad1c886454555dff96aa1efb877ab3fedf80ef",
+  "assets/fashions/HeadRect_10061_2.png": "438ae11861cf6f02641e50f7c6df6ac1a84a5b4a625fc53c545c46bb0c27cab8",
+  "assets/fashions/HeadRect_10061_3.png": "e8e53ed4df2b150b39095abc827df490d904139fab96f8fd495aed89c98c454d",
+  "assets/fashions/HeadRect_10062_1.png": "3373144f4b941b977e6d0f632682223e1c53d1a20cea191853b6d058f8f09227",
+  "assets/fashions/HeadRect_10062_2.png": "d164fbe55373d9b377946884a1de07a832cc1b29fe6698ecd0c7344cdc373a83",
+  "assets/fashions/HeadRect_10062_3.png": "84a4540108b0fccaf60023afeab33121a838c023bcfe832efe89b7504189b50d",
+  "assets/fashions/HeadRect_10064_1.png": "e902c8a55797d73fb21787cbd734f712cc528dbdd4bafb378c09aa125ef0aa11",
+  "assets/fashions/HeadRect_10064_2.png": "fb5f870cdc017f188f0ccacbee0c521d781040ad6c03781e7ad817cb29324ad6",
+  "assets/fashions/HeadRect_10064_3.png": "1d0220db66033dcdea7936ed63dcc4d00f5cc5ab20941f013b77c634a2d7b4b4",
+  "assets/fashions/HeadRect_10067_1.png": "adb8dfcab1e0c2d018c001bd032b8772017956d46fb460351afa2171f14f9548",
+  "assets/fashions/HeadRect_10067_2.png": "ed8add6a00b133b660311585a5d060a00981c55b48adb6ecdfc5084d56a3bfc6",
+  "assets/fashions/HeadRect_10067_3.png": "a11cb5c0430ace27600ea32bc7e65d9d16937dffe36e633ba21beb0e5f031bdd",
+  "assets/fashions/HeadRect_10069_1.png": "fc1d7a1f8a356ffc9d8b382d3931e5ae432184f243d7f61eabc3795f0b784a77",
+  "assets/fashions/HeadRect_10069_2.png": "d3fee77fbea66a2788837036ae694c87849327a7722c2a6ef065efe63147d617",
+  "assets/fashions/HeadRect_10069_3.png": "51db1182036c60698f180aec4f2a8c13478c89cc2792a81aaf0db4830f5c0fc5",
+  "assets/fashions/HeadRect_10070_1.png": "532e4f8a0053bb9b5135ef10118a89d020f4210ee6a73417bc29f59890a6e6e5",
+  "assets/fashions/HeadRect_10070_2.png": "8ef06f6bc654cfc7695127169191797be9d20c390650a3cfd2d1a1d41ee713dd",
+  "assets/fashions/HeadRect_10070_3.png": "bfc83ae3bbb02880dbf3cce7caabe42ff38476cdcc24942e26b12cb2ce7f23e5",
+  "assets/fashions/HeadRect_10070_4.png": "235552d044ea1c6f8cda1466883a7d655a92ef82ffc500c085c5dbe2341ac1ef",
+  "assets/fashions/HeadRect_10071_1.png": "ab8a126d109f0945ff37dff3090740b44e07179b59ac304cf65fc5639d8039ca",
+  "assets/fashions/HeadRect_10071_2.png": "982a1bd91f374b24d6098025cd6fd9ed68ae55237c12fe5fa24318c71aeabb91",
+  "assets/fashions/HeadRect_10071_3.png": "f97a18c177dafd8304ea321a82f717cd4a462030cf3e517613b0a03ba480e969",
+  "assets/fashions/HeadRect_10073_1.png": "956c8c7520f41821bf0e1acd8a9510f77341446f3411d9aa8db85a2c041923fa",
+  "assets/fashions/HeadRect_10073_2.png": "d218a0bd005ecd4690035361fd2a8da37313a98b2dc19f720bc639cb94777ee3",
+  "assets/fashions/HeadRect_10073_3.png": "16f92046a39516b6e3ebc394e6dc0356b2aef68f749f57e5a8b1e56b345b031c",
+  "assets/fashions/HeadRect_10074_1.png": "5bbf174391b9d721626b03633112c7447e251ed59772e73ba389bbc4fe4e6d96",
+  "assets/fashions/HeadRect_10074_2.png": "126c705102615e5981caa638aea34fe5d61f03102bbac810ee68896ea7551151",
+  "assets/fashions/HeadRect_10074_3.png": "85f395d1192808b8acedd4bdd067fdad0bfefda5863fd2ac3b4579fec7d11910",
+  "assets/fashions/HeadRect_10075_1.png": "5407a7eb932fce02acf643f3a3ff8fbc2370fd3060973648bc5a46a7da4a62c0",
+  "assets/fashions/HeadRect_10075_2.png": "ee6fe1c2ac649afe6b47dd2b71e799bb285a868686f53be5c1ab1a05540bc6b0",
+  "assets/fashions/HeadRect_10075_3.png": "407f2e5d32ee9ca429a0660d16198fecc32f4f89bb99fa977730ccc1be301021",
+  "assets/fashions/HeadRect_10076_1.png": "6f129cc4195a9bf51f3606354db38bacc7cf3ab59ba00e33487c190cda15fb0d",
+  "assets/fashions/HeadRect_10076_2.png": "ddc49d167066b800ec8f9b4aa7150479a034da20fe186bbd43b6790e38f3e56b",
+  "assets/fashions/HeadRect_10076_3.png": "441bd49a58eebd1928a89e781178fc2514c8ab0556cfe53bff85260b5944a865",
+  "assets/fashions/HeadRect_10077_1.png": "8dd9646a0784da3216a06def39f6df49d6c5b6a8aa7ed0753b81536d134be1e9",
+  "assets/fashions/HeadRect_10077_2.png": "173274fbca7c53b55a0f2ba42c34a987d199283013ddcce869ce33a6281c9ea4",
+  "assets/fashions/HeadRect_10077_3.png": "193266cbd4106ac7a6bdece35eff87aba63988640a93cc3fada262e0086a8fa1",
+  "assets/fashions/HeadRect_10078_1.png": "71dff61bae895b868ab75c7345995c43bd4c3e1f57e7ee4cd9e2463ccdd52dba",
+  "assets/fashions/HeadRect_10078_2.png": "d3dcf1641461349c92f07987a3a1c57b5839db1aa57fb609cbcf8d028469aa2d",
+  "assets/fashions/HeadRect_10078_3.png": "cf7e16fa01a97289179a88d3137c56c15876e7463444b4eb69b0f17c78a37cf1",
+  "assets/fashions/HeadRect_10080_1.png": "93653bd0ac62fac4f48c2bebae4e4418bb23bd748ec26acf901562b54d498219",
+  "assets/fashions/HeadRect_10080_2.png": "edf49c222d900f74ef0bccf337e3417444e23ead0497f07206c694dca0f1398a",
+  "assets/fashions/HeadRect_10080_3.png": "34b5848a21b79707b7f24045c0874fc8ee84f306b53b080fb7ab646f8b47ec33",
+  "assets/fashions/HeadRect_10080_4.png": "6be3b94121cc1d7b461b47ed50cb083a2464cb3d45b24402afca00b7a9597e6e",
+  "assets/fashions/HeadRect_10082_1.png": "c39bc59128dd9950a9723429968f492b73f4f4d6f17c8e98870d69b2d618ddf6",
+  "assets/fashions/HeadRect_10082_2.png": "b6cd0150ad1875bed67a80913019acc1097d3861ae644128200ff747e8974cfb",
+  "assets/fashions/HeadRect_10082_3.png": "e3b14a25bcaf3490f9f7d4a1ea5e9da013b49f15fef4be888bfca81ae2d1878b",
+  "assets/fashions/HeadRect_10083_1.png": "907984aad47d4cb7787010332701adb57c5601832632dc55beb62a49df735307",
+  "assets/fashions/HeadRect_10083_2.png": "2391cf7d665653aa60d9eda8a1e9f17e943bb6db58497fe2fd2357522d1c9c5f",
+  "assets/fashions/HeadRect_10083_3.png": "a0447afe903a7035e9cf7f0ac10b55d1a8131705d7d9976631232e94ef562028",
+  "assets/fashions/HeadRect_10086_1.png": "1c190964f478ea32b8201cc051d8c5ea09373a03f9850d331d5f386531f01a6e",
+  "assets/fashions/HeadRect_10086_2.png": "9c64d74e32a1312e5e8a4a2cdfbb3dc3a3ad55c1f468a2609ce612aad1804c87",
+  "assets/fashions/HeadRect_10086_3.png": "cc32c238bc5b2b856e159a06af37c9e285e77b066f52dd857c5fa9c0ab94bc22",
+  "assets/fashions/HeadRect_10089_1.png": "5c44ec7bfb3c1a5f0d62a084afb789bb33fc54a4dc4317803aa119c63f585653",
+  "assets/fashions/HeadRect_10089_2.png": "5dab880500e8be3376d1592468c85da09b2bd9382354ba8e526929af23ad2d13",
+  "assets/fashions/HeadRect_10089_3.png": "d1409b9b6b71b4fe42c4ba402598d03f07c94120a96a0b5e1cff27b75127990a",
+  "assets/fashions/HeadRect_10091_1.png": "a3965a42fa97cf8c3dd174a4f833a8be7e76e7cb3b4b3582d59f8118990a2097",
+  "assets/fashions/HeadRect_10091_2.png": "40c84217d3fbb0e06d199f5aa0f0807f2f570fd811738bffe32dcf6eca292628",
+  "assets/fashions/HeadRect_10091_3.png": "784916fa961a9c6df5f4542541ccc01e7fd147959407dbaaac49e0f8d2e774d1",
+  "assets/fashions/HeadRect_10093_1.png": "8a67448fec83bfc4eb77419b745079bed0b614b00e59e2bda7e6bcb62d6225c7",
+  "assets/fashions/HeadRect_10093_2.png": "1e8befe11b869f235d7e5963b3ed3752e78c7bc474a1b3d6533eaf654da052d4",
+  "assets/fashions/HeadRect_10093_3.png": "d2dad313f115aab09f8e6d72109db60b0a23f1277aca06557d99098456f8e24d",
+  "assets/fashions/HeadRect_10094_1.png": "f3279943c73868cfbac441172e1afddaa3aa87c5d6c109c7c758977152e8b379",
+  "assets/fashions/HeadRect_10094_2.png": "13898aef68b9a7bd5c927f5a5053c71948bcd6ecfbefad545b109df57222007e",
+  "assets/fashions/HeadRect_10094_3.png": "af70bfe78d5a32473f11fa4ffcbc0d774a6896509fa7eb0ab23972d5cff9ec9d",
+  "assets/fashions/HeadRect_10095_1.png": "9e464b8097c14f506d7fb2d90e1474f5f7ceae9bb3e8347c3a916969f8122c58",
+  "assets/fashions/HeadRect_10095_2.png": "7c3f76a44f67578e54d9668e791d9f3d72228c472517f2e7db8ea17c32b4b245",
+  "assets/fashions/HeadRect_10095_3.png": "9e9ab4c4d71060bcf7bcd5bcfad50cf5e29852b41f50a016e8292d61736487c1",
+  "assets/fashions/HeadRect_10096_1.png": "9ed358d9f15dba123aa7cb408c1c60c2e591886398410ba7cb38559670a75318",
+  "assets/fashions/HeadRect_10096_2.png": "389c54e6049568a8007814ab0230db42cec487063ac8ad6a81392ca7bc4f205c",
+  "assets/fashions/HeadRect_10096_3.png": "53cb32751928fdbad1c055a9113d1bc6f5b72b612793d0f562fc844f71d5dde7",
+  "assets/fashions/HeadRect_10097_1.png": "3c43b4e4551f6db6fcf795ead939acfae4e54ca9ac4439a8a27b2219cbf0dafc",
+  "assets/fashions/HeadRect_10097_2.png": "43ada28368e807a2d02768013d6a62840efb848074f00c4c55ce7927f0dcb7bb",
+  "assets/fashions/HeadRect_10097_3.png": "190eceeb154a7c3e3524238b39f6f287fab308e1d07f81c73348634f24facea9",
+  "assets/fashions/HeadRect_10098_1.png": "2aeb87157757eabfab0f4769d796c7c97c3d10979063b2381eb92b5b169dffe4",
+  "assets/fashions/HeadRect_10098_2.png": "7d5fd0106d11baa367bfd74314574d9893a6ea49a0324f5ce138521a099b6eae",
+  "assets/fashions/HeadRect_10098_3.png": "8621e4aee8928d15293043c34263a59a9236632226ec4ad8e779851150a26603",
+  "assets/fashions/HeadRect_10098_4.png": "aaa24a108a7f79b427ea11a16b481c7be1d6cabdb079835c75ab935405b008d8",
+  "assets/fashions/HeadRect_10098_5.png": "a6a278795deacb4efb62b7d4cbadaacd4a3d6320f748cf0c1ea7cb31fb874296",
+  "assets/fashions/HeadRect_10099_1.png": "d0fd1b8abae8db9ee1afef54e394182d263a7a8e493bc270db6dc7d0659435b2",
+  "assets/fashions/HeadRect_10099_2.png": "0ee232b6a15d14bb0edc7b72842e903d77817842e6d142670aa4e57a9864a3d3",
+  "assets/fashions/HeadRect_10099_3.png": "647d59a6014c34f0530cd0a2444a7bdc34ab493be66a46d57ddad49dd0c5aa1f",
+  "assets/fashions/HeadRect_10100_1.png": "037c05c4144b1015519fa0582ef7c2db15c04d4ddcc5250db58b49c0f27f5787",
+  "assets/fashions/HeadRect_10100_2.png": "348e3ad7cfbfcef4317d6b0a26e67fa66949ab93efda8cab94c40da31c2fa635",
+  "assets/fashions/HeadRect_10100_3.png": "30c695d0802712eaba36fc1cdddf214a4046056855c2ac438e07d1eac340f48e",
+  "assets/fashions/HeadRect_10101_1.png": "e862ec1f3e004f3865fc084d968668f7d1ce7025f624a20cda4cd65a9bf81b2b",
+  "assets/fashions/HeadRect_10101_2.png": "de68a43dec356ba4ae4aaeee8d7b583278ebe084c5a42412856fd7e380a86cda",
+  "assets/fashions/HeadRect_10101_3.png": "f8f8e4ed56b1cf65338c4e147de8441ea418feaab2ee31570eb5cc36a965e2d6",
+  "assets/fashions/HeadRect_10102_1.png": "9a78ff308ea6a51ea37473df772638ad95cb1b1d473368283c7a85b5bf6453c1",
+  "assets/fashions/HeadRect_10102_2.png": "e6598f51b6220d6b1a4a10d1640a13764a4ac555c188201d0ccaeb6ded4b3608",
+  "assets/fashions/HeadRect_10102_3.png": "f9c35cdf9bb9d8b799a12e770b38e65c1e98d2eecdd1c0e0e92ade6bd5421603",
+  "assets/fashions/HeadRect_10102_4.png": "434eccd50089723112cab88e37500eb8e8a1652708bec4677964a577ce39fb4d",
+  "assets/fashions/HeadRect_10103_1.png": "055bf804e6a919fe8b818ab77669ebcc44cd0d804f3aaa1cf1a5704d438d6b22",
+  "assets/fashions/HeadRect_10103_2.png": "a0e7f6e1a69fdd596ce36b39d3228e73b9621b015a6bb4629f44fa16b071ca92",
+  "assets/fashions/HeadRect_10103_3.png": "7b9a92fa1b4bca24306c5957b929098a77a427763f58857a88e4b5e7e64b082f",
+  "assets/fashions/HeadRect_10103_4.png": "3a03aca2d79b2a8d82bcadf1d8e1c62550356a1740a232b7f62c3a08957f1e7f",
+  "assets/fashions/HeadRect_10104_1.png": "10848d4c9fe95cf6d0ff943ee47e65d883a4b4bfe8359dc4e1ba5fe39498c378",
+  "assets/fashions/HeadRect_10104_2.png": "c35c859cc6e46b9974f426f845c3f510a93aba23aa754dd48808bdfd3a8b5e37",
+  "assets/fashions/HeadRect_10104_3.png": "f1d02f1fa29e9465c6e3e2762ee616cf15e847d4d51023cb8ec78f171f081ac8",
+  "assets/fashions/HeadRect_10105_1.png": "7037212286533f5813fae69f294b1250396c5b1031f12bc47722f7d57a1ab627",
+  "assets/fashions/HeadRect_10105_2.png": "63f0512e088158317c0e218b0fdfe601b765ab4203ec32d8ab7622865826c624",
+  "assets/fashions/HeadRect_10105_3.png": "e4a126a8d690650f5aed6a4554db4a1dec950c4f3e9ece3084b32255cd45c41c",
+  "assets/fashions/HeadRect_10106_1.png": "50ab7bbd38f5a516878eb292d35693220d3e302ee97a897aefc84c467cdbf1f4",
+  "assets/fashions/HeadRect_10106_2.png": "987d1be6ad628236692242f48cf97b9fce5da00e31a9cf22bffe1b076cd94bd6",
+  "assets/fashions/HeadRect_10106_3.png": "819c8a41287c6699a9f5a7ba3c3ab9c86e5d333d09dd46e5d7baa5ed74ea81dd",
+  "assets/fashions/HeadRect_10107_1.png": "1dc387933eeb42ba576f1a8eaa987fb1247c6211b9abbb4d6c2573aabfa8d129",
+  "assets/fashions/HeadRect_10107_2.png": "ffe8cc9399f6debcff3f6912e95ec45411d7cdeef3550f89ca08a3759253e338",
+  "assets/fashions/HeadRect_10107_3.png": "06e34b037838168df5119e9537a74613922953a3470bf9058776b22834183b5b",
+  "assets/fashions/HeadRect_10108_1.png": "e97d21397d721d0d71a067b657f1ae7a11271bb77797b11ecad4ec72f92c42aa",
+  "assets/fashions/HeadRect_10108_2.png": "7a1ecc0d5c9e97c20f0a096059b02c481136243b7180faa2ae3528aae3c1b39f",
+  "assets/fashions/HeadRect_10108_3.png": "b22af972760e449107f957cafee6156976d7aaa3dbed08d9b11310d7acf269ff",
+  "assets/fashions/HeadRect_10109_1.png": "08e102021491e04739056ada1030db483e12fb3c98661357bf2905dbd0879576",
+  "assets/fashions/HeadRect_10109_2.png": "b0e9785c89779adbe5b0e100ca4526967436c4c2d826ab9085cbc29760ea4cb2",
+  "assets/fashions/HeadRect_10109_3.png": "5779cae6d2b1117634969fd501c765b1fbda2b1add1399877c665f0d15d4c2fc",
+  "assets/fashions/HeadRect_10110_1.png": "30a4d87067abbef827d951d45fdc622f92bd8dbb3bc945f336f9449e212d9b0f",
+  "assets/fashions/HeadRect_10110_2.png": "9a04c57db5685f8b3979cc58f0e2c13e97a9ffef962c360838af61eb30dfe0d2",
+  "assets/fashions/HeadRect_10110_3.png": "caff98abf61eb304b488b69abdacffeca159356cf859b7e547cb636bcfe40e23",
+  "assets/fashions/HeadRect_10111_1.png": "2144d2c917a5003b296058c48ca5a9bc28865b7ef932c4934ca29ce2b044f039",
+  "assets/fashions/HeadRect_10111_2.png": "eb641356914b6626a4732d893b70f716fc849b067a006be1eac1255051487dde",
+  "assets/fashions/HeadRect_10111_3.png": "43a57f0c16d01e4aaa630193871f2a6a816d38b9a99a9c2753550a780d242392",
+  "assets/fashions/HeadRect_10112_1.png": "09420d169159eeb63c5c9ab0a2bdf70fbbd97e83f52cf21e5acf4acd5c96e719",
+  "assets/fashions/HeadRect_10112_2.png": "0f56cc6af999149ba2c2aaca0f3e87c340880465073bbc57de0902ceaa7e0589",
+  "assets/fashions/HeadRect_10112_3.png": "2f2fba0c11eaf1e86cef1c8636503e9c5075a70bd14be8ecc8787acd54a3d89f",
+  "assets/fashions/HeadRect_10113_1.png": "d5fd9e82cb8874f1ceb2a97dc95a10ae929fd77b0a7a673d32faa60df330fc91",
+  "assets/fashions/HeadRect_10113_2.png": "a4c1f881a43e3794126a7fe355a44bd7caa427fc251138e5803b2fc21520ce2d",
+  "assets/fashions/HeadRect_10113_3.png": "ea43cb68fd51e5da55a4934cac80553649524349fb819e528620828f134ac9db",
+  "assets/fashions/HeadRect_10114_1.png": "8bf9549388222fff2e908eb46111069a826cf26ec4d0394818be80d1f5c99518",
+  "assets/fashions/HeadRect_10114_2.png": "55fd88b1455138b2096968b0dc764fe4195158bd7cddca56a0f46d5399fd4f78",
+  "assets/fashions/HeadRect_10114_3.png": "a60d709818a64acc4567a857e4ee5966b08b538799303aa7081d40bb56c7b6d6",
+  "assets/fashions/HeadRect_10115_1.png": "77297b8685157f80232076cdbf1033789c9abc85a6698886f95fe6980bb792a7",
+  "assets/fashions/HeadRect_10115_2.png": "1323de4efb5fec7081e4958ac136525d87123019b3f647fa0789e0748edc1525",
+  "assets/fashions/HeadRect_10115_3.png": "93cf200fca396d2957925ec28b0adb0093a167737b9520d2f18067f829a6e811",
+  "assets/fashions/HeadRect_10116_1.png": "b4cc0395eab079900ce1efed6ef7eb22f96a2f218ccfb9f410aef813a47a49ba",
+  "assets/fashions/HeadRect_10116_2.png": "5e1694c0ec1ff7b3f2c23029e130b389a47222ea4e818db4940a541f55d93924",
+  "assets/fashions/HeadRect_10116_3.png": "f15f44f0f9df4f33b770342835dac10d9cadf06572f67016afaae41a394d578a",
+  "assets/fashions/HeadRect_10117_1.png": "1bcdae9e3b7a77efa7bc48e6cf2260403d776fb6165c1eb1ddc04f6a1d66e6e9",
+  "assets/fashions/HeadRect_10117_2.png": "5fdfcd4d74a86fe188e3b70a0e7e0fda734a2c29cd5377a34cc810894d74a984",
+  "assets/fashions/HeadRect_10117_3.png": "597e600513231546317e288cb3a0a143773898b3d07f1a2c02df5b68928b9efb",
+  "assets/fashions/HeadRect_10118_1.png": "4094534340c323c61767442b527a57aff75a337a63738f173ba30ef4e1721bdd",
+  "assets/fashions/HeadRect_10118_2.png": "592b565bd09ccc6762fe3e458471c968aaca87046ec23e265ed9926e44093a45",
+  "assets/fashions/HeadRect_10118_3.png": "418d44b919ec5890fe813f88e9cfdd564784325d2577c2575d2b3cb19aa120ce",
+  "assets/fashions/HeadRect_10119_1.png": "b1c9952d88f9c75e58f2b38251fccb0e10eac24aa519e9409c053fbf0344b13b",
+  "assets/fashions/HeadRect_10119_2.png": "45d648113fc7efba89afbd55eeb6c576e2d4eb818f0bad97ea884df794e20a6b",
+  "assets/fashions/HeadRect_10119_3.png": "6e82849840aca9e224575134813a28ff87f49d6c515610cbd0e7b95ef68780c2",
+  "assets/fashions/HeadRect_10120_1.png": "9294eba00e766d692d55b1bec67d7fd836b1d96687066768a1adde311778da69",
+  "assets/fashions/HeadRect_10120_2.png": "44fabe0b2e6f95a18b5831ac42793012396a7250af016c9a622e8994ee1965d2",
+  "assets/fashions/HeadRect_10120_3.png": "5feba5f9908f6d141339ea97be670f6d8a0aa44f6de94199633be3284686df59",
+  "assets/fashions/HeadRect_10121_1.png": "c50515325b2a74b8039606dd87e733e01126f66be3284160591a3dec71ba72ef",
+  "assets/fashions/HeadRect_10121_2.png": "85e2521270df6583b91710757385ac123c5d5bdb7d7d061a9c774d36e838789d",
+  "assets/fashions/HeadRect_10121_3.png": "28cd52c415048898f04a6ff65761ac86f87e5d96457e2af85598bbe648788c12",
+  "assets/fashions/HeadRect_10122_1.png": "cc1d3a71d65d127477d3e1f20fb294b5e1e50ec783e678ec66caab5885937300",
+  "assets/fashions/HeadRect_10122_2.png": "1103d8c451e1dd56749eee89b0ffc8c925215a9270ec080749a48538a5df4915",
+  "assets/fashions/HeadRect_10122_3.png": "a40430fb83f409f3d7b074c7bd73358b8844f59d9d14a6306ae86e978743ecd2",
+  "assets/fashions/HeadRect_10123_1.png": "fb207fb1e9c8069b7c3f40288b69c2f5c06d6afabfb00634c17cf7d28c11063e",
+  "assets/fashions/HeadRect_10123_2.png": "fae4e961b6eba159dee73b4adf94d7a984dc1ebded843101dd1e039b3a203da6",
+  "assets/fashions/HeadRect_10123_3.png": "82b65385c96a4e1bfee07f5fab8c0ecf2b6964edab02ed5e5e59979b2b556a98",
+  "assets/fashions/HeadRect_10124_1.png": "ef2e6f11b8b0e38c70174944be4210f81d8c91a71f8c50ededc2ac53e7bae435",
+  "assets/fashions/HeadRect_10124_2.png": "148fd7879a97829c4cfce6d6d17f04dd76199cd6ae2f61585de8473af4418057",
+  "assets/fashions/HeadRect_10124_3.png": "2db5ffc14c2d2e5864382a10edd434893523d46f4c50c8d1834b7815b7f0f46a",
+  "assets/mascot/minigame017_gugu-die.webp": "5116a2110d09a667a88cafe1dfd1f97687a17b4468aee0a4e7bb810af88fdff8",
+  "assets/mascot/minigame017_gugu-idle.png": "18e93aa6a595e3724d23ae714f956d5705f5bac1f19b0c3da392d09a3cea1ecf",
+  "assets/mascot/minigame017_gugu-idle.webp": "aff916c3c22f7f7695af8b5cdfc49dd3dda4760d54abc6ae3ada9cb3a8417026",
+  "assets/mascot/minigame017_gugu-jump_all.webp": "ea0e2c2e09dbbc237219452bec1bee9d461e82091ed54cf793918a550c6042b2",
+  "assets/mascot/minigame017_gugu-relive.webp": "a03feb17a5aa6ff3a780ec60ec3e93d65cfeee8e914800ef6660f957135efac4",
+  "assets/ui/perlinNoise.png": "d306dc60c9a0aba7444e8afae95587cf7a4811562fd444f93e78c3564f22c258",
+  "assets/ui/primary-button.png": "97d2d9a2d1ed6b6b290b3a1e5db7000caffc803d14fada57f31aeba3e2529e1a"
+ }
+}
