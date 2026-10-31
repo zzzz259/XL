@@ -185,7 +185,7 @@ enabled = false
 # Explicit media root and catalog source; all tiers may enable this.
 data_dir = ""
 source_id = ""
-max_decode_pixels = 8000000
+max_decode_pixels = 8388608 # 8 MiPixels
 max_manifest_bytes = 65536
 max_catalog_bytes = 4194304
 max_image_bytes = 20971520

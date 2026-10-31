@@ -182,7 +182,7 @@ class PortraitQueryConfig:
     enabled: bool = False
     data_dir: str = ""
     source_id: str = ""
-    max_decode_pixels: int = 8_000_000
+    max_decode_pixels: int = 8_388_608
     max_manifest_bytes: int = 65536
     max_catalog_bytes: int = 4194304
     max_image_bytes: int = 20971520
@@ -587,7 +587,7 @@ def load_config(path: str = "config.toml") -> Config:
         enabled=portrait_raw.get("enabled", False),
         data_dir=str(portrait_raw.get("data_dir", "")).strip(),
         source_id=str(portrait_raw.get("source_id", "")).strip(),
-        max_decode_pixels=portrait_raw.get("max_decode_pixels", 8_000_000),
+        max_decode_pixels=portrait_raw.get("max_decode_pixels", 8_388_608),
         **{key: portrait_raw.get(key, default) for key, default in (
             ("max_manifest_bytes", 65536), ("max_catalog_bytes", 4194304), ("max_image_bytes", 20971520))},
     )

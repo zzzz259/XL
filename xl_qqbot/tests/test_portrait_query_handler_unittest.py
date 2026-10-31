@@ -16,7 +16,7 @@ class PortraitConfigTests(unittest.TestCase):
         from bot_app.config import PortraitQueryConfig
         cfg = PortraitQueryConfig()
         self.assertFalse(cfg.enabled)
-        self.assertEqual(cfg.max_decode_pixels, 8000000)
+        self.assertEqual(cfg.max_decode_pixels, 8 * 1024 * 1024)
 
 class PortraitHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_portrait_and_card_routes(self):

@@ -112,6 +112,14 @@ class CatalogTests(unittest.TestCase):
     def test_decode_budget(self):
         self.assertEqual(PortraitQuerier(self.root, 'i', 's', max_decode_pixels=1).find('100', 1)['status'], 'unavailable')
 
+    def test_default_budget_accepts_real_campfire_dimensions(self):
+        # Verified full2x campfire is 8,015,183 pixels, just above decimal8M.
+        with Image.new('RGBA', (2903, 2761), 'red') as image:
+            image.save(self.root / 'p.png')
+        self.catalog['skins'][0]['artifact_sha256'] = hashlib.sha256((self.root / 'p.png').read_bytes()).hexdigest()
+        self.publish()
+        self.assertEqual(self.querier.find('100', 1)['status'], 'found')
+
     def test_byte_budgets(self):
         for keyword in ('max_manifest_bytes', 'max_catalog_bytes', 'max_image_bytes'):
             with self.subTest(keyword=keyword):

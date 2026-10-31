@@ -23,7 +23,7 @@ def parse_portrait_query(query, exact_name_exists):
 
 
 class PortraitQuerier:
-    def __init__(self, root: Path, instance_id: str, source_id: str, *, max_decode_pixels: int = 8_000_000, max_manifest_bytes: int = 65536,
+    def __init__(self, root: Path, instance_id: str, source_id: str, *, max_decode_pixels: int = 8_388_608, max_manifest_bytes: int = 65536,
                  max_catalog_bytes: int = 4 * 1024 * 1024, max_image_bytes: int = 20 * 1024 * 1024):
         self.root = Path(root).resolve()
         self.instance_id = instance_id
