@@ -2,13 +2,13 @@
 
 (()=>{
  const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,login:{phase:'idle',profiles:[]},loginPanel:'options',manualOpen:false,loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,showCharacters:false};
- let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null;
+ let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null,mascot=null;
  window.mobileReady=false;
  const active=()=>['opening','waiting','querying','cancelling'].includes(state.login.phase);
  function notify(text,kind=''){clearTimeout(toastTimer);const toast=$('toast');toast.textContent=text;toast.className=`toast ${kind}`;toast.hidden=!text;if(text)toastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:4000);}
  function openDialog(id){const dialog=$(id);if(!dialog.open)dialog.showModal();}
  function closeDialog(id){const dialog=$(id);if(dialog?.open&&dialog.dataset.busy!=='true')dialog.close();}
- function applyPage(name,scrollY=0){state.tab=name;MobileRender.tabs(state);requestAnimationFrame(()=>{if(state.tab===name)window.scrollTo(0,scrollY);});}
+ function applyPage(name,scrollY=0){state.tab=name;MobileRender.tabs(state);mascot?.reset();requestAnimationFrame(()=>{if(state.tab===name)window.scrollTo(0,scrollY);});}
  function switchTab(name,{replace=false,resetScroll=false}={}){const scrollY=navigation.go(name,{replace,resetScroll,scrollY:window.scrollY});applyPage(name,scrollY);}
  function renderRecords(){const result=MobileView.records(state.report,{...state.filters,page:state.recordPage});state.recordPage=result.page;MobileRender.records(state,result);}
  function renderAll(){MobileRender.tabs(state);MobileRender.recordPage(state);MobileRender.recordPoolOptions(state);renderRecords();MobileRender.profile(state);}
@@ -73,13 +73,15 @@
   $('record-filter-toggle').addEventListener('click',()=>{const hidden=$('record-filters').hidden;$('record-filters').hidden=!hidden;$('record-filter-toggle').setAttribute('aria-expanded',String(hidden));});
   $('record-prev').addEventListener('click',()=>{state.recordPage--;renderRecords();});$('record-next').addEventListener('click',()=>{state.recordPage++;renderRecords();});
   $('catalog-check').addEventListener('click',()=>checkCatalog(true));$('catalog-source-save').addEventListener('click',()=>run(async()=>{const value=await MobileServices.api('/catalog/source',{url:$('catalog-source').value.trim()});await updateCatalog(value);notify('配置地址已保存，正在检查更新。');}));
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkCatalog(false);});
+  document.addEventListener('visibilitychange',()=>{mascot?.reset();if(!document.hidden)checkCatalog(false);});
  }
  window.mobileBack=()=>{const dialogs=[...document.querySelectorAll('dialog[open]')];if(dialogs.length){const dialog=dialogs.at(-1);if(dialog.dataset.busy==='true')return true;dialog.close();return true;}if(state.tab==='query'&&state.manualOpen){if(state.working||active()){notify('正在查询，请稍候。','error');return true;}setManualOpen(false);return true;}const previous=navigation.back(window.scrollY);if(previous){applyPage(previous.page,previous.scrollY);return true;}return false;};
  async function init(){
   bind();MobileImage.init({notify});renderAll();
   try{
-   state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());await refreshLibrary(true);
+   state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());
+   try{await MobileAssets.init();const brand=MobileAssets.brand();if(brand?.logo){const image=document.querySelector('.brand-logo');image.hidden=false;image.src=brand.logo;}const instance=MobileMascot.create();instance.init();mascot=instance;}catch{notify('部分视觉素材未加载，已使用占位显示。','error');}
+   await refreshLibrary(true);
    const initial=MobileNavigation.initialPage(state);navigation=MobileNavigation.createNavigation(initial);switchTab(initial,{replace:true,resetScroll:true});
    const login=await MobileServices.api('/login');state.login=login;if(active()||login.pending_result||login.report){switchTab('query');handleLogin(login);if(active())scheduleLogin();}MobileRender.profile(state);await refreshCatalog();checkCatalog(false);setInterval(()=>checkCatalog(false),6*3600*1000);
   }catch(error){notify(error.message||'应用初始化未完成，请重试。','error');}

@@ -23,6 +23,8 @@ ANDROID_WEB_FILES = (
     "index.html",
     "mobile-ui.css",
     "mobile-app.js",
+    "mobile-assets.js",
+    "mobile-mascot.js",
     "mobile-render.js",
     "mobile-image.js",
     "mobile-services.js",
@@ -44,6 +46,9 @@ def prepare_assets(desktop, root, assets):
         shutil.copyfile(root / "web" / name, assets / name)
     for name in ("catalog.json", "update-source.json"):
         shutil.copyfile(desktop / "data" / name, assets / name)
+    bundled = root / "web" / "assets"
+    if bundled.is_dir():
+        shutil.copytree(bundled, assets / "assets", dirs_exist_ok=True)
 
 
 def main():
@@ -104,6 +109,8 @@ def main():
             "tests/mobile-navigation.test.cjs",
             "tests/mobile-probability.test.cjs",
             "tests/mobile-insights.test.cjs",
+            "tests/mobile-assets.test.cjs",
+            "tests/mobile-mascot.test.cjs",
             "tests/mobile-view-model.test.cjs",
             "tests/mobile-export.test.cjs",
             "tests/engine.test.cjs",
@@ -180,11 +187,12 @@ def main():
                 *root.joinpath("web").glob("*.js"),
                 *root.joinpath("web").glob("*.css"),
                 *root.joinpath("web").glob("*.html"),
+                *root.joinpath("web/assets").rglob("*"),
                 *desktop.joinpath("static").iterdir(),
             ]
         )
         if p.is_file()
-        and (p.suffix in (".java", ".js", ".css", ".html") or p.name == "baseline.json")
+        and (p.suffix in (".java", ".js", ".css", ".html", ".png", ".webp") or p.name in ("baseline.json", "manifest.json"))
     }
     info = {
         "baseline": json.loads((root / "baseline.json").read_text(encoding="utf-8")),
@@ -223,6 +231,8 @@ def main():
             "--release",
             "8",
             "-Xlint:-options",
+            "-encoding",
+            "UTF-8",
             "-d",
             wire,
             root / "src/cn/starfall/gacha/local/Wire.java",

@@ -9,6 +9,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/mobile-ui.css">
   <script src="/mobile-engine.js" defer></script>
+  <script src="/mobile-assets.js" defer></script>
   <script src="/image-export.js" defer></script>
   <script src="/android-bridge.js" defer></script>
   <script src="/mobile-navigation.js" defer></script>
@@ -18,6 +19,7 @@
   <script src="/mobile-services.js" defer></script>
   <script src="/mobile-render.js" defer></script>
   <script src="/mobile-image.js" defer></script>
+  <script src="/mobile-mascot.js" defer></script>
   <script src="/mobile-app.js" defer></script>
 </head>
 <body class="compact-ui">
@@ -48,8 +50,8 @@
 
   <div id="app" class="app-shell">
     <header class="topbar">
-      <div class="brand" aria-label="星落抽卡手记"><span class="brand-symbol"><svg><use href="#icon-star"></use></svg></span><span class="brand-copy"><strong>抽卡手记</strong><small>STARFALL</small></span></div>
-      <button id="account-button" class="account-switch" type="button" aria-haspopup="dialog"><span class="account-avatar"><svg><use href="#icon-user"></use></svg></span><span id="account-button-label">本机存档</span><svg class="chevron"><use href="#icon-down"></use></svg></button>
+      <div class="brand" aria-label="星落抽卡手记"><span class="brand-symbol"><img class="brand-logo" src="/assets/brand/starfall-logo.png" alt="星落" onerror="this.hidden=true"></span><span class="brand-copy"><strong>抽卡手记</strong><small>STARFALL</small></span></div>
+      <button id="account-button" class="account-switch" type="button" aria-haspopup="dialog"><span id="account-button-avatar" class="account-avatar"><svg><use href="#icon-user"></use></svg></span><span id="account-button-label">本机存档</span><svg class="chevron"><use href="#icon-down"></use></svg></button>
     </header>
 
     <main class="main-content" id="main-content">
@@ -98,11 +100,12 @@
           </section>
         </div>
         <div class="query-secondary"><button id="import-empty-button" class="button secondary" type="button"><svg><use href="#icon-upload"></use></svg>导入本地记录</button><button id="manual-open" class="button ghost" type="button" aria-expanded="false" aria-controls="manual-panel"><span id="manual-open-label">手动凭据</span><svg><use href="#icon-chevron"></use></svg></button></div>
+        <button id="gugu-button" class="gugu-button" type="button" aria-label="和咕咕互动"><img id="gugu-idle" alt="" aria-hidden="true"><img id="gugu-reaction" alt="" aria-hidden="true" hidden><img id="gugu-poster" alt="" aria-hidden="true" hidden></button>
       </section>
 
       <section id="view-profile" class="view" aria-label="我的" hidden>
         <header class="view-heading"><p class="eyebrow">LOCAL & PERSONAL</p><h1>我的手记</h1><p>管理账号、数据与应用设置。</p></header>
-        <section class="profile-account-card"><span class="profile-avatar"><svg><use href="#icon-user"></use></svg></span><div><small>当前存档</small><h2 id="profile-account-name">尚未选择</h2><p id="profile-account-meta">登录或导入后，记录会保存在本机。</p></div><div class="profile-account-actions"><button id="rename-account" class="icon-button" type="button" aria-label="存档改名"><svg><use href="#icon-edit"></use></svg></button><button id="delete-account" class="icon-button danger" type="button" aria-label="删除存档"><svg><use href="#icon-trash"></use></svg></button></div></section>
+        <section class="profile-account-card"><span id="profile-account-avatar" class="profile-avatar"><svg><use href="#icon-user"></use></svg></span><div><small>当前存档</small><h2 id="profile-account-name">尚未选择</h2><p id="profile-account-meta">登录或导入后，记录会保存在本机。</p></div><div class="profile-account-actions"><button id="rename-account" class="icon-button" type="button" aria-label="存档改名"><svg><use href="#icon-edit"></use></svg></button><button id="delete-account" class="icon-button danger" type="button" aria-label="删除存档"><svg><use href="#icon-trash"></use></svg></button></div></section>
         <section class="settings-section"><h2>记录与数据</h2><div class="settings-list">
           <button id="profile-login" type="button"><span class="settings-icon gold"><svg><use href="#icon-refresh"></use></svg></span><div><strong>登录并更新记录</strong><small>官服、TapTap App 或 B 服授权</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>
           <button id="profile-import" type="button"><span class="settings-icon blue"><svg><use href="#icon-upload"></use></svg></span><div><strong>导入记录</strong><small>合并 JSON / CSV，自动去重</small></div><svg class="chevron"><use href="#icon-chevron"></use></svg></button>

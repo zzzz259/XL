@@ -25,7 +25,7 @@
    if(!source||!Array.isArray(source.records))MobileEngine.fail();
    let id=await MobileEngine.identity(source.account,label);
    if(target){const old=map.get(target);if(!old)MobileEngine.fail('ACCOUNT_NOT_FOUND');if(source.account&&id.id!==target)MobileEngine.fail('ACCOUNT_ID_MISMATCH');id=old.account;}
-   const old=map.get(id.id);if(old)id=old.account;
+   const old=map.get(id.id);if(old)id={...old.account,...id,id:old.account.id,label:old.account.label};
    const r=MobileEngine.buildReport([...(old?.records||[]),...source.records],cfg,{...(old?.pool_metadata||{}),...(source.pool_metadata||{})});
    r.account=id;r.partial=Boolean(source.partial);
    if(source.queries)r.query_receipt={at:new Date().toISOString(),queries:source.queries.map(q=>({selector:q.selector,ret_code:q.ret_code,record_count:q.record_count}))};
@@ -43,7 +43,7 @@
   if(path==='/api/login'){
    const v=await native('loginStatus');
    if(v.phase==='done'&&v.raw){
-    if(savedSession!==v.id){const [r]=await merge([{records:v.raw.records,queries:v.raw.queries,partial:v.raw.partial,account:{uid:v.raw.uid,channel:v.raw.channel}}],null,null,v.raw.catalog_snapshot);savedSession=v.id;v.report=r;}
+    if(savedSession!==v.id){const [r]=await merge([{records:v.raw.records,queries:v.raw.queries,partial:v.raw.partial,account:{...v.raw.profile,uid:v.raw.uid,channel:v.raw.channel}}],null,null,v.raw.catalog_snapshot);savedSession=v.id;v.report=r;}
     else{const rows=await all();v.report=rows.find(r=>r.account.uid===v.raw.uid&&r.account.channel===v.raw.channel);}
     delete v.raw;
     await native('loginAck',{id:v.id});
@@ -52,7 +52,7 @@
   if(path==='/api/login/start')return native('loginStart',body);
   if(path==='/api/login/cancel')return native('loginCancel');
   if(path==='/api/login/forget')return native('loginForget',body);
-  if(path==='/api/query'){const raw=await native('query',body);return (await merge([{records:raw.records,partial:raw.partial,account:{uid:raw.uid,channel:raw.channel}}],null,null,raw.catalog_snapshot))[0];}
+  if(path==='/api/query'){const raw=await native('query',body);return (await merge([{records:raw.records,partial:raw.partial,account:{...raw.profile,uid:raw.uid,channel:raw.channel}}],null,null,raw.catalog_snapshot))[0];}
   const rows=await all();
   if(path==='/api/library')return {accounts:rows.map(r=>({...r.account,pull_count:r.summary.pull_count,updated_at:r.captured_at})).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)),last_account:await last(),directory:'此应用的本地存储（更新应用会保留，卸载或清除应用数据会删除）'};
   if(path==='/api/library/backup')return {format:'starfall-local-backup',version:1,exported_at:new Date().toISOString(),accounts:rows};

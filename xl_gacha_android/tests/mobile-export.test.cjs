@@ -38,6 +38,100 @@ test('shared long-image engine loads without the legacy desktop dialog',()=>{
  vm.runInNewContext(code,context);
  assert.equal(typeof context.module.exports.planPages,'function');
  assert.equal(typeof context.module.exports.deliver,'function');
+ assert.equal(typeof context.module.exports.prepare,'function');
+});
+
+function freshLongImage(){
+ delete require.cache[require.resolve('../../xl_gacha_web/static/image-export.js')];
+ return require('../../xl_gacha_web/static/image-export.js');
+}
+
+function mockImage(w=280,h=140){return {naturalWidth:w,naturalHeight:h,width:w,height:h};}
+
+function mockCanvas(){
+ const ops=[];
+ return {width:0,height:0,ops,
+  getContext:()=>({fillStyle:'',font:'',
+   fillRect:(...a)=>ops.push(['fillRect',...a]),
+   fillText:(...a)=>ops.push(['fillText',...a]),
+   measureText:s=>({width:String(s).length*10}),
+   drawImage:(...a)=>ops.push(['drawImage',...a])})};
+}
+
+function assetBridge({failIds=new Set(),missingIds=new Set(),failBrand=false}={}){
+ const calls={init:0,character:[],load:[]};
+ globalThis.MobileAssets={
+  init:async()=>{calls.init++;},
+  character:async id=>{calls.character.push(id);
+   if(failIds.has(id))throw new Error('bad character');
+   return missingIds.has(id)?null:{src:`assets/char/${id}.png`,name:`角色${id}`,rarity:5,crop:'left'};},
+  loadImage:async src=>{calls.load.push(src);
+   if(failBrand&&src.includes('brand'))throw new Error('logo decode failed');
+   return mockImage();},
+  brand:async()=>({logo:'assets/brand/starfall-logo.png',name:'星落'}),
+ };
+ return calls;
+}
+
+function imageReport(){
+ const events=[
+  {name:'角色甲',item_id:11,pulls_since_five:20,interval_exact:true,outcome:'up'},
+  {name:'角色乙',item_id:22,pulls_since_five:40,interval_exact:true,outcome:'off',guaranteed:true},
+  {name:'角色甲',item_id:11,pulls_since_five:10,interval_exact:true,outcome:'up'},
+ ];
+ return {account:{label:'主号'},preview_source:false,
+  summary:{pull_count:200,rarity_counts:{'5':3},pool_pull_counts:{池:200}},
+  analysis:{categories:{normal:{name:'普通池',pull_count:200,five_count:3}},
+   pools:[{pool_name:'池',category:'normal',category_name:'普通池',first_date:'2026-01-01',
+    last_date:'2026-01-03',pull_count:200,hard_pity:70,tail_since_five:5,tail_exact:true,
+    next_guaranteed:false,events}]}};
+}
+
+test('prepare resolves null without MobileAssets and never blocks export',async()=>{
+ delete globalThis.MobileAssets;
+ assert.equal(await freshLongImage().prepare(imageReport(),[]),null);
+});
+
+test('prepare dedups unique characters across pages and caches the results',async()=>{
+ const calls=assetBridge({failBrand:true});
+ const LongImage=freshLongImage(),report=imageReport(),pages=LongImage.planPages(report,'all');
+ const assets=await LongImage.prepare(report,pages);
+ assert.equal(calls.init,1);
+ assert.deepEqual([...calls.character].sort((a,b)=>a-b),[11,22]);
+ assert.equal(calls.load.filter(src=>src.includes('char')).length,2);
+ assert.equal(assets.brand,null);
+ assert.equal(assets.characters.get(22).info.rarity,5);
+ await LongImage.prepare(report,pages);
+ assert.equal(calls.character.length,2);
+ delete globalThis.MobileAssets;
+});
+
+test('prepare drops failed character lookups without rejecting',async()=>{
+ assetBridge({failIds:new Set([22]),missingIds:new Set([33])});
+ const LongImage=freshLongImage(),report=imageReport();
+ report.analysis.pools[0].events.push({name:'角色丙',item_id:33,pulls_since_five:5,interval_exact:true,outcome:'up'});
+ const assets=await LongImage.prepare(report,LongImage.planPages(report,'all'));
+ assert.deepEqual([...assets.characters.keys()],[11]);
+ delete globalThis.MobileAssets;
+});
+
+test('draw keeps the legacy layout without assets and renders avatars plus logo with assets',async()=>{
+ const LongImage=freshLongImage();
+ globalThis.document={createElement:()=>mockCanvas()};
+ const report=imageReport(),page=LongImage.planPages(report,'all')[0];
+ const legacy=LongImage.draw(report,page,0,1,'all');
+ assert.equal(legacy.ops.filter(op=>op[0]==='drawImage').length,0);
+ assert.equal(legacy.ops.find(op=>op[0]==='fillText'&&op[1]==='角色甲')[2],60);
+ assetBridge();
+ const assets=await LongImage.prepare(report,LongImage.planPages(report,'all'));
+ const canvas=LongImage.draw(report,page,0,1,'all',assets);
+ const draws=canvas.ops.filter(op=>op[0]==='drawImage');
+ assert.equal(draws.length,4);
+ assert.deepEqual(draws[0].slice(2),[1080-40-56,51,56,34]);
+ for(const avatar of draws.slice(1))assert.deepEqual(avatar.slice(2,6),[0,0,140,140]);
+ assert.equal(canvas.ops.find(op=>op[0]==='fillText'&&op[1]==='角色甲')[2],132);
+ delete globalThis.document;
+ delete globalThis.MobileAssets;
 });
 
 test('catalog feedback recognizes native updates and actual revision changes',()=>{

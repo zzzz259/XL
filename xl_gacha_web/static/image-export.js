@@ -22,6 +22,60 @@ const LongImage = (() => {
     return pages;
   }
 
+  // Local avatar/logo assets come from the optional global MobileAssets bridge (Android).
+  // Everything degrades to the plain text/color layout when it is missing or a single image fails.
+  const characterCache = new Map();
+  let brandCache = null, brandResolved = false, assetsInitPromise = null;
+  function assetsBridge() {
+    return typeof MobileAssets !== 'undefined' && MobileAssets && typeof MobileAssets.init === 'function' ? MobileAssets : null;
+  }
+  function ensureAssetsInit(bridge) {
+    if (!assetsInitPromise) assetsInitPromise = Promise.resolve().then(() => bridge.init());
+    return assetsInitPromise.catch(() => {});
+  }
+  async function resolveCharacter(bridge, itemId) {
+    if (characterCache.has(itemId)) return characterCache.get(itemId);
+    let entry = null;
+    try {
+      const info = await bridge.character(itemId);
+      if (info && info.src && typeof bridge.loadImage === 'function') {
+        const image = await bridge.loadImage(info.src);
+        if (image) entry = {info, image};
+      }
+    } catch { entry = null; }
+    characterCache.set(itemId, entry);
+    return entry;
+  }
+  async function resolveBrand(bridge) {
+    if (brandResolved) return brandCache;
+    brandResolved = true;
+    try {
+      const info = typeof bridge.brand === 'function' ? await bridge.brand() : null;
+      if (info && info.logo && typeof bridge.loadImage === 'function') {
+        const image = await bridge.loadImage(info.logo);
+        if (image) brandCache = {info, image};
+      }
+    } catch { brandCache = null; }
+    return brandCache;
+  }
+  async function prepare(report, pages) {
+    const bridge = assetsBridge();
+    if (!bridge) return null;
+    try {
+      await ensureAssetsInit(bridge);
+      const itemIds = new Set();
+      for (const page of pages || []) for (const chunk of page.chunks || [])
+        for (const event of chunk.events || [])
+          if (event.item_id !== undefined && event.item_id !== null) itemIds.add(event.item_id);
+      const characters = new Map();
+      await Promise.all([...itemIds].map(async itemId => {
+        const entry = await resolveCharacter(bridge, itemId);
+        if (entry) characters.set(itemId, entry);
+      }));
+      return {brand: await resolveBrand(bridge), characters};
+    } catch { return null; }
+  }
+
   const encoder = new TextEncoder();
   const crcTable = Array.from({length: 256}, (_, n) => {
     for (let k = 0; k < 8; k++) n = (n & 1) ? 0xedb88320 ^ (n >>> 1) : n >>> 1;
@@ -54,10 +108,18 @@ const LongImage = (() => {
     return new Blob([...local, ...central, end], {type: 'application/zip'});
   }
 
-  function draw(report, page, index, total, category) {
+  function headRect(image, crop) {
+    if (crop === 'left') return [0, 0, 140, 140];
+    const w = image.naturalWidth || image.width || 140, h = image.naturalHeight || image.height || 140;
+    return [Math.max(0, (w - 140) / 2), Math.max(0, (h - 140) / 2), 140, 140];
+  }
+
+  function draw(report, page, index, total, category, assets) {
     const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = page.height;
     const c = canvas.getContext('2d');
     if (!c) throw new Error('当前浏览器无法生成图片，请更换浏览器。');
+    const brand = assets && assets.brand && assets.brand.image ? assets.brand : null;
+    const characters = assets && assets.characters ? assets.characters : null;
     const rect = (x,y,w,h,color) => {c.fillStyle = color; c.fillRect(x,y,w,h);};
     function label(value,x,y,size=26,color='#eef1f5',weight=400,max=1000) {
       c.font = `${weight} ${size}px "Microsoft YaHei", "PingFang SC", sans-serif`; c.fillStyle = color;
@@ -69,7 +131,8 @@ const LongImage = (() => {
       c.fillText(s,x,y,max);
     }
     rect(0,0,W,canvas.height,'#111820'); rect(40,40,6,56,'#d8bb86');
-    label(report.account?.label || (report.preview_source ? '本地记录预览' : '招募档案'),64,80,38,'#f3e4c7',650,950);
+    if (brand) c.drawImage(brand.image, W-40-56, 51, 56, 34);
+    label(report.account?.label || (report.preview_source ? '本地记录预览' : '招募档案'),64,80,38,'#f3e4c7',650,brand?W-40-56-64-24:950);
     label(`星落 · 抽卡手记    ${category === 'all' ? '全部卡池' : ({normal:'普通池',limited:'限定池',collection:'典藏池',beginner:'启程池',unknown:'未分类'}[category] || category)}    ${index+1}/${total}`,42,124,24,'#a9b7c8');
     label(`${report.summary.pull_count.toLocaleString()} 抽  ·  ${report.summary.rarity_counts['5'] || 0} 个五星  ·  ${Object.keys(report.summary.pool_pull_counts).length} 个卡池`,42,178,32,'#f3f5f8',600);
     for (const [i, key] of ['normal','limited','collection'].entries()) {
@@ -88,7 +151,11 @@ const LongImage = (() => {
       label(`${p.category_name}  ·  ${p.first_date} — ${p.last_date}`,60,y+73,22,'#a5b3c3');
       let ey = y+94;
       for (const e of part.events) {
-        label(e.name,60,ey+33,27,'#edf1f5',600,218);
+        const entry = characters ? characters.get(e.item_id) : null;
+        const avatar = entry && entry.image ? entry : null;
+        const nameX = avatar ? 132 : 60, nameMax = avatar ? 290-nameX-12 : 218;
+        if (avatar) c.drawImage(avatar.image, ...headRect(avatar.image, avatar.info.crop), 60, ey+3, 60, 60);
+        label(e.name,nameX,ey+33,27,'#edf1f5',600,nameMax);
         const count = e.pulls_since_five, color = !e.interval_exact ? '#67778b' : count<=30 ? '#41c3aa' : count<=60 ? '#dfbd66' : '#e78372';
         rect(290,ey+6,470,41,'#131b25'); rect(290,ey+6,Math.max(105, Math.min(470,count/(p.hard_pity || 70)*470)),41,color);
         label(`${e.interval_exact ? '' : '≥'}${count} 抽`,302,ey+36,25,'#101921',650);
@@ -96,7 +163,7 @@ const LongImage = (() => {
         if(e.guaranteed === true) tags += ' · 大保底¹';
         if(!e.interval_exact) tags = '前序不完整';
         label(tags,780,ey+34,22,'#e2c38f',500,242);
-        if(e.carried_pulls) label(`跨池 ${e.carried_pulls} 抽`,60,ey+57,18,'#93a4b8',400,218);
+        if(e.carried_pulls) label(`跨池 ${e.carried_pulls} 抽`,nameX,ey+57,18,'#93a4b8',400,nameMax);
         ey += ROW;
       }
       if(!part.events.length) {label('尚无五星记录',60,ey+36,25,'#9aabbe'); ey += ROW;}
@@ -118,7 +185,7 @@ const LongImage = (() => {
     catch(error){error.completed=completed;throw error;}
     return {saved:true,count:completed};
   }
-  return {planPages, makeZip, draw, deliver};
+  return {planPages, makeZip, draw, deliver, prepare};
 })();
 
 if (typeof module !== 'undefined') module.exports = LongImage;

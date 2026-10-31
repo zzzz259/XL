@@ -22,8 +22,11 @@ class ToolchainTests(unittest.TestCase):
             (desktop / "static" / "private.log").write_text("private")
             for name in ANDROID_WEB_FILES:
                 (android / "web" / name).write_text("synthetic")
+            (android / "web" / "assets" / "fashions").mkdir(parents=True)
+            (android / "web" / "assets" / "fashions" / "HeadRect_test.png").write_bytes(b"synthetic-image")
             assets = root / "assets"
             prepare_assets(desktop, android, assets)
+            self.assertTrue((assets / "assets" / "fashions" / "HeadRect_test.png").is_file())
             self.assertFalse((assets / "private.json").exists())
             self.assertFalse((assets / "private.log").exists())
             self.assertTrue((assets / "catalog.json").exists())

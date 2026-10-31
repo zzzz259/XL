@@ -23,6 +23,8 @@ class MobilePageParser(HTMLParser):
             self.assets.append(values["src"])
         if tag == "link" and values.get("href"):
             self.assets.append(values["href"])
+        if tag == "img" and values.get("src"):
+            self.assets.append(values["src"])
 
 
 class MobileAssetTests(unittest.TestCase):
@@ -33,7 +35,7 @@ class MobileAssetTests(unittest.TestCase):
         parser.feed(page.read_text(encoding="utf-8"))
         self.assertEqual(len(parser.ids), len(set(parser.ids)))
         self.assertCountEqual(parser.tabs, ["records", "query", "profile"])
-        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "query-flip", "query-front", "manual-panel", "manual-open", "manual-open-label", "manual-help", "manual-help-dialog", "characters-toggle", "career-evaluation", "recent-evaluation", "career-tags"):
+        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "query-flip", "query-front", "manual-panel", "manual-open", "manual-open-label", "manual-help", "manual-help-dialog", "characters-toggle", "career-evaluation", "recent-evaluation", "career-tags", "account-button-avatar", "profile-account-avatar", "gugu-button", "gugu-idle", "gugu-reaction", "gugu-poster"):
             self.assertIn(element_id, parser.ids)
         for removed_id in ("account-quick-stats", "record-account-updated", "characters-detail", "manual-dialog"):
             self.assertNotIn(removed_id, parser.ids)
@@ -47,7 +49,7 @@ class MobileAssetTests(unittest.TestCase):
         for asset in parser.assets:
             self.assertFalse(asset.startswith(("http://", "https://", "//")))
             name = asset.split("?", 1)[0].split("#", 1)[0].lstrip("/")
-            if name.endswith((".js", ".css", ".svg", ".json")):
+            if name.endswith((".js", ".css", ".svg", ".json", ".png", ".webp")):
                 self.assertTrue((root / "web" / name).is_file() or name in {"demo.json", "favicon.svg", "image-export.js"})
         self.assertNotIn("/app.js", parser.assets)
         self.assertNotIn("/style.css", parser.assets)
@@ -84,6 +86,25 @@ class MobileAssetTests(unittest.TestCase):
             with self.subTest(script=script[:80]):
                 result = subprocess.run(["node", "--input-type=module", "--check"], input=script, encoding="utf-8", capture_output=True, timeout=10)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_bundled_manifest_matches_disk(self):
+        import hashlib
+        import json
+
+        root = Path(__file__).resolve().parents[1]
+        manifest = json.loads((root / "web" / "assets" / "manifest.json").read_text(encoding="utf-8"))
+        catalog = json.loads((root.parent / "xl_gacha_web" / "data" / "catalog.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["resource_version"], "134359843258232660")
+        self.assertEqual(set(manifest["characters"]), set(catalog["cards"]))
+        self.assertEqual(len(manifest["fashions"]), 312)
+        self.assertEqual(len(manifest["account_items"]), 99)
+        self.assertEqual(len(manifest["files"]), 418)
+        for path, expected in manifest["files"].items():
+            self.assertTrue(path.startswith("assets/"), path)
+            self.assertNotIn("..", path)
+            source = root / "web" / path
+            self.assertTrue(source.is_file(), path)
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), expected, path)
 
 
 if __name__ == "__main__":

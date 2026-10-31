@@ -52,9 +52,9 @@ public class MainActivity extends Activity {
   web.addJavascriptInterface(new Host(),"AndroidHost");
   web.setWebViewClient(new WebViewClient(){
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){Uri u=r.getUrl();if(!"https".equals(u.getScheme())||!HOST.equals(u.getHost()))return denied();
-    String path=u.getPath();if("/".equals(path))path="/index.html";if(path==null||path.equals("/bilibili-client.json")||path.contains("..")||!path.matches("/[A-Za-z0-9._-]+"))return denied();
+    String path=u.getPath();if("/".equals(path))path="/index.html";if(path==null||path.equals("/bilibili-client.json")||path.contains("..")||path.contains("//")||!path.matches("/(?:assets/)?[A-Za-z0-9._/-]+"))return denied();
     try{if("/catalog.json".equals(path))return new WebResourceResponse("application/json","UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream(updates.catalog().toString().getBytes(StandardCharsets.UTF_8)));
-     String mime=path.endsWith(".js")?"text/javascript":path.endsWith(".css")?"text/css":path.endsWith(".json")?"application/json":path.endsWith(".svg")?"image/svg+xml":"text/html";
+     String mime=path.endsWith(".js")?"text/javascript":path.endsWith(".css")?"text/css":path.endsWith(".json")?"application/json":path.endsWith(".svg")?"image/svg+xml":path.endsWith(".webp")?"image/webp":path.endsWith(".png")?"image/png":"text/html";
      return new WebResourceResponse(mime,"UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),getAssets().open(path.substring(1)));
     }catch(IOException e){return denied();}}
    @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){if(HOST.equals(r.getUrl().getHost())&&"https".equals(r.getUrl().getScheme()))return false;

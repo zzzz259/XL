@@ -521,6 +521,47 @@ body.compact-ui #record-coverage { display: none !important; }
 #bili-login:disabled { opacity: .58; cursor: not-allowed; }
 #bili-login-note { color: var(--faint); }
 
+:root {
+  --bg: #161c20;
+  --surface: #22292e;
+  --surface-raised: #2b343a;
+  --surface-soft: #1b2227;
+  --accent: #d8f553;
+}
+.brand-symbol { width: 56px; height: 38px; background: transparent; }
+.brand-logo { display: block; width: 56px; height: 38px; object-fit: contain; }
+.button.primary { color: #162014; background-color: var(--accent); background-image: linear-gradient(rgba(216, 245, 83, .86), rgba(216, 245, 83, .86)), url('/assets/ui/primary-button.png'); background-size: cover; background-position: center; }
+.text-link, .characters-toggle[aria-pressed="true"] { color: var(--accent); }
+.category-tabs button.active { color: #162014; background: var(--accent); }
+.bottom-nav button.active { color: var(--accent); }
+.bottom-nav button.active::after { background: var(--accent); }
+.pool-total { color: #162014; background: var(--accent); }
+.career-summary, .query-card { background-color: #20272b; background-image: linear-gradient(rgba(32, 39, 43, .96), rgba(32, 39, 43, .96)), url('/assets/ui/perlinNoise.png'); background-size: auto, 128px 128px; }
+.item-avatar .avatar-image { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; object-position: left center; }
+.item-avatar .avatar-fallback { position: relative; z-index: 1; }
+.item-avatar.has-image .avatar-fallback { display: none; }
+.item-avatar .avatar-flag { z-index: 2; }
+.item-avatar.roster-avatar { width: 20px; height: 20px; flex-basis: 20px; border-radius: 4px; font-size: 10px; }
+.roster-chip { display: inline-flex; align-items: center; gap: 4px; }
+.player-avatar { position: relative; display: inline-grid; place-items: center; width: 100%; height: 100%; isolation: isolate; }
+.player-head { position: absolute; inset: 8%; z-index: 0; width: 84%; height: 84%; border-radius: 10px; object-fit: cover; object-position: left center; }
+.player-fallback { width: 55%; height: 55%; color: var(--muted); }
+.player-frame { position: absolute; inset: -7%; z-index: 1; width: 114%; height: 114%; object-fit: contain; pointer-events: none; }
+.player-rank { position: absolute; right: -6px; bottom: -3px; z-index: 2; padding: 0 4px; border-radius: 4px; color: #162014; background: var(--accent); font-size: 9px; font-weight: 800; line-height: 1.5; }
+.player-level { padding: 2px 5px; border-radius: 5px; color: var(--accent); background: rgba(216, 245, 83, .1); font-size: 12px; font-weight: 700; }
+.account-option-player { width: 38px; height: 38px; flex: 0 0 38px; }
+.gugu-button { position: relative; display: block; width: 112px; height: 112px; margin: 4px 0 0 auto; padding: 0; border-radius: 20px; transition: transform .16s ease; }
+.gugu-button img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.gugu-button[data-state="reacting"] { transform: scale(1.06) rotate(-4deg); }
+.gugu-button:active { transform: scale(.96); }
+.gugu-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+@media (max-width: 400px) {
+  .gugu-button { width: 100px; height: 100px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gugu-button { transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

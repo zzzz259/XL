@@ -61,6 +61,16 @@ test('account identity hashes match the desktop algorithm and fields are allowli
  assert.ok(!JSON.stringify(report).includes('NEVER_STORE'));
 });
 
+test('player profile fields preserve account identity and nickname defaults',async()=>{
+ const source={uid:'555',channel:'sms',nickname:'合成玩家',game_uid:'9007199254740993',level:80,face_id:12001701,fashion_id:12001701,head_id:0,head_rect_id:21180003,head_rect_stamp:1893456000,head_rect_extra:7,head_rect_item_uid:'0',server_time:1793456000};
+ const identity=await engine.identity(source);
+ const hash=require('node:crypto').createHash('sha256').update('sms:555').digest('hex').slice(0,32);
+ assert.equal(identity.id,'account-'+hash);assert.equal(identity.label,'合成玩家');
+ for(const key of Object.keys(source))assert.deepEqual(identity[key],source[key]);
+ const named=await engine.identity({...source,label:'我的存档'});assert.equal(named.label,'我的存档');
+ await assert.rejects(engine.identity({...source,level:-1}));await assert.rejects(engine.identity({...source,nickname:'bad\nname'}));
+});
+
 test('same numeric UID in Bilibili and official login remains in separate archives',async()=>{
  const bili=await engine.identity({uid:'555',channel:'bilibili'}),official=await engine.identity({uid:'555',channel:'sms'});
  assert.notEqual(bili.id,official.id);

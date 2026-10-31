@@ -70,7 +70,10 @@ const MobileEngine=(()=>{
   const uid=txt(String(value.uid||''),64),channel=txt(value.channel||'',64);let id;
   if(uid||channel){if(!uid||!/^[-\w]{1,64}$/.test(channel))fail();id='account-'+(await digest(channel+':'+uid)).slice(0,32);if(value.id&&value.id!==id)fail('ACCOUNT_ID_MISMATCH');}
   else{id=value.id||'local-'+crypto.randomUUID().replaceAll('-','');if(!/^local-[a-f0-9]{32}$/.test(id))fail();}
-  return {id,uid,channel,label:txt(label||value.label||(uid?`${channel} · UID ${uid}`:'导入的账号'),60)};
+  const result={id,uid,channel,label:txt(label||value.label||value.nickname||(uid?`${channel} · UID ${uid}`:'导入的账号'),60)};
+  for(const [key,max] of [['nickname',60],['game_uid',64],['head_rect_item_uid',64]])if(value[key]!==undefined&&value[key]!==null&&value[key]!=='')result[key]=txt(String(value[key]),max);
+  for(const key of ['level','face_id','fashion_id','head_id','head_rect_id','head_rect_stamp','head_rect_extra','server_time'])if(value[key]!==undefined&&value[key]!==null&&value[key]!=='')result[key]=num(value[key]);
+  return result;
  }
  function csvRows(content){
   const rows=[];let row=[],cell='',quote=false;

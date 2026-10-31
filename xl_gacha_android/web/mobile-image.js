@@ -31,9 +31,10 @@ const MobileImage=(()=>{
   const run=++generation;generating=true;clear();update();$('image-status').textContent='正在本机生成图片…';
   try{
    await document.fonts.ready;const pages=LongImage.planPages(report,category),base=`星落-${(report.account?.label||'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;
+   const assets=typeof LongImage.prepare==='function'?await LongImage.prepare(report,pages):null;
    for(let index=0;index<pages.length;index++){
     if(run!==generation||!$('mobile-image-dialog').open)break;
-    const canvas=LongImage.draw(report,pages[index],index,pages.length,category),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png')),width=canvas.width,height=canvas.height;canvas.width=canvas.height=1;
+    const canvas=LongImage.draw(report,pages[index],index,pages.length,category,assets),blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png')),width=canvas.width,height=canvas.height;canvas.width=canvas.height=1;
     if(!blob)throw new Error('图片生成失败，请减少记录后重试。');
     if(run!==generation||!$('mobile-image-dialog').open)break;
     const url=URL.createObjectURL(blob),file={name:`${base}-${String(index+1).padStart(2,'0')}.png`,blob,url,width,height};urls.push(url);files.push(file);selected.add(files.length-1);$('image-previews').append(preview(file,index));
