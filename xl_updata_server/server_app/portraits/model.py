@@ -19,6 +19,29 @@ def _id(value):
 def _hash(value):
     return isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value) is not None
 
+
+def validate_job(payload):
+    """Copy a fixed-profile job; lease acceptance remains the store's concern."""
+    if not isinstance(payload, dict): raise ValueError('job must be an object')
+    job = copy.deepcopy(payload)
+    if type(job.get('schema_version')) is not int or job['schema_version'] != 1:
+        raise ValueError('invalid job schema')
+    if not all(_text(job.get(k)) for k in ('instance_id', 'source_id', 'version')):
+        raise ValueError('invalid job scope/version')
+    if not all(_id(job.get(k)) for k in ('character_id', 'skin_id')):
+        raise ValueError('invalid job identity')
+    if job.get('profile') != PROFILE or type(job['profile'].get('scale')) is not int:
+        raise ValueError('unsupported job profile')
+    if not all(_hash(job.get(k)) for k in ('job_id', 'render_key')):
+        raise ValueError('invalid job digest')
+    if job['job_id'] != digest([job[k] for k in ('instance_id','source_id','version','character_id','skin_id','render_key')]):
+        raise ValueError('job id mismatch')
+    if job.get('reason') not in ('new_character','new_skin','changed_inputs','manual_backfill'):
+        raise ValueError('invalid job reason')
+    if 'attempt' in job and (type(job['attempt']) is not int or not 1 <= job['attempt'] < 2**63):
+        raise ValueError('invalid attempt')
+    return job
+
 def render_key(catalog, row):
     return digest([catalog['instance_id'], catalog['source_id'], row['character_id'], row['skin_id'], PROFILE, *[row[k] for k in FINGERPRINTS]])
 

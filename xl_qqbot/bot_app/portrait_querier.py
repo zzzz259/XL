@@ -73,7 +73,10 @@ class PortraitQuerier:
             version = current['version']
             if type(current['schema_version']) is not int or current['schema_version'] != 1 or not isinstance(version, str) or not version.strip():
                 raise ValueError('invalid manifest')
-            if current['catalog_path'] != f'catalog/{version}.json':
+            sha = current['sha256']
+            if not isinstance(sha, str) or not re.fullmatch('[0-9a-fA-F]{64}', sha):
+                raise ValueError('invalid catalog digest')
+            if current['catalog_path'] not in (f'catalog/{version}.json', f'catalog/{version}/{sha.lower()}.json'):
                 raise ValueError('catalog version path mismatch')
             raw = self._read(self._path(current['catalog_path']), self.max_catalog_bytes)
             self._hash(raw, current['sha256'])

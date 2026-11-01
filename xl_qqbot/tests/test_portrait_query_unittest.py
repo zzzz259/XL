@@ -76,6 +76,19 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(self.querier.find('100', 1)['status'], 'found')
         self.assertEqual(len(current_reads), 1)
 
+    def test_immutable_revision_pointer_and_hash_path_binding(self):
+        data = json.dumps(self.catalog).encode()
+        sha = hashlib.sha256(data).hexdigest()
+        revision = self.root / 'catalog' / 'v' / (sha+'.json')
+        revision.parent.mkdir(); revision.write_bytes(data)
+        current = dict(schema_version=1, version='v', catalog_path=f'catalog/v/{sha}.json', sha256=sha)
+        (self.root/'current.json').write_text(json.dumps(current))
+        self.assertEqual(self.querier.find('100', 1)['status'], 'found')
+        current['catalog_path'] = f"catalog/v/{'b'*64}.json"
+        (revision.parent/('b'*64+'.json')).write_bytes(data)
+        (self.root/'current.json').write_text(json.dumps(current))
+        self.assertEqual(self.querier.find('100', 1)['status'], 'unavailable')
+
     def test_symlink_escape(self):
         outside = self.root.parent / (self.root.name + '-outside.png')
         outside.write_bytes((self.root / 'p.png').read_bytes())
