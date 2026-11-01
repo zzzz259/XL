@@ -21,9 +21,21 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual([j['reason'] for j in jobs],['new_skin','new_character'])
         self.assertEqual(jobs,plan_changes(a,b))
     def test_content_changes(self):
-        for field in ('config_fingerprint','dependency_fingerprint','tool_fingerprint'):
+        for field in ('config_fingerprint','dependency_fingerprint'):
             row=skin(); row[field]='d'*64
             self.assertEqual(plan_changes(cat(),cat([row]))[0]['reason'],'changed_inputs')
+    def test_tool_only_does_not_backfill_missing_history(self):
+        for state in ('not_generated','blocked','failed','pending','running'):
+            row=skin(state=state); changed=copy.deepcopy(row); changed['tool_fingerprint']='d'*64
+            self.assertEqual(plan_changes(cat([row]),cat([changed])),[])
+    def test_tool_only_refreshes_complete_published_lineage_including_fallback(self):
+        for state in ('published','failed','pending'):
+            row=skin(state=state,artifact_path='portraits/1/10.png',artifact_sha256='e'*64,source_version='1')
+            changed=skin(); changed['tool_fingerprint']='d'*64
+            self.assertEqual(len(plan_changes(cat([row]),cat([changed]))),1)
+    def test_tool_and_real_inputs_still_schedule(self):
+        row=skin(); row.update(tool_fingerprint='d'*64,dependency_fingerprint='e'*64)
+        self.assertEqual(len(plan_changes(cat(),cat([row]))),1)
     def test_display_only(self):
         row=skin(); row['name']='renamed'
         a=cat(); b=cat([skin(5),row],version='2')

@@ -13,7 +13,13 @@ def plan_changes(previous: dict | None, current: dict) -> list[dict]:
     for row in current['skins']:
         identity=(row['character_id'],row['skin_id'])
         if identity not in old: reason='new_skin' if row['character_id'] in characters else 'new_character'
-        elif old[identity]['render_key'] != row['render_key']: reason='changed_inputs'
+        elif old[identity]['render_key'] != row['render_key']:
+            prior=old[identity]
+            game_inputs_changed=any(prior[k]!=row[k] for k in ('config_fingerprint','dependency_fingerprint'))
+            # A fallback may retain complete publication lineage after a failed update.
+            has_artifact=all(prior[k] for k in ('artifact_path','artifact_sha256','source_version'))
+            if not game_inputs_changed and not has_artifact: continue
+            reason='changed_inputs'
         else: continue
         job={k:current[k] for k in ('schema_version','instance_id','source_id','version')}
         job.update({k:copy.deepcopy(row[k]) for k in ('character_id','skin_id','render_key','profile')})
