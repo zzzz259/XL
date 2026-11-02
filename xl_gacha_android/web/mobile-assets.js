@@ -5,6 +5,7 @@ const MobileAssets=(()=>{
  const ASSET_PREFIX='assets/';
  const deps={fetch:null,Image:null};
  let manifestPromise=null;
+ let refreshPromise=null;
  let manifest=null;
  const imageCache=new Map();
 
@@ -23,48 +24,74 @@ const MobileAssets=(()=>{
   return src.startsWith(ASSET_PREFIX);
  };
 
- function init(){
-  if(!manifestPromise){
+ function fetchManifest(){
    const fetchImpl=deps.fetch||(typeof fetch==='function'?fetch:null);
-   if(!fetchImpl){
-    manifestPromise=Promise.reject(new Error('MobileAssets: 当前环境没有 fetch，无法加载 manifest'));
-   }else{
-    manifestPromise=Promise.resolve()
+   if(!fetchImpl)return Promise.reject(new Error('MobileAssets: 当前环境没有 fetch，无法加载 manifest'));
+   return Promise.resolve()
      .then(()=>fetchImpl(MANIFEST_URL,{cache:'no-store'}))
      .then(response=>{
       if(!response||response.ok===false)throw new Error(`MobileAssets: manifest 请求失败 (${response&&response.status})`);
       return response.json();
      })
-     .then(data=>{manifest=data;return data;});
-   }
-  }
+     .then(data=>{
+      if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('MobileAssets: manifest 格式无效');
+      return data;
+     });
+ }
+ function init(){
+  if(!manifestPromise)manifestPromise=fetchManifest().then(data=>{manifest=data;return data;});
   return manifestPromise;
+ }
+ function refresh(){
+  if(!refreshPromise){
+   refreshPromise=fetchManifest().then(data=>{
+    manifest=data;
+    manifestPromise=Promise.resolve(data);
+    imageCache.clear();
+    return data;
+   }).finally(()=>{refreshPromise=null;});
+  }
+  return refreshPromise;
+ }
+ function revision(){
+  const source=resolveManifest();
+  return source._revision??source.visual_revision??source.resource_version??null;
+ }
+
+ // CommonResource.HeadBg: 88px 圆形遮罩，320×140 的 PicLoader 位于 (-91,-23)。
+ const HEAD_CROP=[91,23,88,88],HEAD_SIZE=[320,140];
+ const PORTRAIT_CROP=[38,0,180,180],PORTRAIT_SIZE=[256,256];
+ function geometry(entry,fallbackCrop,fallbackSize){
+  const crop=entry.crop_rect,size=entry.source_size;
+  const valid=Array.isArray(crop)&&crop.length===4&&Array.isArray(size)&&size.length===2
+   &&[...crop,...size].every(Number.isSafeInteger)
+   &&size.every(value=>value>0&&value<=4096)&&crop[0]>=0&&crop[1]>=0&&crop[2]>0&&crop[3]>0
+   &&crop[0]+crop[2]<=size[0]&&crop[1]+crop[3]<=size[1];
+  return {cropRect:[...(valid?crop:fallbackCrop)],sourceSize:[...(valid?size:fallbackSize)]};
  }
 
  function character(itemId){
   const entry=resolveManifest().characters?.[String(itemId)];
   if(!entry||!entry.path)return null;
-  return {src:entry.path,name:entry.name??null,rarity:entry.rarity??null,crop:'center'};
+  return {src:entry.path,name:entry.name??null,rarity:entry.rarity??null,crop:'center',...geometry(entry,PORTRAIT_CROP,PORTRAIT_SIZE)};
  }
 
  const fashionHead=id=>{
   const entry=resolveManifest().fashions?.[String(id)];
-  return entry&&entry.rect_path?{src:entry.rect_path,crop:'center'}:null;
+  return entry&&entry.rect_path?{src:entry.rect_path,crop:'game-head',...geometry(entry,HEAD_CROP,HEAD_SIZE)}:null;
  };
  const accountHead=id=>{
   const entry=resolveManifest().account_items?.[String(id)];
-  return entry&&entry.type===108&&entry.path?{src:entry.path,crop:'left'}:null;
+  return entry&&entry.type===108&&entry.path?{src:entry.path,crop:'game-head',...geometry(entry,HEAD_CROP,HEAD_SIZE)}:null;
  };
  function headFor(account){
   const fashionId=Number(account.fashion_id??0);
   if(Number.isFinite(fashionId)&&fashionId>0){
-   const head=fashionHead(fashionId);
-   if(head)return head;
+   return fashionHead(fashionId);
   }
   const headId=Number(account.head_id??0);
   if(Number.isFinite(headId)&&headId>0){
-   const head=accountHead(headId);
-   if(head)return head;
+   return accountHead(headId);
   }
   const faceId=Number(account.face_id);
   if(fashionId===0&&headId===0&&Number.isFinite(faceId)&&faceId>0){
@@ -73,7 +100,7 @@ const MobileAssets=(()=>{
   }
   return null;
  }
- function frameFor(account){
+ function frameFor(account,nowMs){
   const source=resolveManifest();
   const rectId=Number(account.head_rect_id);
   if(!Number.isFinite(rectId)||rectId<=0)return null;
@@ -81,7 +108,13 @@ const MobileAssets=(()=>{
   if(!entry||entry.type!==109||!entry.path)return null;
   if(String(entry.effect_value)==='1'){
    const stamp=Number(account.head_rect_stamp),serverTime=Number(account.server_time);
-   if(!Number.isFinite(stamp)||!Number.isFinite(serverTime)||stamp<=serverTime)return null;
+   if(!Number.isFinite(stamp)||!Number.isFinite(serverTime))return null;
+   const receivedAt=Number(account.server_time_received_at);
+   // 新存档沿用服务器时钟偏差；旧存档用当前时间避免冻结已过期的头像框。
+   const currentServerTime=Number.isFinite(receivedAt)&&receivedAt>0
+    ?serverTime+Math.max(0,nowMs-receivedAt)/1000
+    :Math.max(serverTime,Math.floor(nowMs/1000));
+   if(stamp<=currentServerTime)return null;
   }
   return {src:entry.path};
  }
@@ -90,11 +123,13 @@ const MobileAssets=(()=>{
   const extra=Number(account.head_rect_extra);
   return Number.isFinite(extra)&&extra>0?extra:null;
  }
- function player(account){
+ function player(account,options={}){
   const empty={head:null,frame:null,rank:null};
   if(!account||typeof account!=='object')return empty;
   resolveManifest();
-  return {head:headFor(account),frame:frameFor(account),rank:rankFor(account)};
+  const nowMs=Number.isFinite(options.nowMs)?options.nowMs:Date.now();
+  const frame=frameFor(account,nowMs);
+  return {head:headFor(account),frame,rank:frame?rankFor(account):null};
  }
 
  function brand(){
@@ -141,12 +176,13 @@ const MobileAssets=(()=>{
  }
  function _reset(){
   manifestPromise=null;
+  refreshPromise=null;
   manifest=null;
   imageCache.clear();
   return api;
  }
 
- const api={init,character,player,brand,mascot,loadImage,_inject,_reset};
+ const api={init,refresh,revision,character,player,brand,mascot,loadImage,_inject,_reset};
  return api;
 })();
 

@@ -15,8 +15,10 @@ function mockCanvas() {
   const ops = [];
   const ctx = {fillStyle: '', font: '', _align: 'left',
     fillRect: (...a) => ops.push(['fillRect', ...a]),
-    fillText(...a) {ops.push(['fillText', ...a, this.font, this.textAlign]);},
+    fillText(text, x, y, max) {ops.push(['fillText', text, x, y, max, this.font, this.textAlign, this.fillStyle]);},
     measureText: s => ({width: String(s).length * 10}),
+    save: () => ops.push(['save']), restore: () => ops.push(['restore']),
+    beginPath: () => ops.push(['beginPath']), arc: (...a) => ops.push(['arc', ...a]), clip: () => ops.push(['clip']),
     drawImage: (...a) => ops.push(['drawImage', ...a])};
   Object.defineProperty(ctx, 'textAlign', {
     get() {return ctx._align;},
@@ -243,11 +245,12 @@ test('draw keeps the legacy text layout when no assets are passed', () => {
   const nameOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '角色甲');
   assert.equal(nameOp[2], 60);
   const accountOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '主号');
-  assert.equal(accountOp[4], 950);
+  assert.equal(accountOp[4], undefined);
+  assert.equal(accountOp[2], 64);
   delete globalThis.document;
 });
 
-test('draw renders the new interface with a proportional logo, avatars and a two-row event layout', async () => {
+test('draw renders a centered intact logo and inset portrait rows in the mobile layout', async () => {
   const LongImage = freshLongImage();
   globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
   assetBridge();
@@ -258,15 +261,20 @@ test('draw renders the new interface with a proportional logo, avatars and a two
   assert.equal(draws.length, 4);
   assert.equal(draws[0][1], assets.brand.image);
   // The complete 2:1 logo is enlarged proportionally, never square-cropped.
-  assert.deepEqual(draws[0].slice(2), [1080 - 40 - 128, 40, 128, 64]);
+  const [logoX, logoY, logoW, logoH] = draws[0].slice(2);
+  assert.equal(logoX + logoW / 2, 540);
+  assert.equal(logoW / logoH, 2);
+  assert.ok(logoH >= 120 && logoY >= 32);
   for (const avatar of draws.slice(1)) {
     assert.deepEqual(avatar.slice(2, 6), [0, 0, 256, 256]);
-    assert.deepEqual(avatar.slice(6), [60, avatar[7], 60, 60]);
+    assert.ok(avatar[6] >= 72 && avatar[8] >= 88 && avatar[9] === avatar[8]);
   }
   const nameOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '角色甲');
-  assert.equal(nameOp[2], 132);
+  assert.ok(nameOp[2] >= 184);
   const accountOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '招募档案');
-  assert.equal(accountOp[4], 1080 - 40 - 128 - 64 - 24);
+  assert.equal(accountOp[2], 540);
+  assert.equal(accountOp[6], 'center');
+  assert.ok(accountOp[3] > logoY + logoH + 60);
   // career cards use the overlaid (叠字) pity progress text
   const pityText = canvas.ops.find(op => op[0] === 'fillText' && String(op[1]).startsWith('已垫 '));
   assert.ok(pityText);
@@ -313,7 +321,7 @@ test('draw keeps the new interface non-overlapping with overlaid bar text', asyn
   const ops = canvas.ops;
   const texts = ops.filter(op => op[0] === 'fillText').map(op => {
     const size = Number(/(\d+(?:\.\d+)?)px/.exec(op[5])[1]);
-    const w = Math.min(op[4], String(op[1]).length * 10);
+    const w = String(op[1]).length * 10;
     const align = op[6] || 'left';
     const left = align === 'center' ? op[2] - w / 2 : align === 'right' ? op[2] - w : op[2];
     return {s: String(op[1]), left, right: left + w, y: op[3], size};
@@ -324,31 +332,32 @@ test('draw keeps the new interface non-overlapping with overlaid bar text', asyn
       assert.ok(!overlap(a, b), `texts overlap: ${a.s} vs ${b.s}`);
   const rects = ops.filter(op => op[0] === 'fillRect');
   // interval bar moved to its own second row: track then fill, with the dark count text overlaid inside the fill
-  const tracks = rects.filter(r => r[1] === 132 && r[3] === 908 && r[4] === 36);
+  const tracks = rects.filter(r => r[1] === 184 && r[3] === 824 && r[4] === 42);
   assert.equal(tracks.length, 3);
   for (const track of tracks) {
     const at = ops.indexOf(track);
-    const fill = ops.slice(at + 1).find(op => op[0] === 'fillRect' && op[1] === 132 && op[2] === track[2]);
+    const fill = ops.slice(at + 1).find(op => op[0] === 'fillRect' && op[1] === 184 && op[2] === track[2]);
     assert.ok(fill);
-    assert.ok(fill[3] >= 105 && fill[3] <= 908);
-    const count = texts.find(t => t.left === 148 && t.y === track[2] + 25);
+    assert.ok(fill[3] >= 72 && fill[3] <= 824);
+    assert.ok(track[1] + track[3] <= 1008, 'event bars must keep an inner margin');
+    const count = texts.find(t => t.left === 200 && t.y === track[2] + 30);
     assert.ok(count, 'missing overlaid interval text');
-    assert.ok(count.right <= 132 + fill[3]);
+    assert.ok(count.right <= 184 + fill[3]);
   }
   // event chips follow the name on the first row and stay inside the card
-  for (const chip of rects.filter(r => r[4] === 30 && r[3] >= 26 && r[3] <= 300))
-    assert.ok(chip[1] >= 132 && chip[1] + chip[3] <= 1040);
+  for (const chip of rects.filter(r => r[4] === 32 && r[3] >= 26 && r[3] <= 300))
+    assert.ok(chip[1] >= 184 && chip[1] + chip[3] <= 1008);
   // avatars stay left of the names
   for (const avatar of ops.filter(op => op[0] === 'drawImage').slice(1)) {
-    assert.equal(avatar[6], 60);
-    assert.ok(avatar[6] + avatar[8] <= 132);
+    assert.equal(avatar[6], 72);
+    assert.ok(avatar[6] + avatar[8] <= 184);
   }
   // career pity track hosts its overlaid centered text
-  const pityTracks = rects.filter(r => r[3] === 292 && r[4] === 22);
-  assert.equal(pityTracks.length, 1);
+  const pityTracks = rects.filter(r => r[3] === 272 && r[4] === 30);
+  assert.equal(pityTracks.length, 3);
   const pity = texts.find(t => String(t.s).startsWith('已垫 '));
-  assert.ok(pity.left >= pityTracks[0][1] && pity.right <= pityTracks[0][1] + 292);
-  assert.ok(pity.y <= pityTracks[0][2] + 22 && pity.y > pityTracks[0][2]);
+  assert.ok(pity.left >= pityTracks[0][1] && pity.right <= pityTracks[0][1] + 272);
+  assert.ok(pity.y <= pityTracks[0][2] + 30 && pity.y > pityTracks[0][2]);
   delete globalThis.document;
   delete globalThis.MobileAssets;
 });
@@ -356,6 +365,7 @@ test('draw keeps the new interface non-overlapping with overlaid bar text', asyn
 test('modern export uses real player identity, a larger logo and inline complete event tags', () => {
   const LongImage = freshLongImage();
   globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  assetBridge();
   const report = imageReport();
   report.account = {label: 'TapTap · UID 123456', nickname: '真实昵称', game_uid: '123456', level: 80};
   const event = report.analysis.pools[0].events[1];
@@ -370,7 +380,11 @@ test('modern export uses real player identity, a larger logo and inline complete
   assert.equal(texts.some(op => String(op[1]).includes('TapTap')), false);
   const logo = canvas.ops.find(op => op[0] === 'drawImage');
   assert.equal(logo.length, 6);
-  assert.deepEqual(logo.slice(-2), [128, 64]);
+  assert.ok(logo.at(-1) >= 120);
+  assert.equal(logo[2] + logo[4] / 2, 540);
+  assert.equal(texts.find(op => op[1] === '真实昵称')[6], 'center');
+  assert.ok(texts.find(op => String(op[1]).includes('200 抽'))[3] > texts.find(op => op[1] === 'UID 123456 · Lv.80')[3]);
+  assert.ok(texts.every(op => op[4] === undefined), 'text must be ellipsized explicitly without Canvas maxWidth squeezing');
   for (const text of ['UP', '大保底', '十连四金']) {
     const tag = texts.find(op => op[1] === text);
     assert.ok(tag, `missing ${text}`);
@@ -378,11 +392,13 @@ test('modern export uses real player identity, a larger logo and inline complete
   }
   assert.equal(texts.some(op => String(op[1]).includes('本池第')), false);
   delete globalThis.document;
+  delete globalThis.MobileAssets;
 });
 
 test('modern export wraps every career tag instead of dropping overflowing tags', () => {
   const LongImage = freshLongImage();
   globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  assetBridge();
   const tags = [
     {key: 'up_streak', text: '4连UP', count: 1},
     {key: 'guarantee_streak', text: '3连大保底', count: 1},
@@ -403,4 +419,231 @@ test('modern export wraps every career tag instead of dropping overflowing tags'
   assert.equal(canvas.height, page.height);
   delete globalThis.MobileInsights;
   delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile preparation resolves account art and undrawn featured characters, then follows refreshed mappings', async () => {
+  const calls = assetBridge();
+  let manifest = {characters: {'33': {name: '未抽到的UP', path: 'assets/char/33.png'}}};
+  globalThis.MobileAssets.init = async () => manifest;
+  globalThis.MobileAssets.player = account => ({head: {src: `assets/player/${account.face_id}.png`, crop: 'left'}, frame: {src: 'assets/player/frame.png'}, rank: 3});
+  const LongImage = freshLongImage(), report = imageReport();
+  report.account.face_id = 7;
+  report.analysis.pools[0].featured_names = ['未抽到的UP'];
+  let assets = await LongImage.prepare(report, LongImage.planPages(report));
+  assert.ok(assets.player.head.image);
+  assert.ok(assets.player.frame.image);
+  assert.equal(assets.player.rank, 3);
+  assert.deepEqual(assets.featured.get('1').map(entry => entry.itemId), [33]);
+  assert.ok(calls.character.includes(33), 'UP portrait must load even without an event');
+  const originalImage = assets.characters.get(11).image;
+  manifest = {characters: {'33': {name: '未抽到的UP', path: 'assets/char/new-33.png'}}};
+  assets = await LongImage.prepare(report, LongImage.planPages(report));
+  assert.notEqual(assets.characters.get(11).image, originalImage, 'refreshed manifest must invalidate export image entries');
+  delete globalThis.MobileAssets;
+});
+
+test('mobile export uses metadata portrait bounds for event and featured art and never bleeds into the footer', async () => {
+  assetBridge();
+  const LongImage = freshLongImage(), report = imageReport();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const portrait = {info: {crop: 'center', cropRect: [18, 24, 208, 208]}, image: mockImage()};
+  const pages = LongImage.planPages(report, 'all', 1600);
+  assert.ok(pages.length > 1);
+  for (const [index, page] of pages.entries()) {
+    const canvas = LongImage.draw(report, page, index, pages.length, 'all', {brand: null, characters: new Map([[11, portrait], [22, portrait]]), featured: new Map([['1', [{...portrait, itemId: 11}]]])});
+    const images = canvas.ops.filter(op => op[0] === 'drawImage');
+    assert.ok(images.length > page.chunks.reduce((sum, part) => sum + part.events.length, 0));
+    for (const op of images) {
+      assert.deepEqual(op.slice(2, 6), [18, 24, 208, 208]);
+      assert.ok(op[6] >= 72 && op[6] + op[8] <= 1008);
+      assert.ok(op[7] + op[9] < canvas.height - 100);
+    }
+    assert.ok(canvas.height <= 1600);
+  }
+  assert.equal(pages[1].chunks[0].continuation, true);
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile pagination rejects a canvas limit smaller than its header and one record', () => {
+  assetBridge();
+  const LongImage = freshLongImage();
+  // This limit fits the former compressed header but cannot fit the readable mobile layout.
+  assert.throws(() => LongImage.planPages(imageReport(), 'all', 1000), /图片高度|记录|卡池/);
+  delete globalThis.MobileAssets;
+});
+
+test('mobile text keeps readable glyph widths and all event chips when names are long', () => {
+  assetBridge();
+  const LongImage = freshLongImage(), report = imageReport();
+  report.account = {nickname: '很长的玩家昵称'.repeat(20), game_uid: '123456789', level: 99};
+  const event = report.analysis.pools[0].events[0];
+  event.name = '很长的角色名称'.repeat(12);
+  Object.assign(event, {outcome: 'up', guaranteed: true, interval_exact: false, guarantee_conflict: true});
+  const measure = (text, font) => {
+    const size = Number(/(\d+)px/.exec(font)?.[1] || 26);
+    return [...String(text)].reduce((sum, ch) => sum + size * (ch.charCodeAt(0) > 127 ? 1 : .55), 0);
+  };
+  globalThis.document = {createElement: () => {
+    const canvas = mockCanvas(), context = canvas.getContext();
+    context.measureText = text => ({width: measure(text, context.font)});
+    return canvas;
+  }, getElementById: () => null};
+  const insights = {tags: [], multi: {byPool: {'1': [{positions: [20], exact: false, five_count: 4}]}}};
+  const canvas = LongImage.draw(report, LongImage.planPages(report)[0], 0, 1, 'all', {brand: null, characters: new Map(), insights});
+  const texts = canvas.ops.filter(op => op[0] === 'fillText');
+  const nickname = texts.find(op => String(op[1]).startsWith('很长的玩家'));
+  const name = texts.find(op => String(op[1]).startsWith('很长的角色'));
+  assert.ok(nickname[1].endsWith('…'));
+  assert.ok(name[1].endsWith('…'));
+  assert.ok(measure(nickname[1], nickname[5]) <= 888);
+  assert.ok(measure(name[1], name[5]) <= 266);
+  assert.ok(texts.every(op => op[4] === undefined));
+  const expected = ['UP', '大保底', '十连至少四金', '待核验', '前序不完整'];
+  const chips = expected.map(label => texts.find(op => op[1] === label));
+  assert.ok(chips.every(Boolean), 'every meaningful event badge must survive long names');
+  for (const [index, chip] of chips.entries()) {
+    assert.ok(chip[2] + measure(chip[1], chip[5]) <= 1008);
+    if (index) assert.ok(chips[index - 1][2] + measure(chips[index - 1][1], chips[index - 1][5]) < chip[2]);
+  }
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile manifest failure preserves readable text layout and isolates player image failures', async () => {
+  assetBridge({throwIds: new Set([11, 22]), failBrand: true});
+  globalThis.MobileAssets.init = async () => {throw new Error('manifest unavailable');};
+  globalThis.MobileAssets.player = () => ({head: {src: 'assets/player/missing.png'}, frame: {src: 'assets/player/frame.png'}});
+  const loadImage = globalThis.MobileAssets.loadImage;
+  globalThis.MobileAssets.loadImage = src => src.includes('missing') ? Promise.reject(new Error('missing head')) : loadImage(src);
+  const LongImage = freshLongImage(), report = imageReport();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const pages = LongImage.planPages(report), assets = await LongImage.prepare(report, pages);
+  assert.ok(assets, 'a broken mobile image manifest must retain the mobile text layout');
+  assert.equal(assets.player.head, null);
+  assert.ok(assets.player.frame.image, 'one failed player image must not suppress another valid image');
+  const canvas = LongImage.draw(report, pages[0], 0, 1, 'all', assets);
+  assert.ok(canvas.ops.some(op => op[0] === 'fillText' && op[1] === '抽卡手记' && op[2] === 540));
+  assert.ok(canvas.ops.some(op => op[0] === 'fillText' && op[1] === '角色甲' && op[2] === 184));
+  assert.equal(canvas.height, pages[0].height);
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile account art follows the game head viewport and surrounding frame geometry', () => {
+  assetBridge();
+  const LongImage = freshLongImage(), report = imageReport();
+  report.account.nickname = '玩家';
+  report.account.game_uid = '123456';
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const head = {info: {crop: 'game-head', cropRect: [91, 23, 88, 88]}, image: mockImage(320, 140)};
+  const frame = {info: {}, image: mockImage(130, 130)};
+  const canvas = LongImage.draw(report, LongImage.planPages(report)[0], 0, 1, 'all', {brand: null, characters: new Map(), player: {head, frame}});
+  const images = canvas.ops.filter(op => op[0] === 'drawImage');
+  assert.equal(images.length, 2);
+  const headOp = images.find(op => op[1] === head.image), frameOp = images.find(op => op[1] === frame.image);
+  assert.deepEqual(headOp.slice(2, 6), [91, 23, 88, 88]);
+  assert.equal(headOp[8], 70.4);
+  assert.equal(headOp[9], 70.4);
+  assert.equal(frameOp[4], 96);
+  assert.equal(frameOp[5], 96);
+  assert.ok(Math.abs(headOp[6] + 35.2 - frameOp[2] - 48) < 0.001);
+  assert.ok(Math.abs(headOp[7] + 35.2 - frameOp[3] - 48) < 0.001);
+  const circle = canvas.ops.find(op => op[0] === 'arc');
+  assert.ok(circle, 'account heads must use the same circular viewport as the page');
+  assert.deepEqual(circle.slice(1), [headOp[6] + 35.2, headOp[7] + 35.2, 35.2, 0, Math.PI * 2]);
+  const clipAt = canvas.ops.findIndex(op => op[0] === 'clip'), restoreAt = canvas.ops.findIndex(op => op[0] === 'restore');
+  assert.ok(clipAt < canvas.ops.indexOf(headOp));
+  assert.ok(canvas.ops.indexOf(headOp) < restoreAt);
+  assert.ok(restoreAt < canvas.ops.indexOf(frameOp), 'frame art must remain outside the head clip');
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile career cards retain average metrics beside counts with room before pity and tags', () => {
+  assetBridge();
+  const LongImage = freshLongImage(), report = imageReport();
+  report.analysis.categories.limited = {name: '限定池', pull_count: 200, five_count: 5, up_count: 3, off_count: 2, average_five_interval: 49.25, since_five: 1, hard_pity: 70};
+  report.analysis.categories.collection = {name: '典藏池', pull_count: 0, five_count: 0, up_count: 0, off_count: 0, average_five_interval: null};
+  globalThis.MobileInsights = {analyze: () => ({tags: [{key: 'up_streak', text: '4连UP', count: 1}]})};
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const page = LongImage.planPages(report)[0];
+  const canvas = LongImage.draw(report, page, 0, 1, 'all', {brand: null, characters: new Map(), insights: globalThis.MobileInsights.analyze()});
+  const texts = canvas.ops.filter(op => op[0] === 'fillText');
+  const averages = ['66.7', '49.3', '—'].map(value => texts.find(op => op[1] === value));
+  assert.ok(averages.every(Boolean), 'average values must use the same one-decimal calculation and empty state as the app');
+  const labels = texts.filter(op => op[1] === '五星平均' || op[1] === '平均UP');
+  assert.equal(labels.length, 3);
+  assert.equal(labels[0][1], '五星平均');
+  const pity = texts.filter(op => String(op[1]).startsWith('已垫 '));
+  const tag = texts.find(op => op[1] === '4连UP');
+  for (const [index, average] of averages.entries()) {
+    assert.equal(average[2], labels[index][2]);
+    assert.equal(average[6], 'center');
+    assert.ok(average[3] < labels[index][3] - 21);
+    assert.ok(labels[index][3] < pity[index][3] - 30);
+    assert.ok(pity[index][3] < tag[3] - 40);
+  }
+  assert.ok(page.headerHeight > tag[3] + 40, 'the larger cards and tags must remain inside the planned header');
+  delete globalThis.document;
+  delete globalThis.MobileInsights;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile career warning tags use the same red categories as the app', () => {
+  assetBridge();
+  const LongImage = freshLongImage(), report = imageReport();
+  const tags = [
+    {key: 'guarantee_streak', text: '3连大保底'},
+    {key: 'up_130', text: '130抽以上才出UP'},
+    {key: 'off_streak', text: '3连歪'},
+    {key: 'up_streak', text: '4连UP'},
+    {key: 'pity_70', text: '抽满70井'},
+  ];
+  globalThis.MobileInsights = {analyze: () => ({tags})};
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const canvas = LongImage.draw(report, LongImage.planPages(report)[0], 0, 1, 'all', {characters: new Map(), insights: {tags}});
+  const texts = canvas.ops.filter(op => op[0] === 'fillText');
+  for (const tag of tags) assert.equal(texts.find(op => op[1] === tag.text)[7], ['guarantee_streak', 'up_130', 'off_streak'].includes(tag.key) ? '#ff9c91' : '#54e0b9');
+  delete globalThis.document;
+  delete globalThis.MobileInsights;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile export shows luck badges from complete selected UP cycles without changing interval bars', async () => {
+  assetBridge();
+  globalThis.MobileProbability = require('../../xl_gacha_android/web/mobile-probability.js');
+  const LongImage = freshLongImage(), report = imageReport(), pool = report.analysis.pools[0];
+  pool.category = 'limited';
+  pool.events = [
+    {name: '角色甲', item_id: 11, timestamp: 1, pulls_since_five: 3, interval_exact: true, outcome: 'up', guaranteed: false},
+    {name: '角色乙', item_id: 22, timestamp: 2, pulls_since_five: 65, interval_exact: true, outcome: 'off', guaranteed: false},
+    {name: '角色甲', item_id: 11, timestamp: 3, pulls_since_five: 65, interval_exact: true, outcome: 'up', guaranteed: true},
+  ];
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const pages = LongImage.planPages(report), assets = await LongImage.prepare(report, pages);
+  const canvas = LongImage.draw(report, pages[0], 0, 1, 'all', assets);
+  const texts = canvas.ops.filter(op => op[0] === 'fillText').map(op => op[1]);
+  assert.equal(texts.filter(value => value === '超欧').length, 1);
+  assert.equal(texts.filter(value => value === '超非').length, 1);
+  assert.equal(texts.filter(value => value === '65 抽').length, 2, 'bar labels still show exact five-star intervals');
+  delete globalThis.MobileProbability;
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('mobile canvas uses the shared account display name without changing desktop aliases', () => {
+  assetBridge();
+  const LongImage = freshLongImage(), report = imageReport();
+  globalThis.MobileServices = {accountName: account => account.label === '主号' ? '自定义主号' : '招募档案'};
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const page = LongImage.planPages(report)[0];
+  const mobile = LongImage.draw(report, page, 0, 1, 'all', {characters: new Map()});
+  assert.ok(mobile.ops.some(op => op[0] === 'fillText' && op[1] === '自定义主号'));
+  const desktop = LongImage.draw(report, page, 0, 1, 'all');
+  assert.ok(desktop.ops.some(op => op[0] === 'fillText' && op[1] === '主号'));
+  delete globalThis.MobileServices;
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
 });

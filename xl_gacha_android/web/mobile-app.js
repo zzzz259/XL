@@ -1,7 +1,7 @@
 'use strict';
 
 (()=>{
- const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,login:{phase:'idle',profiles:[]},loginPanel:'options',manualOpen:false,loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,showCharacters:false};
+ const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,visualRevision:null,login:{phase:'idle',profiles:[]},loginPanel:'options',manualOpen:false,loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,showCharacters:false};
  let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null,mascot=null;
  window.mobileReady=false;
  const active=()=>['opening','waiting','querying','cancelling'].includes(state.login.phase);
@@ -50,7 +50,11 @@
  async function updateCatalog(value){
   const previous=state.catalog?.revision;value=MobileServices.catalogView(value,previous);state.catalog=value;MobileRender.catalog(value);
   if(value.revision&&value.revision!==previous&&state.report?.storage==='local'&&state.report.configuration_revision!==value.revision){const id=state.report.account.id,report=await MobileServices.api('/library/open',{id});if(state.report?.account?.id===id)showReport(report,false,true);}
-  if(value.phase==='checking')catalogTimer=setTimeout(refreshCatalog,700);
+  const visual=value.visual_assets;
+  if(visual?.revision&&visual.revision!==state.visualRevision){
+   try{await MobileAssets.refresh();state.visualRevision=visual.revision;const scrollY=window.scrollY;renderAll();requestAnimationFrame(()=>window.scrollTo(0,scrollY));}catch{/* Keep the previous verified map and retry on the next check. */}
+  }
+  if(value.phase==='checking'||visual?.checking)catalogTimer=setTimeout(refreshCatalog,700);
  }
  function bind(){
   document.querySelectorAll('.bottom-nav [data-tab]').forEach(button=>button.addEventListener('click',()=>switchTab(button.dataset.tab)));
@@ -71,7 +75,7 @@
   $('profile-backup').addEventListener('click',()=>run(async()=>{const backup=await MobileServices.api('/library/backup');MobileServices.saveBlob(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}),`星落-全部账号备份-${new Date().toISOString().slice(0,10)}.json`);notify(`已生成 ${backup.accounts.length} 个账号的备份。`);}));
   $('rename-account').addEventListener('click',()=>{if(!state.report||state.demo)return;$('rename-input').value=state.report.account.label;openDialog('rename-dialog');});
   $('rename-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{const report=await MobileServices.api('/library/rename',{id:state.report.account.id,label:$('rename-input').value});showReport(report,false,true);closeDialog('rename-dialog');await refreshLibrary(false);notify('存档名称已保存。');});});
-  $('delete-account').addEventListener('click',()=>{if(!state.report||state.demo)return;confirm('删除本机存档',`将删除“${state.report.account.label}”的本机记录，不影响游戏账号。未备份的数据无法恢复。`,'删除存档',async()=>{await MobileServices.api('/library/delete',{id:state.report.account.id});state.report=null;state.demo=false;await refreshLibrary(false);if(state.accounts.length)showReport(await MobileServices.api('/library/open',{id:state.accounts[0].id}),false);else renderAll();notify('本机存档已删除。');});});
+  $('delete-account').addEventListener('click',()=>{if(!state.report||state.demo)return;confirm('删除本机存档',`将删除“${MobileServices.accountName(state.report.account)}”的本机记录，不影响游戏账号。未备份的数据无法恢复。`,'删除存档',async()=>{await MobileServices.api('/library/delete',{id:state.report.account.id});state.report=null;state.demo=false;await refreshLibrary(false);if(state.accounts.length)showReport(await MobileServices.api('/library/open',{id:state.accounts[0].id}),false);else renderAll();notify('本机存档已删除。');});});
   $('confirm-action').addEventListener('click',()=>{const action=confirmHandler;confirmHandler=null;closeDialog('confirm-dialog');if(action)run(action);});
   for(const id of ['overview-image','profile-image'])$(id).addEventListener('click',()=>MobileImage.open(state.report,state.poolCategory));
   $('pool-category-tabs').addEventListener('click',event=>{const button=event.target.closest('[data-category]');if(!button)return;state.poolCategory=button.dataset.category;state.insights=MobileInsights.analyze(state.report,{category:state.poolCategory});MobileRender.pools(state);});
@@ -85,7 +89,7 @@
   $('record-prev').addEventListener('click',()=>{state.recordPage--;renderRecords();});$('record-next').addEventListener('click',()=>{state.recordPage++;renderRecords();});
   $('catalog-check').addEventListener('click',()=>checkCatalog(true));$('catalog-source-save').addEventListener('click',()=>run(async()=>{const value=await MobileServices.api('/catalog/source',{url:$('catalog-source').value.trim()});await updateCatalog(value);notify('配置地址已保存，正在检查更新。');}));
   $('text-zoom-options').addEventListener('click',event=>{const button=event.target.closest('[data-zoom]');if(button)applyTextZoom(Number(button.dataset.zoom));});
-  document.addEventListener('visibilitychange',()=>{mascot?.reset();if(!document.hidden)checkCatalog(false);});
+  document.addEventListener('visibilitychange',()=>{mascot?.reset();if(!document.hidden){if(state.report){MobileRender.accounts(state);MobileRender.recordPage(state);}checkCatalog(false);}});
  }
  window.mobileBack=()=>{const dialogs=[...document.querySelectorAll('dialog[open]')];if(dialogs.length){const dialog=dialogs.at(-1);if(dialog.dataset.busy==='true')return true;dialog.close();return true;}if(state.tab==='query'&&state.manualOpen){if(state.working||active()){notify('正在查询，请稍候。','error');return true;}setManualOpen(false);return true;}const previous=navigation.back(window.scrollY);if(previous){applyPage(previous.page,previous.scrollY);return true;}return false;};
  async function init(){

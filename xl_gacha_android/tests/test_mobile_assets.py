@@ -84,7 +84,7 @@ class MobileAssetTests(unittest.TestCase):
         self.assertTrue(scripts)
         for script in scripts:
             with self.subTest(script=script[:80]):
-                result = subprocess.run(["node", "--input-type=module", "--check"], input=script, encoding="utf-8", capture_output=True, timeout=10)
+                result = subprocess.run(["node", "--input-type=module", "--check"], input=script, encoding="utf-8", capture_output=True, timeout=10, check=False)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_bundled_manifest_matches_disk(self):
@@ -94,11 +94,11 @@ class MobileAssetTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "web" / "assets" / "manifest.json").read_text(encoding="utf-8"))
         catalog = json.loads((root.parent / "xl_gacha_web" / "data" / "catalog.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["resource_version"], "134359843258232660")
+        self.assertEqual(manifest["resource_version"], "134377281279792758")
         self.assertEqual(set(manifest["characters"]), set(catalog["cards"]))
-        self.assertEqual(len(manifest["fashions"]), 312)
-        self.assertEqual(len(manifest["account_items"]), 99)
-        self.assertEqual(len(manifest["files"]), 526)
+        self.assertEqual(len(manifest["fashions"]), 316)
+        self.assertEqual(len(manifest["account_items"]), 100)
+        self.assertEqual(len(manifest["files"]), 532)
         for path, expected in manifest["files"].items():
             self.assertTrue(path.startswith("assets/"), path)
             self.assertNotIn("..", path)

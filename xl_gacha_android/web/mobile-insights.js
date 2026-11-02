@@ -25,8 +25,9 @@ const MobileInsights=(()=>{
   const ratio=cost/fiveCount,[label,tone]=rate(ratio);
   return{status:'rated',ratio,pulls,fiveCount,lowConfidence,label,tone};
  }
- function collectTags(records,pools,cats,awakeningRecords){
-  const ten=new Map(),awakenings=new Map(),events=[];
+ function collectTags(records,cats,awakeningRecords,report,poolIds){
+  const probability=typeof MobileProbability!=='undefined'?MobileProbability:require('./mobile-probability.js');
+  const ten=new Map(),awakenings=new Map();
   for(const r of records){
    let total=0,fives=0,unknown=0;
    for(const d of r.drops){total+=d.count;if(d.rarity===5)fives+=d.count;else if(d.rarity===null)unknown+=d.count;}
@@ -38,30 +39,22 @@ const MobileInsights=(()=>{
    if(d.rarity!==5||d.item_id===null||d.item_id===undefined)continue;
    const id=String(d.item_id),e=awakenings.get(id)||{id,name:d.name||`角色 ${id}`,copies:0};if(d.name)e.name=d.name;e.copies+=d.count;awakenings.set(id,e);
   }
-  for(const p of pools.values()){
-   if(!cats.includes(p.category)||!(p.hard_pity>0))continue;
-   for(const ev of p.events||[])events.push({timestamp:ev.timestamp||0,pool:p.pool_id,pos:ev.in_pool_pull||0,outcome:ev.outcome,guaranteed:ev.guaranteed,exact:ev.interval_exact,pulls:ev.pulls_since_five,category:p.category});
-  }
-  events.sort((a,b)=>a.timestamp-b.timestamp||a.pool-b.pool||a.pos-b.pos);
-  let up=0,off=0,guarantee=0,maxUp=0,maxOff=0,maxGuarantee=0,longUp=0;
-  const lastOff=new Map();
-  for(const e of events){
+  let maxUp=0,maxOff=0,maxGuarantee=0,longUp=0;
+  const states=new Map();
+  for(const {event:e,group,selected,eligible} of probability.eventTimeline(report,{poolIds,categories:cats})){
+   if(!selected||!eligible||e.interval_exact===false)states.delete(group);
+   if(!selected||!eligible)continue;
+   const state=states.get(group)||{up:0,off:0,guarantee:0};
    if(e.outcome==='up'){
-    up++;off=0;
-    if(e.guaranteed===true){
-     guarantee++;
-     const before=lastOff.get(e.category),cycle=before?Number(e.pulls)+Number(before.pulls):NaN;
-     if(e.exact&&before?.exact&&Number.isFinite(cycle)&&cycle>=130)longUp++;
-     lastOff.delete(e.category);
-    }else{
-     guarantee=0;lastOff.delete(e.category);
-     if(e.guaranteed===false&&e.exact&&Number(e.pulls)>=130)longUp++;
-    }
+    state.up++;state.off=0;
+    state.guarantee=e.guaranteed===true?state.guarantee+1:0;
    }else if(e.outcome==='off'){
-    off++;up=0;lastOff.set(e.category,{pulls:e.pulls,exact:e.exact});
-   }else{up=0;off=0;guarantee=0;lastOff.delete(e.category);}
-   if(up>maxUp)maxUp=up;if(off>maxOff)maxOff=off;if(guarantee>maxGuarantee)maxGuarantee=guarantee;
+    state.off++;state.up=0;
+   }else{state.up=0;state.off=0;state.guarantee=0;}
+   states.set(group,state);
+   maxUp=Math.max(maxUp,state.up);maxOff=Math.max(maxOff,state.off);maxGuarantee=Math.max(maxGuarantee,state.guarantee);
   }
+  for(const cycle of probability.upCycles(report,{poolIds,categories:cats}).values())if(cycle.up_cycle_exact&&cycle.up_cycle_pulls>=130)longUp++;
   const tags=[];
   if(maxUp>=2)tags.push({key:'up_streak',text:`${maxUp}连UP`,count:1});
   if(maxGuarantee>=2)tags.push({key:'guarantee_streak',text:`${maxGuarantee}连大保底`,count:1});
@@ -103,14 +96,14 @@ const MobileInsights=(()=>{
   for(const r of report?.records||[]){
    const k=key(r);if(seen.has(k))continue;seen.add(k);
    const p=pools.get(String(r.pool_id));
-   if(category==='all'||p?.category===category)awakeningRecords.push(r);
+   if((!wanted||wanted.has(String(r.pool_id)))&&(category==='all'||p?.category===category))awakeningRecords.push(r);
    if(p&&cats.includes(p.category)&&p.hard_pity>0)records.push(r);
   }
   records.sort(sort);
   const career=evaluate(records,hardOf,'empty');
   const cutoff=now-RECENT_DAYS*DAY;
   const recent={...evaluate(records.filter(r=>r.timestamp<=now&&r.timestamp>=cutoff),hardOf,'excluded'),days:RECENT_DAYS};
-  return{career,recent,tags:collectTags(records,pools,cats,awakeningRecords),multi:collectMulti(records)};
+  return{career,recent,tags:collectTags(records,cats,awakeningRecords,report,opts.poolIds),multi:collectMulti(records)};
  }
  return{analyze};
 })();

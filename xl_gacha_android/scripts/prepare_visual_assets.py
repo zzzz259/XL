@@ -2,10 +2,12 @@
 """可复现素材生成器：从星落素材交付包重建 xl_gacha_android/web/assets。
 
 用法：
-    python scripts/prepare_visual_assets.py [素材包根目录] [--preview-dir DIR] [--no-preview]
+    python scripts/prepare_visual_assets.py [素材包根目录] [--game-output 导出目录] [--preview-dir DIR] [--no-preview]
 
 素材包默认路径可用环境变量 STARFALL_ASSET_PACK 覆盖。生成器只读取素材包，
 不修改其中任何文件；所有产物写入 web/assets 并刷新 manifest.json。
+--game-output 可叠加最新导出的 Lua 与原图；未导出的精确引用写入 unavailable_assets，
+不会用其他角色/皮肤替代。统计配置不在本脚本的修改范围内。
 """
 
 from __future__ import annotations
@@ -13,13 +15,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import statistics
 import struct
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageSequence
+from PIL import Image, ImageDraw
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -30,6 +33,10 @@ Image.MAX_IMAGE_PIXELS = None
 DEFAULT_PACK = "C:/Users/49432/Downloads/Starfall-App-Assets-20261029/Starfall-App-Assets"
 
 PORTRAIT_SIZE = 256          # 角色肖像输出边长
+PORTRAIT_CROP = (38, 0, 180, 180)  # 头像窗口聚焦头肩；保持原图供导出共享同一裁切
+# CommonResource.HeadBg: PicLoader 320×140 at (-91,-23), ellipse mask 88×88.
+ACCOUNT_HEAD_CROP = (91, 23, 88, 88)
+ACCOUNT_HEAD_SOURCE_SIZE = (320, 140)
 SQUARE_PAD_SIZE = 270        # 140x270 HeadSquare 左右补透明后的方画布边长
 ALPHA_THRESHOLD = 0          # alpha bbox 阈值（与素材包 catalog/assets.json 约定一致，alpha_min=0）
 
@@ -280,6 +287,96 @@ def load_catalog(pack_root, name):
         return json.load(handle)
 
 
+def load_game_catalogs(pack_root, game_output):
+    """Overlay the latest exported Lua references without modifying the original pack.
+
+    Only available, exact referenced rasters become runtime mappings. Missing game
+    references are recorded separately rather than substituted with another skin.
+    Absolute source paths are internal to generation and never enter the manifest.
+    """
+    pack_root, game_output = Path(pack_root), Path(game_output).resolve()
+    versions = [p for p in (game_output / "lua").iterdir()
+                if p.is_dir() and p.name.isdigit() and (p / "BaseCard.lua").is_file()]
+    if not versions:
+        raise ValueError(f"没有导出的角色 Lua: {game_output}")
+    lua_root = max(versions, key=lambda p: int(p.name))
+
+    def text(name):
+        return (lua_root / f"{name}.lua").read_text(encoding="utf-8-sig").replace("\r", "")
+
+    def rows(name):
+        return dict(re.findall(r"^  \[(\d+)\] = \{\n(.*?)^  \},?$", text(name), re.MULTILINE | re.DOTALL))
+
+    def value(body, key):
+        match = re.search(r"^    " + re.escape(key) + r' = ("(?:[^"\\]|\\.)*"|\d+)', body, re.MULTILINE)
+        return json.loads(match.group(1)) if match else None
+
+    words = {key: json.loads(label) for key, label in re.findall(
+        r'\[(\d+)\]\s*=\s*\{[^{}]*?\bname\s*=\s*("(?:[^"\\]|\\.)*")', text("BaseWord_cn"), re.DOTALL)}
+
+    def label(body, fallback):
+        match = re.search(r"\bname = function\(\)\s+return T\((\d+)\)", body)
+        return words.get(match.group(1), fallback) if match else fallback
+
+    def resource_path(resource):
+        if not resource:
+            return None
+        if ":" in resource:
+            package, name = resource.split(":", 1)
+            if not re.fullmatch(r"[A-Za-z0-9_]+", package + name):
+                raise ValueError(f"非法素材引用: {resource}")
+            return game_output / "game_material" / "fgui" / package / f"{name}.png"
+        if not re.fullmatch(r"[A-Za-z0-9_]+\.png", resource):
+            raise ValueError(f"非法头像引用: {resource}")
+        return game_output / "game_material" / "burst-head" / resource
+
+    baseline = load_catalog(pack_root, "characters.json")
+    card_rows, fashion_rows = rows("BaseCard"), rows("BaseFashion")
+    fashion_rows = {key: body for key, body in fashion_rows.items() if value(body, "card_id")}
+    item_rows = {key: body for key, body in rows("BaseItem").items() if value(body, "type") in (108, 109)}
+    characters, fashions, account_items, unavailable = {}, {}, {}, []
+
+    def missing(kind, item_id, body, resource, source, item_type):
+        unavailable.append({"kind": kind, "id": item_id, "type": item_type,
+                            "name": label(body, resource), "resource": resource,
+                            "path": source.relative_to(game_output).as_posix()})
+
+    for item_id, body in sorted(card_rows.items()):
+        fashion_id = str(value(body, "fashion_id"))
+        fashion = fashion_rows[fashion_id]
+        burst = resource_path(value(fashion, "head_icon_burst"))
+        square = resource_path(value(fashion, "head_icon_square"))
+        if not (burst and burst.is_file()) and not (square and square.is_file()):
+            raise ValueError(f"角色 {item_id} 的默认头像原图未导出")
+        old = baseline.get(item_id, {})
+        characters[item_id] = {"name": old.get("name", label(body, item_id)),
+                               "star": old.get("star", value(body, "star")),
+                               "default_fashion_id": fashion_id,
+                               "bursthead": str(burst) if burst and burst.is_file() else None,
+                               "square": str(square) if square and square.is_file() else None}
+
+    for fashion_id, body in sorted(fashion_rows.items()):
+        resource = value(body, "head_icon_rect")
+        source = resource_path(resource)
+        if not source or not source.is_file():
+            missing("fashions", fashion_id, body, resource, source, "fashion_head")
+            continue
+        fashions[fashion_id] = {"card_id": str(value(body, "card_id")),
+                                "paths": {"head_icon_rect": str(source)}}
+
+    for item_id, body in sorted(item_rows.items()):
+        resource = value(body, "icon")
+        source, item_type = resource_path(resource), value(body, "type")
+        if not source or not source.is_file():
+            missing("account_items", item_id, body, resource, source, item_type)
+            continue
+        account_items[item_id] = {"path": str(source), "type": item_type,
+                                  "effect_value": value(body, "effect_value")}
+    return {"resource_version": lua_root.name, "characters": characters, "fashions": fashions,
+            "account_items": account_items, "unavailable_assets": unavailable,
+            "source_counts": {"characters": len(card_rows), "fashions": len(fashion_rows), "account_items": len(item_rows)}}
+
+
 def write_manifest(path, manifest):
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, ensure_ascii=False, indent=1)
@@ -350,7 +447,7 @@ def build_previews(preview_dir, pack_root, web_root, manifest):
     preview_dir.mkdir(parents=True, exist_ok=True)
     characters = manifest["characters"]
 
-    # 1) 全部 108 张角色肖像缩略图
+    # 1) 全部可用角色肖像缩略图
     cells = []
     for item_id in sorted(characters):
         im = Image.open(web_root / characters[item_id]["path"])
@@ -376,7 +473,6 @@ def build_previews(preview_dir, pack_root, web_root, manifest):
 
     # 3) 每套 gugu 动画全部帧
     for set_name in MASCOT_SETS:
-        riff = parse_webp_riff(web_root / "assets" / "mascot" / f"{MASCOT_NAME}-{set_name}.webp")
         frames = decode_frames(web_root / "assets" / "mascot" / f"{MASCOT_NAME}-{set_name}.webp")
         cells = [(frame, str(index)) for index, frame in enumerate(frames)]
         contact_sheet(cells, cols=7, cell=150, out_path=preview_dir / f"gugu_{set_name}_frames.png")
@@ -405,7 +501,12 @@ def build_previews(preview_dir, pack_root, web_root, manifest):
 # 主流程
 # ---------------------------------------------------------------------------
 
-def generate(web_root, pack_root, preview_dir=None):
+def generate(web_root, pack_root, preview_dir=None, game_output=None):
+    # Validate source references before removing any previous generated output.
+    source = load_game_catalogs(pack_root, game_output) if game_output is not None else None
+    characters = source["characters"] if source else load_catalog(pack_root, "characters.json")
+    fashions = source["fashions"] if source else load_catalog(pack_root, "fashions.json")
+    account_items = source["account_items"] if source else load_catalog(pack_root, "account-items.json")
     assets_dir = web_root / "assets"
     portraits_dir = assets_dir / "portraits"
     account_dir = assets_dir / "account"
@@ -422,10 +523,6 @@ def generate(web_root, pack_root, preview_dir=None):
     if fashions_dir.exists():
         shutil.rmtree(fashions_dir)
 
-    characters = load_catalog(pack_root, "characters.json")
-    fashions = load_catalog(pack_root, "fashions.json")
-    account_items = load_catalog(pack_root, "account-items.json")
-
     outputs = {}  # relpath (assets/...) -> absolute path
 
     # 1) 角色肖像
@@ -439,6 +536,8 @@ def generate(web_root, pack_root, preview_dir=None):
             "name": entry["name"],
             "rarity": entry["star"],
             "path": rel,
+            "crop_rect": list(PORTRAIT_CROP),
+            "source_size": [PORTRAIT_SIZE, PORTRAIT_SIZE],
         }
 
     # 2) 抽卡默认角色肖像与账号时装 CardHeadRect 是两套独立资源
@@ -461,9 +560,11 @@ def generate(web_root, pack_root, preview_dir=None):
         manifest_fashions[fashion_id] = {
             "path": f"assets/portraits/{card_id}.webp",
             "rect_path": rel,
+            "crop_rect": list(ACCOUNT_HEAD_CROP),
+            "source_size": list(ACCOUNT_HEAD_SOURCE_SIZE),
         }
 
-    # 3) 账户装扮道具（99 项映射、98 个文件：Frame_4002 被两个道具共用）
+    # 3) 账户装扮道具（不同道具可能共用同一个框图）
     manifest_account = {}
     account_sources = {}
     for item_id in sorted(account_items):
@@ -483,12 +584,17 @@ def generate(web_root, pack_root, preview_dir=None):
             "type": entry["type"],
             "effect_value": entry["effect_value"],
         }
+        if entry["type"] == 108:
+            manifest_account[item_id].update({
+                "crop_rect": list(ACCOUNT_HEAD_CROP),
+                "source_size": list(ACCOUNT_HEAD_SOURCE_SIZE),
+            })
 
     # 4) brand 与 ui
     static_files = {
         f"assets/brand/{Path(BRAND_LOGO_SRC).name}": BRAND_LOGO_SRC,
         f"assets/ui/{Path(UI_PERLIN_SRC).name}": UI_PERLIN_SRC,
-        f"assets/ui/primary-button.png": UI_PRIMARY_BUTTON_SRC,
+        "assets/ui/primary-button.png": UI_PRIMARY_BUTTON_SRC,
     }
     manifest_brand = {
         "logo": f"assets/brand/{Path(BRAND_LOGO_SRC).name}",
@@ -532,7 +638,7 @@ def generate(web_root, pack_root, preview_dir=None):
     # 6) manifest
     files = {rel: sha256_file(path) for rel, path in sorted(outputs.items())}
     manifest = {
-        "resource_version": RESOURCE_VERSION,
+        "resource_version": source["resource_version"] if source else RESOURCE_VERSION,
         "characters": manifest_characters,
         "fashions": manifest_fashions,
         "account_items": manifest_account,
@@ -540,6 +646,9 @@ def generate(web_root, pack_root, preview_dir=None):
         "mascot": manifest_mascot,
         "files": files,
     }
+    if source:
+        manifest["source_counts"] = source["source_counts"]
+        manifest["unavailable_assets"] = source["unavailable_assets"]
     write_manifest(assets_dir / "manifest.json", manifest)
 
     if preview_dir is not None:
@@ -555,6 +664,9 @@ def main(argv):
         pack_root = Path(args.pop(0))
     preview_dir = None
     no_preview = "--no-preview" in args
+    game_output = None
+    if "--game-output" in args:
+        game_output = Path(args[args.index("--game-output") + 1])
     if "--preview-dir" in args:
         index = args.index("--preview-dir")
         preview_dir = Path(args[index + 1])
@@ -564,7 +676,7 @@ def main(argv):
     if not pack_root.is_dir():
         raise SystemExit(f"素材包不存在: {pack_root}")
     web_root = Path(__file__).resolve().parents[1] / "web"
-    manifest = generate(web_root, pack_root, preview_dir)
+    manifest = generate(web_root, pack_root, preview_dir, game_output)
     counts = {
         "characters": len(manifest["characters"]),
         "fashions": len(manifest["fashions"]),

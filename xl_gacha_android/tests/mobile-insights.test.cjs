@@ -123,17 +123,64 @@ test('full awakening names characters at six visible copies and follows category
  assert.equal(tag(normal.tags,'awaken_1001'),undefined);
 });
 
+test('pool selection scopes full-awakening copies while normal pools still contribute when selected',()=>{
+ const source=report([record(1,1000,[drop(1001,5,6,'同一角色')]),record(2,2000,[drop(1001,5,5,'同一角色')])],[poolInfo(1,'normal',70),poolInfo(2,'limited',70)]);
+ assert.equal(tag(MobileInsights.analyze(source).tags,'awaken_1001').text,'同一角色 满觉');
+ assert.equal(tag(MobileInsights.analyze(source,{poolIds:[2]}).tags,'awaken_1001'),undefined);
+ assert.equal(tag(MobileInsights.analyze(source,{poolIds:[1]}).tags,'awaken_1001').text,'同一角色 满觉');
+});
+
 test('longest up and off streaks across pools become streak tags only at length two or more',()=>{
  const pools=[poolInfo(11,'limited',70,[ev(1,1,'up'),ev(2,2,'up'),ev(3,3,'off'),ev(4,4,'up'),ev(5,5,'off'),ev(6,6,'off'),ev(7,7,'off')])];
  const {tags}=MobileInsights.analyze(report([],pools),{now:100});
  assert.equal(tag(tags,'up_streak').text,'2连UP');assert.equal(tag(tags,'up_streak').count,1);
  assert.equal(tag(tags,'off_streak').text,'3连歪');assert.equal(tag(tags,'off_streak').count,1);
- const broken=MobileInsights.analyze(report([],[poolInfo(12,'normal',70,[ev(1,1,'up'),ev(2,2,'up'),ev(3,3,'normal'),ev(4,4,'up'),ev(5,5,'up')])]),{now:100});
+ const broken=MobileInsights.analyze(report([],[poolInfo(12,'limited',70,[ev(1,1,'up'),ev(2,2,'up'),ev(3,3,'unknown'),ev(4,4,'up'),ev(5,5,'up')])]),{now:100});
  assert.equal(tag(broken.tags,'up_streak').text,'2连UP');assert.equal(tag(broken.tags,'off_streak'),undefined);
  const singles=MobileInsights.analyze(report([],[poolInfo(13,'limited',70,[ev(1,1,'up'),ev(2,2,'off'),ev(3,3,'up')])]),{now:100});
  assert.equal(tag(singles.tags,'up_streak'),undefined);assert.equal(tag(singles.tags,'off_streak'),undefined);
  const cross=MobileInsights.analyze(report([],[poolInfo(14,'limited',70,[ev(10,1,'up')]),poolInfo(15,'limited',70,[ev(20,1,'up')])]),{now:100});
  assert.equal(tag(cross.tags,'up_streak').text,'2连UP');
+});
+
+test('normal pools never create or interrupt UP and guarantee streaks when selected or unselected',()=>{
+ const normal=poolInfo(1,'normal',70,[ev(2,1,'normal'),ev(5,2,'normal'),ev(8,3,'up')]);
+ const limited=poolInfo(2,'limited',70,[naturalUpEvent(1,10),naturalUpEvent(3,10),offEvent(4,65),guaranteedEvent(6,65),offEvent(7,65),guaranteedEvent(9,65)]);
+ const source=report([record(1,2,[drop(11,3,8),drop(12,5,2,'普通金')])],[normal,limited]);
+ const all=MobileInsights.analyze(source),selected=MobileInsights.analyze(source,{poolIds:[2]});
+ assert.equal(tag(all.tags,'up_streak').text,'2连UP');
+ assert.equal(tag(all.tags,'guarantee_streak').text,'2连大保底');
+ for(const key of ['up_streak','off_streak','guarantee_streak','up_130'])assert.deepEqual(tag(all.tags,key),tag(selected.tags,key));
+ assert.equal(all.career.pulls,10);assert.equal(all.multi.count,1);
+ assert.equal(tag(MobileInsights.analyze(report([],[normal])).tags,'up_streak'),undefined);
+});
+
+test('limited and collection streaks remain independent while valid same-category pools carry on',()=>{
+ const pools=[poolInfo(1,'limited',70,[naturalUpEvent(1,10),naturalUpEvent(3,10)]),poolInfo(2,'collection',70,[naturalUpEvent(2,10)])];
+ assert.equal(tag(MobileInsights.analyze(report([],pools)).tags,'up_streak').text,'2连UP');
+ const mixed=[poolInfo(1,'limited',70,[offEvent(1,65),guaranteedEvent(3,65)]),poolInfo(2,'collection',70,[offEvent(2,65),guaranteedEvent(4,65)])];
+ assert.equal(tag(MobileInsights.analyze(report([],mixed)).tags,'guarantee_streak'),undefined);
+ assert.equal(tag(MobileInsights.analyze(report([],mixed)).tags,'up_130').count,2);
+});
+
+test('unknown outcomes, uncertain intervals and excluded UP pools separate streaks',()=>{
+ for(const middle of [ev(2,2,'unknown'),ev(2,2,'up',false)]){
+  const source=report([],[poolInfo(1,'limited',70,[naturalUpEvent(1,10),middle,naturalUpEvent(3,10)])]);
+  const result=MobileInsights.analyze(source);
+  assert.notEqual(tag(result.tags,'up_streak')?.text,'3连UP');
+ }
+ const source=report([],[poolInfo(1,'limited',70,[naturalUpEvent(1,10)]),poolInfo(2,'limited',70,[offEvent(2,60)]),poolInfo(3,'limited',70,[naturalUpEvent(3,10)])]);
+ const selected=MobileInsights.analyze(source,{poolIds:[1,3]});
+ assert.equal(tag(selected.tags,'up_streak'),undefined,'removing the middle UP pool must not join nonadjacent history');
+ const gap=report([],[poolInfo(1,'limited',70,[offEvent(1,65),guaranteedEvent(2,65),offEvent(3,65,false),guaranteedEvent(4,65)])]);
+ assert.equal(tag(MobileInsights.analyze(gap).tags,'guarantee_streak'),undefined);
+});
+
+test('same-second cross-pool events follow source record order rather than numeric pool id',()=>{
+ const rows=[record(3,100,[drop(12,5,1,'UP')],1),record(1,100,[drop(13,5,1,'歪')],2),record(2,100,[drop(12,5,1,'UP')],3)];
+ const pools=[poolInfo(3,'limited',70,[naturalUpEvent(100,1)]),poolInfo(1,'limited',70,[offEvent(100,1)]),poolInfo(2,'limited',70,[guaranteedEvent(100,1)])];
+ for(const pool of pools)pool.events[0].in_pool_pull=1;
+ assert.equal(tag(MobileInsights.analyze(report(rows,pools)).tags,'up_streak'),undefined);
 });
 
 test('duplicate records dedupe by pool timestamp index and record id keeping the first copy',()=>{

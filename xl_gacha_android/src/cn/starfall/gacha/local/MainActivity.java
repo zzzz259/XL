@@ -17,6 +17,7 @@ public class MainActivity extends Activity {
  static final String HOST="appassets.androidplatform.net",ORIGIN="https://"+HOST;
  static MainActivity current;
  static CatalogUpdates updates;
+ static VisualAssets visuals;
  static final ExecutorService IO=Executors.newCachedThreadPool();
  static JSONObject login=new JSONObject();
  static boolean remember=false;
@@ -30,9 +31,14 @@ public class MainActivity extends Activity {
   if(updates==null){JSONObject base;JSONObject source;
    try(InputStream in=context.getAssets().open("catalog.json")){base=new JSONObject(new String(GachaClient.bounded(in,4*1024*1024),StandardCharsets.UTF_8));}
    try(InputStream in=context.getAssets().open("update-source.json")){source=new JSONObject(new String(GachaClient.bounded(in,16384),StandardCharsets.UTF_8));}
-   updates=new CatalogUpdates(new File(context.getFilesDir(),"catalog-cache"),base,source.optString("url",""));
+   CatalogUpdates catalogUpdates=new CatalogUpdates(new File(context.getFilesDir(),"catalog-cache"),base,source.optString("url",""));
+   JSONObject visualBase;try(InputStream in=context.getAssets().open("assets/manifest.json")){visualBase=new JSONObject(new String(GachaClient.bounded(in,2*1024*1024),StandardCharsets.UTF_8));}
+   visuals=new VisualAssets(new File(context.getFilesDir(),"visual-cache"),visualBase);
+   updates=catalogUpdates;
+   updates.setObserver((catalog,url,force)->visuals.start(catalog,url,force));
   }
  }
+ static JSONObject catalogStatus()throws JSONException{return updates.status().put("visual_assets",visuals.status());}
  static synchronized JSONObject loginStatus(Context c)throws Exception{
   JSONObject out=new JSONObject(login.toString());if(!out.has("phase"))out.put("phase","idle");
   JSONArray profiles=new JSONArray();android.content.SharedPreferences prefs=c.getSharedPreferences("login",MODE_PRIVATE);
@@ -54,7 +60,9 @@ public class MainActivity extends Activity {
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){Uri u=r.getUrl();if(!"https".equals(u.getScheme())||!HOST.equals(u.getHost()))return denied();
     String path=u.getPath();if("/".equals(path))path="/index.html";if(path==null||path.equals("/bilibili-client.json")||path.contains("..")||path.contains("//")||!path.matches("/(?:assets/)?[A-Za-z0-9._/-]+"))return denied();
     try{if("/catalog.json".equals(path))return new WebResourceResponse("application/json","UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream(updates.catalog().toString().getBytes(StandardCharsets.UTF_8)));
+     if("/assets/manifest.json".equals(path))return new WebResourceResponse("application/json","UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream(visuals.manifest().toString().getBytes(StandardCharsets.UTF_8)));
      String mime=path.endsWith(".js")?"text/javascript":path.endsWith(".css")?"text/css":path.endsWith(".json")?"application/json":path.endsWith(".svg")?"image/svg+xml":path.endsWith(".webp")?"image/webp":path.endsWith(".png")?"image/png":"text/html";
+     if(path.startsWith("/assets/remote/")){InputStream image=visuals.open(path);if(image==null)return denied();return new WebResourceResponse(path.endsWith(".webp")?"image/webp":path.endsWith(".png")?"image/png":"image/jpeg",null,200,"OK",Collections.singletonMap("Cache-Control","no-store"),image);}
      return new WebResourceResponse(mime,"UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),getAssets().open(path.substring(1)));
     }catch(IOException e){return denied();}}
    @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){if(HOST.equals(r.getUrl().getHost())&&"https".equals(r.getUrl().getScheme()))return false;
@@ -75,9 +83,11 @@ public class MainActivity extends Activity {
   @JavascriptInterface public void request(String id,String action,String raw){if(id==null||!id.matches("[0-9]{1,12}")||raw==null||raw.length()>50*1024*1024)return;
    IO.execute(()->{try{JSONObject body=new JSONObject(raw),result;
     switch(action){
-     case "catalogStatus":result=updates.status();break;
-     case "catalogCheck":updates.start(body.optBoolean("force",true));result=updates.status();break;
-     case "catalogSource":updates.setSource(body.getString("url"));updates.start(true);result=updates.status();break;
+     case "catalogStatus":result=catalogStatus();break;
+     case "catalogCheck":updates.start(body.optBoolean("force",true));result=catalogStatus();break;
+     case "catalogSource":updates.setSource(body.getString("url"));updates.start(true);result=catalogStatus();break;
+     case "visualStatus":result=visuals.status();break;
+     case "visualCheck":visuals.start(updates.catalog(),updates.status().optString("source",""),body.optBoolean("force",true));result=visuals.status();break;
      case "query":result=GachaClient.query(getApplicationContext(),body.getString("credential"));break;
      case "loginStatus":result=loginStatus(MainActivity.this);break;
      case "copyBiliDiagnostics":String diagnostic="星落手记 B 服脱敏诊断（无账号 UID、令牌）\n"+BiliDiagnostics.report(MainActivity.this).toString(2);runOnUiThread(()->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("B 服诊断",diagnostic));Toast.makeText(MainActivity.this,"脱敏诊断已复制",Toast.LENGTH_SHORT).show();});result=object("copied",true);break;

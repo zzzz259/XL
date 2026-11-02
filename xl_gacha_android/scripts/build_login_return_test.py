@@ -71,6 +71,8 @@ def main():
             ROOT / "tests/TapAppIntegration.java",
             ROOT / "tests/TapAppLoginTest.java",
             ROOT / "tests/MobileUiIntegration.java",
+            ROOT / "tests/VisualAssetsTest.java",
+            ROOT / "tests/VisualAssetsIntegration.java",
         ]
     )
     run(
@@ -109,7 +111,7 @@ def main():
     )
     manifest = manifest.replace(
         "</manifest>",
-        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.ImageExportIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.LoginFreshIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.TapAppIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.MobileUiIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
+        '<instrumentation android:name="cn.starfall.gacha.local.LoginReturnIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.ImageExportIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.LoginFreshIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.TapAppIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.MobileUiIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /><instrumentation android:name="cn.starfall.gacha.local.VisualAssetsIntegration" android:targetPackage="cn.starfall.gacha.returnqa" /></manifest>',
     )
     (out / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
     test_assets = args.assets or out / "test-assets"

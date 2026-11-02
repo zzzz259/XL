@@ -54,7 +54,7 @@ const MobileImage=(()=>{
    await document.fonts.ready;
    const poolIds=poolsForCategory().filter(pool=>poolChoice.has(String(pool.pool_id))).map(pool=>pool.pool_id);
    if(!poolIds.length){$('image-status').textContent='请先在下方勾选一个具体卡池。';notify('请至少勾选一个具体卡池。','error');return;}
-   const pages=LongImage.planPages(report,category,10000,poolIds),base=`星落-${(report.account?.label||'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;
+   const pages=LongImage.planPages(report,category,10000,poolIds),base=`星落-${MobileServices.accountName(report.account,'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;
    const assets=typeof LongImage.prepare==='function'?await LongImage.prepare(report,pages,poolIds):null;
    for(let index=0;index<pages.length;index++){
     if(run!==generation||!$('mobile-image-dialog').open)break;
@@ -84,7 +84,7 @@ const MobileImage=(()=>{
   $('image-select-all').addEventListener('click',()=>{selected=new Set(files.map((file,index)=>index));for(const choice of $('image-previews').querySelectorAll('input[type=checkbox]'))choice.checked=true;update();});
   $('image-clear').addEventListener('click',()=>{selected.clear();for(const choice of $('image-previews').querySelectorAll('input[type=checkbox]'))choice.checked=false;update();});
   $('image-save').addEventListener('click',()=>perform('album'));$('image-share').addEventListener('click',()=>perform('share'));
-  $('image-zip').addEventListener('click',async()=>{if(!files.length||delivering)return;$('image-zip').disabled=true;try{const zip=await LongImage.makeZip(files),base=`星落-${(report.account?.label||'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;MobileServices.saveBlob(zip,`${base}-长图.zip`);}catch{notify('压缩包生成失败，仍可逐张保存图片。','error');}finally{update();}});
+  $('image-zip').addEventListener('click',async()=>{if(!files.length||delivering)return;$('image-zip').disabled=true;try{const zip=await LongImage.makeZip(files),base=`星落-${MobileServices.accountName(report.account,'招募记录').replace(/[<>:"/\\|?*]/g,'_')}`;MobileServices.saveBlob(zip,`${base}-长图.zip`);}catch{notify('压缩包生成失败，仍可逐张保存图片。','error');}finally{update();}});
   $('image-close').addEventListener('click',()=>{if(!delivering)$('mobile-image-dialog').close();});
   $('mobile-image-dialog').addEventListener('cancel',event=>{if(delivering)event.preventDefault();});
   $('mobile-image-dialog').addEventListener('close',()=>{generation++;generating=false;clear();});

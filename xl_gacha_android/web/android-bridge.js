@@ -38,6 +38,8 @@
  }
  let savedSession='';
  async function route(path,body={}){
+  if(path==='/api/visual/status')return native('visualStatus');
+  if(path==='/api/visual/check')return native('visualCheck',body);
   if(path==='/api/catalog')return native('catalogStatus');
   if(path==='/api/catalog/check')return native('catalogCheck',body);
   if(path==='/api/catalog/source')return native('catalogSource',body);

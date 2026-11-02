@@ -16,6 +16,7 @@
 ### 抽卡手记
 
 - [用户指南](gacha-user-guide.md)：安装、登录、账号、导入导出、更新、隐私与帮助。
+- [0.4 更新公告](releases/gacha-v0.4.md)：Android 信息与 UI 重构、长图、素材与统计改进。
 - [0.3.6 更新公告](releases/gacha-v0.3.6.md)：0.3.4 之后的渠道登录与查询改进、电脑端停止维护说明。
 - [构建与测试](gacha-development.md)：Android 环境、共享代码 CI、原生验证与签名升级；电脑端已停止维护。
 - [数据与配置协议](gacha-architecture.md)：架构、存储、统计、schema1 与失败回退。

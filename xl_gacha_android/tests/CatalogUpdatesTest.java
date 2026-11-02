@@ -122,8 +122,65 @@ public final class CatalogUpdatesTest {
         CatalogUpdates repairReopened = store(repairDir,repairFake);
         ok(repairReopened.check(true).getBoolean("updated"),"verified download repairs corrupt cache blob");
         ok(repairHash.equals(store(repairDir,repairFake).catalog().getString("_revision")),"repaired cache survives restart");
+        Fake observedFake = new Fake(); observedFake.publish("9007199254740993");
+        CatalogUpdates observed = store(directory("observer"), observedFake);
+        final List<String> observations = new ArrayList<>();
+        observed.setObserver((data, source, force) -> observations.add(data.optString("version") + ":" + source + ":" + force));
+        observed.check(true);
+        ok(!observations.isEmpty(), "observer called after catalog check");
+        ok(observations.get(observations.size()-1).equals("9007199254740993:" + SOURCE + ":true"), "observer receives verified active catalog");
+        observed.setSource("");
+        ok(observations.get(observations.size()-1).equals("9007199254740993::false"), "observer invalidates visual source when disabled");
+        // A late network error belongs to A, even when B has not requested a check yet.
+        final String replacementSource = "https://replacement.example/config/current.json";
+        final CountDownLatch staleEntered = new CountDownLatch(1), staleRelease = new CountDownLatch(1);
+        CatalogUpdates stale = new CatalogUpdates(directory("stale-status"), catalog("1"), SOURCE, (url, limit) -> {
+            staleEntered.countDown(); staleRelease.await(5, TimeUnit.SECONDS); throw new IOException("old source offline");
+        });
+        stale.start(true); ok(staleEntered.await(5, TimeUnit.SECONDS), "stale worker reached transport");
+        stale.setSource(replacementSource); staleRelease.countDown(); waitSettled(stale);
+        ok(stale.status().getString("error").isEmpty() && stale.status().getLong("retry_at") == 0, "old source failure cannot back off or mark new source as failed");
+        ok("idle".equals(stale.status().getString("phase")), "unrequested replacement source settles idle");
+
+        final Fake replacement = new Fake(); replacement.publish("3");
+        final CountDownLatch sourceAEntered = new CountDownLatch(1), sourceARelease = new CountDownLatch(1);
+        final CountDownLatch sourceBEntered = new CountDownLatch(1), sourceBRelease = new CountDownLatch(1);
+        CatalogUpdates switched = new CatalogUpdates(directory("queued-source"), catalog("1"), SOURCE, (url, limit) -> {
+            if (url.equals(SOURCE)) { sourceAEntered.countDown(); sourceARelease.await(5, TimeUnit.SECONDS); throw new IOException("old source offline"); }
+            if (url.equals(replacementSource)) { sourceBEntered.countDown(); sourceBRelease.await(5, TimeUnit.SECONDS); return replacement.manifest; }
+            if (url.equals("https://replacement.example/config/catalog-3.json")) return replacement.body;
+            throw new AssertionError("unexpected source-switch request " + url);
+        });
+        switched.start(true); ok(sourceAEntered.await(5, TimeUnit.SECONDS), "source A starts");
+        switched.setSource(replacementSource); switched.start(true); sourceARelease.countDown();
+        ok(sourceBEntered.await(5, TimeUnit.SECONDS), "source B starts without waiting for another user request");
+        ok(switched.status().getBoolean("checking") && switched.status().getString("error").isEmpty() && switched.status().getLong("retry_at") == 0, "queued replacement remains checking without stale failure");
+        sourceBRelease.countDown(); waitSettled(switched);
+        ok("3".equals(switched.catalog().getString("version")) && "current".equals(switched.status().getString("phase")), "queued replacement catalog activates");
+
+        // A forced synchronous check queued behind an async worker must survive a later non-forced start.
+        final Fake initialVersion = new Fake(); initialVersion.publish("2");
+        final CountDownLatch sameEntered = new CountDownLatch(1), sameRelease = new CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicInteger manifestCalls = new java.util.concurrent.atomic.AtomicInteger();
+        CatalogUpdates forced = new CatalogUpdates(directory("queued-force"), catalog("1"), SOURCE, (url, limit) -> {
+            if (url.equals(SOURCE)) {
+                if (manifestCalls.incrementAndGet() == 1) { sameEntered.countDown(); sameRelease.await(5, TimeUnit.SECONDS); return initialVersion.manifest; }
+                return replacement.manifest;
+            }
+            if (url.endsWith("catalog-2.json")) return initialVersion.body;
+            if (url.endsWith("catalog-3.json")) return replacement.body;
+            throw new AssertionError("unexpected queued-force request " + url);
+        });
+        forced.start(true); ok(sameEntered.await(5, TimeUnit.SECONDS), "same-source worker starts");
+        forced.start(false); forced.check(true); forced.start(false); sameRelease.countDown(); waitSettled(forced);
+        ok("3".equals(forced.catalog().getString("version")) && manifestCalls.get() == 2, "queued requests coalesce and retain force across six-hour throttle");
         System.out.println("CatalogUpdates real Android JSON checks passed: " + assertions);
         System.exit(0);
+    }
+
+    static void waitSettled(CatalogUpdates updates) throws Exception {
+        for (int i = 0; i < 500 && updates.status().getBoolean("checking"); i++) Thread.sleep(10);
+        ok(!updates.status().getBoolean("checking"), "catalog worker settled");
     }
 
     static void validateShared(JSONObject shared) throws Exception {

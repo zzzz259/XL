@@ -53,7 +53,7 @@ function mockCanvas(){
  return {width:0,height:0,ops,
   getContext:()=>({fillStyle:'',font:'',
    fillRect:(...a)=>ops.push(['fillRect',...a]),
-   fillText(...a){ops.push(['fillText',...a,this.font]);},
+   fillText(text,x,y,max){ops.push(['fillText',text,x,y,max,this.font,this.textAlign]);},
    measureText:s=>({width:String(s).length*10}),
    drawImage:(...a)=>ops.push(['drawImage',...a])})};
 }
@@ -145,23 +145,28 @@ test('draw keeps the legacy layout without assets and renders the new interface 
  assert.equal(legacy.ops.filter(op=>op[0]==='drawImage').length,0);
  assert.equal(legacy.ops.find(op=>op[0]==='fillText'&&op[1]==='角色甲')[2],60);
  assetBridge();
- const assets=await LongImage.prepare(report,LongImage.planPages(report,'all'));
- const canvas=LongImage.draw(report,page,0,1,'all',assets);
+ const mobilePage=LongImage.planPages(report,'all')[0];
+ const assets=await LongImage.prepare(report,[mobilePage]);
+ const canvas=LongImage.draw(report,mobilePage,0,1,'all',assets);
  const draws=canvas.ops.filter(op=>op[0]==='drawImage');
  assert.equal(draws.length,4);
  // The complete logo scales proportionally; avatars still use full squares.
- assert.deepEqual(draws[0].slice(2),[912,40,128,64]);
+ assert.equal(draws[0][2]+draws[0][4]/2,540);
+ assert.equal(draws[0][4]/draws[0][5],2);
+ assert.ok(draws[0][5]>=120);
  for(const avatar of draws.slice(1)){
   assert.deepEqual(avatar.slice(2,6),[0,0,256,256]);
-  assert.equal(avatar[6],60);
+  assert.equal(avatar[6],72);
+  assert.ok(avatar[8]>=88);
  }
- assert.equal(canvas.ops.find(op=>op[0]==='fillText'&&op[1]==='角色甲')[2],132);
+ assert.ok(canvas.ops.find(op=>op[0]==='fillText'&&op[1]==='角色甲')[2]>=184);
  // left-crop banners still crop 140x140 from the left
  const BannerLongImage=freshLongImage();
  assetBridge({crop:'left'});
  const bannerReport=imageReport();
- const bannerAssets=await BannerLongImage.prepare(bannerReport,BannerLongImage.planPages(bannerReport,'all'));
- const bannerCanvas=BannerLongImage.draw(bannerReport,page,0,1,'all',bannerAssets);
+ const bannerPage=BannerLongImage.planPages(bannerReport,'all')[0];
+ const bannerAssets=await BannerLongImage.prepare(bannerReport,[bannerPage]);
+ const bannerCanvas=BannerLongImage.draw(bannerReport,bannerPage,0,1,'all',bannerAssets);
  for(const avatar of bannerCanvas.ops.filter(op=>op[0]==='drawImage').slice(1))
   assert.deepEqual(avatar.slice(2,6),[0,0,140,140]);
  delete globalThis.document;
@@ -216,7 +221,7 @@ function mobileImageHarness(){
   draw:()=>({width:1080,height:1000,toBlob:callback=>callback(new Blob(['png'],{type:'image/png'}))}),
   deliver:()=>new Promise(resolve=>{deliveryResolve=resolve;}),makeZip:async()=>new Blob(),
  };
- const context={document,LongImage,MobileRender:{el:(tag,text,className)=>{const element=new Element(tag);element.textContent=text??'';element.className=className??'';return element;}},MobileServices:{messages:{}},window:{},URL:{createObjectURL:()=>`blob:${Math.random()}`,revokeObjectURL:()=>{}},requestAnimationFrame:callback=>setImmediate(callback),setImmediate,Blob,console};
+ const context={document,LongImage,MobileRender:{el:(tag,text,className)=>{const element=new Element(tag);element.textContent=text??'';element.className=className??'';return element;}},MobileServices:{messages:{},accountName:MobileServices.accountName},window:{},URL:{createObjectURL:()=>`blob:${Math.random()}`,revokeObjectURL:()=>{}},requestAnimationFrame:callback=>setImmediate(callback),setImmediate,Blob,console};
  context.$=id=>elements.get(id);
  vm.runInNewContext(`${fs.readFileSync(require.resolve('../web/mobile-image.js'),'utf8')}\nglobalThis.controller=MobileImage;`,context);
  context.controller.init({notify:()=>{}});
@@ -263,4 +268,19 @@ test('long image pool changes stay locked during system delivery',async()=>{
  assert.ok(choices.every(choice=>!choice.disabled));
  choices[1].checked=false;choices[1].dispatchEvent({type:'change'});await harness.settle();
  assert.equal(elements.get('image-pool-count').textContent,'已选 1/2 个卡池');
+});
+
+
+test('account headings prefer real nicknames and suppress automatically generated channel names',()=>{
+ for(const label of ['tap','bili','sms','taptap · UID 12345','bilibili · UID 12345']){
+  const account={nickname:'玩家昵称',channel:'sms',uid:'12345',label},before=JSON.stringify(account);
+  assert.equal(MobileServices.accountName(account),'玩家昵称');
+  assert.equal(JSON.stringify(account),before);
+  assert.equal(MobileServices.accountName({...account,nickname:''}),'招募档案');
+ }
+ assert.equal(MobileServices.accountName({label:'自己起的存档名'}),'自己起的存档名');
+ assert.equal(MobileServices.accountName(null,'本机存档'),'本机存档');
+ assert.equal(MobileServices.accountName({nickname:'tap',label:'自动名称'}),'tap');
+ const report=fixture();report.account.nickname='玩家昵称';
+ assert.ok(MobileServices.reportFile(report,'json',false,new Date('2026-11-02')).filename.includes('玩家昵称'));
 });

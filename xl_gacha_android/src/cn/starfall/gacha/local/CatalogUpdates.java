@@ -16,12 +16,19 @@ public final class CatalogUpdates {
     private static final long INTERVAL = 6 * 3600 * 1000L, BACKOFF = 60 * 1000L;
     private static final long MAX_ID = 9007199254740991L;
     interface Transport { byte[] get(String url, int limit) throws Exception; }
+    public interface Observer { void onCatalog(JSONObject catalog, String source, boolean force); }
+    private Observer observer;
+    public synchronized void setObserver(Observer observer) { this.observer = observer; notifyObserver(source, false); }
+    private void notifyObserver(String requestedSource, boolean force) {
+        // Observers must enqueue work only; image downloading never delays catalog commits.
+        if (observer != null) try { observer.onCatalog(catalog(), requestedSource, force); } catch (RuntimeException ignored) { }
+    }
     private final File directory;
     private final Transport transport;
     private JSONObject current, pointer;
     private String revision, source, phase = "idle", error = "", updatedAt = "";
-    private long checkedAt, retryAt;
-    private boolean remote, busy;
+    private long checkedAt, retryAt, sourceGeneration;
+    private boolean remote, busy, pending, pendingForce;
 
     public CatalogUpdates(File cacheDirectory, JSONObject bundledCatalog, String defaultManifestUrl) throws Exception {
         this(cacheDirectory, bundledCatalog, defaultManifestUrl, CatalogUpdates::download);
@@ -74,6 +81,9 @@ public final class CatalogUpdates {
     public synchronized JSONObject setSource(String url) throws Exception {
         String value = validateSource(url == null ? "" : url.trim());
         atomic(new File(directory, "source.json"), new JSONObject().put("url", value).toString().getBytes(StandardCharsets.UTF_8));
+        if (!source.equals(value)) sourceGeneration++;
+        // Invalidate visual downloads before exposing the new source to other workers.
+        notifyObserver(value, false);
         source = value; checkedAt = 0; retryAt = 0; error = "";
         if (!busy) phase = value.isEmpty() ? "unconfigured" : "idle";
         saveCheck();
@@ -81,14 +91,21 @@ public final class CatalogUpdates {
     }
 
     public void start(final boolean force) {
-        synchronized (this) { if (busy) return; busy = true; phase = "checking"; }
+        synchronized (this) {
+            if (busy) { pending = true; pendingForce |= force; return; }
+            launch(force);
+        }
+    }
+
+    private void launch(final boolean force) {
+        busy = true; phase = "checking";
         Thread worker = new Thread(() -> runCheck(force), "catalog-update");
         worker.setDaemon(true); worker.start();
     }
 
     public JSONObject check(boolean force) {
         synchronized (this) {
-            if (busy) return result(false);
+            if (busy) { pending = true; pendingForce |= force; return result(false); }
             busy = true;
         }
         return runCheck(force);
@@ -96,13 +113,14 @@ public final class CatalogUpdates {
 
     private JSONObject runCheck(boolean force) {
         String requestedSource;
+        long requestedGeneration;
         synchronized (this) {
-            requestedSource = source;
+            requestedSource = source; requestedGeneration = sourceGeneration;
             long now = System.currentTimeMillis();
             if (source.isEmpty() || (!force && (now < retryAt || (checkedAt > 0 && now - checkedAt < INTERVAL)))) {
-                busy = false;
                 if (source.isEmpty()) phase = "unconfigured";
                 else if (phase.equals("checking")) phase = error.isEmpty() ? "current" : "error";
+                finishCheck(requestedGeneration, force, false);
                 return result(false);
             }
             phase = "checking"; error = "";
@@ -117,42 +135,59 @@ public final class CatalogUpdates {
                 if (incoming.has(key)) manifest.put(key, incoming.get(key));
             }
             String version = manifest.getString("version");
+            boolean needsDownload = true;
             synchronized (this) {
-                require(source.equals(requestedSource), "CATALOG_SOURCE_CHANGED");
+                require(requestedGeneration == sourceGeneration, "CATALOG_SOURCE_CHANGED");
                 require(compare(version, current.getString("version")) >= 0, "CATALOG_DOWNGRADE_REJECTED");
                 if (remote && version.equals(current.getString("version"))) {
                     require(revision.equals(manifest.getString("sha256")), "CATALOG_VERSION_CONFLICT");
-                    success(); busy = false; return result(false);
+                    success(); needsDownload = false;
                 }
             }
-            String target = new URI(requestedSource).resolve(manifest.getString("file")).toString();
-            byte[] raw = transport.get(target, MAX_CATALOG);
-            JSONObject candidate = verified(raw, manifest);
-            synchronized (this) {
-                require(source.equals(requestedSource), "CATALOG_SOURCE_CHANGED");
-                String sha = manifest.getString("sha256");
-                File dataFile = new File(directory, sha + ".json");
-                // Immutable data first, pointer last; a failed commit leaves the prior snapshot intact.
-                // The downloaded bytes are already hash/schema verified. Repair
-                // a truncated local blob rather than rejecting this version forever.
-                atomic(dataFile, raw);
-                String saved = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US) {{ setTimeZone(TimeZone.getTimeZone("UTC")); }}.format(new Date());
-                JSONObject next = new JSONObject().put("manifest", manifest).put("updated_at", saved);
-                JSONObject state = new JSONObject().put("current", next).put("previous", pointer == null ? JSONObject.NULL : pointer);
-                if (pointer != null) atomic(new File(directory, "previous.json"), pointer.toString().getBytes(StandardCharsets.UTF_8));
-                atomic(new File(directory, "active.json"), state.toString().getBytes(StandardCharsets.UTF_8));
-                current = candidate; revision = sha; pointer = next; remote = true; updatedAt = saved; updated = true;
-                success();
+            if (needsDownload) {
+                String target = new URI(requestedSource).resolve(manifest.getString("file")).toString();
+                byte[] raw = transport.get(target, MAX_CATALOG);
+                JSONObject candidate = verified(raw, manifest);
+                synchronized (this) {
+                    require(requestedGeneration == sourceGeneration, "CATALOG_SOURCE_CHANGED");
+                    String sha = manifest.getString("sha256");
+                    File dataFile = new File(directory, sha + ".json");
+                    // Immutable data first, pointer last; a failed commit leaves the prior snapshot intact.
+                    // The downloaded bytes are already hash/schema verified. Repair
+                    // a truncated local blob rather than rejecting this version forever.
+                    atomic(dataFile, raw);
+                    String saved = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US) {{ setTimeZone(TimeZone.getTimeZone("UTC")); }}.format(new Date());
+                    JSONObject next = new JSONObject().put("manifest", manifest).put("updated_at", saved);
+                    JSONObject state = new JSONObject().put("current", next).put("previous", pointer == null ? JSONObject.NULL : pointer);
+                    if (pointer != null) atomic(new File(directory, "previous.json"), pointer.toString().getBytes(StandardCharsets.UTF_8));
+                    atomic(new File(directory, "active.json"), state.toString().getBytes(StandardCharsets.UTF_8));
+                    current = candidate; revision = sha; pointer = next; remote = true; updatedAt = saved; updated = true;
+                    success();
+                }
             }
         } catch (Exception e) {
             synchronized (this) {
-                phase = "error";
-                String message = e.getMessage();
-                error = message != null && message.matches("CATALOG_[A-Z_]+") ? message : "CATALOG_UPDATE_FAILED";
-                retryAt = System.currentTimeMillis() + BACKOFF; saveCheck();
+                if (requestedGeneration == sourceGeneration) {
+                    phase = "error";
+                    String message = e.getMessage();
+                    error = message != null && message.matches("CATALOG_[A-Z_]+") ? message : "CATALOG_UPDATE_FAILED";
+                    retryAt = System.currentTimeMillis() + BACKOFF; saveCheck();
+                }
             }
-        } finally { synchronized (this) { busy = false; } }
+        } finally { synchronized (this) { finishCheck(requestedGeneration, force, true); } }
         synchronized (this) { return result(updated); }
+    }
+
+    /** Keep checking=true across a queued handoff, and never let an obsolete worker mutate its replacement. */
+    private void finishCheck(long requestedGeneration, boolean force, boolean attempted) {
+        busy = false;
+        boolean stale = requestedGeneration != sourceGeneration;
+        if (stale) phase = source.isEmpty() ? "unconfigured" : "idle";
+        if (pending) {
+            boolean nextForce = pendingForce; pending = false; pendingForce = false;
+            launch(nextForce);
+        }
+        if (!stale && attempted) notifyObserver(source, force);
     }
 
     private void success() {

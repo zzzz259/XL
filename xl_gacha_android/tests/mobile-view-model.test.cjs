@@ -96,15 +96,26 @@ test('empty and unknown reports never invent live pity or statistics',()=>{
  assert.equal(view.guaranteeText,'大小保底未知');
 });
 
-test('event luck grades use the first-UP distribution and never punish guaranteed pulls',()=>{
- const event=(pulls,guaranteed=false,exact=true)=>({pulls,guaranteed,interval_exact:exact});
+test('event luck grades require complete UP cycles rather than impossible single intervals',()=>{
+ const event=(pulls,guaranteed=false,exact=true)=>({pulls,guaranteed,interval_exact:exact,outcome:'up'});
  assert.equal(MobileView.eventGrade(event(6),70),'lucky');
  assert.equal(MobileView.eventGrade(event(7),70),'normal');
  assert.equal(MobileView.eventGrade(event(70),70),'normal');
  assert.equal(MobileView.eventGrade(event(121),70),'normal');
- assert.equal(MobileView.eventGrade(event(122),70),'rough');
+ assert.equal(MobileView.eventGrade(event(122),70),'normal');
  assert.equal(MobileView.eventGrade(event(122,true),70),'normal');
  assert.equal(MobileView.eventGrade(event(122,null),70),'normal');
  assert.equal(MobileView.eventGrade(event(1,false,false),70),'normal');
  assert.equal(MobileView.eventGrade(event(122),null),'normal');
+});
+
+test('pool view events preserve full UP cycle context for functioning lucky and rough badges',()=>{
+ const event=(timestamp,outcome,pulls,guaranteed)=>({timestamp,outcome,pulls_since_five:pulls,interval_exact:true,guaranteed});
+ const source={analysis:{pools:[{pool_id:1,category:'limited',hard_pity:70,events:[event(1,'up',3,false),event(2,'off',65,false),event(3,'up',65,true),event(4,'off',3,false),event(5,'up',3,true)]}]}};
+ const snapshot=JSON.stringify(source),view=MobileView.pools(source)[0];
+ assert.deepEqual(view.events.map(value=>MobileView.eventGrade(value,70,'limited')),['lucky','normal','rough','normal','lucky']);
+ assert.equal(view.events[2].pulls,65,'the interval bar must keep the five-star interval');
+ assert.equal(view.events[2].up_cycle_pulls,130,'grading uses the separate complete UP cost');
+ assert.equal(view.events[2].interval_exact,true);
+ assert.equal(JSON.stringify(source),snapshot);
 });

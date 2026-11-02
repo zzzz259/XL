@@ -39,9 +39,9 @@ beforeEach(async()=>{
 });
 
 test('manifest keeps resource version, mappings and sha256 for controlled files',()=>{
- assert.equal(manifest.resource_version,'134359843258232660');
- assert.equal(Object.keys(manifest.characters).length,108);
- assert.equal(Object.keys(manifest.fashions).length,312);
+ assert.equal(manifest.resource_version,'134377281279792758');
+ assert.equal(Object.keys(manifest.characters).length,109);
+ assert.equal(Object.keys(manifest.fashions).length,316);
  for(const section of ['characters','fashions','account_items']){
   for(const entry of Object.values(manifest[section])){
    assert.ok(entry.path.startsWith('assets/'),`${section} path must be relative: ${entry.path}`);
@@ -61,7 +61,7 @@ test('manifest keeps resource version, mappings and sha256 for controlled files'
 
 test('default character resolves the initial square portrait to a controlled asset',()=>{
  const view=MobileAssets.character('10000101');
- assert.deepEqual(view,{src:'assets/portraits/10000101.webp',name:'菲尼斯',rarity:1,crop:'center'});
+ assert.deepEqual(view,{src:'assets/portraits/10000101.webp',name:'菲尼斯',rarity:1,crop:'center',cropRect:[38,0,180,180],sourceSize:[256,256]});
  for(const id of Object.keys(manifest.characters)){
   const entry=MobileAssets.character(id);
   assert.ok(entry,`character ${id} must resolve`);
@@ -81,12 +81,13 @@ test('player head uses account CardHeadRect assets and only falls back to face_i
  const headSrc=manifest.account_items[headItemId].path;
  const faceSrc=manifest.fashions[otherFashionId].rect_path;
  const withFashion=MobileAssets.player({fashion_id:Number(anyFashionId),head_id:Number(headItemId),face_id:Number(otherFashionId)});
- assert.deepEqual(withFashion.head,{src:fashionSrc,crop:'center'});
+ assert.deepEqual(withFashion.head,{src:fashionSrc,crop:'game-head',cropRect:[91,23,88,88],sourceSize:[320,140]});
  const withHead=MobileAssets.player({fashion_id:0,head_id:Number(headItemId),face_id:Number(otherFashionId)});
- assert.deepEqual(withHead.head,{src:headSrc,crop:'left'});
+ assert.deepEqual(withHead.head,{src:headSrc,crop:'game-head',cropRect:[91,23,88,88],sourceSize:[320,140]});
  const withFace=MobileAssets.player({fashion_id:0,head_id:0,face_id:Number(otherFashionId)});
- assert.deepEqual(withFace.head,{src:faceSrc,crop:'center'});
- assert.deepEqual(MobileAssets.player({face_id:Number(otherFashionId)}).head,{src:faceSrc,crop:'center'},'missing legacy ids are equivalent to zero');
+ assert.deepEqual(withFace.head,{src:faceSrc,crop:'game-head',cropRect:[91,23,88,88],sourceSize:[320,140]});
+ assert.deepEqual(MobileAssets.player({face_id:Number(otherFashionId)}).head,{src:faceSrc,crop:'game-head',cropRect:[91,23,88,88],sourceSize:[320,140]},'missing legacy ids are equivalent to zero');
+ assert.equal(MobileAssets.player({fashion_id:99999999,head_id:Number(headItemId),face_id:Number(otherFashionId)}).head,null,'unknown selected fashion must not fall through to a different head');
  assert.equal(MobileAssets.player({fashion_id:0,head_id:99999999,face_id:Number(otherFashionId)}).head,null,'unknown nonzero head id must not fall through to face id');
  assert.equal(MobileAssets.player({fashion_id:0,head_id:Number(permanentFrameId),face_id:0}).head,null,'frame item must not be used as a player head');
  assert.equal(MobileAssets.player({fashion_id:0,head_id:0,face_id:0}).head,null);
@@ -108,20 +109,23 @@ test('player frame without effect_value is permanent',()=>{
 test('player frame with effect_value 1 requires stamp newer than server time',()=>{
  const rect=Number(timedFrameId);
  const src=manifest.account_items[timedFrameId].path;
- assert.deepEqual(MobileAssets.player({head_rect_id:rect,head_rect_stamp:2000,server_time:1000}).frame,{src});
+ assert.deepEqual(MobileAssets.player({head_rect_id:rect,head_rect_stamp:2000,server_time:1000},{nowMs:1000000}).frame,{src});
  assert.equal(MobileAssets.player({head_rect_id:rect,head_rect_stamp:1000,server_time:2000}).frame,null);
  assert.equal(MobileAssets.player({head_rect_id:rect,head_rect_stamp:1000,server_time:1000}).frame,null);
  assert.equal(MobileAssets.player({head_rect_id:rect}).frame,null);
  assert.equal(MobileAssets.player({head_rect_id:rect,head_rect_stamp:2000}).frame,null);
 });
 
-test('player rank only comes from anonymous uid zero with positive extra',()=>{
- assert.equal(MobileAssets.player({head_rect_item_uid:'0',head_rect_extra:3}).rank,3);
- assert.equal(MobileAssets.player({head_rect_item_uid:0,head_rect_extra:'5'}).rank,5);
- assert.equal(MobileAssets.player({head_rect_item_uid:'0',head_rect_extra:0}).rank,null);
- assert.equal(MobileAssets.player({head_rect_item_uid:'0',head_rect_extra:'0'}).rank,null);
- assert.equal(MobileAssets.player({head_rect_item_uid:'12345',head_rect_extra:3}).rank,null);
- assert.equal(MobileAssets.player({head_rect_extra:3}).rank,null);
+test('player rank only comes from a visible frame with anonymous uid zero and positive extra',()=>{
+ const rank=account=>MobileAssets.player({head_rect_id:Number(permanentFrameId),...account}).rank;
+ assert.equal(rank({head_rect_item_uid:'0',head_rect_extra:3}),3);
+ assert.equal(rank({head_rect_item_uid:0,head_rect_extra:'5'}),5);
+ assert.equal(rank({head_rect_item_uid:'0',head_rect_extra:0}),null);
+ assert.equal(rank({head_rect_item_uid:'0',head_rect_extra:'0'}),null);
+ assert.equal(rank({head_rect_item_uid:'12345',head_rect_extra:3}),null);
+ assert.equal(rank({head_rect_extra:3}),null);
+ assert.equal(MobileAssets.player({head_rect_id:0,head_rect_item_uid:'0',head_rect_extra:3}).rank,null);
+ assert.equal(MobileAssets.player({head_rect_id:Number(timedFrameId),head_rect_stamp:10,server_time:20,head_rect_item_uid:'0',head_rect_extra:3}).rank,null);
 });
 
 test('player returns nulls for a missing or non-object account',()=>{
@@ -185,4 +189,100 @@ test('brand and mascot expose controlled ui and mascot bundles',()=>{
  assert.equal(mascot.idle.poster,'assets/mascot/minigame017_gugu-idle.png');
  assert.equal(mascot.idle.durationMs,1366);
  assert.deepEqual(mascot.reactions.map(r=>r.name),['jump_all','relive','die']);
+});
+
+
+test('asset geometry uses validated per-entry metadata without exposing mutable manifest arrays',async()=>{
+ const custom=JSON.parse(manifestText);
+ custom.characters['10000101'].crop_rect=[30,10,180,180];
+ custom.characters['10000101'].source_size=[256,256];
+ custom.fashions[anyFashionId].crop_rect=[80,20,90,90];
+ custom.fashions[anyFashionId].source_size=[320,140];
+ MobileAssets._reset()._inject({fetch:async()=>({ok:true,json:async()=>custom})});
+ await MobileAssets.init();
+ assert.deepEqual(MobileAssets.character('10000101').cropRect,[30,10,180,180]);
+ const head=MobileAssets.player({fashion_id:anyFashionId}).head;
+ assert.deepEqual(head.cropRect,[80,20,90,90]);
+ head.cropRect[0]=999;
+ assert.equal(MobileAssets.player({fashion_id:anyFashionId}).head.cropRect[0],80);
+ custom.characters['10000101'].crop_rect=[200,10,180,180];
+ assert.deepEqual(MobileAssets.character('10000101').cropRect,[38,0,180,180],'out-of-image crop uses the known bundled geometry');
+ custom.fashions[anyFashionId].source_size=[-1,140];
+ assert.deepEqual(MobileAssets.player({fashion_id:anyFashionId}).head.sourceSize,[320,140]);
+});
+
+test('refresh replaces mapping and image cache and exposes native manifest revision',async()=>{
+ const before=await MobileAssets.loadImage('assets/portraits/10000101.webp');
+ const fresh=JSON.parse(manifestText);
+ fresh._revision='native-visual-r2';
+ fresh.characters['10000101'].name='更新角色';
+ fresh.characters['10000101'].crop_rect=[20,0,200,200];
+ fresh.characters['10000101'].source_size=[256,256];
+ let calls=0;
+ MobileAssets._inject({fetch:async(url,options)=>{
+  calls++;assert.equal(url,'./assets/manifest.json');assert.equal(options.cache,'no-store');
+  return {ok:true,json:async()=>fresh};
+ }});
+ const [left,right]=await Promise.all([MobileAssets.refresh(),MobileAssets.refresh()]);
+ assert.equal(calls,1,'simultaneous refreshes share one request');
+ assert.equal(left,right);
+ assert.equal(MobileAssets.revision(),'native-visual-r2');
+ assert.equal(MobileAssets.character('10000101').name,'更新角色');
+ assert.deepEqual(MobileAssets.character('10000101').cropRect,[20,0,200,200]);
+ assert.notEqual(await MobileAssets.loadImage('assets/portraits/10000101.webp'),before,'same asset URL must reload after a native visual update');
+ await MobileAssets.init();
+ assert.equal(calls,1,'init uses the refreshed manifest');
+});
+
+test('a failed refresh preserves working mappings and can be retried',async()=>{
+ const original=MobileAssets.character('10000101');
+ MobileAssets._inject({fetch:async()=>({ok:false,status:503})});
+ await assert.rejects(MobileAssets.refresh(),/503/);
+ assert.deepEqual(MobileAssets.character('10000101'),original);
+ assert.equal(MobileAssets.revision(),'134377281279792758');
+ MobileAssets._inject({fetch:async()=>({ok:true,json:async()=>({...JSON.parse(manifestText),_revision:'recovered'})})});
+ await MobileAssets.refresh();
+ assert.equal(MobileAssets.revision(),'recovered');
+});
+
+test('timed frame advances from its server receipt anchor and expires frame and rank together',()=>{
+ const account={head_rect_id:Number(timedFrameId),head_rect_stamp:1100,server_time:1000,server_time_received_at:10000,head_rect_item_uid:'0',head_rect_extra:3};
+ const saved=JSON.stringify(account),src=manifest.account_items[timedFrameId].path;
+ assert.deepEqual(MobileAssets.player(account,{nowMs:109999}).frame,{src});
+ assert.equal(MobileAssets.player(account,{nowMs:109999}).rank,3);
+ assert.equal(MobileAssets.player(account,{nowMs:110000}).frame,null,'exact expiry boundary is no longer visible');
+ assert.equal(MobileAssets.player(account,{nowMs:110000}).rank,null);
+ assert.equal(MobileAssets.player(account,{nowMs:250000}).frame,null,'saved server time must not freeze frame validity');
+ assert.equal(JSON.stringify(account),saved,'clock advancement must not rewrite the archived profile');
+});
+
+test('receipt anchor preserves server clock offset and clamps a backward local clock',()=>{
+ const account={head_rect_id:Number(timedFrameId),head_rect_stamp:1100,server_time:1000,server_time_received_at:2000000};
+ assert.ok(MobileAssets.player(account,{nowMs:2050000}).frame,'local wall clock ahead of server must not expire a server-aligned frame early');
+ assert.equal(MobileAssets.player(account,{nowMs:2100000}).frame,null);
+ assert.ok(MobileAssets.player(account,{nowMs:1900000}).frame,'backward device clock must not subtract time from the server sample');
+ assert.equal(MobileAssets.player({...account,head_rect_stamp:1000},{nowMs:1900000}).frame,null);
+});
+
+test('legacy timed frames expire using current wall time while permanent frames remain visible',()=>{
+ const legacy={head_rect_id:Number(timedFrameId),head_rect_stamp:1100,server_time:1000};
+ assert.ok(MobileAssets.player(legacy,{nowMs:1099999}).frame);
+ assert.equal(MobileAssets.player(legacy,{nowMs:1100000}).frame,null);
+ assert.equal(MobileAssets.player(legacy,{nowMs:1200000}).frame,null);
+ assert.equal(MobileAssets.player({...legacy,server_time:1200},{nowMs:900000}).frame,null,'legacy server sample remains a lower time bound');
+ assert.equal(MobileAssets.player({...legacy,server_time_received_at:0},{nowMs:1200000}).frame,null,'zero anchor is treated as a legacy profile');
+ assert.ok(MobileAssets.player({...legacy,head_rect_id:Number(permanentFrameId)},{nowMs:1200000}).frame);
+ assert.equal(MobileAssets.player({...legacy,head_rect_stamp:1}).frame,null,'default player clock uses the real current time');
+});
+
+
+test('latest exported portraits and frames resolve while genuinely absent game references stay unavailable',()=>{
+ assert.equal(MobileAssets.character('10000227').name,'菲欧');
+ assert.equal(MobileAssets.character('10000227').src,'assets/portraits/10000227.webp');
+ assert.equal(MobileAssets.player({fashion_id:12002271}).head.src,'assets/account-rect/HeadRect_10127_1.png');
+ assert.equal(MobileAssets.player({head_rect_id:21181240}).frame.src,'assets/account/Frame_3040.png');
+ assert.equal(MobileAssets.player({fashion_id:12002251}).head,null);
+ assert.equal(MobileAssets.player({head_rect_id:21181283}).frame,null);
+ assert.deepEqual(manifest.source_counts,{characters:109,fashions:322,account_items:101});
+ assert.deepEqual(manifest.unavailable_assets.map(entry=>entry.id).sort(),['12002251','12002252','12002253','12002261','12002262','12002263','21181283']);
 });

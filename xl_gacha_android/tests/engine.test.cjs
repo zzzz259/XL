@@ -62,7 +62,7 @@ test('account identity hashes match the desktop algorithm and fields are allowli
 });
 
 test('player profile fields preserve account identity and nickname defaults',async()=>{
- const source={uid:'555',channel:'sms',nickname:'合成玩家',game_uid:'9007199254740993',level:80,face_id:12001701,fashion_id:12001701,head_id:0,head_rect_id:21180003,head_rect_stamp:1893456000,head_rect_extra:7,head_rect_item_uid:'0',server_time:1793456000};
+ const source={uid:'555',channel:'sms',nickname:'合成玩家',game_uid:'9007199254740993',level:80,face_id:12001701,fashion_id:12001701,head_id:0,head_rect_id:21180003,head_rect_stamp:1893456000,head_rect_extra:7,head_rect_item_uid:'0',server_time:1793456000,server_time_received_at:1793456000123};
  const identity=await engine.identity(source);
  const hash=require('node:crypto').createHash('sha256').update('sms:555').digest('hex').slice(0,32);
  assert.equal(identity.id,'account-'+hash);assert.equal(identity.label,'合成玩家');
@@ -88,4 +88,15 @@ test('new catalog remaps raw IDs and refreshes revision while preserving pulls',
  const r=engine.buildReport(before.records,newer,before.pool_metadata);
  assert.equal(r.summary.pull_count,1);assert.equal(r.summary.unknown_item_count,0);assert.equal(r.records[0].drops[0].name,'新增五星');
  assert.equal(r.analysis.pools[0].events[0].outcome,'up');assert.equal(r.configuration_revision,'test-new-config');
+});
+
+test('server receipt anchor survives profile normalization and archive round trips',async()=>{
+ const source={uid:'555',channel:'sms',server_time:1793456000,server_time_received_at:'1793456000123'};
+ const profile=await engine.identity(source);
+ assert.equal(profile.server_time_received_at,1793456000123);
+ const restored=await engine.identity(JSON.parse(JSON.stringify(profile)));
+ assert.equal(restored.server_time_received_at,1793456000123);
+ assert.equal(source.server_time_received_at,'1793456000123','normalization must not reset or replace the receipt anchor');
+ for(const invalid of [-1,1.5,true,'not-a-clock'])await assert.rejects(engine.identity({...source,server_time_received_at:invalid}));
+ assert.equal((await engine.identity({uid:'555',channel:'sms'})).server_time_received_at,undefined,'legacy profiles retain missing anchors for renderer fallback');
 });

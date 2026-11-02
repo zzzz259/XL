@@ -63,9 +63,9 @@ final class GachaClient {
   try(Socket socket=gateway(host,proxy)){
    if("bilibili".equals(c.provider))BiliDiagnostics.put("stage","enter_game");
    byte[] enter=Wire.join(Wire.blob(1,c.token.getBytes(StandardCharsets.UTF_8)),Wire.blob(3,c.guid.getBytes(StandardCharsets.UTF_8)),Wire.blob(4,BiliProtocol.gameChannel(c.provider).getBytes(StandardCharsets.UTF_8)),Wire.integer(5,1),Wire.integer(6,1),Wire.blob(7,c.uid.getBytes(StandardCharsets.UTF_8)));
-   socket.getOutputStream().write(Wire.frame(1002,enter,1));Wire.Reply reply=Wire.response(socket,101002);
+   socket.getOutputStream().write(Wire.frame(1002,enter,1));Wire.Reply reply=Wire.response(socket,101002);long playerReceivedAt=System.currentTimeMillis();
    if("bilibili".equals(c.provider)){BiliDiagnostics.put("enter_code",reply.code);BiliDiagnostics.put("actor_present",Wire.number(Wire.fields(reply.body),1)==1);}
-   if(reply.code!=0)throw error("ENTER_REJECTED");if(Wire.number(Wire.fields(reply.body),1)!=1)throw error("ACTOR_NOT_FOUND");player=new JSONObject(Wire.profile(reply.body));
+   if(reply.code!=0)throw error("ENTER_REJECTED");if(Wire.number(Wire.fields(reply.body),1)!=1)throw error("ACTOR_NOT_FOUND");player=new JSONObject(Wire.profile(reply.body)).put("server_time_received_at",playerReceivedAt);
    for(int i=0;i<selectors.length();i++){
     int selector=selectors.getInt(i);socket.getOutputStream().write(Wire.frame(10504,Wire.integer(1,selector),i+2));reply=Wire.response(socket,110504);
     JSONArray batch=reply.code==0?decode(reply.body):new JSONArray();accepted|=reply.code==0;partial|=reply.code!=0;

@@ -72,7 +72,7 @@ const MobileEngine=(()=>{
   else{id=value.id||'local-'+crypto.randomUUID().replaceAll('-','');if(!/^local-[a-f0-9]{32}$/.test(id))fail();}
   const result={id,uid,channel,label:txt(label||value.label||value.nickname||(uid?`${channel} · UID ${uid}`:'导入的账号'),60)};
   for(const [key,max] of [['nickname',60],['game_uid',64],['head_rect_item_uid',64]])if(value[key]!==undefined&&value[key]!==null&&value[key]!=='')result[key]=txt(String(value[key]),max);
-  for(const key of ['level','face_id','fashion_id','head_id','head_rect_id','head_rect_stamp','head_rect_extra','server_time'])if(value[key]!==undefined&&value[key]!==null&&value[key]!=='')result[key]=num(value[key]);
+  for(const key of ['level','face_id','fashion_id','head_id','head_rect_id','head_rect_stamp','head_rect_extra','server_time','server_time_received_at'])if(value[key]!==undefined&&value[key]!==null&&value[key]!=='')result[key]=num(value[key]);
   return result;
  }
  function csvRows(content){

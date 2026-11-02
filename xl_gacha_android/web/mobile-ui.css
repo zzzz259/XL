@@ -591,3 +591,38 @@ body.compact-ui #record-coverage { display: none !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Account identity uses stable rows at every text size. */
+.account-summary { align-items: center; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 14px; padding: 12px 2px; }
+.record-account-avatar { width: 64px; height: 64px; border-radius: 0; background: transparent; }
+.account-summary-main { align-self: center; }
+.account-name-line { display: block; }
+.account-name-line h1 { font-size: 24px; line-height: 1.3; }
+.account-identity-line { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; margin-top: 4px; }
+.account-identity-line .account-uid, .account-identity-line .player-level { font-size: 12px; line-height: 1.5; }
+#record-account-meta { grid-column: 1 / -1; display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 5px; margin-top: 4px; font-size: 13px; }
+#record-account-meta strong { font-size: 17px; }
+.account-evaluation { margin-top: 4px; }
+.pool-title { min-width: 0; flex: 1; }
+.pool-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.pool-title-line h3 { min-width: 0; overflow-wrap: anywhere; }
+.pool-up-avatars { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pool-title-line .up-avatar { width: 28px; height: 28px; flex-basis: 28px; }
+.pool-heading { align-items: flex-start; }
+.player-avatar { aspect-ratio: 1; }
+.account-avatar, .profile-account-avatar { background: transparent; }
+@media (max-width: 360px) {
+ .account-summary { grid-template-columns: 58px minmax(0, 1fr); gap: 8px 10px; }
+ .record-account-avatar { width: 58px; height: 58px; }
+ .account-name-line h1 { font-size: 22px; }
+}
+
+/* FGUI CommonResource Head: 130px canvas, 88px masked head at (21,21), 120px frame at (5,5). */
+.item-avatar { overflow: hidden; }
+.item-avatar .avatar-image { border-radius: 0; max-width: none; }
+.player-head-clip { position: absolute; left: 16.153846%; top: 16.153846%; width: 67.692308%; height: 67.692308%; overflow: hidden; border-radius: 50%; }
+.player-head-clip .player-head { inset: 0; width: 100%; height: 100%; max-width: none; border-radius: 0; }
+.player-frame { inset: auto; left: 3.846154%; top: 3.846154%; width: 92.307692%; height: 92.307692%; }
+
+.player-rank { right: auto; bottom: auto; left: 61.538462%; top: 56.923077%; min-width: 25.384615%; height: 21.538462%; display: grid; place-items: center; padding: 0 2px; line-height: 1; font-size: 9px; }
+.category-tabs { margin-inline: 0; padding-inline: 0; max-width: 100%; }

@@ -1,6 +1,12 @@
 'use strict';
 
 const MobileServices=(()=>{
+ function accountName(account,fallback='招募档案'){
+  if(!account)return fallback;
+  const nickname=String(account.nickname||'').trim();if(nickname)return nickname;
+  const label=String(account.label||'').trim();
+  return label&&!/^(?:tap|taptap|bili|bilibili|sms|qq|official|官服|B\s*服)(?:\s*[·:|]\s*UID\s*[-\w]+)?$/i.test(label)?label:fallback;
+ }
  const messages={
   INVALID_INPUT:'请粘贴完整的 JWT 字符串或官网 HP 对象。',INVALID_CREDENTIAL_INPUT:'没有识别到有效凭据，请复制完整值。',
   CREDENTIAL_EXPIRED:'登录凭据已过期，请重新登录。',WRONG_APP:'当前凭据不属于支持的星落应用。',
@@ -45,7 +51,7 @@ const MobileServices=(()=>{
  function reportFile(report,kind,isDemo=false,now=new Date()){
   if(!report||!Array.isArray(report.records))throw new Error('没有可导出的记录。');
   if(!['json','csv'].includes(kind))throw new Error('不支持的导出格式。');
-  const label=(report.account?.label||'记录').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_');
+  const label=accountName(report.account,'记录').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_');
   const base=`${isDemo?'demo-':''}starfall-gacha-${label}-${now.toISOString().slice(0,10)}`;
   return kind==='json'?{content:JSON.stringify(report,null,2),mime:'application/json',filename:`${base}.json`}:{content:csv(report),mime:'text/csv;charset=utf-8',filename:`${base}.csv`};
  }
@@ -58,7 +64,7 @@ const MobileServices=(()=>{
   catch{return {bilibili_enabled:false,baseline:null};}
  }
  function catalogView(value,previousRevision){return {...value,updated:value.updated===true||Boolean(previousRevision&&value.revision&&value.revision!==previousRevision)};}
- return {api,buildInfo,catalogView,messages,reportFile,saveBlob};
+ return {api,buildInfo,catalogView,messages,reportFile,saveBlob,accountName};
 })();
 
 if(typeof module!=='undefined')module.exports=MobileServices;

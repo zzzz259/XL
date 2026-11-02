@@ -4,22 +4,27 @@ const $=id=>document.getElementById(id);
 const MobileRender=(()=>{
  function el(tag,text,className){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;}
  function icon(name,className=''){const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),use=document.createElementNS('http://www.w3.org/2000/svg','use');if(className)svg.setAttribute('class',className);use.setAttribute('href',`#icon-${name}`);svg.append(use);return svg;}
+ function cropImage(image,entry){
+  const rect=entry?.cropRect,size=entry?.sourceSize;
+  if(!Array.isArray(rect)||!Array.isArray(size)||rect.length!==4||size.length!==2||!rect.every(Number.isFinite)||!size.every(Number.isFinite)||rect[2]<=0||rect[3]<=0)return;
+  image.style.inset='auto';image.style.width=`${size[0]/rect[2]*100}%`;image.style.height=`${size[1]/rect[3]*100}%`;image.style.left=`${-rect[0]/rect[2]*100}%`;image.style.top=`${-rect[1]/rect[3]*100}%`;image.style.objectFit='fill';image.dataset.cropRect=rect.join(',');
+ }
  function avatar(itemId,name,rarity=5,className=''){
   const node=el('span',undefined,`item-avatar s${rarity||0} ${className}`);node.dataset.itemId=String(itemId||'');node.dataset.rarity=String(rarity??'unknown');node.title=String(name||'未知角色');node.setAttribute('aria-label',node.title);node.append(el('span',String(name||'?').trim().slice(0,1)||'?','avatar-fallback'));
   let entry;try{entry=MobileAssets.character(itemId);}catch{entry=null;}
-  if(entry?.src){const image=document.createElement('img');image.className='avatar-image';image.dataset.crop=entry.crop;image.alt='';image.loading='lazy';image.decoding='async';image.draggable=false;image.addEventListener('load',()=>node.classList.add('has-image'),{once:true});image.addEventListener('error',()=>image.remove(),{once:true});image.src=entry.src;node.append(image);}
+  if(entry?.src){const image=document.createElement('img');image.className='avatar-image';image.dataset.crop=entry.crop;cropImage(image,entry);image.alt='';image.loading='lazy';image.decoding='async';image.draggable=false;image.addEventListener('load',()=>node.classList.add('has-image'),{once:true});image.addEventListener('error',()=>image.remove(),{once:true});image.src=entry.src;node.append(image);}
   return node;
  }
  function playerAvatar(account,className=''){
   let value;try{value=MobileAssets.player(account||{});}catch{value={head:null,frame:null,rank:null};}
   const node=el('span',undefined,`player-avatar ${className}`);node.setAttribute('aria-hidden','true');
-  if(value.head?.src){const image=document.createElement('img');image.className='player-head';image.dataset.crop=value.head.crop;image.alt='';image.decoding='async';image.draggable=false;image.addEventListener('error',()=>{image.remove();if(!node.querySelector('.player-fallback'))node.prepend(icon('user','player-fallback'));},{once:true});image.src=value.head.src;node.append(image);}else node.append(icon('user','player-fallback'));
+  if(value.head?.src){const image=document.createElement('img');image.className='player-head';image.dataset.crop=value.head.crop;cropImage(image,value.head);image.alt='';image.decoding='async';image.draggable=false;image.addEventListener('error',()=>{image.remove();if(!node.querySelector('.player-fallback'))node.prepend(icon('user','player-fallback'));},{once:true});image.src=value.head.src;const clip=el('span',undefined,'player-head-clip');clip.append(image);node.append(clip);}else node.append(icon('user','player-fallback'));
   if(value.frame?.src){const frame=document.createElement('img');frame.className='player-frame';frame.alt='';frame.decoding='async';frame.draggable=false;frame.addEventListener('error',()=>frame.remove(),{once:true});frame.src=value.frame.src;node.dataset.frameId=String(account.head_rect_id);node.append(frame);}
   if(value.rank!==null){node.dataset.rank=String(value.rank);node.append(el('span',String(value.rank),'player-rank'));}
   return node;
  }
- function channel(value){return {bilibili:'B 服',sms:'官服',taptap:'TapTap',qq:'官服 QQ'}[value]||value||'本机记录';}
- function accountMeta(account,hideUid=true){if(!account)return '';const uid=String(account.game_uid||account.uid||''),shown=hideUid&&uid.length>5?`${uid.slice(0,2)}•••${uid.slice(-3)}`:uid;return `${channel(account.channel)}${shown?` · UID ${shown}`:''}`;}
+ function channel(value){return {bili:'B 服',bilibili:'B 服',sms:'官服',tap:'TapTap',taptap:'TapTap',qq:'官服 QQ'}[value]||value||'本机记录';}
+ function accountMeta(account,hideUid=true){if(!account)return '';const uid=String(account.game_uid||account.uid||''),shown=hideUid&&uid.length>5?`${uid.slice(0,2)}•••${uid.slice(-3)}`:uid;const alias=account.label&&account.label!==account.nickname&&MobileServices.accountName({...account,nickname:''})!=='招募档案'?` · 存档 ${account.label}`:'';return `${channel(account.channel)}${shown?` · UID ${shown}`:''}${alias}`;}
  function time(value){const date=new Date(value);return Number.isNaN(date.getTime())?'':date.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
  function tabs(state){
   for(const name of ['records','query','profile'])$(`view-${name}`).hidden=state.tab!==name;
@@ -27,9 +32,9 @@ const MobileRender=(()=>{
  }
  function accounts(state){
   const report=state.report,account=report?.account;
-  $('account-button-label').textContent=account?.label||'本机存档';
-  $('profile-account-name').textContent=account?.label||'尚未选择';
-  $('profile-account-meta').textContent=account?`${account.nickname&&account.nickname!==account.label?`${account.nickname} · `:''}${accountMeta(account,false)}`:'登录或导入后，记录会保存在本机。';
+  $('account-button-label').textContent=MobileServices.accountName(account,'本机存档');
+  $('profile-account-name').textContent=MobileServices.accountName(account,'尚未选择');
+  $('profile-account-meta').textContent=account?accountMeta(account,false):'登录或导入后，记录会保存在本机。';
   $('account-button-avatar').replaceChildren(playerAvatar(account,'account-button-player'));$('profile-account-avatar').replaceChildren(playerAvatar(account,'profile-player'));
   for(const id of ['rename-account','delete-account'])$(id).disabled=!account||state.demo;
   for(const id of ['profile-export-json','profile-export-csv','profile-image','overview-image'])$(id).disabled=!report;
@@ -38,10 +43,10 @@ const MobileRender=(()=>{
   if(!state.accounts.length)list.append(el('div','还没有本机存档。可登录查询或从文件导入。','empty-accounts'));
   for(const item of state.accounts){
    const button=el('button',undefined,`account-option${item.id===account?.id?' active':''}`);button.type='button';button.dataset.accountId=item.id;button.dataset.uid=item.uid||'';
-   const avatarNode=playerAvatar(item,'account-option-player'),content=el('div');content.append(el('strong',item.label),el('small',`${accountMeta(item)} · ${MobileView.number(item.pull_count)} 抽`));button.append(avatarNode,content,icon('chevron','chevron'));list.append(button);
+   const avatarNode=playerAvatar(item,'account-option-player'),content=el('div');content.append(el('strong',MobileServices.accountName(item)),el('small',`${accountMeta(item)} · ${MobileView.number(item.pull_count)} 抽`));button.append(avatarNode,content,icon('chevron','chevron'));list.append(button);
   }
   const selected=$('import-target').value,target=$('import-target');target.replaceChildren(new Option('自动识别账号；无身份时新建存档',''));
-  for(const item of state.accounts)target.append(new Option(`合并到：${item.label}`,item.id));target.value=selected;
+  for(const item of state.accounts)target.append(new Option(`合并到：${MobileServices.accountName(item)}${item.game_uid||item.uid?` · UID ${item.game_uid||item.uid}`:''}`,item.id));target.value=selected;
   const receipt=report?.query_receipt;$('query-receipt').hidden=!receipt;
   if(receipt)$('query-receipt-text').textContent=`查询时间：${time(receipt.at)}\n`+receipt.queries.map(query=>`卡池 ${query.selector}：返回码 ${query.ret_code}，${query.record_count} 条记录`).join('\n');
  }
@@ -68,12 +73,12 @@ const MobileRender=(()=>{
  }
  function poolCard(pool,state){
   const card=el('article',undefined,`pool-card ${pool.category}`);card.dataset.poolId=String(pool.poolId);card.dataset.category=pool.category;
-  const heading=el('div',undefined,'pool-heading'),title=el('div',undefined,'pool-title');title.append(el('h3',pool.name),el('p',`${pool.firstDate} — ${pool.lastDate}`));
+  const heading=el('div',undefined,'pool-heading'),title=el('div',undefined,'pool-title');const titleLine=el('div',undefined,'pool-title-line');titleLine.append(el('h3',pool.name));title.append(titleLine,el('p',`${pool.firstDate} — ${pool.lastDate}`));
   const total=el('div',undefined,'pool-total');total.append(el('strong',MobileView.number(pool.pullCount)),el('span','抽'));heading.append(title,total);card.append(heading);
   const featured=el('div',undefined,'pool-featured');
-  if(pool.featuredIds.length||pool.featuredNames.length){const avatars=el('div',undefined,'pool-up-avatars'),ids=pool.featuredNames.length?pool.featuredNames:pool.featuredIds;for(const [index,name] of ids.entries()){const itemId=pool.featuredIds[index];if(pool.featuredIds.length&&itemId===undefined)continue;avatars.append(avatar(itemId||'',pool.featuredNames[index]||'UP 角色',5,'up-avatar'));}featured.append(avatars);}
+  if(pool.featuredIds.length||pool.featuredNames.length){const avatars=el('div',undefined,'pool-up-avatars'),ids=pool.featuredNames.length?pool.featuredNames:pool.featuredIds;for(const [index,name] of ids.entries()){const itemId=pool.featuredIds[index];if(pool.featuredIds.length&&itemId===undefined)continue;avatars.append(avatar(itemId||'',pool.featuredNames[index]||'UP 角色',5,'up-avatar'));}titleLine.append(avatars);}
   else featured.append(el('p',pool.category==='normal'?'常驻角色招募 · 不区分 UP / 歪':pool.category==='beginner'?'启程招募 · 独立计数':'UP 配置未确认'));
-  card.append(featured);
+  if(featured.childNodes.length)card.append(featured);
   const events=el('div',undefined,'five-event-list'),limit=state.eventLimits[pool.poolId]||20,burstPositions=new Map(),numerals=['','单','双','三','四','五','六','七','八','九','十'];
   for(const burst of state.insights?.multi?.byPool?.[String(pool.poolId)]||[])for(const position of burst.positions)burstPositions.set(position,burst);
   if(!pool.events.length)events.append(el('p','可见记录中尚未出现五星角色。','no-five'));
@@ -124,8 +129,8 @@ const MobileRender=(()=>{
   const report=state.report;$('records-empty').hidden=Boolean(report);$('records-content').hidden=!report;$('record-floating-actions').hidden=!report;document.body.dataset.demo=String(state.demo);
   if(!report)return;
   const account=report.account||{},uid=String(account.game_uid||account.uid||'');
-  $('record-account-name').textContent=account.nickname||'招募档案';$('record-account-uid').textContent=uid?`UID ${uid}`:'';$('record-account-uid').hidden=!uid;$('demo-badge').hidden=!state.demo;
-  document.querySelector('.account-name-line .player-level')?.remove();if(Number(account.level)>0)document.querySelector('.account-name-line').append(el('span',`Lv.${Number(account.level)}`,'player-level'));
+  $('record-account-name').textContent=MobileServices.accountName(account);$('record-account-uid').textContent=uid?`UID ${uid}`:'';$('record-account-uid').hidden=!uid;$('demo-badge').hidden=!state.demo;
+  document.querySelector('.account-identity-line .player-level')?.remove();if(Number(account.level)>0)document.querySelector('.account-identity-line').append(el('span',`Lv.${Number(account.level)}`,'player-level'));
   $('record-account-avatar').replaceChildren(playerAvatar(account,'record-player'));
   const meta=$('record-account-meta'),pulls=el('strong',MobileView.number(report.summary.pull_count)),fives=el('strong',MobileView.number(report.summary.rarity_counts['5']||0)),poolCount=el('strong',MobileView.number(Object.keys(report.summary.pool_pull_counts||{}).length));pulls.id='summary-pulls';fives.id='summary-fives';poolCount.id='summary-pools';meta.replaceChildren(document.createTextNode('总抽数 '),pulls,document.createTextNode(' · 五星 '),fives,document.createTextNode(' · 卡池 '),poolCount);
   $('partial-warning').hidden=!report.partial;state.insights=MobileInsights.analyze(report,{category:state.poolCategory});
@@ -147,7 +152,7 @@ const MobileRender=(()=>{
  function catalog(value){
   if(!value)return;$('catalog-version').textContent=`配置 ${value.version||'未知'} · ${value.origin==='bundled'?'内置':'本机缓存'}`;
   const phases={checking:'正在检查和校验配置，现有记录仍可查看。',unconfigured:'使用本机配置，尚未设置下载地址。',updated:'配置已更新，存档会按新配置重新识别。',current:'已是最新可用配置。',error:'更新暂未成功，继续使用本机配置。'};
-  $('catalog-status').textContent=value.updated===true?phases.updated:(phases[value.phase]||'本机配置可用，启动后自动检查。');if(document.activeElement!==$('catalog-source'))$('catalog-source').value=value.source||'';$('catalog-check').disabled=value.phase==='checking';$('catalog-source-save').disabled=value.phase==='checking';
+  $('catalog-status').textContent=value.updated===true?phases.updated:(phases[value.phase]||'本机配置可用，启动后自动检查。');const visual=value.visual_assets;if(visual?.checking)$('catalog-status').textContent+=' 正在更新头像与角色素材…';else if(visual?.phase==='error')$('catalog-status').textContent+=' 素材更新暂未完成，继续使用已有图片。';else if(visual?.origin==='cache')$('catalog-status').textContent+=' 头像与角色素材已就绪。';if(document.activeElement!==$('catalog-source'))$('catalog-source').value=value.source||'';$('catalog-check').disabled=value.phase==='checking'||Boolean(value.visual_assets?.checking);$('catalog-source-save').disabled=value.phase==='checking';
  }
  function login(state){
   const value=state.login||{phase:'idle',profiles:[]},active=['opening','waiting','querying','cancelling'].includes(value.phase),progress=state.loginPanel==='progress',manual=Boolean(state.manualOpen),bilibiliEnabled=Boolean(state.buildInfo?.bilibili_enabled);
