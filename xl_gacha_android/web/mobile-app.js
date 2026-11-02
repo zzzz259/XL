@@ -4,6 +4,12 @@
  const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,visualRevision:null,login:{phase:'idle',profiles:[]},loginPanel:'options',manualOpen:false,loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,showCharacters:false};
  let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null,mascot=null;
  window.mobileReady=false;
+ function syncNavigationSize(){const nav=document.querySelector('.bottom-nav'),height=nav?.getBoundingClientRect().height;if(height>0)document.documentElement.style.setProperty('--bottom-nav-height',`${Math.ceil(height)}px`);}
+ function observeNavigationSize(){
+  const nav=document.querySelector('.bottom-nav'),schedule=()=>requestAnimationFrame(syncNavigationSize);
+  if(window.ResizeObserver)new ResizeObserver(schedule).observe(nav,{box:'border-box'});
+  window.addEventListener('resize',schedule);window.visualViewport?.addEventListener('resize',schedule);syncNavigationSize();
+ }
  const active=()=>['opening','waiting','querying','cancelling'].includes(state.login.phase);
  function notify(text,kind=''){clearTimeout(toastTimer);const toast=$('toast');toast.textContent=text;toast.className=`toast ${kind}`;toast.hidden=!text;if(text)toastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:4000);}
  let zoomTask=Promise.resolve();
@@ -12,6 +18,7 @@
   zoomTask=zoomTask.then(async()=>{
    if(window.AndroidBridge?.textZoom)await AndroidBridge.textZoom(value);else document.body.style.fontSize=`${15*value/100}px`;
    document.body.dataset.textZoom=String(value);document.querySelectorAll('#text-zoom-options [data-zoom]').forEach(button=>button.setAttribute('aria-pressed',String(Number(button.dataset.zoom)===value)));$('text-zoom-status').textContent=`${value}%`;
+   requestAnimationFrame(syncNavigationSize);
    if(save)try{localStorage.setItem('starfall-text-zoom',String(value));}catch{}
   }).catch(()=>{notify('字号设置未应用，请重试。','error');});
   return zoomTask;
@@ -93,7 +100,7 @@
  }
  window.mobileBack=()=>{const dialogs=[...document.querySelectorAll('dialog[open]')];if(dialogs.length){const dialog=dialogs.at(-1);if(dialog.dataset.busy==='true')return true;dialog.close();return true;}if(state.tab==='query'&&state.manualOpen){if(state.working||active()){notify('正在查询，请稍候。','error');return true;}setManualOpen(false);return true;}const previous=navigation.back(window.scrollY);if(previous){applyPage(previous.page,previous.scrollY);return true;}return false;};
  async function init(){
-  bind();MobileImage.init({notify});renderAll();
+  observeNavigationSize();bind();MobileImage.init({notify});renderAll();
   try{
    await applyTextZoom(initialTextZoom(),false);
    state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());

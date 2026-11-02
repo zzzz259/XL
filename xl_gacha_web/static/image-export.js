@@ -349,9 +349,9 @@ const LongImage = (() => {
       label(`${s.pull_count} 抽`,cx,644,38,P.accent,700,264,'center');
       if (key === 'normal') label(s.five_count,x+84,684,28,P.text,650,120,'center');
       else {
-        label(s.up_count,x+54,684,32,P.teal,700,54,'center');
+        label(s.up_count,x+54,684,28,P.teal,700,54,'center');
         label('/',x+84,684,24,P.muted,500,22,'center');
-        label(s.off_count,x+114,684,32,P.red,700,54,'center');
+        label(s.off_count,x+114,684,28,P.red,700,54,'center');
       }
       label(key === 'normal' ? '出卡数' : 'UP/歪',x+84,714,21,P.muted,400,120,'center');
       const average = s.average_five_interval == null || !Number.isFinite(Number(s.average_five_interval)) ? '—' : Number(s.average_five_interval).toFixed(1);

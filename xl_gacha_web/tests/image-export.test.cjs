@@ -721,7 +721,7 @@ test('export shades only visible burst members on continued pages without insert
   delete globalThis.MobileAssets;
 });
 
-test('export formats full-140 career tags consistently and enlarges UP/off counts without squeezing', () => {
+test('export formats full-140 career tags consistently and restores original UP/off count size without squeezing', () => {
   assetBridge();
   globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
   const LongImage = freshLongImage(), report = imageReport();
@@ -734,7 +734,7 @@ test('export formats full-140 career tags consistently and enlarges UP/off count
   assert.equal(label[7], '#ff9c91');
   const up = texts.find(op => op[1] === '7' && op[7] === '#14c7a7');
   const off = texts.find(op => op[1] === '1' && op[7] === '#ff5d50');
-  assert.ok(/ 32px /.test(up[5]) && / 32px /.test(off[5]));
+  assert.ok(/ 28px /.test(up[5]) && / 28px /.test(off[5]));
   assert.equal(up[4], undefined);assert.equal(off[4], undefined);
   globalThis.MobileInsights = {tagText: tag => tag.key === 'up_140' ? '共享格式文本' : tag.text};
   canvas = draw();
