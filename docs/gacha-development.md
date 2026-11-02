@@ -103,4 +103,4 @@ adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.Vi
 
 输出应同时含 `PASS 41 offline visual asset checks` 与 `INSTRUMENTATION_CODE: -1`。MuMu shell `app_process` 可能在断言后退出139，不能以已打印 PASS 替代成功结束码。移动 UI 检查另覆盖原游戏裁切/头像框中心、身份三层布局、池名旁 UP 头像，以及模拟素材发布后不重装 APK 即刷新图片。
 
-`NativeInsetsIntegration` 在独立 QA 包中验证系统栏、刘海安全边距和键盘尺寸只由原生父容器预留一次，再消费已处理的边距，包含重复派发与清零回归（API35 共26项）。`MobileUiIntegration` 同时检查底栏增高48/96px后分享按钮仍在上方且可点击，以及原字号生涯指标保持两列。CI 在 Android 模拟器的三键导航模式执行这些检查；MuMu 的硬件导航键配置不能代表红魔8实机。
+`NativeInsetsIntegration` 在独立 QA 包中验证系统栏、刘海安全边距和键盘尺寸只由原生父容器预留一次，再消费已处理的边距，包含重复派发与清零回归（API35 共26项）。`MobileUiIntegration` 同时检查底栏增高48/96px后分享按钮仍在上方且可点击，以及UP／歪与均抽同字号并保持两列，覆盖窄屏、140%字号及123／456／999.9长数值。CI 在 Android 模拟器的三键导航模式执行这些检查；MuMu 的硬件导航键配置不能代表红魔8实机。

@@ -4,11 +4,22 @@
  const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,visualRevision:null,login:{phase:'idle',profiles:[]},loginPanel:'options',manualOpen:false,loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,showCharacters:false};
  let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null,mascot=null;
  window.mobileReady=false;
- function syncNavigationSize(){const nav=document.querySelector('.bottom-nav'),height=nav?.getBoundingClientRect().height;if(height>0)document.documentElement.style.setProperty('--bottom-nav-height',`${Math.ceil(height)}px`);}
- function observeNavigationSize(){
-  const nav=document.querySelector('.bottom-nav'),schedule=()=>requestAnimationFrame(syncNavigationSize);
-  if(window.ResizeObserver)new ResizeObserver(schedule).observe(nav,{box:'border-box'});
-  window.addEventListener('resize',schedule);window.visualViewport?.addEventListener('resize',schedule);syncNavigationSize();
+ function fitCareerMetrics(){
+  const rows=[...document.querySelectorAll('.career-category.limited .career-metrics,.career-category.collection .career-metrics')];
+  for(const row of rows)row.style.removeProperty('--career-metric-scale');
+  for(const row of rows){
+   const width=row.getBoundingClientRect().width;if(!width)continue;
+   const gap=(parseFloat(getComputedStyle(row).columnGap)||0)*width/row.clientWidth;
+   const widths=[...row.children].map(cell=>Math.max(...[...cell.children].map(node=>{const range=document.createRange();range.selectNodeContents(node);return range.getBoundingClientRect().width;})));
+   const needed=widths.reduce((sum,value)=>sum+value,0);
+   if(needed>0)row.style.setProperty('--career-metric-scale',String(Math.min(1,Math.max(.05,(width-gap-2)/needed))));
+  }
+ }
+ function syncLayout(){const nav=document.querySelector('.bottom-nav'),height=nav?.getBoundingClientRect().height;if(height>0)document.documentElement.style.setProperty('--bottom-nav-height',`${Math.ceil(height)}px`);fitCareerMetrics();}
+ function observeLayout(){
+  const nav=document.querySelector('.bottom-nav'),schedule=()=>requestAnimationFrame(syncLayout);
+  if(window.ResizeObserver){const observer=new ResizeObserver(schedule);observer.observe(nav,{box:'border-box'});observer.observe($('career-categories'),{box:'border-box'});}
+  window.addEventListener('resize',schedule);window.visualViewport?.addEventListener('resize',schedule);syncLayout();
  }
  const active=()=>['opening','waiting','querying','cancelling'].includes(state.login.phase);
  function notify(text,kind=''){clearTimeout(toastTimer);const toast=$('toast');toast.textContent=text;toast.className=`toast ${kind}`;toast.hidden=!text;if(text)toastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:4000);}
@@ -18,7 +29,7 @@
   zoomTask=zoomTask.then(async()=>{
    if(window.AndroidBridge?.textZoom)await AndroidBridge.textZoom(value);else document.body.style.fontSize=`${15*value/100}px`;
    document.body.dataset.textZoom=String(value);document.querySelectorAll('#text-zoom-options [data-zoom]').forEach(button=>button.setAttribute('aria-pressed',String(Number(button.dataset.zoom)===value)));$('text-zoom-status').textContent=`${value}%`;
-   requestAnimationFrame(syncNavigationSize);
+   requestAnimationFrame(syncLayout);
    if(save)try{localStorage.setItem('starfall-text-zoom',String(value));}catch{}
   }).catch(()=>{notify('字号设置未应用，请重试。','error');});
   return zoomTask;
@@ -26,10 +37,10 @@
  function initialTextZoom(){let value=100;try{value=Number(localStorage.getItem('starfall-text-zoom'))||100;}catch{}return [80,85,90,95,100,110,125,140].includes(value)?value:100;}
  function openDialog(id){const dialog=$(id);if(!dialog.open)dialog.showModal();}
  function closeDialog(id){const dialog=$(id);if(dialog?.open&&dialog.dataset.busy!=='true')dialog.close();}
- function applyPage(name,scrollY=0){state.tab=name;MobileRender.tabs(state);mascot?.reset();requestAnimationFrame(()=>{if(state.tab===name)window.scrollTo(0,scrollY);});}
+ function applyPage(name,scrollY=0){state.tab=name;MobileRender.tabs(state);mascot?.reset();requestAnimationFrame(()=>{if(state.tab===name){window.scrollTo(0,scrollY);syncLayout();}});}
  function switchTab(name,{replace=false,resetScroll=false}={}){const scrollY=navigation.go(name,{replace,resetScroll,scrollY:window.scrollY});applyPage(name,scrollY);}
  function renderRecords(){const result=MobileView.records(state.report,{...state.filters,page:state.recordPage});state.recordPage=result.page;MobileRender.records(state,result);}
- function renderAll(){MobileRender.tabs(state);MobileRender.recordPage(state);MobileRender.recordPoolOptions(state);renderRecords();MobileRender.profile(state);}
+ function renderAll(){MobileRender.tabs(state);MobileRender.recordPage(state);MobileRender.recordPoolOptions(state);renderRecords();MobileRender.profile(state);requestAnimationFrame(syncLayout);}
  function showReport(report,demo=false,preserveView=false){
   state.report=report;state.demo=demo;
   if(!preserveView){state.manualOpen=false;state.poolCategory='all';state.poolLimit=20;state.eventLimits={};state.characterLimits={};state.showCharacters=false;state.filters={search:'',pool:'',rarity:'',fiveOnly:false};state.recordPage=1;$('record-search').value='';$('record-pool').value='';$('record-rarity').value='';$('record-five-only').checked=false;$('record-five-only').disabled=false;$('record-rarity').disabled=false;}
@@ -96,11 +107,11 @@
   $('record-prev').addEventListener('click',()=>{state.recordPage--;renderRecords();});$('record-next').addEventListener('click',()=>{state.recordPage++;renderRecords();});
   $('catalog-check').addEventListener('click',()=>checkCatalog(true));$('catalog-source-save').addEventListener('click',()=>run(async()=>{const value=await MobileServices.api('/catalog/source',{url:$('catalog-source').value.trim()});await updateCatalog(value);notify('配置地址已保存，正在检查更新。');}));
   $('text-zoom-options').addEventListener('click',event=>{const button=event.target.closest('[data-zoom]');if(button)applyTextZoom(Number(button.dataset.zoom));});
-  document.addEventListener('visibilitychange',()=>{mascot?.reset();if(!document.hidden){if(state.report){MobileRender.accounts(state);MobileRender.recordPage(state);}checkCatalog(false);}});
+  document.addEventListener('visibilitychange',()=>{mascot?.reset();if(!document.hidden){if(state.report){MobileRender.accounts(state);MobileRender.recordPage(state);requestAnimationFrame(syncLayout);}checkCatalog(false);}});
  }
  window.mobileBack=()=>{const dialogs=[...document.querySelectorAll('dialog[open]')];if(dialogs.length){const dialog=dialogs.at(-1);if(dialog.dataset.busy==='true')return true;dialog.close();return true;}if(state.tab==='query'&&state.manualOpen){if(state.working||active()){notify('正在查询，请稍候。','error');return true;}setManualOpen(false);return true;}const previous=navigation.back(window.scrollY);if(previous){applyPage(previous.page,previous.scrollY);return true;}return false;};
  async function init(){
-  observeNavigationSize();bind();MobileImage.init({notify});renderAll();
+  observeLayout();bind();MobileImage.init({notify});renderAll();
   try{
    await applyTextZoom(initialTextZoom(),false);
    state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());
