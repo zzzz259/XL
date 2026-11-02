@@ -15,6 +15,7 @@ function mockCanvas() {
   const ops = [];
   const ctx = {fillStyle: '', font: '', _align: 'left',
     fillRect(...a) {ops.push(['fillRect', ...a, this.fillStyle]);},
+    createLinearGradient(...bounds) {return {kind: 'linear-gradient', bounds, stops: [], addColorStop(offset, color) {this.stops.push({offset, color});}};},
     fillText(text, x, y, max) {ops.push(['fillText', text, x, y, max, this.font, this.textAlign, this.fillStyle]);},
     measureText: s => ({width: String(s).length * 10}),
     save: () => ops.push(['save']), restore: () => ops.push(['restore']),
@@ -670,10 +671,18 @@ test('export groups only real ten-pull members and separates adjacent multi-gold
   const LongImage = freshLongImage(), report = multiExportReport(), snapshot = JSON.stringify(report);
   const insights = MobileInsights.analyze(report), page = LongImage.planPages(report)[0];
   const canvas = LongImage.draw(report, page, 0, 1, 'all', {characters: new Map(), insights});
-  const groups = canvas.ops.filter(op => op[0] === 'fillRect' && op[5] === 'rgba(20,199,167,0.12)');
+  const groups = canvas.ops.filter(op => op[0] === 'fillRect' && op[5]?.kind === 'linear-gradient');
   const texts = canvas.ops.filter(op => op[0] === 'fillText');
   assert.equal(groups.length, 2);
   assert.deepEqual(groups.map(op => op.slice(1, 5)), [[60, page.headerHeight + 324, 960, 276], [60, page.headerHeight + 612, 960, 420]]);
+  assert.notEqual(groups[0][5], groups[1][5], 'adjacent tens need independent gradients');
+  for (const group of groups) {
+    const gradient = group[5];
+    assert.deepEqual(gradient.bounds, [0, group[2], 0, group[2] + group[4]], 'fade restarts at each group top');
+    assert.equal(gradient.stops[0].offset, 0); assert.equal(gradient.stops.at(-1).offset, 1);
+    const opacity = stop => Number(/([\d.]+)\)$/.exec(stop.color)[1]);
+    assert.ok(opacity(gradient.stops[0]) > opacity(gradient.stops.at(-1)) * 3, 'next group starts visibly darker than previous group ends');
+  }
   const headers = texts.filter(op => /^十连(?:双|三)金$/.test(op[1]) && op[3] > page.headerHeight);
   assert.deepEqual(headers.map(op => op[1]), ['十连双金', '十连三金']);
   for (const [index, header] of headers.entries()) assert.ok(header[3] > groups[index][2] && header[3] < groups[index][2] + 30);
@@ -696,10 +705,11 @@ test('export shades only visible burst members on continued pages without insert
   assert.equal(pages.length, 4);
   for (const [index, page] of pages.entries()) {
     const canvas = LongImage.draw(report, page, index, pages.length, 'all', {characters: new Map(), insights});
-    const groups = canvas.ops.filter(op => op[0] === 'fillRect' && op[5] === 'rgba(20,199,167,0.12)');
+    const groups = canvas.ops.filter(op => op[0] === 'fillRect' && op[5]?.kind === 'linear-gradient');
     const texts = canvas.ops.filter(op => op[0] === 'fillText');
     renderedNames.push(...texts.filter(op => /^角色\d+$/.test(op[1])).map(op => op[1]));
     labels.push(texts.filter(op => /^十连/.test(op[1]) && op[3] > page.headerHeight).map(op => op[1]));
+    assert.equal(groups.length, texts.filter(op => /^十连/.test(op[1]) && op[3] > page.headerHeight).length);
     for (const group of groups) assert.ok(group[2] + group[4] < canvas.height - 100);
     for (const text of texts.filter(op => /^角色\d+$/.test(op[1]))) assert.ok(text[3] < canvas.height - 100);
     assert.ok(page.height <= 1516);

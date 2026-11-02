@@ -401,8 +401,11 @@ const LongImage = (() => {
         if (groupStart) {
           let end = eventIndex+1;
           while (end < part.events.length && burstByPos.get(part.events[end].in_pool_pull) === burst) end++;
-          rect(60,ey,960,(end-eventIndex)*rowH-12,'rgba(20,199,167,0.12)');
-          rect(60,ey,3,(end-eventIndex)*rowH-12,P.teal);
+          const groupHeight = (end-eventIndex)*rowH-12, shade = c.createLinearGradient(0,ey,0,ey+groupHeight);
+          shade.addColorStop(0,'rgba(20,199,167,0.20)');
+          shade.addColorStop(.45,'rgba(20,199,167,0.11)');
+          shade.addColorStop(1,'rgba(20,199,167,0.035)');
+          rect(60,ey,960,groupHeight,shade);
           const continued = (burst.positions || []).some(pos => Number(pos) > Number(e.in_pool_pull));
           label(`十连${burst.exact ? '' : '至少'}${numerals[burst.five_count] || burst.five_count}金${continued ? '（续）' : ''}`,84,ey+22,22,P.green,700,700);
         }
