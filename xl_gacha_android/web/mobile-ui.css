@@ -151,7 +151,7 @@ input[role="switch"]:checked::before { transform: translateX(20px); background: 
 .item-avatar.s0 { color: #c0c7cc; background: #41494f; }
 .item-avatar.up-avatar { width: 30px; height: 30px; flex-basis: 30px; border-radius: 6px; font-size: 12px; }
 .item-avatar.event-avatar { width: 48px; height: 48px; flex-basis: 48px; font-size: 19px; }
-.avatar-flag { position: absolute; top: -5px; right: -5px; padding: 1px 4px; border-radius: 4px; color: white; background: #e44c43; font-size: 10px; line-height: 1.4; }
+.avatar-flag { position: absolute; top: 2px; right: 2px; padding: 1px 3px; border-radius: 4px; color: white; background: #e44c43; font-size: 11px; line-height: 1.3; white-space: nowrap; }
 .five-event-list { display: grid; gap: 15px; margin-top: 17px; }
 .five-event { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; align-items: start; }
 .event-body { min-width: 0; }
@@ -579,7 +579,19 @@ body.compact-ui #record-coverage { display: none !important; }
 .career-category { border: 1px solid var(--line); background: #2b3237; }
 .career-outcomes .up { color: #54e0b9; }
 .career-outcomes .off { color: #ff9c91; }
-.career-tag.guarantee_streak, .career-tag.up_130, .career-tag.off_streak { color: #ff9c91; background: rgba(255, 93, 80, .12); }
+.career-category:is(.limited, .collection) .career-metrics { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.career-category:is(.limited, .collection) .career-outcomes { display: flex; align-items: baseline; justify-content: center; gap: 2px; white-space: nowrap; overflow-wrap: normal; font-variant-numeric: tabular-nums; }
+.career-outcomes .up, .career-outcomes .off { font-size: 18px; line-height: 1.2; letter-spacing: -.025em; white-space: nowrap; overflow-wrap: normal; }
+.career-outcomes .career-outcome-divider { font-size: 11px; }
+.multi-pull-group { display: grid; gap: 9px; min-width: 0; padding: 8px; border: 1px solid rgba(84, 224, 185, .2); border-radius: 9px; background: rgba(20, 199, 167, .09); }
+.multi-pull-heading { color: #55dcb8; font-size: 11px; font-weight: 750; line-height: 1.3; }
+.multi-pull-group .five-event-track { width: calc(100% - 56px); }
+@media (max-width: 360px) {
+ .career-category:is(.limited, .collection) { padding-inline: 4px; }
+ .career-outcomes .up, .career-outcomes .off { font-size: 16px; }
+ .multi-pull-group { padding: 7px; }
+}
+.career-tag.guarantee_streak, .career-tag.up_140, .career-tag.off_streak { color: #ff9c91; background: rgba(255, 93, 80, .12); }
 .career-tag[class*="awaken_"] { color: var(--gold); background: rgba(228, 199, 137, .12); }
 .account-uid { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .five-event-track { width: calc(100% - 64px); }

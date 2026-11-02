@@ -14,7 +14,7 @@ function mockImage(w = 256, h = 256) {
 function mockCanvas() {
   const ops = [];
   const ctx = {fillStyle: '', font: '', _align: 'left',
-    fillRect: (...a) => ops.push(['fillRect', ...a]),
+    fillRect(...a) {ops.push(['fillRect', ...a, this.fillStyle]);},
     fillText(text, x, y, max) {ops.push(['fillText', text, x, y, max, this.font, this.textAlign, this.fillStyle]);},
     measureText: s => ({width: String(s).length * 10}),
     save: () => ops.push(['save']), restore: () => ops.push(['restore']),
@@ -385,11 +385,12 @@ test('modern export uses real player identity, a larger logo and inline complete
   assert.equal(texts.find(op => op[1] === '真实昵称')[6], 'center');
   assert.ok(texts.find(op => String(op[1]).includes('200 抽'))[3] > texts.find(op => op[1] === 'UID 123456 · Lv.80')[3]);
   assert.ok(texts.every(op => op[4] === undefined), 'text must be ellipsized explicitly without Canvas maxWidth squeezing');
-  for (const text of ['UP', '大保底', '十连四金']) {
+  for (const text of ['UP', '大保底']) {
     const tag = texts.find(op => op[1] === text);
     assert.ok(tag, `missing ${text}`);
     assert.ok(tag[2] > 132 && tag[2] < 772, `${text} should follow the name`);
   }
+  assert.ok(texts.some(op => op[1] === '十连四金'), 'multi-gold label now appears once in its group header');
   assert.equal(texts.some(op => String(op[1]).includes('本池第')), false);
   delete globalThis.document;
   delete globalThis.MobileAssets;
@@ -500,7 +501,8 @@ test('mobile text keeps readable glyph widths and all event chips when names are
   assert.ok(measure(nickname[1], nickname[5]) <= 888);
   assert.ok(measure(name[1], name[5]) <= 266);
   assert.ok(texts.every(op => op[4] === undefined));
-  const expected = ['UP', '大保底', '十连至少四金', '待核验', '前序不完整'];
+  assert.ok(texts.some(op => op[1] === '十连至少四金'));
+  const expected = ['UP', '大保底', '待核验', '前序不完整'];
   const chips = expected.map(label => texts.find(op => op[1] === label));
   assert.ok(chips.every(Boolean), 'every meaningful event badge must survive long names');
   for (const [index, chip] of chips.entries()) {
@@ -644,6 +646,126 @@ test('mobile canvas uses the shared account display name without changing deskto
   const desktop = LongImage.draw(report, page, 0, 1, 'all');
   assert.ok(desktop.ops.some(op => op[0] === 'fillText' && op[1] === '主号'));
   delete globalThis.MobileServices;
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+function multiExportReport() {
+  const engine = require('../../xl_gacha_android/web/mobile-engine.js');
+  const catalog = {version: 'test', cards: {1: ['低星', 3]}, pools: {1: '普通池'}, pool_meta: {1: {category: 'normal', pity_group: 'normal', hard_pity: 70}}};
+  for (const id of [101, 102, 103, 104, 105, 106, 107]) catalog.cards[id] = [`角色${id}`, 5];
+  const drops = [
+    [{item_id: 101, count: 1}],
+    [{item_id: 1, count: 7}, {item_id: 102, count: 1}, {item_id: 103, count: 1}, {item_id: 104, count: 1}],
+    [{item_id: 1, count: 8}, {item_id: 105, count: 1}, {item_id: 106, count: 1}],
+    [{item_id: 107, count: 1}],
+  ];
+  return engine.buildReport(drops.map((value, index) => ({pool_id: 1, timestamp: index + 1, index: index + 1, record_id: index + 1, drops: value})), catalog);
+}
+
+test('export groups only real ten-pull members and separates adjacent multi-gold ten-pulls', () => {
+  assetBridge();
+  globalThis.MobileInsights = require('../../xl_gacha_android/web/mobile-insights.js');
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const LongImage = freshLongImage(), report = multiExportReport(), snapshot = JSON.stringify(report);
+  const insights = MobileInsights.analyze(report), page = LongImage.planPages(report)[0];
+  const canvas = LongImage.draw(report, page, 0, 1, 'all', {characters: new Map(), insights});
+  const groups = canvas.ops.filter(op => op[0] === 'fillRect' && op[5] === 'rgba(20,199,167,0.12)');
+  const texts = canvas.ops.filter(op => op[0] === 'fillText');
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map(op => op.slice(1, 5)), [[60, page.headerHeight + 324, 960, 276], [60, page.headerHeight + 612, 960, 420]]);
+  const headers = texts.filter(op => /^十连(?:双|三)金$/.test(op[1]) && op[3] > page.headerHeight);
+  assert.deepEqual(headers.map(op => op[1]), ['十连双金', '十连三金']);
+  for (const [index, header] of headers.entries()) assert.ok(header[3] > groups[index][2] && header[3] < groups[index][2] + 30);
+  for (const text of texts.filter(op => /^角色\d+$/.test(op[1]))) {
+    const matching = groups.filter(group => text[3] >= group[2] && text[3] <= group[2] + group[4]);
+    assert.equal(matching.length, ['角色101', '角色107'].includes(text[1]) ? 0 : 1, `incorrect group for ${text[1]}`);
+  }
+  assert.equal(JSON.stringify(report), snapshot);
+  delete globalThis.MobileInsights;
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('export shades only visible burst members on continued pages without inserting event rows', () => {
+  assetBridge();
+  globalThis.MobileInsights = require('../../xl_gacha_android/web/mobile-insights.js');
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const LongImage = freshLongImage(), report = multiExportReport(), insights = MobileInsights.analyze(report);
+  const pages = LongImage.planPages(report, 'all', 1516), renderedNames = [], labels = [];
+  assert.equal(pages.length, 4);
+  for (const [index, page] of pages.entries()) {
+    const canvas = LongImage.draw(report, page, index, pages.length, 'all', {characters: new Map(), insights});
+    const groups = canvas.ops.filter(op => op[0] === 'fillRect' && op[5] === 'rgba(20,199,167,0.12)');
+    const texts = canvas.ops.filter(op => op[0] === 'fillText');
+    renderedNames.push(...texts.filter(op => /^角色\d+$/.test(op[1])).map(op => op[1]));
+    labels.push(texts.filter(op => /^十连/.test(op[1]) && op[3] > page.headerHeight).map(op => op[1]));
+    for (const group of groups) assert.ok(group[2] + group[4] < canvas.height - 100);
+    for (const text of texts.filter(op => /^角色\d+$/.test(op[1]))) assert.ok(text[3] < canvas.height - 100);
+    assert.ok(page.height <= 1516);
+  }
+  assert.deepEqual(renderedNames, ['角色107', '角色106', '角色105', '角色104', '角色103', '角色102', '角色101']);
+  assert.deepEqual(labels, [['十连双金'], ['十连双金（续）', '十连三金'], ['十连三金（续）'], []]);
+  delete globalThis.MobileInsights;
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('export formats full-140 career tags consistently and enlarges UP/off counts without squeezing', () => {
+  assetBridge();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const LongImage = freshLongImage(), report = imageReport();
+  report.analysis.categories.limited = {name: '限定池', pull_count: 400, five_count: 8, up_count: 7, off_count: 1, average_five_interval: 50};
+  const tags = [{key: 'up_140', text: '旧标签', count: 2}];
+  const draw = () => LongImage.draw(report, LongImage.planPages(report)[0], 0, 1, 'all', {characters: new Map(), insights: {tags}});
+  let canvas = draw(), texts = canvas.ops.filter(op => op[0] === 'fillText');
+  let label = texts.find(op => op[1] === '吃满140*2');
+  assert.ok(label, 'fallback must format the new tag without stale text or multiplication glyph');
+  assert.equal(label[7], '#ff9c91');
+  const up = texts.find(op => op[1] === '7' && op[7] === '#14c7a7');
+  const off = texts.find(op => op[1] === '1' && op[7] === '#ff5d50');
+  assert.ok(/ 32px /.test(up[5]) && / 32px /.test(off[5]));
+  assert.equal(up[4], undefined);assert.equal(off[4], undefined);
+  globalThis.MobileInsights = {tagText: tag => tag.key === 'up_140' ? '共享格式文本' : tag.text};
+  canvas = draw();
+  assert.ok(canvas.ops.some(op => op[0] === 'fillText' && op[1] === '共享格式文本'));
+  delete globalThis.MobileInsights;
+  delete globalThis.document;
+  delete globalThis.MobileAssets;
+});
+
+test('export evaluations match the total-pull font and form one centered pair without long-text collisions', () => {
+  assetBridge();
+  const measure = (text, size) => [...String(text)].reduce((sum, ch) => sum + size * (ch.charCodeAt(0) > 127 ? 1 : .55), 0);
+  globalThis.document = {createElement: () => {
+    const canvas = mockCanvas(), context = canvas.getContext();
+    context.measureText = text => ({width: measure(text, Number(/(\d+)px/.exec(context.font)?.[1] || 26))});
+    return canvas;
+  }, getElementById: () => null};
+  const LongImage = freshLongImage(), report = imageReport(), page = LongImage.planPages(report)[0];
+  const cases = [
+    {career: {status: 'rated', label: '绝世欧皇', lowConfidence: true, tone: 'lucky'}, recent: {status: 'small', tone: 'quiet'}},
+    {career: {status: 'rated', label: '很长的生涯评价'.repeat(30), lowConfidence: true, tone: 'rough'}, recent: {status: 'zero', tone: 'quiet'}},
+  ];
+  for (const [index, insights] of cases.entries()) {
+    const canvas = LongImage.draw(report, page, 0, 1, 'all', {characters: new Map(), insights});
+    const texts = canvas.ops.filter(op => op[0] === 'fillText');
+    const summary = texts.find(op => String(op[1]).includes('200 抽') && String(op[1]).includes('个五星'));
+    const evaluations = ['生涯 · ', '近45天 · '].map(prefix => texts.find(op => String(op[1]).startsWith(prefix)));
+    const bounds = evaluations.map(op => {
+      const size = Number(/(\d+)px/.exec(op[5])[1]), width = measure(op[1], size);
+      const left = op[6] === 'center' ? op[2] - width / 2 : op[6] === 'right' ? op[2] - width : op[2];
+      assert.equal(size, Number(/(\d+)px/.exec(summary[5])[1]), 'evaluation text must match the total-pull font');
+      return {left, right: left + width, baseline: op[3], top: op[3] - size};
+    });
+    assert.ok(Math.abs((bounds[0].left + bounds[1].right) / 2 - 540) < .01, 'the actual text pair must center on the image axis');
+    assert.ok(bounds[1].left - bounds[0].right >= 32 && bounds[1].left - bounds[0].right <= 40);
+    assert.ok(bounds[0].left >= 72 && bounds[1].right <= 1008);
+    assert.equal(bounds[0].baseline, bounds[1].baseline);
+    assert.ok(bounds[0].top > summary[3] && bounds[0].baseline < 558);
+    if (index === 0) assert.equal(evaluations[0][1], '生涯 · 绝世欧皇 · 暂估');
+    else assert.ok(evaluations[0][1].endsWith('…'), 'long evaluations must ellipsize while keeping the same font size');
+  }
   delete globalThis.document;
   delete globalThis.MobileAssets;
 });
