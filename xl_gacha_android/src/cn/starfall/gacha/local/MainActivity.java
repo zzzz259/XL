@@ -51,8 +51,14 @@ public class MainActivity extends Activity {
   }catch(Exception e){throw new IllegalStateException("CATALOG_INIT_FAILED");}
   FrameLayout content=new FrameLayout(this);content.setBackgroundColor(0xff0b1020);
   web=new WebView(this);web.setBackgroundColor(0xff0b1020);content.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(content);
-  // WebView does not inset its rendered document when its own padding changes.
-  content.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
+  // Size WebView through its parent; consume the reserved space before CSS safe areas see it.
+  content.setOnApplyWindowInsetsListener((v,insets)->{
+   int left=insets.getSystemWindowInsetLeft(),top=insets.getSystemWindowInsetTop(),right=insets.getSystemWindowInsetRight(),bottom=insets.getSystemWindowInsetBottom();
+   android.view.DisplayCutout cutout=insets.getDisplayCutout();
+   if(cutout!=null){left=Math.max(left,cutout.getSafeInsetLeft());top=Math.max(top,cutout.getSafeInsetTop());right=Math.max(right,cutout.getSafeInsetRight());bottom=Math.max(bottom,cutout.getSafeInsetBottom());}
+   v.setPadding(left,top,right,bottom);
+   return insets.consumeSystemWindowInsets().consumeDisplayCutout();
+  });
   WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
   if((getApplicationInfo().flags&android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0)WebView.setWebContentsDebuggingEnabled(true);
   web.addJavascriptInterface(new Host(),"AndroidHost");
