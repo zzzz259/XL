@@ -59,7 +59,7 @@ const MobileRender=(()=>{
    card.append(el('h3',value.name));const pulls=el('div',undefined,'career-pulls');pulls.append(el('strong',MobileView.number(value.pull_count)),el('span','抽'));
    const metrics=el('div',undefined,'career-metrics'),count=el('div'),average=el('div');
    const outcomes=el('strong',undefined,'career-outcomes');
-   if(key==='normal')outcomes.textContent=String(value.five_count);else outcomes.append(el('span',String(value.up_count),'up'),document.createTextNode(' / '),el('span',String(value.off_count),'off'));
+   if(key==='normal')outcomes.textContent=String(value.five_count);else outcomes.append(el('span',String(value.up_count),'up'),el('span','/','career-outcome-divider'),el('span',String(value.off_count),'off'));
    count.append(outcomes,el('span',key==='normal'?'出卡数':'UP/歪'));
    const avg=value.average_five_interval===null?'—':Number(value.average_five_interval).toFixed(1);average.append(el('strong',avg),el('span',key==='normal'?'五星平均':'平均UP'));
    metrics.append(count,average);
@@ -68,7 +68,7 @@ const MobileRender=(()=>{
    pity.append(el('span',`已垫 ${countText} / ${value.hard_pity||'—'}`,'career-pity-text'));card.append(pulls,metrics,pity);list.append(card);
   }
   const extra=$('career-extra');extra.replaceChildren();const unknown=source.unknown;if(unknown?.pull_count)extra.append(el('span',`未分类另计 ${MobileView.number(unknown.pull_count)} 抽 · ${unknown.five_count} 个五星`));extra.hidden=!extra.children.length;
-  const tags=$('career-tags');tags.replaceChildren(...(insights?.tags||[]).map(tag=>el('span',tag.count>1?`${tag.text} ×${tag.count}`:tag.text,`career-tag ${tag.key}`)));tags.hidden=!tags.children.length;
+  const tags=$('career-tags');tags.replaceChildren(...(insights?.tags||[]).map(tag=>el('span',MobileInsights.tagText(tag),`career-tag ${tag.key}`)));tags.hidden=!tags.children.length;
   for(const [id,value,prefix] of [['career-evaluation',insights?.career,'生涯'],['recent-evaluation',insights?.recent,'近45天']]){const target=$(id);target.textContent=`${prefix} · ${value?evaluationText(value):'暂无记录'}`;target.className=`evaluation-badge ${value?.tone||'quiet'}`;}
  }
  function poolCard(pool,state){
@@ -82,10 +82,20 @@ const MobileRender=(()=>{
   const events=el('div',undefined,'five-event-list'),limit=state.eventLimits[pool.poolId]||20,burstPositions=new Map(),numerals=['','单','双','三','四','五','六','七','八','九','十'];
   for(const burst of state.insights?.multi?.byPool?.[String(pool.poolId)]||[])for(const position of burst.positions)burstPositions.set(position,burst);
   if(!pool.events.length)events.append(el('p','可见记录中尚未出现五星角色。','no-five'));
+  let activeBurst=null,group=null;
   for(const event of pool.events.slice(0,limit)){
-   const row=el('article',undefined,'five-event'),portrait=avatar(event.item_id,event.name,5,'event-avatar');if(event.outcome==='off')portrait.append(el('span','歪','avatar-flag'));
+   const burst=burstPositions.get(event.in_pool_pull);
+   if(burst!==activeBurst){
+    activeBurst=burst;group=null;
+    if(burst){
+     group=el('section',undefined,'multi-pull-group');
+     group.dataset.burstId=[pool.poolId,burst.timestamp,burst.record_id,...burst.positions].join(':');
+     const label=`十连${burst.exact?'':'至少'}${numerals[burst.five_count]||burst.five_count}金`;
+     group.setAttribute('aria-label',label);group.append(el('div',label,'multi-pull-heading'));events.append(group);
+    }
+   }
+   const row=el('article',undefined,'five-event'),portrait=avatar(event.item_id,event.name,5,'event-avatar');row.dataset.inPoolPull=String(event.in_pool_pull);if(event.outcome==='off')portrait.append(el('span','歪','avatar-flag'));
    const body=el('div',undefined,'event-body'),name=el('div',undefined,'event-name');name.append(el('strong',event.name));
-   const burst=burstPositions.get(event.in_pool_pull);if(burst)name.append(el('span',`十连${burst.exact?'':'至少'}${numerals[burst.five_count]}金`,'event-badge multi'));
    if(event.outcome==='up')name.append(el('span','UP','event-badge up'));
    if(event.guaranteed===true)name.append(el('span','大保底','event-badge guarantee'));
    if(event.guarantee_conflict)name.append(el('span','记录待核验','event-badge conflict'));
@@ -95,7 +105,7 @@ const MobileRender=(()=>{
    const track=el('div',undefined,'five-event-track'),fill=el('div',undefined,`five-event-fill ${!event.exact?'uncertain':event.pulls<=30?'early':event.pulls<=60?'middle':'late'}`);
    if(pool.hardPity)fill.style.width=`${Math.max(12,Math.min(100,event.pulls/pool.hardPity*100))}%`;else fill.classList.add('no-rule');
    fill.append(el('span',`${event.exact?'':'≥'}${event.pulls} 抽`));track.append(fill);
-   const meta=el('p',`${event.time_beijing} · 本池第 ${event.in_pool_pull} 抽${event.carried_pulls?` · 跨池累计 ${event.carried_pulls} 抽`:''}`,'five-event-meta');body.append(name,track,meta);row.append(portrait,body);events.append(row);
+   const meta=el('p',`${event.time_beijing} · 本池第 ${event.in_pool_pull} 抽${event.carried_pulls?` · 跨池累计 ${event.carried_pulls} 抽`:''}`,'five-event-meta');body.append(name,track,meta);row.append(portrait,body);(group||events).append(row);
   }
   if(pool.events.length>limit){const more=el('button',`继续显示五星记录 · 还有 ${pool.events.length-limit} 条`,'load-more');more.type='button';more.dataset.poolMore=pool.poolId;events.append(more);}
   card.append(events);

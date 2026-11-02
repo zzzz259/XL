@@ -6,6 +6,7 @@ const MobileInsights=(()=>{
  const sort=(a,b)=>a.timestamp-b.timestamp||a.index-b.index||a.record_id-b.record_id||a.pool_id-b.pool_id;
  const key=r=>JSON.stringify([r.pool_id,r.timestamp,r.index,r.record_id]);
  const rate=ratio=>ratio<=0.2?['绝世欧皇','lucky']:ratio<=0.4?['欧气不错','good']:ratio<=0.65?['平稳前行','steady']:ratio<=0.9?['略需转运','rough']:['继续加油','quiet'];
+ const tagText=tag=>tag.text+(tag.count>1?(tag.key==='up_140'?'*':' ×')+tag.count:'');
  function evaluate(records,hardOf,emptyStatus){
   if(!records.length)return{status:emptyStatus,ratio:null,pulls:0,fiveCount:0,lowConfidence:true,label:null,tone:'quiet'};
   let pulls=0,cost=0,fiveCount=0,unknown=0;
@@ -41,9 +42,12 @@ const MobileInsights=(()=>{
   }
   let maxUp=0,maxOff=0,maxGuarantee=0,longUp=0;
   const states=new Map();
-  for(const {event:e,group,selected,eligible} of probability.eventTimeline(report,{poolIds,categories:cats})){
+  const cycles=probability.upCycles(report,{poolIds,categories:cats});
+  for(const {event:e,pool,group,selected,eligible} of probability.eventTimeline(report,{poolIds,categories:cats})){
    if(!selected||!eligible||e.interval_exact===false)states.delete(group);
    if(!selected||!eligible)continue;
+   const cycle=cycles.get(e);
+   if(pool.hard_pity===70&&e.guaranteed===true&&cycle?.up_cycle_exact===true&&cycle.up_cycle_pulls===140)longUp++;
    const state=states.get(group)||{up:0,off:0,guarantee:0};
    if(e.outcome==='up'){
     state.up++;state.off=0;
@@ -54,14 +58,13 @@ const MobileInsights=(()=>{
    states.set(group,state);
    maxUp=Math.max(maxUp,state.up);maxOff=Math.max(maxOff,state.off);maxGuarantee=Math.max(maxGuarantee,state.guarantee);
   }
-  for(const cycle of probability.upCycles(report,{poolIds,categories:cats}).values())if(cycle.up_cycle_exact&&cycle.up_cycle_pulls>=130)longUp++;
   const tags=[];
   if(maxUp>=2)tags.push({key:'up_streak',text:`${maxUp}连UP`,count:1});
   if(maxGuarantee>=2)tags.push({key:'guarantee_streak',text:`${maxGuarantee}连大保底`,count:1});
   for(const e of [...awakenings.values()].filter(e=>e.copies>=6).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN')||a.id.localeCompare(b.id)))tags.push({key:`awaken_${e.id}`,text:`${e.name} 满觉`,count:1});
   tags.push(...ten.values());
   if(maxOff>=2)tags.push({key:'off_streak',text:`${maxOff}连歪`,count:1});
-  if(longUp>0)tags.push({key:'up_130',text:'130抽以上才出UP',count:longUp});
+  if(longUp>0)tags.push({key:'up_140',text:'吃满140',count:longUp});
   return tags;
  }
  function collectMulti(records){
@@ -105,6 +108,6 @@ const MobileInsights=(()=>{
   const recent={...evaluate(records.filter(r=>r.timestamp<=now&&r.timestamp>=cutoff),hardOf,'excluded'),days:RECENT_DAYS};
   return{career,recent,tags:collectTags(records,cats,awakeningRecords,report,opts.poolIds),multi:collectMulti(records)};
  }
- return{analyze};
+ return{analyze,tagText};
 })();
 if(typeof module!=='undefined')module.exports=MobileInsights;

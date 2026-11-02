@@ -5,10 +5,15 @@ const LongImage = (() => {
   const W = 1080, HEADER = 380, FOOTER = 100, POOL_BASE = 180, ROW = 96;
   const BASE_HEADER = 904, TAG_TOP = 816, TAG_PITCH = 44, MOBILE_POOL_BASE = 224, MOBILE_ROW = 144;
   const FONT = '"Microsoft YaHei", "PingFang SC", sans-serif';
+  function careerTagText(tag) {
+    if (typeof MobileInsights !== 'undefined' && typeof MobileInsights.tagText === 'function') return MobileInsights.tagText(tag);
+    const text = tag.key === 'up_140' ? '吃满140' : tag.text;
+    return tag.count > 1 ? `${text}${tag.key === 'up_140' ? '*' : ' ×'}${tag.count}` : text;
+  }
   function tagRows(tags, measure) {
     const rows = []; let row = [], width = 0;
     for (const tag of tags || []) {
-      const text = tag.count > 1 ? `${tag.text} ×${tag.count}` : tag.text;
+      const text = careerTagText(tag);
       const w = Math.min(984, Math.ceil(measure(text)) + 32);
       if (row.length && width + 12 + w > 984) {rows.push({tags: row, width}); row = []; width = 0;}
       width += (row.length ? 12 : 0) + w; row.push({tag, text, width: w});
@@ -321,8 +326,20 @@ const LongImage = (() => {
       v.status==='small' ? '样本较少' : v.status==='zero' ? '暂未见金' : v.status==='unknown' ? '星级待确认' : '暂无记录';
     const toneColor = t => ({lucky:P.green,good:P.green,steady:P.gold,rough:P.rough,quiet:P.faint}[t] || P.faint);
     if (insights) {
-      label(`生涯 · ${evalText(insights.career)}`,294,534,24,toneColor(insights.career?.tone),600,444,'center');
-      label(`近45天 · ${evalText(insights.recent)}`,786,534,24,toneColor(insights.recent?.tone),600,444,'center');
+      const evaluations = [['生涯',insights.career],['近45天',insights.recent]].map(([prefix,value]) => {
+        let text = `${prefix} · ${evalText(value)}`;
+        if (measure(text,32,600) > 450) {
+          const chars = [...text];
+          while (chars.length && measure(chars.join('')+'…',32,600) > 450) chars.pop();
+          text = chars.join('')+'…';
+        }
+        return {text,width:measure(text,32,600),color:toneColor(value?.tone)};
+      });
+      let x = (W-evaluations[0].width-36-evaluations[1].width)/2;
+      for (const evaluation of evaluations) {
+        label(evaluation.text,x,534,32,evaluation.color,600,450);
+        x += evaluation.width+36;
+      }
     }
     for (const [i, key] of ['normal','limited','collection'].entries()) {
       const s = report.analysis?.categories?.[key] || {name:catNames[key],pull_count:0,five_count:0,up_count:0,off_count:0};
@@ -332,9 +349,9 @@ const LongImage = (() => {
       label(`${s.pull_count} 抽`,cx,644,38,P.accent,700,264,'center');
       if (key === 'normal') label(s.five_count,x+84,684,28,P.text,650,120,'center');
       else {
-        label(s.up_count,x+54,684,28,P.teal,700,54,'center');
+        label(s.up_count,x+54,684,32,P.teal,700,54,'center');
         label('/',x+84,684,24,P.muted,500,22,'center');
-        label(s.off_count,x+114,684,28,P.red,700,54,'center');
+        label(s.off_count,x+114,684,32,P.red,700,54,'center');
       }
       label(key === 'normal' ? '出卡数' : 'UP/歪',x+84,714,21,P.muted,400,120,'center');
       const average = s.average_five_interval == null || !Number.isFinite(Number(s.average_five_interval)) ? '—' : Number(s.average_five_interval).toFixed(1);
@@ -350,7 +367,7 @@ const LongImage = (() => {
     for (const [rowIndex, row] of rows.entries()) {
       let tx = (W-row.width)/2, ty = TAG_TOP+rowIndex*TAG_PITCH;
       for (const {tag,text,width} of row.tags) {
-        const risky = ['guarantee_streak', 'up_130', 'off_streak'].includes(tag.key);
+        const risky = ['guarantee_streak', 'up_130', 'up_140', 'off_streak'].includes(tag.key);
         rect(tx,ty,width,34,risky ? '#33201d' : '#173129');
         label(text,tx+16,ty+25,22,risky ? P.rough : P.green,650,width-32);
         tx += width+12;
@@ -379,20 +396,29 @@ const LongImage = (() => {
       for (const burst of insights?.multi?.byPool?.[String(p.pool_id)] || [])
         for (const pos of burst.positions || []) burstByPos.set(pos,burst);
       let ey = y+180;
-      for (const e of part.events) {
+      for (const [eventIndex,e] of part.events.entries()) {
+        const burst = burstByPos.get(e.in_pool_pull), groupStart = burst && burstByPos.get(part.events[eventIndex-1]?.in_pool_pull) !== burst;
+        if (groupStart) {
+          let end = eventIndex+1;
+          while (end < part.events.length && burstByPos.get(part.events[end].in_pool_pull) === burst) end++;
+          rect(60,ey,960,(end-eventIndex)*rowH-12,'rgba(20,199,167,0.12)');
+          rect(60,ey,3,(end-eventIndex)*rowH-12,P.teal);
+          const continued = (burst.positions || []).some(pos => Number(pos) > Number(e.in_pool_pull));
+          label(`十连${burst.exact ? '' : '至少'}${numerals[burst.five_count] || burst.five_count}金${continued ? '（续）' : ''}`,84,ey+22,22,P.green,700,700);
+        }
+        // A group's first row uses the existing 144px pitch for its header; it does not add a synthetic event.
+        const contentY = ey+(groupStart ? 28 : 0);
         const entry = characters ? characters.get(e.item_id) : null;
         const avatar = entry && entry.image ? entry : null;
         const nameX = 184, nameMax = 266;
-        rect(72,ey+4,92,92,P.track);
-        if (avatar) portrait(avatar,72,ey+4,92);
-        else label(String(e.name || '?').slice(0,1),118,ey+65,38,P.faint,600,72,'center');
-        label(e.name,nameX,ey+35,30,P.text,600,nameMax);
+        rect(72,contentY+4,92,92,P.track);
+        if (avatar) portrait(avatar,72,contentY+4,92);
+        else label(String(e.name || '?').slice(0,1),118,contentY+65,38,P.faint,600,72,'center');
+        label(e.name,nameX,contentY+35,30,P.text,600,nameMax);
         const nameW = Math.min(measure(e.name,30,600), nameMax);
         const chips = [];
         if (e.outcome === 'up') chips.push(['UP',P.teal]); else if (e.outcome === 'off') chips.push(['歪',P.red]);
         if (e.guaranteed === true) chips.push(['大保底',P.gold]);
-        const burst = burstByPos.get(e.in_pool_pull);
-        if (burst) chips.push([`十连${burst.exact ? '' : '至少'}${numerals[burst.five_count] || burst.five_count}金`,P.blue]);
         if (e.guarantee_conflict) chips.push(['待核验',P.red]);
         if (!e.interval_exact) chips.push(['前序不完整',P.gray]);
         const grade = assets.eventGrades?.get(e);
@@ -402,16 +428,16 @@ const LongImage = (() => {
         for (const [text,bg] of chips) {
           const w = Math.ceil(measure(text,21,700)) + 24;
           if (chipX+w > 1008) break;
-          rect(chipX,ey+9,w,32,bg);
-          label(text,chipX+12,ey+33,21,P.dark,700,w-24);
+          rect(chipX,contentY+9,w,32,bg);
+          label(text,chipX+12,contentY+33,21,P.dark,700,w-24);
           chipX += w+8;
         }
         const count = e.pulls_since_five, exact = e.interval_exact, hard = p.hard_pity || 70;
         const countText = `${exact ? '' : '≥'}${count} 抽`, fillW = Math.min(824, Math.max(measure(countText,26,800)+32, count/hard*824));
-        rect(184,ey+58,824,42,P.track);
-        rect(184,ey+58,fillW,42,!exact ? P.gray : count<=30 ? P.teal : count<=60 ? P.yellow : P.red);
-        label(countText,200,ey+88,26,P.dark,800,fillW-32);
-        if (e.carried_pulls) label(`跨池 ${e.carried_pulls} 抽`,1008,ey+122,20,P.muted,400,400,'right');
+        rect(184,contentY+58,824,42,P.track);
+        rect(184,contentY+58,fillW,42,!exact ? P.gray : count<=30 ? P.teal : count<=60 ? P.yellow : P.red);
+        label(countText,200,contentY+88,26,P.dark,800,fillW-32);
+        if (e.carried_pulls) label(`跨池 ${e.carried_pulls} 抽`,1008,ey+(groupStart ? 22 : 122),20,P.muted,400,220,'right');
         ey += rowH;
       }
       if(!part.events.length) {label('可见记录中尚未出现五星角色。',72,ey+52,26,P.faint); ey += rowH;}

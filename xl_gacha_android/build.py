@@ -109,6 +109,7 @@ def main():
             "tests/mobile-navigation.test.cjs",
             "tests/mobile-probability.test.cjs",
             "tests/mobile-insights.test.cjs",
+            "tests/mobile-render.test.cjs",
             "tests/mobile-assets.test.cjs",
             "tests/mobile-mascot.test.cjs",
             "tests/mobile-view-model.test.cjs",
