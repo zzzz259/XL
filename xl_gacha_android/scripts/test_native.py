@@ -47,6 +47,7 @@ def main():
             classes,
             *sorted((ROOT / "src").rglob("*.java")),
             ROOT / "tests/CatalogUpdatesTest.java",
+            ROOT / "tests/VisualAssetsTest.java",
             ROOT / "tests/LoginLinksTest.java",
             ROOT / "tests/LoginReturnTest.java",
             ROOT / "tests/TapAppLoginTest.java",

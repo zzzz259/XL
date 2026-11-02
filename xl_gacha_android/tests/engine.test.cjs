@@ -13,6 +13,17 @@ test('80 to 1 wrap retains cross-banner pulls and guaranteed UP; missing 80 stil
  assert.equal(gap.pulls_since_five,10);assert.equal(gap.interval_exact,false);assert.equal(gap.guaranteed,null);
 });
 
+test('non-contiguous index jumps conservatively mark earlier history incomplete',()=>{
+ const records=[
+  {pool_id:1,pool_name:'测试池',timestamp:100,index:40,record_id:1,time_beijing:'2026-01-01 00:00:00',drops:[{item_id:5,name:'低星',rarity:3,count:9}]},
+  {pool_id:1,pool_name:'测试池',timestamp:200,index:50,record_id:2,time_beijing:'2026-01-01 00:00:00',drops:[{item_id:11,name:'五星',rarity:5,count:1}]},
+ ];
+ const hit=engine.analyze(records,{1:{category:'limited',pity_group:'limited',featured_ids:[11]}}).pools[0].events[0];
+ assert.equal(hit.interval_exact,false);
+ assert.equal(hit.pulls_since_five,1);
+ assert.equal(hit.guaranteed,null);
+});
+
 test('average includes every visible pull, first five and current unfinished pulls',()=>{
  const rows=[{pool_id:1,pool_name:'测试池',timestamp:100,index:1,record_id:1,time_beijing:'2026-01-01 00:00:00',drops:[{item_id:1,name:'低星',rarity:3,count:3},{item_id:2,name:'五星',rarity:5,count:1},{item_id:1,name:'低星',rarity:3,count:6}]}];
  assert.equal(engine.analyze(rows,{1:{category:'normal'}}).categories.normal.average_five_interval,10);
@@ -50,6 +61,16 @@ test('account identity hashes match the desktop algorithm and fields are allowli
  assert.ok(!JSON.stringify(report).includes('NEVER_STORE'));
 });
 
+test('player profile fields preserve account identity and nickname defaults',async()=>{
+ const source={uid:'555',channel:'sms',nickname:'合成玩家',game_uid:'9007199254740993',level:80,face_id:12001701,fashion_id:12001701,head_id:0,head_rect_id:21180003,head_rect_stamp:1893456000,head_rect_extra:7,head_rect_item_uid:'0',server_time:1793456000,server_time_received_at:1793456000123};
+ const identity=await engine.identity(source);
+ const hash=require('node:crypto').createHash('sha256').update('sms:555').digest('hex').slice(0,32);
+ assert.equal(identity.id,'account-'+hash);assert.equal(identity.label,'合成玩家');
+ for(const key of Object.keys(source))assert.deepEqual(identity[key],source[key]);
+ const named=await engine.identity({...source,label:'我的存档'});assert.equal(named.label,'我的存档');
+ await assert.rejects(engine.identity({...source,level:-1}));await assert.rejects(engine.identity({...source,nickname:'bad\nname'}));
+});
+
 test('same numeric UID in Bilibili and official login remains in separate archives',async()=>{
  const bili=await engine.identity({uid:'555',channel:'bilibili'}),official=await engine.identity({uid:'555',channel:'sms'});
  assert.notEqual(bili.id,official.id);
@@ -67,4 +88,15 @@ test('new catalog remaps raw IDs and refreshes revision while preserving pulls',
  const r=engine.buildReport(before.records,newer,before.pool_metadata);
  assert.equal(r.summary.pull_count,1);assert.equal(r.summary.unknown_item_count,0);assert.equal(r.records[0].drops[0].name,'新增五星');
  assert.equal(r.analysis.pools[0].events[0].outcome,'up');assert.equal(r.configuration_revision,'test-new-config');
+});
+
+test('server receipt anchor survives profile normalization and archive round trips',async()=>{
+ const source={uid:'555',channel:'sms',server_time:1793456000,server_time_received_at:'1793456000123'};
+ const profile=await engine.identity(source);
+ assert.equal(profile.server_time_received_at,1793456000123);
+ const restored=await engine.identity(JSON.parse(JSON.stringify(profile)));
+ assert.equal(restored.server_time_received_at,1793456000123);
+ assert.equal(source.server_time_received_at,'1793456000123','normalization must not reset or replace the receipt anchor');
+ for(const invalid of [-1,1.5,true,'not-a-clock'])await assert.rejects(engine.identity({...source,server_time_received_at:invalid}));
+ assert.equal((await engine.identity({uid:'555',channel:'sms'})).server_time_received_at,undefined,'legacy profiles retain missing anchors for renderer fallback');
 });

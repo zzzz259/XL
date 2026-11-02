@@ -17,6 +17,7 @@ public class MainActivity extends Activity {
  static final String HOST="appassets.androidplatform.net",ORIGIN="https://"+HOST;
  static MainActivity current;
  static CatalogUpdates updates;
+ static VisualAssets visuals;
  static final ExecutorService IO=Executors.newCachedThreadPool();
  static JSONObject login=new JSONObject();
  static boolean remember=false;
@@ -30,21 +31,26 @@ public class MainActivity extends Activity {
   if(updates==null){JSONObject base;JSONObject source;
    try(InputStream in=context.getAssets().open("catalog.json")){base=new JSONObject(new String(GachaClient.bounded(in,4*1024*1024),StandardCharsets.UTF_8));}
    try(InputStream in=context.getAssets().open("update-source.json")){source=new JSONObject(new String(GachaClient.bounded(in,16384),StandardCharsets.UTF_8));}
-   updates=new CatalogUpdates(new File(context.getFilesDir(),"catalog-cache"),base,source.optString("url",""));
+   CatalogUpdates catalogUpdates=new CatalogUpdates(new File(context.getFilesDir(),"catalog-cache"),base,source.optString("url",""));
+   JSONObject visualBase;try(InputStream in=context.getAssets().open("assets/manifest.json")){visualBase=new JSONObject(new String(GachaClient.bounded(in,2*1024*1024),StandardCharsets.UTF_8));}
+   visuals=new VisualAssets(new File(context.getFilesDir(),"visual-cache"),visualBase);
+   updates=catalogUpdates;
+   updates.setObserver((catalog,url,force)->visuals.start(catalog,url,force));
   }
  }
+ static JSONObject catalogStatus()throws JSONException{return updates.status().put("visual_assets",visuals.status());}
  static synchronized JSONObject loginStatus(Context c)throws Exception{
   JSONObject out=new JSONObject(login.toString());if(!out.has("phase"))out.put("phase","idle");
   JSONArray profiles=new JSONArray();android.content.SharedPreferences prefs=c.getSharedPreferences("login",MODE_PRIVATE);
   String id=prefs.getString("profile","");if(!id.isEmpty())profiles.put(object("id",id,"label",prefs.getString("label","最近一次登录"),"account_id",prefs.getString("account","")));
   return out.put("profiles",profiles);
  }
- @Override public void onCreate(Bundle b){super.onCreate(b);current=this;getWindow().setStatusBarColor(0xff111820);getWindow().setNavigationBarColor(0xff111820);
+ @Override public void onCreate(Bundle b){super.onCreate(b);current=this;getWindow().setStatusBarColor(0xff0b1020);getWindow().setNavigationBarColor(0xff0b1020);
   IO.execute(()->ImageExports.cleanup(getApplicationContext()));
   try{ensureCatalog(this);updates.start(false);
   }catch(Exception e){throw new IllegalStateException("CATALOG_INIT_FAILED");}
-  FrameLayout content=new FrameLayout(this);content.setBackgroundColor(0xff111820);
-  web=new WebView(this);web.setBackgroundColor(0xff111820);content.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(content);
+  FrameLayout content=new FrameLayout(this);content.setBackgroundColor(0xff0b1020);
+  web=new WebView(this);web.setBackgroundColor(0xff0b1020);content.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(content);
   // WebView does not inset its rendered document when its own padding changes.
   content.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
   WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(true);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -52,9 +58,11 @@ public class MainActivity extends Activity {
   web.addJavascriptInterface(new Host(),"AndroidHost");
   web.setWebViewClient(new WebViewClient(){
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){Uri u=r.getUrl();if(!"https".equals(u.getScheme())||!HOST.equals(u.getHost()))return denied();
-    String path=u.getPath();if("/".equals(path))path="/index.html";if(path==null||path.equals("/bilibili-client.json")||path.contains("..")||!path.matches("/[A-Za-z0-9._-]+"))return denied();
+    String path=u.getPath();if("/".equals(path))path="/index.html";if(path==null||path.equals("/bilibili-client.json")||path.contains("..")||path.contains("//")||!path.matches("/(?:assets/)?[A-Za-z0-9._/-]+"))return denied();
     try{if("/catalog.json".equals(path))return new WebResourceResponse("application/json","UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream(updates.catalog().toString().getBytes(StandardCharsets.UTF_8)));
-     String mime=path.endsWith(".js")?"text/javascript":path.endsWith(".css")?"text/css":path.endsWith(".json")?"application/json":path.endsWith(".svg")?"image/svg+xml":"text/html";
+     if("/assets/manifest.json".equals(path))return new WebResourceResponse("application/json","UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream(visuals.manifest().toString().getBytes(StandardCharsets.UTF_8)));
+     String mime=path.endsWith(".js")?"text/javascript":path.endsWith(".css")?"text/css":path.endsWith(".json")?"application/json":path.endsWith(".svg")?"image/svg+xml":path.endsWith(".webp")?"image/webp":path.endsWith(".png")?"image/png":"text/html";
+     if(path.startsWith("/assets/remote/")){InputStream image=visuals.open(path);if(image==null)return denied();return new WebResourceResponse(path.endsWith(".webp")?"image/webp":path.endsWith(".png")?"image/png":"image/jpeg",null,200,"OK",Collections.singletonMap("Cache-Control","no-store"),image);}
      return new WebResourceResponse(mime,"UTF-8",200,"OK",Collections.singletonMap("Cache-Control","no-store"),getAssets().open(path.substring(1)));
     }catch(IOException e){return denied();}}
    @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){if(HOST.equals(r.getUrl().getHost())&&"https".equals(r.getUrl().getScheme()))return false;
@@ -75,9 +83,11 @@ public class MainActivity extends Activity {
   @JavascriptInterface public void request(String id,String action,String raw){if(id==null||!id.matches("[0-9]{1,12}")||raw==null||raw.length()>50*1024*1024)return;
    IO.execute(()->{try{JSONObject body=new JSONObject(raw),result;
     switch(action){
-     case "catalogStatus":result=updates.status();break;
-     case "catalogCheck":updates.start(body.optBoolean("force",true));result=updates.status();break;
-     case "catalogSource":updates.setSource(body.getString("url"));updates.start(true);result=updates.status();break;
+     case "catalogStatus":result=catalogStatus();break;
+     case "catalogCheck":updates.start(body.optBoolean("force",true));result=catalogStatus();break;
+     case "catalogSource":updates.setSource(body.getString("url"));updates.start(true);result=catalogStatus();break;
+     case "visualStatus":result=visuals.status();break;
+     case "visualCheck":visuals.start(updates.catalog(),updates.status().optString("source",""),body.optBoolean("force",true));result=visuals.status();break;
      case "query":result=GachaClient.query(getApplicationContext(),body.getString("credential"));break;
      case "loginStatus":result=loginStatus(MainActivity.this);break;
      case "copyBiliDiagnostics":String diagnostic="星落手记 B 服脱敏诊断（无账号 UID、令牌）\n"+BiliDiagnostics.report(MainActivity.this).toString(2);runOnUiThread(()->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("B 服诊断",diagnostic));Toast.makeText(MainActivity.this,"脱敏诊断已复制",Toast.LENGTH_SHORT).show();});result=object("copied",true);break;
@@ -89,6 +99,7 @@ public class MainActivity extends Activity {
       boolean bili="bilibili".equals(body.optString("channel")),tapApp=!bili&&"taptap_app".equals(body.optString("method")),reuse=remember&&!tapApp&&!body.optString("profile","").isEmpty();if(bili)BiliDiagnostics.begin(MainActivity.this);if(tapApp)TapAppDiagnostics.begin();runOnUiThread(()->startActivity(new Intent(MainActivity.this,bili?BiliAuthActivity.class:LoginActivity.class).putExtra("reuse",reuse).putExtra("remember",remember).putExtra("tap_app",tapApp)));result=loginStatus(MainActivity.this);break;
      case "loginCancel":synchronized(MainActivity.class){if("querying".equals(login.optString("phase")))throw GachaClient.error("PORTAL_QUERY_IN_PROGRESS");phase("cancelled","已取消登录。");}runOnUiThread(()->{if(LoginActivity.current!=null)LoginActivity.current.finish();if(BiliAuthActivity.current!=null)BiliAuthActivity.current.finish();});result=loginStatus(MainActivity.this);break;
      case "loginForget":getSharedPreferences("login",MODE_PRIVATE).edit().clear().apply();runOnUiThread(()->LoginActivity.clearRemoteSessions(()->{}));result=object("deleted",true);break;
+     case "textZoom":{int percent=-1;Object v=body.opt("percent");if(v instanceof Number&&((Number)v).doubleValue()==Math.rint(((Number)v).doubleValue()))percent=((Number)v).intValue();if(percent<80||percent>160)throw GachaClient.error("INVALID_INPUT");int zoom=percent;runOnUiThread(()->{if(web!=null)web.getSettings().setTextZoom(zoom);});result=object("percent",percent);break;}
      case "imageStage":result=object("image",ImageExports.stage(MainActivity.this,Base64.decode(body.getString("data"),Base64.DEFAULT)).getLastPathSegment());break;
      case "imageShare":{
       JSONArray list=body.getJSONArray("images");ArrayList<String> ids=new ArrayList<>();for(int i=0;i<list.length();i++)ids.add(list.getString(i));Intent intent=ImageExports.shareIntent(MainActivity.this,ids);
@@ -134,6 +145,6 @@ public class MainActivity extends Activity {
    if(result==RESULT_OK&&data!=null&&data.getData()!=null&&bytes!=null){Uri target=data.getData();IO.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(target)){if(out==null)throw new IOException();out.write(bytes);reply(id,200,object("saved",true));runOnUiThread(()->Toast.makeText(this,"文件已保存",Toast.LENGTH_SHORT).show());}catch(Exception e){reply(id,400,object("error","FILE_SAVE_FAILED"));}});}
    else reply(id,200,object("cancelled",true));}
  }
- @Override public void onBackPressed(){web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){if(d.dataset.busy!=='true')d.close();return true;}return false;})()",value->{if(!"true".equals(value))super.onBackPressed();});}
+ @Override public void onBackPressed(){web.evaluateJavascript("(()=>{if(typeof window.mobileBack==='function')return window.mobileBack()===true;const d=document.querySelector('dialog[open]');if(d){if(d.dataset.busy!=='true')d.close();return true;}return false;})()",value->{if(!"true".equals(value))super.onBackPressed();});}
  @Override protected void onDestroy(){if(current==this)current=null;albumBytes=null;albumRequest=null;albumName=null;if(web!=null){web.removeJavascriptInterface("AndroidHost");web.destroy();web=null;}super.onDestroy();}
 }

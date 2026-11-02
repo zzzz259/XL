@@ -25,10 +25,12 @@ node --test tests/image-export.test.cjs
 
 ```sh
 cd xl_gacha_android
-node --test tests/engine.test.cjs
+node --test tests/*.test.cjs
 python -B -m unittest discover -s tests -p 'test_*.py' -v
 python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/native-tests
 ```
+
+`tests/test_visual_assets.py` 使用标准库 unittest 与 Pillow 检查 108 张初始 `_1` 方图、312 个时装映射、214 项 manifest 哈希，以及 gugu 864×864 画布、逐帧时长、基线和 poster。仓库产物检查始终执行；本机存在原始素材包时再对照源图，其他环境可通过 `STARFALL_ASSET_PACK` 指定，缺失时这 7 项源图对照明确跳过。Android CI 安装与生成器一致的 Pillow 后运行同一 unittest 入口，不使用 pytest/numpy。
 
 原生脚本编译所有实际 Java 源码与 CatalogUpdatesTest，执行纯 JVM WireTest，并输出 DEX 测试 JAR。`android.jar` 中 `org.json` 是编译 stub，不能据此声称运行验证；使用已启动的 API35 模拟器测试真实实现：
 
@@ -45,7 +47,7 @@ adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-test/catalog-tests.jar app_proce
 
 该测试不安装 APK、不读取已安装应用账号数据，不做真实登录。命令退出码必须为零。`XL CI` 使用同样原生编译、WireTest、JS 与 Android emulator 检查；首次本机开发可只编译，但须明确尚未运行 Android JSON。
 
-QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
+QQ 分享窗口回归另外使用隔离包 `cn.starfall.gacha.returnqa`。构建脚本默认打包 0.4 移动端页面资源，并将 `update-source.json` 置空、`build-info.json` 标记 `bilibili_enabled: false`，避免 QA 连接真实配置源；B 服授权入口在界面中始终显示，未启用时按钮禁用并标注「待接入」（B 服实现仍在，仅构建传入 Git 外 `--bilibili-config` 才写入并启用点击；普通 QA 未提供该私有配置，故入口为禁用态）。只有显式传 `--assets` 才改用给定资源。下面构建脚本仅将初始官网导航替换为 `about:blank`，不改变产品的回调和会话处理；随后用虚构 `qaCode`/`qaState` 检查弹窗绑定、超时/换会话/重放拒绝，以及本人确认后恢复原窗口。测试不连接真实授权端点，也不读正式应用数据。首次安装前确认设备没有同包名的其他 QA 存档，测试结束移除临时包；不要卸载正式版。
 
 ```sh
 python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/login-return
@@ -56,6 +58,7 @@ adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.Im
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginFreshIntegration
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
 adb shell am instrument -w -e mobile true cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.MobileUiIntegration
 adb uninstall cn.starfall.gacha.returnqa
 ```
 
@@ -68,6 +71,10 @@ adb uninstall cn.starfall.gacha.returnqa
 TapTap App 衔接测试需包含 `PASS 16 TapTap App WebView/handoff checks`、`tap_policy_checks=21` 与 `INSTRUMENTATION_CODE: -1`。它拦截合成官网响应及 App 启动，测试真实 WebView 监听、包名、一次性交接、未安装 App 的反馈、会话切换、当前窗口恢复、超时与诊断不含挑战。21 项链接策略检查在同一个正常 Android 应用进程执行；MuMu 的 shell `app_process` 可能在执行完策略后以 139 退出，不能据打印通过就声称命令成功。JS 监听另用 `node --test tests/tap-app-login.test.cjs` 覆盖官方来源、fetch/XHR、重复注入及过期。
 
 手机布局分支另外需包含 `layout=phone`、`PASS 20 TapTap App WebView/handoff checks` 和成功结束码。该夹具使用含 Mobile 标识的手机 UA 与官网相同的扫码切换可见性条件，并通过 history.replaceState 模拟 `/authorize` 到 `/login` 的 SPA 跳转；同时验证原 state/PKCE 保留、网页登录回退恢复原 UA、再次 App 授权可用。诊断只记录页面路径和布局准备状态，完整 URL 与挑战仅在原生内存中绑定本次窗口，不进入诊断。
+
+移动端界面集成测试需包含 `PASS ` 与 `mobile UI checks` 和 `INSTRUMENTATION_CODE: -1`；仅 adb 退出码为零不代表断言通过。MobileUiIntegration 加载真实主页面：先清空隔离存档，检查空库打开查询页、登录为页内流程而非对话框、已移除控件（remember-login、demo-button、compact-toggle、tap-diagnostics 等）缺席且查询页无宣传文案、登录卡正反面翻转、下方同一按钮翻回、非活动面禁用交互、凭据教程单独弹窗、返回键先关教程再翻回，以及本人确认/合成查询失败保留输入并停留背面、合成查询成功清空输入并进入记录页、查询页下方 gugu 的加载/点击/回待机、B 服入口常显但无配置时禁用、`aria-disabled` 并标注「待接入」；随后 fetch 内置 `demo.json` 并附上合成账号身份，经 `/api/library/import` 注入（不依赖任何界面演示入口），重载后检查合成数据汇总数值（总抽数 464、五星 9、卡池 7）、玩家昵称、UID、等级与真实头像/框、旧别名保留和新资料更新、未知 ID 回退（无 `account-quick-stats`）、生涯与近 45 天评价及标签渲染、三类垫抽以 `career-pity` 进度条叠字并入生涯卡（限定/典藏用 UP/歪 与平均 UP、普通保留五星平均）、启程不计入生涯附注、卡池默认展开五星及间隔条（高约 24px）、「全部角色/收起角色」开关整体显隐角色列表、卡池分类筛选、原始招募明细折叠内搜索/卡池/星级/仅五星筛选与空结果、长图弹窗预加载本地 Logo/256px 初始角色方图并实际生成 1080px PNG（以 drawImage 计数验证），继续勾选单一卡池、确认空选择不出图；返回键先走页面 `window.mobileBack`（关闭弹层后回到上一栏并恢复其滚动位置）、账号切换与重载后恢复上次账号；昵称独占一行、小号 UID 与等级在下一行同字号，账号头像使用 320×140 横图和 120×120 框；生涯卡底色、UP 绿/歪红、抽数条避让浮动分享钮与卡池选择列表均有断言；gugu 动画/静态图均为 864×864，125% 字号在重载后恢复，85% 缩小档也同时应用于原生 WebView，140% 大字体下页面与汇总指标均无横向溢出。QA 包配置源为空，测试不连真实配置网络、不做真实登录。
+
+对应 Node 单测 `tests/mobile-navigation.test.cjs` 校验三栏初始目的地（有选中报告或本机存档进「记录」、否则进「查询」）、返回上一页并恢复其滚动位置、replace 去重与非法页面拒绝；`tests/mobile-view-model.test.cjs` 校验汇总视图模型（累计与分类抽数、可见垫抽、最近五星倒序与上下文、条数上限）、卡池分类视图与记录卡片（最新在前、筛选后分页、仅五星/星级/卡池/搜索与空态、UP ID 取自内置 catalog，且不改动原始分析数据）；`tests/mobile-export.test.cjs` 校验 JSON/CSV 导出保真与安全文件名、CSV 公式中立化、不支持的格式与空记录报错，并校验共享长图引擎脱离旧版桌面弹窗加载、具体卡池第四参、素材预加载、新渲染与缺图降级；长图控制器另覆盖同一报告保留勾选、切换报告重新全选；`tests/mobile-assets.test.cjs` 校验角色/时装/账号头像与框的本地映射、路径安全、限时和名次规则、图片失败重试；`tests/mobile-mascot.test.cjs` 校验洗牌袋不重复、互动计时、连点、后台复位与 reduced-motion；`tests/mobile-insights.test.cjs` 校验生涯/近 45 天口径（含端点、剔除未来记录）、empty/small/zero/unknown/rated 与暂估边界、十连多金及次数（未知稀有度按至少双金）、连续大保底、满觉角色、完整 130 抽以上 UP 周期、2 连及以上 UP/歪 标签、分类收窄，以及与 `mobile-engine.js` 报告的一致性和输入不可变；`tests/mobile-probability.test.cjs` 校验首次 UP 的 1–140 抽分布与固定阈值（超欧 ≤6、超非按完整 UP 周期 ≥122），以及保证状态未知、前序不完整、非限定/典藏、hard_pity 非 70 时不判超非；构建脚本与 `XL CI` 在打包前运行这组测试。
 
 Android 15 模拟器可验证系统分享预览，不替代接收端真机测试。2026-10-23 用户确认 0.3.4 相册保存和分享在真机均正常；功能提交 a66209d7 的 CI 检查通过。接收应用/机型没有逐项枚举，Android 9 保存相册的权限分支需要另行验证。
 
@@ -85,3 +92,13 @@ python -B build.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/re
 在 `xl_updata_server` 项目环境运行 `python -m pytest -q`；Linux 必须包含 public JSON 的 0644/私有 umask 回归。配置生产器 CLI 和静态服务说明见 HTTPS 文档。客户端默认正式来源为 `https://8.134.186.234/gacha-config/current.json`；测试来源需明确设置 test 地址。所有共享负例在 `xl_gacha_web/tests/fixtures/catalog-contract.json`，由 Python 客户端、producer、Android 实际 JSON 共同执行。
 
 仓库按 debug → test → main 晋级；CI 通过不等于已部署。服务端稀疏发布、存储保留、回滚与锁见 [xl_deploy 运维](../xl_deploy/README.md)。不要为了引导配置而运行完整游戏 CDN 抓取；先验证独立配置快照再由运营者明确种入 test。Android 第二个真实账号查询已由用户确认；2026-10-23 用户另行确认 QQ 授权后的浏览器分享回工具流程真机可用。模拟器合成测试与用户实际授权验收应分别记录，不泛化为所有机型均已兼容。
+
+## 视觉资源更新与导出回归
+
+视觉资源 v1 的发布字段、路径与大小限制见[客户端协议](gacha-visual-assets.md)。原生更新与桥接保持数据/图片更新边界，不下载 JavaScript 或 HTML。`VisualAssetsTest` 在合成 transport 与真实文件系统上检查激活、版本、回退、来源竞态及负例；`VisualAssetsIntegration` 在隔离 QA 包运行相同断言：
+
+```sh
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.VisualAssetsIntegration
+```
+
+输出应同时含 `PASS 41 offline visual asset checks` 与 `INSTRUMENTATION_CODE: -1`。MuMu shell `app_process` 可能在断言后退出139，不能以已打印 PASS 替代成功结束码。移动 UI 检查另覆盖原游戏裁切/头像框中心、身份三层布局、池名旁 UP 头像，以及模拟素材发布后不重装 APK 即刷新图片。
