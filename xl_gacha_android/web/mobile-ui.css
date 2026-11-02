@@ -581,6 +581,15 @@ body.compact-ui #record-coverage { display: none !important; }
 .career-outcomes .up { color: #54e0b9; }
 .career-outcomes .off { color: #ff9c91; }
 .career-outcomes { display: inline-flex; align-items: baseline; gap: 2px; white-space: nowrap; overflow-wrap: normal; font-variant-numeric: tabular-nums; }
+.career-category:is(.limited, .collection) .career-metrics { --career-number-font: 15px; --career-label-font: 10px; grid-template-columns: repeat(2, minmax(max-content, 1fr)); }
+.career-category:is(.limited, .collection) .career-metrics > div { text-align: center; }
+.career-category:is(.limited, .collection) .career-metrics > div > strong { font-size: calc(var(--career-number-font) * var(--career-metric-scale, 1)); white-space: nowrap; overflow-wrap: normal; }
+.career-category:is(.limited, .collection) .career-metrics > div > span, .career-category:is(.limited, .collection) .career-outcome-divider { font-size: calc(var(--career-label-font) * var(--career-metric-scale, 1)); white-space: nowrap; }
+.career-category:is(.limited, .collection) .career-outcomes { justify-content: center; gap: 1px; }
+.career-category:is(.limited, .collection) .career-outcomes .up, .career-category:is(.limited, .collection) .career-outcomes .off { font-size: inherit; }
+@media (max-width: 400px) {
+ .career-category:is(.limited, .collection) .career-metrics { --career-number-font: 13px; --career-label-font: 9px; }
+}
 .multi-pull-group { position: relative; isolation: isolate; display: grid; gap: 9px; min-width: 0; }
 .multi-pull-group::before { content: ""; position: absolute; inset: -3px -6px; z-index: -1; border-radius: 6px; background: linear-gradient(180deg, rgba(20, 199, 167, .20), rgba(20, 199, 167, .11) 45%, rgba(20, 199, 167, .035)); pointer-events: none; }
 .multi-pull-heading { color: #55dcb8; font-size: 11px; font-weight: 750; line-height: 1.3; }
