@@ -42,10 +42,6 @@ def alpha_bbox(image):
     return pva.alpha_bbox(image)
 
 
-def opaque_count(image):
-    return sum(image.convert("RGBA").getchannel("A").histogram()[1:])
-
-
 def visible_pixels_equal(left, right):
     if left.size != right.size:
         return False
@@ -59,18 +55,22 @@ def visible_pixels_equal(left, right):
     return masked.getbbox() is None
 
 
-def matches_under_horizontal_shift(output, reference):
-    output_box = alpha_bbox(output)
-    reference_box = alpha_bbox(reference)
-    if output_box is None or reference_box is None or output.size != reference.size:
-        return False
-    dx = output_box[0] - reference_box[0]
-    for candidate in (dx - 1, dx, dx + 1):
-        shifted = Image.new("RGBA", reference.size)
-        shifted.paste(reference, (candidate, 0))
-        if visible_pixels_equal(output, shifted):
-            return True
-    return False
+def trimmed_reference(image):
+    box = alpha_bbox(image)
+    if box is None:
+        return Image.new("RGBA", (256, 256))
+    margin = 4
+    box = (
+        max(0, box[0] - margin), max(0, box[1] - margin),
+        min(image.width, box[2] + margin), min(image.height, box[3] + margin),
+    )
+    cropped = image.crop(box)
+    scale = min(256 / cropped.width, 256 / cropped.height)
+    size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
+    resized = cropped.resize(size, Image.Resampling.LANCZOS)
+    output = Image.new("RGBA", (256, 256))
+    output.paste(resized, ((256 - size[0]) // 2, (256 - size[1]) // 2))
+    return output
 
 
 def mascot_webp(name):
@@ -123,7 +123,7 @@ class CharacterSourceTests(unittest.TestCase):
     def test_source_catalog_mapping(self):
         self.assertEqual(set(MANIFEST["characters"]), set(self.catalog))
 
-    def test_portraits_match_initial_bursthead_under_horizontal_shift(self):
+    def test_portraits_trim_blank_edges_without_cutting_content(self):
         checked = 0
         for item_id, entry in self.catalog.items():
             if not entry.get("bursthead"):
@@ -131,7 +131,7 @@ class CharacterSourceTests(unittest.TestCase):
             with self.subTest(item_id=item_id):
                 output = Image.open(WEB / MANIFEST["characters"][item_id]["path"]).convert("RGBA")
                 reference = Image.open(PACK_ROOT / entry["bursthead"]).convert("RGBA")
-                self.assertTrue(matches_under_horizontal_shift(output, reference))
+                self.assertTrue(visible_pixels_equal(output, trimmed_reference(reference)))
             checked += 1
         self.assertEqual(checked, 106)
 
@@ -143,31 +143,30 @@ class CharacterSourceTests(unittest.TestCase):
                 source = Image.open(PACK_ROOT / entry["square"]).convert("RGBA")
                 output = Image.open(WEB / MANIFEST["characters"][item_id]["path"]).convert("RGBA")
                 self.assertEqual(source.size, (140, 270))
-                self.assertEqual(output.size, (256, 256))
                 source_box = alpha_bbox(source)
-                output_box = alpha_bbox(output)
-                scale = 256 / 270
-                self.assertGreater(output_box[0], 0)
-                self.assertLess(output_box[2], 256)
-                self.assertLessEqual(abs((output_box[0] + output_box[2]) / 2 - 128), 1.5)
-                self.assertLessEqual(abs(output_box[1] - source_box[1] * scale), 3.0)
-                self.assertLessEqual(abs(output_box[3] - source_box[3] * scale), 3.0)
-                expected_opaque = opaque_count(source) * scale**2
-                self.assertLess(abs(opaque_count(output) - expected_opaque) / expected_opaque, 0.10)
+                padded = Image.new("RGBA", (270, 270))
+                dx = round((270 - (source_box[2] - source_box[0])) / 2) - source_box[0]
+                padded.paste(source, (dx, 0))
+                self.assertTrue(visible_pixels_equal(output, trimmed_reference(padded)))
 
 
 class FashionTests(unittest.TestCase):
-    def test_all_fashions_use_bundled_default_portraits(self):
+    def test_fashions_separate_gacha_portraits_from_account_rects(self):
         portrait_paths = {entry["path"] for entry in MANIFEST["characters"].values()}
         self.assertEqual(len(MANIFEST["fashions"]), 312)
+        rect_paths = {entry.get("rect_path") for entry in MANIFEST["fashions"].values()}
+        self.assertEqual(len(rect_paths), 312)
         for fashion_id, entry in MANIFEST["fashions"].items():
             with self.subTest(fashion_id=fashion_id):
                 self.assertIn(entry["path"], portrait_paths)
                 self.assertTrue((WEB / entry["path"]).is_file())
+                self.assertTrue(entry["rect_path"].startswith("assets/account-rect/"))
+                with Image.open(WEB / entry["rect_path"]) as image:
+                    self.assertEqual(image.size, (320, 140))
         self.assertFalse((ASSETS / "fashions").exists())
 
     @requires_source
-    def test_fashions_map_to_owning_character(self):
+    def test_fashions_map_to_owning_character_and_real_account_rect(self):
         catalog = pva.load_catalog(PACK_ROOT, "fashions.json")
         self.assertEqual(set(MANIFEST["fashions"]), set(catalog))
         for fashion_id, entry in catalog.items():
@@ -176,6 +175,11 @@ class FashionTests(unittest.TestCase):
                 self.assertEqual(
                     MANIFEST["fashions"][fashion_id]["path"],
                     f"assets/portraits/{card_id}.webp",
+                )
+                rect_name = Path(entry["paths"]["head_icon_rect"]).name
+                self.assertEqual(
+                    MANIFEST["fashions"][fashion_id]["rect_path"],
+                    f"assets/account-rect/{rect_name}",
                 )
 
 
@@ -211,8 +215,8 @@ class StaticAssetTests(unittest.TestCase):
 
 
 class ManifestTests(unittest.TestCase):
-    def test_files_count_is_214(self):
-        self.assertEqual(len(MANIFEST["files"]), 108 + 98 + 1 + 2 + 5)
+    def test_files_count_is_526(self):
+        self.assertEqual(len(MANIFEST["files"]), 108 + 312 + 98 + 1 + 2 + 5)
 
     def test_hashes_match_disk(self):
         for relative, expected in MANIFEST["files"].items():

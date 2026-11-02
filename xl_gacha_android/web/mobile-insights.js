@@ -25,8 +25,8 @@ const MobileInsights=(()=>{
   const ratio=cost/fiveCount,[label,tone]=rate(ratio);
   return{status:'rated',ratio,pulls,fiveCount,lowConfidence,label,tone};
  }
- function collectTags(records,pools,cats){
-  const ten=new Map(),pity=new Map(),events=[];
+ function collectTags(records,pools,cats,awakeningRecords){
+  const ten=new Map(),awakenings=new Map(),events=[];
   for(const r of records){
    let total=0,fives=0,unknown=0;
    for(const d of r.drops){total+=d.count;if(d.rarity===5)fives+=d.count;else if(d.rarity===null)unknown+=d.count;}
@@ -34,22 +34,41 @@ const MobileInsights=(()=>{
    const k=unknown>0?'ten_atleast':'ten_'+fives,text=unknown>0?'十连至少双金':`十连${numerals[fives]}金`;
    const e=ten.get(k)||{key:k,text,count:0};e.count++;ten.set(k,e);
   }
+  for(const r of awakeningRecords)for(const d of r.drops){
+   if(d.rarity!==5||d.item_id===null||d.item_id===undefined)continue;
+   const id=String(d.item_id),e=awakenings.get(id)||{id,name:d.name||`角色 ${id}`,copies:0};if(d.name)e.name=d.name;e.copies+=d.count;awakenings.set(id,e);
+  }
   for(const p of pools.values()){
    if(!cats.includes(p.category)||!(p.hard_pity>0))continue;
-   for(const ev of p.events||[]){
-    if(ev.interval_exact&&ev.pulls_since_five>=p.hard_pity){const k='pity_'+p.hard_pity,text=`抽满${p.hard_pity}井`,e=pity.get(k)||{key:k,text,count:0};e.count++;pity.set(k,e);}
-    events.push({timestamp:ev.timestamp||0,pool:p.pool_id,pos:ev.in_pool_pull||0,outcome:ev.outcome});
-   }
+   for(const ev of p.events||[])events.push({timestamp:ev.timestamp||0,pool:p.pool_id,pos:ev.in_pool_pull||0,outcome:ev.outcome,guaranteed:ev.guaranteed,exact:ev.interval_exact,pulls:ev.pulls_since_five,category:p.category});
   }
   events.sort((a,b)=>a.timestamp-b.timestamp||a.pool-b.pool||a.pos-b.pos);
-  let up=0,off=0,maxUp=0,maxOff=0;
+  let up=0,off=0,guarantee=0,maxUp=0,maxOff=0,maxGuarantee=0,longUp=0;
+  const lastOff=new Map();
   for(const e of events){
-   if(e.outcome==='up'){up++;off=0;}else if(e.outcome==='off'){off++;up=0;}else{up=0;off=0;}
-   if(up>maxUp)maxUp=up;if(off>maxOff)maxOff=off;
+   if(e.outcome==='up'){
+    up++;off=0;
+    if(e.guaranteed===true){
+     guarantee++;
+     const before=lastOff.get(e.category),cycle=before?Number(e.pulls)+Number(before.pulls):NaN;
+     if(e.exact&&before?.exact&&Number.isFinite(cycle)&&cycle>=130)longUp++;
+     lastOff.delete(e.category);
+    }else{
+     guarantee=0;lastOff.delete(e.category);
+     if(e.guaranteed===false&&e.exact&&Number(e.pulls)>=130)longUp++;
+    }
+   }else if(e.outcome==='off'){
+    off++;up=0;lastOff.set(e.category,{pulls:e.pulls,exact:e.exact});
+   }else{up=0;off=0;guarantee=0;lastOff.delete(e.category);}
+   if(up>maxUp)maxUp=up;if(off>maxOff)maxOff=off;if(guarantee>maxGuarantee)maxGuarantee=guarantee;
   }
-  const tags=[...ten.values(),...pity.values()];
+  const tags=[];
   if(maxUp>=2)tags.push({key:'up_streak',text:`${maxUp}连UP`,count:1});
+  if(maxGuarantee>=2)tags.push({key:'guarantee_streak',text:`${maxGuarantee}连大保底`,count:1});
+  for(const e of [...awakenings.values()].filter(e=>e.copies>=6).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN')||a.id.localeCompare(b.id)))tags.push({key:`awaken_${e.id}`,text:`${e.name} 满觉`,count:1});
+  tags.push(...ten.values());
   if(maxOff>=2)tags.push({key:'off_streak',text:`${maxOff}连歪`,count:1});
+  if(longUp>0)tags.push({key:'up_130',text:'130抽以上才出UP',count:longUp});
   return tags;
  }
  function collectMulti(records){
@@ -77,20 +96,21 @@ const MobileInsights=(()=>{
  }
  function analyze(report,options={}){
   const opts=options||{},now=opts.now??Date.now()/1000,category=opts.category||'all';
-  const cats=category==='all'?primary:primary.includes(category)?[category]:[];
-  const pools=new Map((report?.analysis?.pools||[]).map(p=>[String(p.pool_id),p]));
+  const cats=category==='all'?primary:primary.includes(category)?[category]:[],wanted=opts.poolIds==null?null:new Set([...opts.poolIds].map(String));
+  const pools=new Map((report?.analysis?.pools||[]).filter(p=>!wanted||wanted.has(String(p.pool_id))).map(p=>[String(p.pool_id),p]));
   const hardOf=r=>pools.get(String(r.pool_id))?.hard_pity??null;
-  const seen=new Set(),records=[];
+  const seen=new Set(),records=[],awakeningRecords=[];
   for(const r of report?.records||[]){
    const k=key(r);if(seen.has(k))continue;seen.add(k);
    const p=pools.get(String(r.pool_id));
+   if(category==='all'||p?.category===category)awakeningRecords.push(r);
    if(p&&cats.includes(p.category)&&p.hard_pity>0)records.push(r);
   }
   records.sort(sort);
   const career=evaluate(records,hardOf,'empty');
   const cutoff=now-RECENT_DAYS*DAY;
   const recent={...evaluate(records.filter(r=>r.timestamp<=now&&r.timestamp>=cutoff),hardOf,'excluded'),days:RECENT_DAYS};
-  return{career,recent,tags:collectTags(records,pools,cats),multi:collectMulti(records)};
+  return{career,recent,tags:collectTags(records,pools,cats,awakeningRecords),multi:collectMulti(records)};
  }
  return{analyze};
 })();

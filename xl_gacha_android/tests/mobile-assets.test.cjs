@@ -49,6 +49,10 @@ test('manifest keeps resource version, mappings and sha256 for controlled files'
    assert.ok(manifest.files[entry.path],`missing sha256 for ${entry.path}`);
   }
  }
+ for(const entry of Object.values(manifest.fashions)){
+  assert.ok(entry.rect_path.startsWith('assets/account-rect/'));
+  assert.ok(manifest.files[entry.rect_path],`missing account rect sha256 for ${entry.rect_path}`);
+ }
  for(const value of Object.values(manifest.brand))assert.ok(manifest.files[value]);
  for(const reaction of manifest.mascot.reactions)assert.ok(manifest.files[reaction.path]);
  assert.equal(manifest.mascot.idle.durationMs,1366);
@@ -72,16 +76,18 @@ test('unknown character id resolves to null without fabricating data',()=>{
  assert.equal(MobileAssets.character(undefined),null);
 });
 
-test('player head follows fashion_id then head_id then face_id priority',()=>{
- const fashionSrc=manifest.fashions[anyFashionId].path;
+test('player head uses account CardHeadRect assets and only falls back to face_id when both ids are zero',()=>{
+ const fashionSrc=manifest.fashions[anyFashionId].rect_path;
  const headSrc=manifest.account_items[headItemId].path;
- const faceSrc=manifest.fashions[otherFashionId].path;
+ const faceSrc=manifest.fashions[otherFashionId].rect_path;
  const withFashion=MobileAssets.player({fashion_id:Number(anyFashionId),head_id:Number(headItemId),face_id:Number(otherFashionId)});
  assert.deepEqual(withFashion.head,{src:fashionSrc,crop:'center'});
  const withHead=MobileAssets.player({fashion_id:0,head_id:Number(headItemId),face_id:Number(otherFashionId)});
  assert.deepEqual(withHead.head,{src:headSrc,crop:'left'});
  const withFace=MobileAssets.player({fashion_id:0,head_id:0,face_id:Number(otherFashionId)});
  assert.deepEqual(withFace.head,{src:faceSrc,crop:'center'});
+ assert.deepEqual(MobileAssets.player({face_id:Number(otherFashionId)}).head,{src:faceSrc,crop:'center'},'missing legacy ids are equivalent to zero');
+ assert.equal(MobileAssets.player({fashion_id:0,head_id:99999999,face_id:Number(otherFashionId)}).head,null,'unknown nonzero head id must not fall through to face id');
  assert.equal(MobileAssets.player({fashion_id:0,head_id:Number(permanentFrameId),face_id:0}).head,null,'frame item must not be used as a player head');
  assert.equal(MobileAssets.player({fashion_id:0,head_id:0,face_id:0}).head,null);
  assert.equal(MobileAssets.player({}).head,null);

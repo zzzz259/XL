@@ -13,12 +13,16 @@ function mockImage(w = 256, h = 256) {
 
 function mockCanvas() {
   const ops = [];
-  return {width: 0, height: 0, ops,
-    getContext: () => ({fillStyle: '', font: '',
-      fillRect: (...a) => ops.push(['fillRect', ...a]),
-      fillText(...a) {ops.push(['fillText', ...a, this.font]);},
-      measureText: s => ({width: String(s).length * 10}),
-      drawImage: (...a) => ops.push(['drawImage', ...a])})};
+  const ctx = {fillStyle: '', font: '', _align: 'left',
+    fillRect: (...a) => ops.push(['fillRect', ...a]),
+    fillText(...a) {ops.push(['fillText', ...a, this.font, this.textAlign]);},
+    measureText: s => ({width: String(s).length * 10}),
+    drawImage: (...a) => ops.push(['drawImage', ...a])};
+  Object.defineProperty(ctx, 'textAlign', {
+    get() {return ctx._align;},
+    set(value) {ctx._align = value; ops.push(['textAlign', value]);},
+  });
+  return {width: 0, height: 0, ops, getContext: () => ctx};
 }
 
 function assetBridge({throwIds = new Set(), nullIds = new Set(), failSrc = new Set(), failBrand = false, crop = 'center'} = {}) {
@@ -114,7 +118,7 @@ test('planPages with an empty selection yields a single blank page that still dr
   const pages = LongImage.planPages(report, 'all', 10000, []);
   assert.equal(pages.length, 1);
   assert.equal(pages[0].chunks.length, 0);
-  assert.equal(pages[0].height, 480);
+  assert.equal(pages[0].height, pages[0].headerHeight + 100);
   const modern = LongImage.draw(report, pages[0], 0, 1, 'all', {brand: null, characters: new Map(), insights: null});
   assert.equal(modern.ops.filter(op => op[0] === 'drawImage').length, 0);
   const legacy = LongImage.draw(report, pages[0], 0, 1, 'all');
@@ -219,10 +223,11 @@ test('prepare scopes insights to the selected pools category and degrades withou
   const seen = [];
   globalThis.MobileInsights = {analyze: (value, options) => {seen.push(options); return {career: null, recent: null, tags: [], multi: {byPool: {}}}}};
   const assets = await LongImage.prepare(report, LongImage.planPages(report, 'all'), [1]);
-  assert.deepEqual(seen, [{category: 'normal'}]);
+  // planPages consults MobileInsights for tag-row planning ('all' scope), then prepare scopes to the selection
+  assert.deepEqual(seen, [{category: 'all'}, {category: 'normal', poolIds: [1]}]);
   assert.deepEqual(assets.insights, {career: null, recent: null, tags: [], multi: {byPool: {}}});
   await LongImage.prepare(report, LongImage.planPages(report, 'all'));
-  assert.deepEqual(seen[1], {category: 'all'});
+  assert.deepEqual(seen.slice(2), [{category: 'all'}, {category: 'all'}]);
   delete globalThis.MobileInsights;
   const plain = await LongImage.prepare(report, LongImage.planPages(report, 'all'), [1]);
   assert.equal(plain.insights, null);
@@ -242,7 +247,7 @@ test('draw keeps the legacy text layout when no assets are passed', () => {
   delete globalThis.document;
 });
 
-test('draw renders the new interface with proportional logo, square avatars and App-style progress', async () => {
+test('draw renders the new interface with a proportional logo, avatars and a two-row event layout', async () => {
   const LongImage = freshLongImage();
   globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
   assetBridge();
@@ -252,21 +257,21 @@ test('draw renders the new interface with proportional logo, square avatars and 
   const draws = canvas.ops.filter(op => op[0] === 'drawImage');
   assert.equal(draws.length, 4);
   assert.equal(draws[0][1], assets.brand.image);
-  // logo keeps the 2:1 asset ratio at height 36
-  assert.deepEqual(draws[0].slice(2), [1080 - 40 - 72, 50, 72, 36]);
+  // The complete 2:1 logo is enlarged proportionally, never square-cropped.
+  assert.deepEqual(draws[0].slice(2), [1080 - 40 - 128, 40, 128, 64]);
   for (const avatar of draws.slice(1)) {
     assert.deepEqual(avatar.slice(2, 6), [0, 0, 256, 256]);
     assert.deepEqual(avatar.slice(6), [60, avatar[7], 60, 60]);
   }
   const nameOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '角色甲');
   assert.equal(nameOp[2], 132);
-  const accountOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '主号');
-  assert.equal(accountOp[4], 1080 - 40 - 72 - 64 - 24);
+  const accountOp = canvas.ops.find(op => op[0] === 'fillText' && op[1] === '招募档案');
+  assert.equal(accountOp[4], 1080 - 40 - 128 - 64 - 24);
   // career cards use the overlaid (叠字) pity progress text
   const pityText = canvas.ops.find(op => op[0] === 'fillText' && String(op[1]).startsWith('已垫 '));
   assert.ok(pityText);
-  // account label appears exactly once and no UID is written by default
-  assert.equal(canvas.ops.filter(op => op[0] === 'fillText' && op[1] === '主号').length, 1);
+  // nickname fallback appears exactly once and no UID is written by default
+  assert.equal(canvas.ops.filter(op => op[0] === 'fillText' && op[1] === '招募档案').length, 1);
   assert.equal(canvas.ops.some(op => op[0] === 'fillText' && /UID/.test(String(op[1]))), false);
   delete globalThis.document;
   delete globalThis.MobileAssets;
@@ -308,28 +313,32 @@ test('draw keeps the new interface non-overlapping with overlaid bar text', asyn
   const ops = canvas.ops;
   const texts = ops.filter(op => op[0] === 'fillText').map(op => {
     const size = Number(/(\d+(?:\.\d+)?)px/.exec(op[5])[1]);
-    return {s: String(op[1]), x: op[2], y: op[3], max: op[4], size, w: Math.min(op[4], String(op[1]).length * 10)};
+    const w = Math.min(op[4], String(op[1]).length * 10);
+    const align = op[6] || 'left';
+    const left = align === 'center' ? op[2] - w / 2 : align === 'right' ? op[2] - w : op[2];
+    return {s: String(op[1]), left, right: left + w, y: op[3], size};
   });
-  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y - a.size < b.y && b.y - b.size < a.y;
+  const overlap = (a, b) => a.left < b.right && b.left < a.right && a.y - a.size < b.y && b.y - b.size < a.y;
   for (const [i, a] of texts.entries())
     for (const b of texts.slice(i + 1))
       assert.ok(!overlap(a, b), `texts overlap: ${a.s} vs ${b.s}`);
   const rects = ops.filter(op => op[0] === 'fillRect');
-  // interval bar: track then fill, with the dark count text overlaid inside the fill
-  const tracks = rects.filter(r => r[1] === 290 && r[4] === 40 && r[3] === 470);
+  // interval bar moved to its own second row: track then fill, with the dark count text overlaid inside the fill
+  const tracks = rects.filter(r => r[1] === 132 && r[3] === 908 && r[4] === 36);
   assert.equal(tracks.length, 3);
   for (const track of tracks) {
     const at = ops.indexOf(track);
-    const fill = ops.slice(at + 1).find(op => op[0] === 'fillRect' && op[1] === 290 && op[2] === track[2]);
+    const fill = ops.slice(at + 1).find(op => op[0] === 'fillRect' && op[1] === 132 && op[2] === track[2]);
     assert.ok(fill);
-    assert.ok(fill[3] >= 105 && fill[3] <= 470);
-    const count = texts.find(t => t.x === 302 && t.y === track[2] + 28);
+    assert.ok(fill[3] >= 105 && fill[3] <= 908);
+    const count = texts.find(t => t.left === 148 && t.y === track[2] + 25);
     assert.ok(count, 'missing overlaid interval text');
-    assert.ok(count.x + count.w <= 290 + fill[3]);
+    assert.ok(count.right <= 132 + fill[3]);
   }
-  // chips stay right of the bar; avatars stay left of the names
-  for (const chip of rects.filter(r => r[4] === 30 && r[3] >= 26))
-    assert.ok(chip[1] >= 772 && chip[1] + chip[3] <= 1040);
+  // event chips follow the name on the first row and stay inside the card
+  for (const chip of rects.filter(r => r[4] === 30 && r[3] >= 26 && r[3] <= 300))
+    assert.ok(chip[1] >= 132 && chip[1] + chip[3] <= 1040);
+  // avatars stay left of the names
   for (const avatar of ops.filter(op => op[0] === 'drawImage').slice(1)) {
     assert.equal(avatar[6], 60);
     assert.ok(avatar[6] + avatar[8] <= 132);
@@ -338,8 +347,60 @@ test('draw keeps the new interface non-overlapping with overlaid bar text', asyn
   const pityTracks = rects.filter(r => r[3] === 292 && r[4] === 22);
   assert.equal(pityTracks.length, 1);
   const pity = texts.find(t => String(t.s).startsWith('已垫 '));
-  assert.ok(pity.x >= pityTracks[0][1] && pity.x + pity.w <= pityTracks[0][1] + 292);
+  assert.ok(pity.left >= pityTracks[0][1] && pity.right <= pityTracks[0][1] + 292);
   assert.ok(pity.y <= pityTracks[0][2] + 22 && pity.y > pityTracks[0][2]);
   delete globalThis.document;
   delete globalThis.MobileAssets;
+});
+
+test('modern export uses real player identity, a larger logo and inline complete event tags', () => {
+  const LongImage = freshLongImage();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const report = imageReport();
+  report.account = {label: 'TapTap · UID 123456', nickname: '真实昵称', game_uid: '123456', level: 80};
+  const event = report.analysis.pools[0].events[1];
+  event.outcome = 'up'; event.guaranteed = true;
+  const assets = {brand: {image: mockImage(280, 140)}, characters: new Map(), insights: {
+    career: null, recent: null, tags: [], multi: {byPool: {'1': [{positions: [60], five_count: 4, exact: true}]}},
+  }};
+  const canvas = LongImage.draw(report, LongImage.planPages(report, 'all')[0], 0, 1, 'all', assets);
+  const texts = canvas.ops.filter(op => op[0] === 'fillText');
+  assert.ok(texts.some(op => op[1] === '真实昵称'));
+  assert.ok(texts.some(op => op[1] === 'UID 123456 · Lv.80'));
+  assert.equal(texts.some(op => String(op[1]).includes('TapTap')), false);
+  const logo = canvas.ops.find(op => op[0] === 'drawImage');
+  assert.equal(logo.length, 6);
+  assert.deepEqual(logo.slice(-2), [128, 64]);
+  for (const text of ['UP', '大保底', '十连四金']) {
+    const tag = texts.find(op => op[1] === text);
+    assert.ok(tag, `missing ${text}`);
+    assert.ok(tag[2] > 132 && tag[2] < 772, `${text} should follow the name`);
+  }
+  assert.equal(texts.some(op => String(op[1]).includes('本池第')), false);
+  delete globalThis.document;
+});
+
+test('modern export wraps every career tag instead of dropping overflowing tags', () => {
+  const LongImage = freshLongImage();
+  globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
+  const tags = [
+    {key: 'up_streak', text: '4连UP', count: 1},
+    {key: 'guarantee_streak', text: '3连大保底', count: 1},
+    {key: 'ten_4', text: '十连四金', count: 2},
+    {key: 'up_130', text: '130抽以上才出UP', count: 3},
+    {key: 'awaken_1', text: '满觉角色甲 满觉', count: 1},
+    {key: 'awaken_2', text: '满觉角色乙 满觉', count: 1},
+  ];
+  globalThis.MobileInsights = {analyze: () => ({career: null, recent: null, tags, multi: {byPool: {}}})};
+  const report = imageReport(), page = LongImage.planPages(report, 'all')[0];
+  assert.ok(page.headerHeight > 380);
+  const canvas = LongImage.draw(report, page, 0, 1, 'all', {brand: null, characters: new Map(), insights: globalThis.MobileInsights.analyze()});
+  const texts = canvas.ops.filter(op => op[0] === 'fillText').map(op => op[1]);
+  for (const tag of tags) {
+    const text = tag.count > 1 ? `${tag.text} ×${tag.count}` : tag.text;
+    assert.ok(texts.includes(text), `missing ${text}`);
+  }
+  assert.equal(canvas.height, page.height);
+  delete globalThis.MobileInsights;
+  delete globalThis.document;
 });

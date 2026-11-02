@@ -2,9 +2,32 @@
 
 // Drawing from the report avoids remote scripts, screenshots of credentials, and DOM canvas limits.
 const LongImage = (() => {
-  const W = 1080, HEADER = 380, FOOTER = 100, POOL_BASE = 180, ROW = 66;
+  const W = 1080, HEADER = 380, FOOTER = 100, POOL_BASE = 180, ROW = 96;
+  // Modern header reserves one career-tag row in the base height; extra wrapped tag rows grow it.
+  const BASE_HEADER = 434, TAG_TOP = 372, TAG_PITCH = 46;
+  function estimateTagRows(tags) {
+    if (!tags || !tags.length) return 1;
+    const width = text => {let w = 0; for (const ch of String(text)) w += ch.charCodeAt(0) > 127 ? 21 : 11.5; return Math.ceil(w) + 28;};
+    let rows = 1, tx = 42;
+    for (const tag of tags) {
+      const text = tag.count > 1 ? `${tag.text} ×${tag.count}` : tag.text;
+      const w = width(text);
+      if (tx + w > 1032 && tx > 42) { rows++; tx = 42; }
+      tx += w + 10;
+    }
+    return rows;
+  }
+  function plannedHeaderHeight(report, poolIds) {
+    let rows = 1;
+    try {
+      if (typeof MobileInsights !== 'undefined' && MobileInsights && typeof MobileInsights.analyze === 'function')
+        rows = Math.max(1, estimateTagRows(MobileInsights.analyze(report, insightOptions(report, poolIds))?.tags));
+    } catch { rows = 1; }
+    return BASE_HEADER + (rows - 1) * TAG_PITCH;
+  }
   function planPages(report, category = 'all', maximum = 10000, poolIds = null) {
-    const pages = []; let page = {chunks: [], height: HEADER + FOOTER};
+    const headerHeight = plannedHeaderHeight(report, poolIds);
+    const pages = []; let page = {chunks: [], height: headerHeight + FOOTER, headerHeight};
     const wanted = poolIds == null ? null : new Set([...poolIds].map(String));
     const pools = (report.analysis?.pools || []).filter(p =>
       (category === 'all' || p.category === category) && (!wanted || wanted.has(String(p.pool_id))));
@@ -12,7 +35,7 @@ const LongImage = (() => {
       const events = [...pool.events].reverse(); let offset = 0;
       do {
         let capacity = Math.floor((maximum - page.height - POOL_BASE) / ROW);
-        if (capacity < 1) {pages.push(page); page = {chunks: [], height: HEADER + FOOTER}; continue;}
+        if (capacity < 1) {pages.push(page); page = {chunks: [], height: headerHeight + FOOTER, headerHeight}; continue;}
         const chunk = events.slice(offset, offset + capacity);
         page.chunks.push({pool, events: chunk, continuation: offset > 0});
         page.height += POOL_BASE + Math.max(chunk.length, 1) * ROW;
@@ -66,6 +89,9 @@ const LongImage = (() => {
     for (const p of report?.analysis?.pools || []) if (wanted.has(String(p.pool_id))) cats.add(p.category);
     return cats.size === 1 ? [...cats][0] : 'all';
   }
+  function insightOptions(report, poolIds) {
+    return {category: detectCategory(report, poolIds), ...(poolIds == null ? {} : {poolIds: [...poolIds]})};
+  }
   async function prepare(report, pages, poolIds = null) {
     const bridge = assetsBridge();
     if (!bridge) return null;
@@ -83,7 +109,7 @@ const LongImage = (() => {
       let insights = null;
       try {
         if (typeof MobileInsights !== 'undefined' && MobileInsights && typeof MobileInsights.analyze === 'function')
-          insights = MobileInsights.analyze(report, {category: detectCategory(report, poolIds)});
+          insights = MobileInsights.analyze(report, insightOptions(report, poolIds));
       } catch { insights = null; }
       return {brand: await resolveBrand(bridge), characters, insights};
     } catch { return null; }
@@ -135,8 +161,8 @@ const LongImage = (() => {
     const brand = assets && assets.brand && assets.brand.image ? assets.brand : null;
     const characters = assets && assets.characters ? assets.characters : null;
     const rect = (x,y,w,h,color) => {c.fillStyle = color; c.fillRect(x,y,w,h);};
-    function label(value,x,y,size=26,color='#eef1f5',weight=400,max=1000) {
-      c.font = `${weight} ${size}px "Microsoft YaHei", "PingFang SC", sans-serif`; c.fillStyle = color;
+    function label(value,x,y,size=26,color='#eef1f5',weight=400,max=1000,align='left') {
+      c.font = `${weight} ${size}px "Microsoft YaHei", "PingFang SC", sans-serif`; c.fillStyle = color; c.textAlign = align;
       let s = String(value);
       if (c.measureText(s).width > max) {
         while (s.length && c.measureText(s + '…').width > max) s = s.slice(0,-1);
@@ -197,49 +223,62 @@ const LongImage = (() => {
     const catNames = {normal:'普通池',limited:'限定池',collection:'典藏池',beginner:'启程池',unknown:'未分类'};
     const insights = assets.insights || null;
     const measure = (s,size,weight=400) => {c.font = `${weight} ${size}px "Microsoft YaHei", "PingFang SC", sans-serif`; return c.measureText(String(s)).width;};
-    rect(0,0,W,canvas.height,P.bg); rect(40,40,6,56,P.accent);
+    const headerH = page.headerHeight ?? BASE_HEADER;
+    const plannedRows = Math.max(1, Math.round((headerH - BASE_HEADER) / TAG_PITCH) + 1);
+    rect(0,0,W,canvas.height,P.bg); rect(40,40,6,64,P.accent);
     let logoW = 0;
     if (brand) {
-      const img = brand.image, iw = img.naturalWidth || img.width || 56, ih = img.naturalHeight || img.height || 34;
-      let lh = 36, lw = Math.round(lh*iw/ih);
-      if (lw > 240) {lw = 240; lh = Math.round(lw*ih/iw);}
+      const img = brand.image, iw = img.naturalWidth || img.width || 64, ih = img.naturalHeight || img.height || 64;
+      let lh = 64, lw = Math.round(lh * iw / ih);
+      if (lw > 320) {lw = 320; lh = Math.round(lw * ih / iw);}
       logoW = lw;
-      c.drawImage(img, W-40-lw, 68-lh/2, lw, lh);
+      c.drawImage(img, W-40-lw, 40, lw, lh);
     }
-    label(report.account?.label || (report.preview_source ? '本地记录预览' : '招募档案'),64,80,38,P.gold,650,logoW?W-40-logoW-64-24:950);
-    label(`星落 · 抽卡手记    ${category === 'all' ? '全部卡池' : (catNames[category] || category)}    ${index+1}/${total}`,42,124,24,P.muted);
+    const account = report.account || {};
+    const nameMax = logoW ? W-40-logoW-64-24 : 950;
+    label(account.nickname || (report.preview_source ? '本地记录预览' : '招募档案'),64,80,38,P.gold,650,nameMax);
+    const uid = account.game_uid || account.uid || '', level = account.level;
+    const idParts = [];
+    if (uid) idParts.push(`UID ${uid}`);
+    if (level !== undefined && level !== null && level !== '') idParts.push(`Lv.${level}`);
+    if (idParts.length) label(idParts.join(' · '),64,116,22,P.muted,400,nameMax);
+    label(`星落 · 抽卡手记    ${category === 'all' ? '全部卡池' : (catNames[category] || category)}    ${index+1}/${total}`,42,152,24,P.muted);
     const evalText = v => !v ? '暂无记录' : v.status==='rated' ? v.label + (v.lowConfidence ? ' · 暂估' : '') :
       v.status==='small' ? '样本较少' : v.status==='zero' ? '暂未见金' : v.status==='unknown' ? '星级待确认' : '暂无记录';
     const toneColor = t => ({lucky:P.green,good:P.green,steady:P.gold,rough:P.rough,quiet:P.faint}[t] || P.faint);
     if (insights) {
-      label(`生涯 · ${evalText(insights.career)}`,42,162,22,toneColor(insights.career?.tone),600,410);
-      label(`近45天 · ${evalText(insights.recent)}`,470,162,22,toneColor(insights.recent?.tone),600,420);
+      label(`生涯 · ${evalText(insights.career)}`,42,188,22,toneColor(insights.career?.tone),600,410);
+      label(`近45天 · ${evalText(insights.recent)}`,470,188,22,toneColor(insights.recent?.tone),600,420);
     }
     for (const [i, key] of ['normal','limited','collection'].entries()) {
       const s = report.analysis?.categories[key]; if (!s) continue;
-      const x = 40+i*338; rect(x,186,324,130,P.panel);
-      label(s.name,x+16,218,22,P.text,600,140);
-      label(`${s.pull_count} 抽`,x+16,258,32,P.accent,650,150);
-      label(key === 'normal' ? `${s.five_count} 出卡` : `UP ${s.up_count} / 歪 ${s.off_count}`,x+170,242,20,P.text,500,138);
-      const avg = s.average_five_interval === null || s.average_five_interval === undefined ? '—' : Number(s.average_five_interval).toFixed(1);
-      label(`平均 ${avg}`,x+170,268,18,P.muted,400,138);
-      rect(x+16,284,292,22,P.track);
+      const x = 40+i*338, cx = x+162;
+      rect(x,220,324,140,P.panel);
+      label(s.name,cx,252,22,P.text,600,292,'center');
+      label(`${s.pull_count} 抽`,cx,286,30,P.accent,650,292,'center');
+      if (key === 'normal') label(`${s.five_count} 出卡`,cx,312,20,P.text,500,292,'center');
+      else {
+        label(`UP ${s.up_count}`,x+100,312,20,P.teal,700,120,'center');
+        label(`歪 ${s.off_count}`,x+224,312,20,P.red,700,120,'center');
+      }
+      rect(x+16,326,292,22,P.track);
       const hard = s.hard_pity || 70, since = s.since_five || 0;
-      if (s.pull_count) rect(x+16,284,Math.round(292*Math.min(1,since/hard)),22,s.since_five_exact ? (key === 'collection' ? P.blue : P.teal) : P.gray);
-      label(`已垫 ${s.pull_count ? `${s.since_five_exact ? '' : '≥'}${since}` : '—'} / ${s.hard_pity || '—'}`,x+162,300,17,P.text,650,146);
+      if (s.pull_count) rect(x+16,326,Math.round(292*Math.min(1,since/hard)),22,s.since_five_exact ? (key === 'collection' ? P.blue : P.teal) : P.gray);
+      label(`已垫 ${s.pull_count ? `${s.since_five_exact ? '' : '≥'}${since}` : '—'} / ${s.hard_pity || '—'}`,cx,342,17,P.text,650,292,'center');
     }
-    let tx = 42;
+    let tx = 42, ty = TAG_TOP;
     for (const tag of insights?.tags || []) {
       const text = tag.count > 1 ? `${tag.text} ×${tag.count}` : tag.text;
       const w = Math.round(measure(text,19,650)) + 26;
-      if (tx + w > 1038) break;
+      if (tx + w > 1038 && tx > 42) { tx = 42; ty += TAG_PITCH; }
       const risky = tag.key === 'pity_70' || tag.key === 'off_streak';
-      rect(tx,324,w,26,risky ? '#33201d' : '#173129');
-      label(text,tx+13,342,19,risky ? P.rough : P.green,650,w-26);
+      rect(tx,ty,w,28,risky ? '#33201d' : '#173129');
+      label(text,tx+13,ty+20,19,risky ? P.rough : P.green,650,w-26);
       tx += w + 8;
     }
-    label('五星间隔：绿 1–30 · 黄 31–60 · 红 61+ · 灰 前序未知',42,372,20,P.faint);
-    let y = HEADER;
+    const usedRows = Math.round((ty - TAG_TOP) / TAG_PITCH) + 1;
+    label('五星间隔：绿 1–30 · 黄 31–60 · 红 61+ · 灰 前序未知',42,TAG_TOP + Math.max(plannedRows,usedRows)*TAG_PITCH + 2,20,P.faint);
+    let y = headerH;
     const numerals = ['','单','双','三','四','五','六','七','八','九','十'];
     for (const part of page.chunks) {
       const p = part.pool, height = POOL_BASE - 16 + Math.max(part.events.length,1)*ROW;
@@ -254,40 +293,37 @@ const LongImage = (() => {
       const burstByPos = new Map();
       for (const burst of insights?.multi?.byPool?.[String(p.pool_id)] || [])
         for (const pos of burst.positions || []) burstByPos.set(pos,burst);
-      let ey = y+94;
+      let ey = y+100;
       for (const e of part.events) {
         const entry = characters ? characters.get(e.item_id) : null;
         const avatar = entry && entry.image ? entry : null;
-        const nameX = avatar ? 132 : 60, nameMax = avatar ? 290-nameX-12 : 218;
+        const nameX = 132, nameMax = avatar ? 290-nameX-12 : 218;
         if (avatar) c.drawImage(avatar.image, ...headRect(avatar.image, avatar.info.crop), 60, ey+2, 60, 60);
-        label(e.name,nameX,ey+34,27,P.text,600,nameMax);
-        const meta = `${e.time_beijing ? e.time_beijing.slice(0,10)+' · ' : ''}本池第 ${e.in_pool_pull ?? '—'} 抽${e.carried_pulls ? ` · 跨池 ${e.carried_pulls} 抽` : ''}`;
-        label(meta,nameX,ey+60,17,P.faint,400,avatar ? 560 : 950);
-        const count = e.pulls_since_five, exact = e.interval_exact, hard = p.hard_pity || 70;
-        const fillW = Math.max(105, Math.min(470, count/hard*470));
-        rect(290,ey+4,470,40,P.track);
-        rect(290,ey+4,fillW,40,!exact ? P.gray : count<=30 ? P.teal : count<=60 ? P.yellow : P.red);
-        label(`${exact ? '' : '≥'}${count} 抽`,302,ey+32,24,P.dark,800,fillW-20);
+        label(e.name,nameX,ey+36,27,P.text,600,nameMax);
+        const nameW = Math.min(measure(e.name,27,600), nameMax);
         const chips = [];
         if (e.outcome === 'up') chips.push(['UP',P.teal]); else if (e.outcome === 'off') chips.push(['歪',P.red]);
+        if (e.guaranteed === true) chips.push(['大保底',P.gold]);
         const burst = burstByPos.get(e.in_pool_pull);
         if (burst) chips.push([`十连${burst.exact ? '' : '至少'}${numerals[burst.five_count] || burst.five_count}金`,P.blue]);
-        if (e.guaranteed === true) chips.push(['大保底',P.gold]);
         if (e.guarantee_conflict) chips.push(['待核验',P.red]);
-        if (!exact) chips.push(['前序不完整',P.gray]);
-        let cx = 1040;
-        for (const [text,bg] of chips.reverse()) {
+        if (!e.interval_exact) chips.push(['前序不完整',P.gray]);
+        let chipX = nameX + nameW + 12;
+        for (const [text,bg] of chips) {
           const w = Math.round(measure(text,19,700)) + 26;
-          if (cx - w < 772) break;
-          cx -= w;
-          rect(cx,ey+13,w,30,bg);
-          label(text,cx+13,ey+34,19,P.dark,700,w-26);
-          cx -= 8;
+          rect(chipX,ey+6,w,30,bg);
+          label(text,chipX+13,ey+27,19,P.dark,700,w-26);
+          chipX += w + 8;
         }
+        const count = e.pulls_since_five, exact = e.interval_exact, hard = p.hard_pity || 70;
+        const fillW = Math.max(105, Math.min(908, count/hard*908));
+        rect(132,ey+50,908,36,P.track);
+        rect(132,ey+50,fillW,36,!exact ? P.gray : count<=30 ? P.teal : count<=60 ? P.yellow : P.red);
+        label(`${exact ? '' : '≥'}${count} 抽`,148,ey+75,24,P.dark,800,fillW-24);
         ey += ROW;
       }
       if(!part.events.length) {label('可见记录中尚未出现五星角色。',60,ey+36,24,P.faint); ey += ROW;}
-      label(`截至本池记录末 · 已垫 ${p.tail_exact?'':'≥'}${p.tail_since_five} 抽${p.next_guaranteed === true ? ' · 下个五星为大保底¹' : ''}`,60,ey+31,21,P.muted,400,950);
+      label(`截至本池记录末 · 已垫 ${p.tail_exact?'':'≥'}${p.tail_since_five} 抽${p.next_guaranteed === true ? ' · 下个五星为大保底¹' : ''}`,60,ey+28,21,P.muted,400,950);
       y += height+16;
     }
     label('¹ 保底与间隔依据可见历史推断，不代表官方实时状态。',42,canvas.height-60,20,P.faint);

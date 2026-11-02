@@ -12,11 +12,12 @@ const MobileImage=(()=>{
  function renderPoolChoices(){
   const list=poolsForCategory(),box=$('image-pool-list');box.replaceChildren();
   for(const pool of list){
-   const id=String(pool.pool_id),label=el('label'),choice=document.createElement('input');
+   const id=String(pool.pool_id),label=el('label'),choice=document.createElement('input'),copy=el('span',undefined,'image-pool-choice-copy');
+   const sync=()=>{label.className=`image-pool-choice${choice.checked?' selected':''}`;};
    choice.type='checkbox';choice.checked=poolChoice.has(id);choice.dataset.poolId=id;
    choice.setAttribute('aria-label',`选择卡池 ${pool.pool_name}`);
-   choice.addEventListener('change',()=>{if(delivering){choice.checked=poolChoice.has(id);return;}choice.checked?poolChoice.add(id):poolChoice.delete(id);updatePoolCount();generate();});
-   label.append(choice,document.createTextNode(`${pool.pool_name} · ${pool.pull_count} 抽`));
+   choice.addEventListener('change',()=>{if(delivering){choice.checked=poolChoice.has(id);sync();return;}choice.checked?poolChoice.add(id):poolChoice.delete(id);sync();updatePoolCount();generate();});
+   copy.append(el('strong',pool.pool_name),el('small',`${pool.category_name||'卡池'} · ${pool.pull_count} 抽`));label.append(choice,copy);sync();
    box.append(label);
   }
   $('image-pool-picker').hidden=!list.length;
@@ -77,7 +78,7 @@ const MobileImage=(()=>{
   generate();
  }
  function init(options={}){notify=options.notify||notify;
-  $('image-category').addEventListener('change',()=>{category=$('image-category').value;renderPoolChoices();if(report)generate();});
+  $('image-category').addEventListener('change',()=>{const select=$('image-category');if(delivering){select.value=category;return;}category=select.value;renderPoolChoices();if(report)generate();});
   $('image-pool-all').addEventListener('click',()=>{if(generating||delivering)return;for(const pool of (report?.analysis?.pools||[]))poolChoice.add(String(pool.pool_id));renderPoolChoices();generate();});
   $('image-pool-none').addEventListener('click',()=>{if(generating||delivering)return;poolChoice.clear();renderPoolChoices();generate();});
   $('image-select-all').addEventListener('click',()=>{selected=new Set(files.map((file,index)=>index));for(const choice of $('image-previews').querySelectorAll('input[type=checkbox]'))choice.checked=true;update();});

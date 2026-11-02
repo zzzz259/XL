@@ -149,8 +149,8 @@ test('draw keeps the legacy layout without assets and renders the new interface 
  const canvas=LongImage.draw(report,page,0,1,'all',assets);
  const draws=canvas.ops.filter(op=>op[0]==='drawImage');
  assert.equal(draws.length,4);
- // proportional logo (280x140 -> 72x36) plus full-square center-cropped avatars
- assert.deepEqual(draws[0].slice(2),[1080-40-72,50,72,36]);
+ // The complete logo scales proportionally; avatars still use full squares.
+ assert.deepEqual(draws[0].slice(2),[912,40,128,64]);
  for(const avatar of draws.slice(1)){
   assert.deepEqual(avatar.slice(2,6),[0,0,256,256]);
   assert.equal(avatar[6],60);
@@ -178,7 +178,7 @@ test('draw degrades gracefully when the brand logo or insights are missing',asyn
  const draws=canvas.ops.filter(op=>op[0]==='drawImage');
  assert.equal(draws.length,3);
  assert.ok(draws.every(op=>op[1]!==null));
- assert.ok(canvas.ops.some(op=>op[0]==='fillText'&&op[1]==='主号'));
+ assert.ok(canvas.ops.some(op=>op[0]==='fillText'&&op[1]==='招募档案'));
  assert.equal(canvas.ops.some(op=>op[0]==='fillText'&&String(op[1]).startsWith('生涯 ·')),false);
  assert.equal(assets.insights,null);
  delete globalThis.document;
@@ -252,6 +252,10 @@ test('long image pool changes stay locked during system delivery',async()=>{
  choices[1].checked=false;choices[1].dispatchEvent({type:'change'});await harness.settle();
  assert.equal(choices[1].checked,true);
  assert.equal(elements.get('image-pool-count').textContent,'已选 2/2 个卡池');
+ assert.equal(elements.get('image-status').textContent,'正在准备系统分享…');
+ assert.equal(elements.get('image-previews').children.length,1);
+ const category=elements.get('image-category');category.value='normal';category.dispatchEvent({type:'change'});await harness.settle();
+ assert.equal(category.value,'all');
  assert.equal(elements.get('image-status').textContent,'正在准备系统分享…');
  assert.equal(elements.get('image-previews').children.length,1);
  harness.completeDelivery();await harness.settle();

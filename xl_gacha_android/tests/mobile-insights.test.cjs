@@ -84,11 +84,43 @@ test('non ten pull records never merge into a ten pull multi',()=>{
  assert.equal(tag(tags,'ten_2'),undefined);assert.equal(multi.count,0);
 });
 
-test('hard pity hits count per well size only with exact intervals',()=>{
- const pools=[poolInfo(9,'limited',70,[ev(100,70,'up'),ev(200,71,'off'),ev(300,70,'up',false),ev(400,140,'up')]),poolInfo(10,'collection',80,[ev(500,80,'up')])];
- const {tags}=MobileInsights.analyze(report([],pools),{now:1000});
- assert.equal(tag(tags,'pity_70').text,'抽满70井');assert.equal(tag(tags,'pity_70').count,3);
- assert.equal(tag(tags,'pity_80').text,'抽满80井');assert.equal(tag(tags,'pity_80').count,1);
+const offEvent=(timestamp,pulls,exact=true)=>({...ev(timestamp,0,'off',exact,pulls),guaranteed:false});
+const guaranteedEvent=(timestamp,pulls,exact=true)=>({...ev(timestamp,0,'up',exact,pulls),guaranteed:true});
+const naturalUpEvent=(timestamp,pulls,exact=true)=>({...ev(timestamp,0,'up',exact,pulls),guaranteed:false});
+
+test('career tags replace hard-pity hits with guaranteed streaks and complete 130-pull UP cycles',()=>{
+ const events=[
+  offEvent(1,60),guaranteedEvent(2,70),
+  offEvent(3,65),guaranteedEvent(4,70),
+  naturalUpEvent(5,20),
+  offEvent(6,60,false),guaranteedEvent(7,70),
+  offEvent(8,59),guaranteedEvent(9,70),
+  offEvent(10,60),guaranteedEvent(11,70),
+ ];
+ const {tags}=MobileInsights.analyze(report([],[poolInfo(9,'limited',70,events)]),{now:1000});
+ assert.equal(tag(tags,'pity_70'),undefined);
+ assert.equal(tag(tags,'guarantee_streak').text,'3连大保底');
+ assert.equal(tag(tags,'up_130').text,'130抽以上才出UP');assert.equal(tag(tags,'up_130').count,3);
+});
+
+test('a natural UP consumes stale off context before a later guaranteed UP',()=>{
+ const events=[offEvent(1,65),naturalUpEvent(2,70),guaranteedEvent(3,65)];
+ const {tags}=MobileInsights.analyze(report([],[poolInfo(9,'limited',70,events)]),{now:1000});
+ assert.equal(tag(tags,'up_130'),undefined);
+});
+
+test('full awakening names characters at six visible copies and follows category without widening career',()=>{
+ const records=[
+  record(1,1000,[drop(1001,5,3,'满觉角色'),drop(1002,5,5,'其他角色'),drop(11,3,2)]),
+  record(2,2000,[drop(1001,5,3,'满觉角色'),drop(11,3,7)]),
+ ];
+ const pools=[poolInfo(1,'normal',70),poolInfo(2,'beginner',null)];
+ const all=MobileInsights.analyze(report(records,pools),{now:3000});
+ assert.equal(all.career.pulls,10);
+ assert.equal(tag(all.tags,'awaken_1001').text,'满觉角色 满觉');
+ assert.equal(tag(all.tags,'awaken_1002'),undefined);
+ const normal=MobileInsights.analyze(report(records,pools),{now:3000,category:'normal'});
+ assert.equal(tag(normal.tags,'awaken_1001'),undefined);
 });
 
 test('longest up and off streaks across pools become streak tags only at length two or more',()=>{
@@ -121,6 +153,9 @@ test('category option narrows every section to that category',()=>{
  assert.equal(limited.career.pulls,10);assert.equal(limited.career.fiveCount,2);
  assert.equal(limited.multi.count,1);assert.deepEqual(Object.keys(limited.multi.byPool),['1']);
  assert.equal(tag(limited.tags,'ten_2').count,1);
+ const selected=MobileInsights.analyze(report(records,pools),{now:3000,category:'all',poolIds:[2]});
+ assert.equal(selected.career.pulls,10);assert.equal(selected.career.fiveCount,2);
+ assert.equal(selected.multi.count,1);assert.deepEqual(Object.keys(selected.multi.byPool),['2']);
 });
 
 const catalog={version:'test',_revision:'test',cards:{1001:['低星',3],1002:['普通五星',5],1003:['限定五星',5]},

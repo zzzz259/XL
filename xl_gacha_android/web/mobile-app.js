@@ -8,7 +8,7 @@
  function notify(text,kind=''){clearTimeout(toastTimer);const toast=$('toast');toast.textContent=text;toast.className=`toast ${kind}`;toast.hidden=!text;if(text)toastTimer=setTimeout(()=>{toast.hidden=true;},kind==='error'?6500:4000);}
  let zoomTask=Promise.resolve();
  function applyTextZoom(percent,save=true){
-  const value=Number(percent);if(![90,100,110,125,140].includes(value))return zoomTask;
+  const value=Number(percent);if(![80,85,90,95,100,110,125,140].includes(value))return zoomTask;
   zoomTask=zoomTask.then(async()=>{
    if(window.AndroidBridge?.textZoom)await AndroidBridge.textZoom(value);else document.body.style.fontSize=`${15*value/100}px`;
    document.body.dataset.textZoom=String(value);document.querySelectorAll('#text-zoom-options [data-zoom]').forEach(button=>button.setAttribute('aria-pressed',String(Number(button.dataset.zoom)===value)));$('text-zoom-status').textContent=`${value}%`;
@@ -16,7 +16,7 @@
   }).catch(()=>{notify('字号设置未应用，请重试。','error');});
   return zoomTask;
  }
- function initialTextZoom(){let value=100;try{value=Number(localStorage.getItem('starfall-text-zoom'))||100;}catch{}return [90,100,110,125,140].includes(value)?value:100;}
+ function initialTextZoom(){let value=100;try{value=Number(localStorage.getItem('starfall-text-zoom'))||100;}catch{}return [80,85,90,95,100,110,125,140].includes(value)?value:100;}
  function openDialog(id){const dialog=$(id);if(!dialog.open)dialog.showModal();}
  function closeDialog(id){const dialog=$(id);if(dialog?.open&&dialog.dataset.busy!=='true')dialog.close();}
  function applyPage(name,scrollY=0){state.tab=name;MobileRender.tabs(state);mascot?.reset();requestAnimationFrame(()=>{if(state.tab===name)window.scrollTo(0,scrollY);});}

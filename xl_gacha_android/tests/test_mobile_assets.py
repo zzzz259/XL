@@ -35,7 +35,7 @@ class MobileAssetTests(unittest.TestCase):
         parser.feed(page.read_text(encoding="utf-8"))
         self.assertEqual(len(parser.ids), len(set(parser.ids)))
         self.assertCountEqual(parser.tabs, ["records", "query", "profile"])
-        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "query-flip", "query-front", "manual-panel", "manual-open", "manual-open-label", "manual-help", "manual-help-dialog", "characters-toggle", "career-evaluation", "recent-evaluation", "career-tags", "account-button-avatar", "profile-account-avatar", "gugu-button", "gugu-idle", "gugu-reaction", "gugu-poster", "text-zoom-options", "text-zoom-status", "image-pool-picker", "image-pool-all", "image-pool-none", "image-pool-count", "image-pool-list"):
+        for element_id in ("view-records", "view-query", "view-profile", "account-summary", "career-summary", "pool-list", "record-floating-actions", "login-options", "login-progress", "raw-records-details", "query-flip", "query-front", "manual-panel", "manual-open", "manual-open-label", "manual-help", "manual-help-dialog", "characters-toggle", "career-evaluation", "recent-evaluation", "career-tags", "record-account-uid", "account-button-avatar", "profile-account-avatar", "gugu-button", "gugu-idle", "gugu-reaction", "gugu-poster", "text-zoom-options", "text-zoom-status", "image-pool-picker", "image-pool-all", "image-pool-none", "image-pool-count", "image-pool-list"):
             self.assertIn(element_id, parser.ids)
         for removed_id in ("account-quick-stats", "record-account-updated", "characters-detail", "manual-dialog"):
             self.assertNotIn(removed_id, parser.ids)
@@ -98,7 +98,7 @@ class MobileAssetTests(unittest.TestCase):
         self.assertEqual(set(manifest["characters"]), set(catalog["cards"]))
         self.assertEqual(len(manifest["fashions"]), 312)
         self.assertEqual(len(manifest["account_items"]), 99)
-        self.assertEqual(len(manifest["files"]), 214)
+        self.assertEqual(len(manifest["files"]), 526)
         for path, expected in manifest["files"].items():
             self.assertTrue(path.startswith("assets/"), path)
             self.assertNotIn("..", path)

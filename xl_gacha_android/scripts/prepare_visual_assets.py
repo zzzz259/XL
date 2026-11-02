@@ -183,21 +183,37 @@ def normalize_portrait(im, square_size):
     return canvas
 
 
+def trim_portrait(im, margin=4):
+    """移除透明边缘并等比填满方画布，保留全部非透明人物像素。"""
+    bbox = alpha_bbox(im)
+    if bbox is None:
+        return Image.new("RGBA", (PORTRAIT_SIZE, PORTRAIT_SIZE))
+    box = (
+        max(0, bbox[0] - margin), max(0, bbox[1] - margin),
+        min(im.width, bbox[2] + margin), min(im.height, bbox[3] + margin),
+    )
+    cropped = im.convert("RGBA").crop(box)
+    scale = min(PORTRAIT_SIZE / cropped.width, PORTRAIT_SIZE / cropped.height)
+    size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
+    resized = cropped.resize(size, Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (PORTRAIT_SIZE, PORTRAIT_SIZE))
+    canvas.paste(resized, ((PORTRAIT_SIZE - size[0]) // 2, (PORTRAIT_SIZE - size[1]) // 2))
+    return canvas
+
+
 def build_portrait(item_id, character, pack_root, out_dir):
-    """生成单个角色肖像，返回输出路径。bursthead 为 null 时回退到 140x270 方图。"""
+    """生成单个角色肖像，bursthead 为 null 时回退到 140x270 方图。"""
     burst = character.get("bursthead")
     if burst:
-        src = Image.open(pack_root / burst)
-        canvas = normalize_portrait(src, PORTRAIT_SIZE)
+        canvas = Image.open(pack_root / burst).convert("RGBA")
     else:
         square_rel = character["square"]
         src = Image.open(pack_root / square_rel)
         if src.size != (140, 270):
             raise ValueError(f"{item_id} 方图尺寸异常: {src.size}")
-        padded = normalize_portrait(src, SQUARE_PAD_SIZE)
-        canvas = padded.resize((PORTRAIT_SIZE, PORTRAIT_SIZE), Image.Resampling.LANCZOS)
+        canvas = normalize_portrait(src, SQUARE_PAD_SIZE)
     out_path = out_dir / f"{item_id}.webp"
-    save_lossless_webp(canvas, out_path)
+    save_lossless_webp(trim_portrait(canvas), out_path)
     return out_path
 
 
@@ -393,11 +409,12 @@ def generate(web_root, pack_root, preview_dir=None):
     assets_dir = web_root / "assets"
     portraits_dir = assets_dir / "portraits"
     account_dir = assets_dir / "account"
+    account_rect_dir = assets_dir / "account-rect"
     brand_dir = assets_dir / "brand"
     ui_dir = assets_dir / "ui"
     mascot_dir = assets_dir / "mascot"
 
-    for directory in (portraits_dir, account_dir, brand_dir, ui_dir, mascot_dir):
+    for directory in (portraits_dir, account_dir, account_rect_dir, brand_dir, ui_dir, mascot_dir):
         if directory.exists():
             shutil.rmtree(directory)
         directory.mkdir(parents=True)
@@ -424,13 +441,27 @@ def generate(web_root, pack_root, preview_dir=None):
             "path": rel,
         }
 
-    # 2) 时装 -> 所属 card_id 的默认角色肖像（始终初始_1，即角色默认肖像）
+    # 2) 抽卡默认角色肖像与账号时装 CardHeadRect 是两套独立资源
     manifest_fashions = {}
+    rect_sources = {}
     for fashion_id in sorted(fashions):
-        card_id = str(fashions[fashion_id]["card_id"])
+        entry = fashions[fashion_id]
+        card_id = str(entry["card_id"])
         if card_id not in manifest_characters:
             raise ValueError(f"时装 {fashion_id} 的 card_id {card_id} 不在角色表中")
-        manifest_fashions[fashion_id] = {"path": f"assets/portraits/{card_id}.webp"}
+        src_rel = entry["paths"]["head_icon_rect"]
+        out_path = account_rect_dir / Path(src_rel).name
+        rel = f"assets/account-rect/{out_path.name}"
+        if rel in rect_sources and rect_sources[rel] != src_rel:
+            raise ValueError(f"账号时装头像重名冲突: {rel}")
+        rect_sources[rel] = src_rel
+        if rel not in outputs:
+            shutil.copyfile(pack_root / src_rel, out_path)
+            outputs[rel] = out_path
+        manifest_fashions[fashion_id] = {
+            "path": f"assets/portraits/{card_id}.webp",
+            "rect_path": rel,
+        }
 
     # 3) 账户装扮道具（99 项映射、98 个文件：Frame_4002 被两个道具共用）
     manifest_account = {}

@@ -49,25 +49,25 @@ const MobileAssets=(()=>{
 
  const fashionHead=id=>{
   const entry=resolveManifest().fashions?.[String(id)];
-  return entry&&entry.path?{src:entry.path,crop:'center'}:null;
+  return entry&&entry.rect_path?{src:entry.rect_path,crop:'center'}:null;
  };
  const accountHead=id=>{
   const entry=resolveManifest().account_items?.[String(id)];
   return entry&&entry.type===108&&entry.path?{src:entry.path,crop:'left'}:null;
  };
  function headFor(account){
-  const fashionId=Number(account.fashion_id);
+  const fashionId=Number(account.fashion_id??0);
   if(Number.isFinite(fashionId)&&fashionId>0){
    const head=fashionHead(fashionId);
    if(head)return head;
   }
-  const headId=Number(account.head_id);
+  const headId=Number(account.head_id??0);
   if(Number.isFinite(headId)&&headId>0){
    const head=accountHead(headId);
    if(head)return head;
   }
   const faceId=Number(account.face_id);
-  if(Number.isFinite(faceId)&&faceId>0){
+  if(fashionId===0&&headId===0&&Number.isFinite(faceId)&&faceId>0){
    const head=fashionHead(faceId);
    if(head)return head;
   }
