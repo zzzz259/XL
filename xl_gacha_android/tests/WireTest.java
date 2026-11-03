@@ -26,6 +26,16 @@ public class WireTest {
   Map<String,Object> noHead=Wire.profile(Wire.join(Wire.integer(1,1),Wire.blob(2,Wire.join(Wire.integer(2,123),Wire.integer(4,7),Wire.blob(6,"abc".getBytes(java.nio.charset.StandardCharsets.UTF_8)))),Wire.integer(3,99)));
   if(((Number)noHead.get("fashion_id")).longValue()!=0||((Number)noHead.get("head_id")).longValue()!=0||((Number)noHead.get("head_rect_id")).longValue()!=0||((Number)noHead.get("head_rect_stamp")).longValue()!=0||((Number)noHead.get("head_rect_extra")).longValue()!=0||!"0".equals(noHead.get("head_rect_item_uid")))throw new AssertionError("zero avatar fields");
   if(!"123".equals(noHead.get("game_uid"))||((Number)noHead.get("level")).longValue()!=7||!"abc".equals(noHead.get("nickname"))||((Number)noHead.get("server_time")).longValue()!=99)throw new AssertionError("actor without head");
+  Map<String,Object> prefixed=Wire.profile(Wire.blob(2,Wire.join(Wire.integer(2,456),Wire.integer(4,77),Wire.blob(6,"\u0016合成玩家".getBytes(java.nio.charset.StandardCharsets.UTF_8)))));
+  if(!"合成玩家".equals(prefixed.get("nickname"))||!"456".equals(prefixed.get("game_uid"))||((Number)prefixed.get("level")).longValue()!=77)throw new AssertionError("leading U+0016 must not prevent saving an otherwise valid account");
+  byte[] controlActor=Wire.join(Wire.integer(2,123),Wire.integer(4,7),Wire.blob(6,"\u0000\t合成\n玩家\r\n\u007f".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+  Map<String,Object> controlProfile=Wire.profile(Wire.blob(2,controlActor));
+  if(!"合成 玩家".equals(controlProfile.get("nickname")))throw new AssertionError("server nickname controls must not reject a valid history query");
+  if(!"123".equals(controlProfile.get("game_uid"))||((Number)controlProfile.get("level")).longValue()!=7)throw new AssertionError("nickname normalization changed player identity");
+  Map<String,Object> onlyControls=Wire.profile(Wire.blob(2,Wire.blob(6,"\n\t\u0000".getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+  if(!"".equals(onlyControls.get("nickname")))throw new AssertionError("empty display nickname must allow account label fallback");
+  Map<String,Object> unicode=Wire.profile(Wire.blob(2,Wire.blob(6,"合成\uD83C\uDF1F玩家".getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+  if(!"合成\uD83C\uDF1F玩家".equals(unicode.get("nickname")))throw new AssertionError("nickname normalization changed Unicode text");
   System.out.println("EnterGameRsp profile parse fixture checks passed.");
  }
 }

@@ -2,7 +2,7 @@
 
 (()=>{
  const state={tab:'query',report:null,accounts:[],demo:false,buildInfo:null,catalog:null,catalogData:null,visualRevision:null,login:{phase:'idle',profiles:[]},loginPanel:'options',manualOpen:false,loginResult:'',working:false,poolCategory:'all',poolLimit:20,eventLimits:{},characterLimits:{},filters:{search:'',pool:'',rarity:'',fiveOnly:false},recordPage:1,showCharacters:false};
- let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null,mascot=null;
+ let navigation=MobileNavigation.createNavigation('query'),toastTimer,loginTimer,catalogTimer,confirmHandler=null,mascot=null,credentialStatus=null;
  window.mobileReady=false;
  function fitCareerMetrics(){
   const rows=[...document.querySelectorAll('.career-category.limited .career-metrics,.career-category.collection .career-metrics')];
@@ -14,6 +14,9 @@
    const needed=widths.reduce((sum,value)=>sum+value,0);
    if(needed>0)row.style.setProperty('--career-metric-scale',String(Math.min(1,Math.max(.05,(width-gap-2)/needed))));
   }
+  const pities=[...document.querySelectorAll('.career-pity-text')];
+  for(const text of pities)text.style.removeProperty('--career-pity-scale');
+  for(const text of pities){const width=text.getBoundingClientRect().width;if(!width)continue;const range=document.createRange();range.selectNodeContents(text);const needed=range.getBoundingClientRect().width;if(needed>width-2)text.style.setProperty('--career-pity-scale',String(Math.max(.05,(width-2)/needed)));}
  }
  function syncLayout(){const nav=document.querySelector('.bottom-nav'),height=nav?.getBoundingClientRect().height;if(height>0)document.documentElement.style.setProperty('--bottom-nav-height',`${Math.ceil(height)}px`);fitCareerMetrics();}
  function observeLayout(){
@@ -40,19 +43,39 @@
  function applyPage(name,scrollY=0){state.tab=name;MobileRender.tabs(state);mascot?.reset();requestAnimationFrame(()=>{if(state.tab===name){window.scrollTo(0,scrollY);syncLayout();}});}
  function switchTab(name,{replace=false,resetScroll=false}={}){const scrollY=navigation.go(name,{replace,resetScroll,scrollY:window.scrollY});applyPage(name,scrollY);}
  function renderRecords(){const result=MobileView.records(state.report,{...state.filters,page:state.recordPage});state.recordPage=result.page;MobileRender.records(state,result);}
- function renderAll(){MobileRender.tabs(state);MobileRender.recordPage(state);MobileRender.recordPoolOptions(state);renderRecords();MobileRender.profile(state);requestAnimationFrame(syncLayout);}
+ function renderAll(){MobileRender.tabs(state);MobileRender.recordPage(state);MobileRender.recordPoolOptions(state);renderRecords();MobileRender.profile(state);renderCredentials();requestAnimationFrame(syncLayout);}
  function showReport(report,demo=false,preserveView=false){
   state.report=report;state.demo=demo;
+  loadCredentialStatus();
   if(!preserveView){state.manualOpen=false;state.poolCategory='all';state.poolLimit=20;state.eventLimits={};state.characterLimits={};state.showCharacters=false;state.filters={search:'',pool:'',rarity:'',fiveOnly:false};state.recordPage=1;$('record-search').value='';$('record-pool').value='';$('record-rarity').value='';$('record-five-only').checked=false;$('record-five-only').disabled=false;$('record-rarity').disabled=false;}
   renderAll();if(!preserveView)switchTab('records',{replace:true,resetScroll:true});
  }
  async function refreshLibrary(restore=false){const info=await MobileServices.api('/library');state.accounts=info.accounts;if(restore&&info.last_account&&info.accounts.some(account=>account.id===info.last_account)){state.report=await MobileServices.api('/library/open',{id:info.last_account});state.demo=false;}MobileRender.profile(state);if(restore)renderAll();}
- async function run(work){if(state.working)return;state.working=true;MobileRender.login(state);try{await work();}catch(error){notify(error.message||'操作未完成，请重试。','error');}finally{state.working=false;MobileRender.login(state);}}
+ async function run(work){if(state.working)return;state.working=true;MobileRender.login(state);renderCredentials();try{await work();}catch(error){notify(error.message||'操作未完成，请重试。','error');}finally{state.working=false;MobileRender.login(state);renderCredentials();}}
  function confirm(title,message,label,action){$('confirm-title').textContent=title;$('confirm-message').textContent=message;$('confirm-action').textContent=label;confirmHandler=action;openDialog('confirm-dialog');}
  function openAccount(){MobileRender.accounts(state);openDialog('account-dialog');}
  function openImport(){closeDialog('account-dialog');$('import-error').hidden=true;MobileRender.accounts(state);openDialog('import-dialog');}
  function setManualOpen(open){if(state.working||active()){notify('正在查询，请稍候。','error');return;}state.manualOpen=open;state.loginPanel='options';if(state.login.phase==='error')state.login={phase:'idle',profiles:state.login.profiles||[]};if(open)$('manual-error').hidden=true;MobileRender.login(state);}
  function openLogin(){state.manualOpen=false;state.loginPanel='options';switchTab('query');MobileRender.login(state);MobileServices.api('/login').then(value=>{handleLogin(value);}).catch(error=>notify(error.message,'error'));}
+ function renderCredentials(){
+  const value=credentialStatus,selected=state.report&&!state.demo;
+  $('credential-status').textContent=!selected?'选择本机账号后管理登录凭据。':!value?'正在读取登录状态…':!value.available?'尚无已保存凭据，下次登录查询后自动保存。':value.expired?'凭据已过期，请重新登录。':value.expires_at?`凭据到期：${new Date(value.expires_at*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}`:'已保存凭据，有效性以服务端校验为准。';
+  $('credential-clear').disabled=!selected||!value?.available||state.working;
+ }
+ async function loadCredentialStatus(){
+  const id=state.report?.account?.id;credentialStatus=null;renderCredentials();if(!id||state.demo)return;
+  try{const value=await MobileServices.api('/credentials/status',{id});if(state.report?.account?.id===id){credentialStatus=value;renderCredentials();}}catch{if(state.report?.account?.id===id){$('credential-status').textContent='登录状态读取失败，请稍后重试。';}}
+ }
+ function refreshCurrent(){
+  if(!state.report||state.demo){openLogin();return;}
+  const id=state.report.account.id;
+  run(async()=>{
+   $('update-record-button').disabled=true;
+   try{const report=await MobileServices.api('/library/refresh',{id});if(state.report?.account?.id===id){showReport(report,false,true);notify('当前账号记录已更新。');}await refreshLibrary(false);}
+   catch(error){if(['CREDENTIAL_MISSING','CREDENTIAL_EXPIRED','AUTH_REJECTED','ENTER_REJECTED'].includes(error.code)){if(state.report?.account?.id===id){openLogin();notify(error.code==='CREDENTIAL_MISSING'?'请先登录一次，随后可直接刷新。':'登录凭据已失效，请重新登录。','error');}}else throw error;}
+   finally{$('update-record-button').disabled=false;loadCredentialStatus();}
+  });
+ }
  function scheduleLogin(delay=800){clearTimeout(loginTimer);loginTimer=setTimeout(pollLogin,delay);}
  async function pollLogin(){try{const value=await MobileServices.api('/login');handleLogin(value);if(active())scheduleLogin();}catch(error){state.login={phase:'error',error:error.code||'QUERY_FAILED',profiles:state.login.profiles||[]};state.loginPanel='progress';MobileRender.login(state);}}
  function handleLogin(value){state.login=value;if(['cancelled','done','idle'].includes(value.phase))state.loginPanel='options';else if(active()||value.phase==='error')state.loginPanel='progress';MobileRender.login(state);if(value.report&&value.id!==state.loginResult){state.loginResult=value.id||String(Date.now());showReport(value.report,false);refreshLibrary(false).catch(error=>notify(error.message,'error'));notify('记录已更新并按账号保存到本机。');}}
@@ -65,6 +88,11 @@
  async function exportReport(kind){if(!state.report){notify('没有可导出的记录。','error');return;}const file=MobileServices.reportFile(state.report,kind,state.demo);MobileServices.saveBlob(new Blob([file.content],{type:file.mime}),file.filename);}
  async function checkCatalog(force){clearTimeout(catalogTimer);try{const value=await MobileServices.api('/catalog/check',{force});await updateCatalog(value);}catch(error){$('catalog-status').textContent=error.message;}}
  async function refreshCatalog(){try{await updateCatalog(await MobileServices.api('/catalog'));}catch(error){$('catalog-status').textContent=error.message;}}
+ async function refreshNews(force=false){
+  $('news-check').disabled=true;
+  try{const value=await MobileServices.api('/news',{force});const list=$('news-list');list.replaceChildren();for(const entry of value.entries||[]){const row=MobileRender.el('article',undefined,'app-news-entry');row.append(MobileRender.el('h3',entry.title),MobileRender.el('small',`${entry.version_name} · ${entry.published_at.slice(0,10)}`),MobileRender.el('p',entry.body));list.append(row);}$('news-status').textContent=value.entries?.length?(value.phase==='cached'?'已显示本机缓存的更新内容。':''):'暂未发布更新内容。';}
+  catch{$('news-status').textContent='更新内容暂时无法读取，请稍后重试。';}finally{$('news-check').disabled=false;}
+ }
  async function updateCatalog(value){
   const previous=state.catalog?.revision;value=MobileServices.catalogView(value,previous);state.catalog=value;MobileRender.catalog(value);
   if(value.revision&&value.revision!==previous&&state.report?.storage==='local'&&state.report.configuration_revision!==value.revision){const id=state.report.account.id,report=await MobileServices.api('/library/open',{id});if(state.report?.account?.id===id)showReport(report,false,true);}
@@ -76,12 +104,22 @@
  }
  function bind(){
   document.querySelectorAll('.bottom-nav [data-tab]').forEach(button=>button.addEventListener('click',()=>switchTab(button.dataset.tab)));
+  document.querySelectorAll('dialog.sheet').forEach(dialog=>{
+   let pressedOutside=false;
+   const outside=event=>{const box=dialog.getBoundingClientRect();return event.target===dialog&&(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom);};
+   dialog.addEventListener('pointerdown',event=>{pressedOutside=outside(event);});
+   dialog.addEventListener('pointercancel',()=>{pressedOutside=false;});
+   dialog.addEventListener('close',()=>{pressedOutside=false;});
+   dialog.addEventListener('click',event=>{const dismiss=pressedOutside&&outside(event);pressedOutside=false;if(dismiss)closeDialog(dialog.id);});
+  });
   document.addEventListener('click',event=>{const close=event.target.closest('[data-close]');if(close)closeDialog(close.dataset.close);});
   document.addEventListener('mobile-status',event=>notify(event.detail.text,event.detail.kind));
   $('account-button').addEventListener('click',openAccount);$('empty-to-accounts').addEventListener('click',openAccount);
   $('account-list').addEventListener('click',event=>{const option=event.target.closest('[data-account-id]');if(!option)return;run(async()=>{const report=await MobileServices.api('/library/open',{id:option.dataset.accountId});showReport(report,false);closeDialog('account-dialog');await refreshLibrary(false);});});
   for(const id of ['account-import','import-empty-button','profile-import'])$(id).addEventListener('click',openImport);
-  for(const id of ['empty-to-query','update-record-button','profile-login'])$(id).addEventListener('click',openLogin);
+  for(const id of ['empty-to-query','profile-login'])$(id).addEventListener('click',openLogin);
+  $('update-record-button').addEventListener('click',refreshCurrent);
+  $('credential-clear').addEventListener('click',()=>{const id=state.report?.account.id;if(!id)return;confirm('清除本机凭据','清除后需重新登录才能刷新，已保存的抽卡记录会保留。','清除凭据',async()=>{await MobileServices.api('/credentials/delete',{id});await loadCredentialStatus();notify('已清除当前账号的凭据与续签状态。');});});
   $('official-login').addEventListener('click',()=>startLogin('official'));$('tap-login').addEventListener('click',()=>startLogin('official','taptap_app'));$('bili-login').addEventListener('click',()=>startLogin('bilibili'));
   $('manual-open').addEventListener('click',()=>setManualOpen(!state.manualOpen));$('manual-help').addEventListener('click',()=>openDialog('manual-help-dialog'));
   $('login-cancel').addEventListener('click',()=>{if(state.login.phase==='error'){state.manualOpen=false;state.loginPanel='options';state.login={phase:'idle',profiles:state.login.profiles||[]};MobileRender.login(state);return;}run(async()=>{state.login=await MobileServices.api('/login/cancel');state.loginPanel='options';MobileRender.login(state);});});
@@ -106,6 +144,7 @@
   $('record-filter-toggle').addEventListener('click',()=>{const hidden=$('record-filters').hidden;$('record-filters').hidden=!hidden;$('record-filter-toggle').setAttribute('aria-expanded',String(hidden));});
   $('record-prev').addEventListener('click',()=>{state.recordPage--;renderRecords();});$('record-next').addEventListener('click',()=>{state.recordPage++;renderRecords();});
   $('catalog-check').addEventListener('click',()=>checkCatalog(true));$('catalog-source-save').addEventListener('click',()=>run(async()=>{const value=await MobileServices.api('/catalog/source',{url:$('catalog-source').value.trim()});await updateCatalog(value);notify('配置地址已保存，正在检查更新。');}));
+  $('news-check').addEventListener('click',()=>refreshNews(true));
   $('text-zoom-options').addEventListener('click',event=>{const button=event.target.closest('[data-zoom]');if(button)applyTextZoom(Number(button.dataset.zoom));});
   document.addEventListener('visibilitychange',()=>{mascot?.reset();if(!document.hidden){if(state.report){MobileRender.accounts(state);MobileRender.recordPage(state);requestAnimationFrame(syncLayout);}checkCatalog(false);}});
  }
@@ -117,6 +156,8 @@
    state.buildInfo=await MobileServices.buildInfo();state.catalogData=await fetch('./catalog.json',{cache:'no-store'}).then(response=>response.json());
    try{await MobileAssets.init();const brand=MobileAssets.brand();if(brand?.logo){const image=document.querySelector('.brand-logo');image.hidden=false;image.src=brand.logo;}const instance=MobileMascot.create();instance.init();mascot=instance;}catch{notify('部分视觉素材未加载，已使用占位显示。','error');}
    await refreshLibrary(true);
+   loadCredentialStatus();
+   refreshNews();
    const initial=MobileNavigation.initialPage(state);navigation=MobileNavigation.createNavigation(initial);switchTab(initial,{replace:true,resetScroll:true});
    const login=await MobileServices.api('/login');state.login=login;if(active()||login.pending_result||login.report){switchTab('query');handleLogin(login);if(active())scheduleLogin();}MobileRender.profile(state);await refreshCatalog();checkCatalog(false);setInterval(()=>checkCatalog(false),6*3600*1000);
   }catch(error){notify(error.message||'应用初始化未完成，请重试。','error');}

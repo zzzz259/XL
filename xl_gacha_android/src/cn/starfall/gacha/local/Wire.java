@@ -19,7 +19,10 @@ final class Wire {
  static byte[] bytes(List<Field> fields,int n){for(Field f:fields)if(f.n==n&&f.w==2)return f.bytes;return new byte[0];}
  static Map<String,Object> profile(byte[] body)throws IOException{
   List<Field> rsp=fields(body),actor=fields(bytes(rsp,2)),head=fields(bytes(actor,18));Map<String,Object> out=new HashMap<>();
-  out.put("nickname",new String(bytes(actor,6),java.nio.charset.StandardCharsets.UTF_8));out.put("game_uid",String.valueOf(number(actor,2)));out.put("level",number(actor,4));out.put("face_id",number(actor,8));
+  // Game-server display names may contain controls that strict archive imports reject.
+  // Normalize only this live display field before passing it to the archive boundary.
+  String nickname=new String(bytes(actor,6),java.nio.charset.StandardCharsets.UTF_8).replaceAll("[\\x00-\\x1f\\x7f]+"," ").trim();
+  out.put("nickname",nickname);out.put("game_uid",String.valueOf(number(actor,2)));out.put("level",number(actor,4));out.put("face_id",number(actor,8));
   out.put("fashion_id",number(head,1));out.put("head_id",number(head,2));out.put("head_rect_id",number(head,3));out.put("head_rect_stamp",number(head,4));out.put("head_rect_extra",number(head,5));out.put("head_rect_item_uid",String.valueOf(number(head,6)));out.put("server_time",number(rsp,3));
   return out;
  }

@@ -13,7 +13,7 @@ public final class BiliAuthActivity extends Activity {
   super.onCreate(saved);current=this;
   LinearLayout layout=new LinearLayout(this);layout.setOrientation(1);int pad=(int)(24*getResources().getDisplayMetrics().density);layout.setPadding(pad,pad,pad,pad);
   layout.setOnApplyWindowInsetsListener((v,i)->{v.setPadding(pad+i.getSystemWindowInsetLeft(),pad+i.getSystemWindowInsetTop(),pad+i.getSystemWindowInsetRight(),pad+i.getSystemWindowInsetBottom());return i;});
-  TextView text=new TextView(this);text.setTextSize(18);text.setText("请在哔哩哔哩的官方页面确认授权。\n\n返回后自动识别账号并查询全部已知卡池，不需要输入 UID。\n\n若 B 站启动广告遮住授权页面，请关闭广告，或从最近任务返回此页面。账号凭据仅用于本次查询，不写入存档。");layout.addView(text);
+  TextView text=new TextView(this);text.setTextSize(18);text.setText("请在哔哩哔哩的官方页面确认授权。\n\n返回后自动识别账号并查询全部已知卡池，不需要输入 UID。\n\n若 B 站启动广告遮住授权页面，请关闭广告，或从最近任务返回此页面。账号凭据加密保存在本机，用于后续刷新，不写入记录备份。");layout.addView(text);
   Button cancel=new Button(this);cancel.setText("取消并返回手记");cancel.setOnClickListener(v->{MainActivity.phase("cancelled","已取消 B 服授权。");back();});layout.addView(cancel);setContentView(layout);
   if(saved==null){
    try{BiliAuthClient.config(this);MainActivity.phase("waiting","请在 B 站官方页面确认授权…");Intent intent=new Intent("tv.danmaku.bili.action.AUTHORIZE").setComponent(new ComponentName("tv.danmaku.bili","tv.danmaku.bili.activities.login.SSOActivity")).putExtra("package_name",getPackageName());startActivityForResult(intent,AUTH);}

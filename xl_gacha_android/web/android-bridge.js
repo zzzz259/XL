@@ -41,6 +41,7 @@
   if(path==='/api/visual/status')return native('visualStatus');
   if(path==='/api/visual/check')return native('visualCheck',body);
   if(path==='/api/catalog')return native('catalogStatus');
+  if(path==='/api/news')return native('appNews',body);
   if(path==='/api/catalog/check')return native('catalogCheck',body);
   if(path==='/api/catalog/source')return native('catalogSource',body);
   if(path==='/api/login'){
@@ -66,9 +67,18 @@
    if(!sources.length||sources.length>500)MobileEngine.fail();return {reports:await merge(sources,body.target,body.label)};
   }
   const report=rows.find(r=>r.account.id===body.id);if(!report)MobileEngine.fail('ACCOUNT_NOT_FOUND');
+  if(path==='/api/library/refresh'){
+   const raw=await native('querySaved',{id:report.account.id});
+   const identity=await MobileEngine.identity({uid:raw.uid,channel:raw.channel});if(identity.id!==report.account.id)MobileEngine.fail('ACCOUNT_ID_MISMATCH');
+   return (await merge([{records:raw.records,queries:raw.queries,partial:raw.partial,account:{...raw.profile,uid:raw.uid,channel:raw.channel}}],null,null,raw.catalog_snapshot))[0];
+  }
+  if(path==='/api/credentials/status')return native('credentialStatus',{id:report.account.id});
+  if(path==='/api/credentials/configure')return native('credentialConfigure',{id:report.account.id,enabled:body.enabled});
+  if(path==='/api/credentials/import')return native('credentialImport',{id:report.account.id,content:body.content});
+  if(path==='/api/credentials/delete')return native('credentialDelete',{id:report.account.id});
   if(path==='/api/library/open'){await write([],report.account.id);return report;}
   if(path==='/api/library/rename'){if(typeof body.label!=='string'||!body.label.trim()||body.label.length>60||/[\x00-\x1f]/.test(body.label))MobileEngine.fail('INVALID_LABEL');report.account.label=body.label.trim();await write([report]);return report;}
-  if(path==='/api/library/delete'){await write([],null,body.id);return {deleted:true};}
+  if(path==='/api/library/delete'){await native('credentialDelete',{id:body.id});await write([],null,body.id);return {deleted:true};}
   MobileEngine.fail('NOT_FOUND');
  }
  let queue=Promise.resolve();

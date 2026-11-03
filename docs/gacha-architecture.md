@@ -39,3 +39,5 @@ catalog schema_version=1，cards 为正 ID → `[名称,星级]`，pools 为正 
 `xl_gacha_web/scripts/update_catalog.py` 仅用于开发者重建内置基线，不是运行时远程发布器；公共发布用 server 的模块 CLI。静态公网只开放两个严格 JSON 路径规则，不开放控制 API/整个 data。Windows 与 Android 二进制更新分别依赖完整ZIP迁移和同签名覆盖安装，公共配置不下载代码。
 
 视觉素材的原生下载、版本化缓存、本地路由及发布契约见[视觉资源更新接口](gacha-visual-assets.md)。0.4 起页面和 Canvas 共用裁切元数据，玩家头像/框按原 FGUI 几何叠加，长图采用独立 1080px 布局。
+
+0.4.2 的原生凭据隔离、Keystore 加密、研发保留的 SDK 续签调度和独立公告协议见[本机凭据与 SDK 续签](gacha-credentials.md)。

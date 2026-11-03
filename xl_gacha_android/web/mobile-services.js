@@ -10,6 +10,8 @@ const MobileServices=(()=>{
  const messages={
   INVALID_INPUT:'请粘贴完整的 JWT 字符串或官网 HP 对象。',INVALID_CREDENTIAL_INPUT:'没有识别到有效凭据，请复制完整值。',
   CREDENTIAL_EXPIRED:'登录凭据已过期，请重新登录。',WRONG_APP:'当前凭据不属于支持的星落应用。',
+  CREDENTIAL_MISSING:'此账号尚无保存的凭据，请先登录。',CREDENTIAL_STORAGE_ERROR:'本机凭据无法读取或保存，请检查存储空间并重新登录。',
+  RENEWAL_PROFILE_REQUIRED:'请先导入当前账号完整的 SDK 续签状态。',INVALID_RENEWAL_PROFILE:'SDK 续签状态不完整、已过期或不适用于此账号。',
   APP_ID_MISMATCH:'凭据包装键与应用 ID 不一致。',AMBIGUOUS_CREDENTIAL_INPUT:'内容包含多个登录会话，请只保留一个。',
   DEVICE_MISMATCH:'凭据中的设备字段不一致。',PROVIDER_MISMATCH:'凭据中的登录渠道不一致。',
   ACTOR_NOT_FOUND:'认证成功，但没有找到对应游戏角色。',GATEWAY_NETWORK_ERROR:'无法连接游戏网关，请检查网络后重试。',

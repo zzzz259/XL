@@ -10,18 +10,21 @@ import java.security.MessageDigest;
 import java.util.*;
 
 final class GachaClient {
- static class Credential {String token,uid,provider,guid;Credential(String t,String u,String p,String g){token=t;uid=u;provider=p;guid=g;}}
+ static class Credential {String token,uid,provider,guid,appId="";long issuedAt,refreshAfter,expiresAt;Credential(String t,String u,String p,String g){token=t;uid=u;provider=p;guid=g;}}
  static IOException error(String code){return new IOException(code);}
  static Credential credential(String raw)throws Exception{
+  return credential(raw,true);
+ }
+ static Credential credential(String raw,boolean enforceExpiry)throws Exception{
   if(raw==null||raw.length()>65536)throw error("INVALID_CREDENTIAL_INPUT");String token=raw.trim();
   if(token.startsWith("{")){JSONObject j=new JSONObject(token);Object v=j.has("HP_2070021")?j.get("HP_2070021"):j.has("HP_2070023")?j.get("HP_2070023"):j;if(v instanceof String&&((String)v).trim().startsWith("{"))v=new JSONObject((String)v);token=v instanceof JSONObject?((JSONObject)v).getString("jwt"):String.valueOf(v);}
   String[] parts=token.split("\\.");if(parts.length!=3)throw error("INVALID_CREDENTIAL_INPUT");
   JSONObject c=new JSONObject(new String(Base64.decode(parts[1],Base64.URL_SAFE|Base64.NO_WRAP|Base64.NO_PADDING),StandardCharsets.UTF_8));
   String app=c.optString("appid"),uid=c.optString("uid"),provider=c.optString("provider"),guid=c.getString("guid");
   if(!app.equals("2070021")&&!app.equals("2070023"))throw error("WRONG_APP");
-  if(c.optDouble("exp",0)<=System.currentTimeMillis()/1000.0)throw error("CREDENTIAL_EXPIRED");
+  if(enforceExpiry&&c.optDouble("exp",0)<=System.currentTimeMillis()/1000.0)throw error("CREDENTIAL_EXPIRED");
   if(uid.isEmpty()||!provider.matches("[A-Za-z0-9_-]{1,64}"))throw error("INVALID_CREDENTIAL_INPUT");
-  guid=UUID.fromString(guid).toString();return new Credential(token,uid,provider,guid);
+  guid=UUID.fromString(guid).toString();Credential result=new Credential(token,uid,provider,guid);result.appId=app;result.issuedAt=c.optLong("iat");result.refreshAfter=c.optLong("vfp");result.expiresAt=c.optLong("exp");return result;
  }
  static String accountId(String uid,String provider)throws Exception{byte[] hash=MessageDigest.getInstance("SHA-256").digest((provider+":"+uid).getBytes(StandardCharsets.UTF_8));StringBuilder out=new StringBuilder("account-");for(int i=0;i<16;i++)out.append(String.format(Locale.ROOT,"%02x",hash[i]&255));return out.toString();}
  static byte[] bounded(InputStream in,int limit)throws Exception{ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1){if(out.size()+n>limit)throw error("RESPONSE_TOO_LARGE");out.write(b,0,n);}return out.toByteArray();}
@@ -74,6 +77,8 @@ final class GachaClient {
     if(i+1<selectors.length())Thread.sleep(1000);
    }
   }
-  if(!accepted)throw error("ALL_HISTORY_QUERIES_REJECTED");return new JSONObject().put("uid",c.uid).put("channel",c.provider).put("records",records).put("queries",queries).put("partial",partial).put("catalog_snapshot",catalog).put("profile",player);
+  if(!accepted)throw error("ALL_HISTORY_QUERIES_REJECTED");
+  boolean cached=true;try{CredentialStore.save(context,c);}catch(Exception e){cached=false;}
+  return new JSONObject().put("uid",c.uid).put("channel",c.provider).put("records",records).put("queries",queries).put("partial",partial).put("catalog_snapshot",catalog).put("profile",player).put("credential_cached",cached);
  }
 }

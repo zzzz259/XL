@@ -23,6 +23,17 @@ test('overview preserves totals and derives primary and non-empty extra categori
  assert.equal(JSON.stringify(demo),original);
 });
 
+test('featured averages divide all visible pulls by UP count and do not reuse cached five-star averages',()=>{
+ const source={pull_count:510,five_count:12,up_count:7,off_count:5,average_five_interval:42.5};
+ const report={summary:{pull_count:1530,rarity_counts:{5:36},pool_pull_counts:{}},analysis:{categories:{normal:{...source},limited:{...source},collection:{...source}}}};
+ const values=Object.fromEntries(MobileView.summary(report).categories.map(value=>[value.key,value.average]));
+ assert.equal(values.normal,42.5);
+ assert.equal(values.limited.toFixed(1),'72.9');
+ assert.equal(values.collection.toFixed(1),'72.9');
+ report.analysis.categories.limited.up_count=0;
+ assert.equal(MobileView.summary(report).categories.find(value=>value.key==='limited').average,null);
+});
+
 test('recent five-star events are newest first and retain pool and uncertainty context',()=>{
  const view=MobileView.summary(demo,100);
  assert.equal(view.recentFive.length,demo.summary.rarity_counts['5']);

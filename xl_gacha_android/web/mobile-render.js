@@ -61,11 +61,13 @@ const MobileRender=(()=>{
    const outcomes=el('strong',undefined,'career-outcomes');
    if(key==='normal')outcomes.textContent=String(value.five_count);else outcomes.append(el('span',String(value.up_count),'up'),el('span','/','career-outcome-divider'),el('span',String(value.off_count),'off'));
    count.append(outcomes,el('span',key==='normal'?'出卡数':'UP/歪'));
-   const avg=value.average_five_interval===null?'—':Number(value.average_five_interval).toFixed(1);average.append(el('strong',avg),el('span',key==='normal'?'五星平均':'平均UP'));
+   const mean=MobileView.categoryAverage(key,value),avg=mean===null?'—':Number(mean).toFixed(1);average.append(el('strong',avg),el('span',key==='normal'?'五星平均':'平均UP'));
    metrics.append(count,average);
    const pity=el('div',undefined,'career-pity'),countText=value.pull_count?`${value.since_five_exact?'':'≥'}${MobileView.number(value.since_five)}`:'—';
    if(value.pull_count&&value.hard_pity){const fill=el('div',undefined,`career-pity-fill${value.since_five_exact?'':' uncertain'}`);fill.style.width=`${Math.min(100,value.since_five/value.hard_pity*100)}%`;pity.append(fill);}
-   pity.append(el('span',`已垫 ${countText} / ${value.hard_pity||'—'}`,'career-pity-text'));card.append(pulls,metrics,pity);list.append(card);
+   const pityText=el('span',`已垫 ${countText} / ${value.hard_pity||'—'}`,'career-pity-text');
+   if(key!=='normal'&&value.next_guaranteed===true){const badge=el('span','保','career-guarantee');badge.title='下个五星为大保底 UP';badge.setAttribute('aria-label',badge.title);pityText.append(badge);}
+   pity.append(pityText);card.append(pulls,metrics,pity);list.append(card);
   }
   const extra=$('career-extra');extra.replaceChildren();const unknown=source.unknown;if(unknown?.pull_count)extra.append(el('span',`未分类另计 ${MobileView.number(unknown.pull_count)} 抽 · ${unknown.five_count} 个五星`));extra.hidden=!extra.children.length;
   const tags=$('career-tags');tags.replaceChildren(...(insights?.tags||[]).map(tag=>el('span',MobileInsights.tagText(tag),`career-tag ${tag.key}`)));tags.hidden=!tags.children.length;

@@ -100,3 +100,11 @@ test('server receipt anchor survives profile normalization and archive round tri
  for(const invalid of [-1,1.5,true,'not-a-clock'])await assert.rejects(engine.identity({...source,server_time_received_at:invalid}));
  assert.equal((await engine.identity({uid:'555',channel:'sms'})).server_time_received_at,undefined,'legacy profiles retain missing anchors for renderer fallback');
 });
+
+test('archive profile validation remains strict for U+0016 while preserving ordinary Unicode names',async()=>{
+ await assert.rejects(engine.identity({uid:'nickname-qa',channel:'sms',nickname:'\u0016合成玩家'}),/INVALID_ARCHIVE/);
+ const account=await engine.identity({uid:'nickname-qa',channel:'sms',nickname:'合成🌟玩家'});
+ assert.equal(account.nickname,'合成🌟玩家');
+ assert.equal(account.uid,'nickname-qa');
+ assert.equal(account.channel,'sms');
+});
