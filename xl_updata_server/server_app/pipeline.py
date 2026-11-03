@@ -41,6 +41,10 @@ class ProcessResult:
     warnings: tuple[str, ...] = ()
     schedule_enabled: bool = True
     portrait_pin: SourcePin | None = field(default=None, repr=False)
+    card_intent: dict | None = field(default=None, repr=False)
+    portrait_ready_ref: object | None = field(default=None, repr=False)
+    portrait_source_state: str = "failed"
+    portrait_pin_digest: str | None = None
 
 
 class UpdatePipeline:
@@ -55,12 +59,21 @@ class UpdatePipeline:
         raise RuntimeError("update processor is not configured")
 
     def run_once(self) -> ProcessResult:
+        from .portraits.core_outcomes import CoreJournalError, CoreReader, current_run
+        context = current_run() if self.publication is not None else None
+        if self.publication is not None and (context is None or context.journal.publication is not self.publication or self.data_dir.absolute() != self.publication.data_root):
+            raise ValueError("enabled pipeline requires owned core run context")
+        if context is not None:
+            context.journal._owned()
+        result = ProcessResult()
+        core_returned = False
         self.data_dir.mkdir(parents=True, exist_ok=True)
         workspace = VersionWorkspace.create(self.versions_dir)
         try:
-            result = self.processor(workspace.root)
-            if not isinstance(result, ProcessResult):
+            candidate = self.processor(workspace.root)
+            if not isinstance(candidate, ProcessResult):
                 raise TypeError("update processor must return ProcessResult")
+            result = candidate
             if result.processed:
                 publish_version(workspace, self.versions_dir, result.version_timestamp)
                 if result.schedule_enabled:
@@ -80,19 +93,59 @@ class UpdatePipeline:
                         else:
                             warnings = warnings[:5]
                         result = replace(result, warnings=tuple(warnings))
-            if result.processed and result.portrait_pin is not None and self.publication is not None:
-                try:
+            core_returned = True
+            if context is not None:
+                self._finish_core(context, result)
+            try:
+                if context is not None:
+                    if result.portrait_ready_ref is not None:
+                        context.journal.link_source(context.run_id, result.portrait_ready_ref)
+                    elif not result.error and result.portrait_pin is None and result.portrait_source_state == 'failed':
+                        context.journal.fail_source(context.run_id, code='source_capture_unavailable')
+                if result.processed and result.portrait_pin is not None and self.publication is not None:
                     self.publication.attest_published(result.version_timestamp, schedule_enabled=result.schedule_enabled)
-                    self.publication.complete(result.version_timestamp, schedule_enabled=result.schedule_enabled)
-                except Exception:  # noqa: BLE001 - optional portrait handoff cannot fail published core
-                    result = replace(result, warnings=(*result.warnings[:4], "portrait: request deferred"))
+                    ref = self.publication.complete(result.version_timestamp, schedule_enabled=result.schedule_enabled)
+                    if context is not None:
+                        context.journal.link_source(context.run_id, ref)
+            except Exception:  # noqa: BLE001 - optional source storage cannot fail published core
+                result = replace(result, warnings=(*result.warnings[:4], "portrait: request deferred"))
             return result
         except Exception as error:
             LOGGER.exception("update processing failed")
-            return ProcessResult(error=str(error))
+            if context is not None and core_returned and CoreReader(context.journal.path, scope=context.journal.scope).read_run(context.run_id) is None:
+                raise CoreJournalError('core outcome persistence failed') from error
+            version = result.version_timestamp
+            if context is not None:
+                bound_version = context.target_version()
+                if version is None and bound_version is not None:
+                    version = int(bound_version)
+            result = replace(result, version_timestamp=version, error=str(error))
+            if context is not None and CoreReader(context.journal.path, scope=context.journal.scope).read_run(context.run_id) is None:
+                self._finish_core(context, result)
+            return result
         finally:
             if workspace.root.exists():
                 shutil.rmtree(workspace.root, ignore_errors=True)
+
+    @staticmethod
+    def _finish_core(context, result):
+        phase = 'failed' if result.error else 'published' if result.processed else 'no_change'
+        source_state = 'not_requested' if phase == 'failed' else 'pending' if result.portrait_pin is not None or result.portrait_ready_ref is not None else result.portrait_source_state
+        if phase in ('published', 'no_change') and source_state == 'failed':
+            source_state = 'pending'  # Source resolution is independent of the immutable core commit.
+        if context.target_version() is None and result.version_timestamp is not None:
+            context.bind_target(result.version_timestamp, classification='processed' if result.processed else 'noop', announcement_eligible=False)
+        context.finish(
+            phase=phase, source_state=source_state,
+            counts={name: getattr(result, name) for name in (
+                'character_count', 'skin_count', 'card_count', 'card_warning_count',
+                'card_failure_count', 'new_character_count', 'updated_character_count')},
+            warnings=tuple('core_optional_warning' for _ in result.warnings[:5]),
+            cards=result.card_intent,
+            pin_digest=result.portrait_pin.pin_digest if result.portrait_pin is not None else result.portrait_ready_ref.pin_digest if result.portrait_ready_ref is not None else result.portrait_pin_digest,
+            bootstrap_ref=result.portrait_ready_ref,
+            code='core_failed' if result.error else None,
+        )
 
     def _carry_forward_cards(self, version_timestamp: int) -> None:
         """把最近一个旧版本的图鉴长图继承进新版本目录，保证角色库不断档。

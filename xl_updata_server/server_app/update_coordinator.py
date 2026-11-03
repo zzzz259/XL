@@ -46,7 +46,7 @@ class UpdateCoordinator:
         if self.publication is None:
             self.job_store.mark_incomplete_interrupted(self.clock())
 
-    def _acquire_run(self) -> bool:
+    def _acquire_run(self, trigger: str = "manual") -> bool:
         if not self._run_lock.acquire(blocking=False):
             return False
         owned = False
@@ -56,6 +56,13 @@ class UpdateCoordinator:
                 if not owned:
                     self._run_lock.release()
                     return False
+                try:
+                    self.publication.set_guard(True)
+                except Exception:
+                    admission_id = str(uuid.uuid4())
+                    self.job_store.create(admission_id, trigger, self.clock())
+                    self.job_store.finish(admission_id, "failed", self.clock(), {"error": "updater guard unavailable"})
+                    raise
                 # A constructor cannot distinguish an abandoned job from a live
                 # sibling. Only exclusive OS ownership permits restart repair.
                 self.job_store.mark_incomplete_interrupted(self.clock())
@@ -88,7 +95,7 @@ class UpdateCoordinator:
         last_check = state.last_check
         if last_check is not None and (now - last_check).total_seconds() < interval:
             return None
-        if not self._acquire_run():
+        if not self._acquire_run("scheduled"):
             return None
         job_id = str(uuid.uuid4())
         with self._metadata_lock:
@@ -232,7 +239,31 @@ class UpdateCoordinator:
             self._finish_run()
 
     def _execute_locked(self, source: str, job_id: str | None) -> ProcessResult:
-        result = self.pipeline.run_once()
+        if self.publication is None:
+            result = self.pipeline.run_once()
+        else:
+            from .portraits.core_outcomes import (
+                CoreJournal,
+                CoreJournalError,
+                CoreReader,
+            )
+            journal = CoreJournal(self.publication)
+            journal.recover()
+            context = journal.begin_run(job_id, trigger=source)
+            with context.activate():
+                try:
+                    result = self.pipeline.run_once()
+                    if CoreReader(journal.path, scope=journal.scope).read_run(job_id) is None:
+                        if result.version_timestamp is not None:
+                            context.bind_target(result.version_timestamp, classification='noop', announcement_eligible=False)
+                        context.finish(phase='failed' if result.error else 'interrupted' if result.processed else 'no_change',
+                                       source_state='not_requested', code='pipeline_completion_unproven')
+                except CoreJournalError:
+                    raise
+                except BaseException:
+                    if CoreReader(journal.path, scope=journal.scope).read_run(job_id) is None:
+                        context.finish(phase='failed', source_state='not_requested', code='core_failed')
+                    raise
         checked_at = self.clock()
         state: ScheduleState = self.state_store.load()
         state = self.scheduler.record_check(

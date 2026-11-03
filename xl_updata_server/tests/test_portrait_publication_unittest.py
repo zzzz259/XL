@@ -6,6 +6,28 @@ from datetime import UTC
 from pathlib import Path
 
 
+def run_owned(pipeline):
+    """Exercise enabled direct fixtures through the actual updater owner boundary."""
+    import uuid
+
+    from server_app.portraits.core_outcomes import CoreJournal
+    pub = pipeline.publication
+    if pub is None:
+        return pipeline.run_once()
+    if not pub.acquire_run():
+        raise AssertionError('fixture updater owner busy')
+    try:
+        pub.set_guard(True)
+        journal = CoreJournal(pub)
+        journal.recover()
+        context = journal.begin_run(str(uuid.uuid4()), trigger='manual')
+        with context.activate():
+            return pipeline.run_once()
+    finally:
+        pub.set_guard(False)
+        pub.release_run()
+
+
 class PublicationTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(importlib.util.find_spec('server_app.portraits.publication'),
@@ -101,24 +123,27 @@ class PublicationTests(unittest.TestCase):
 
 class IntegrationTests(unittest.TestCase):
     def test_pipeline_only_completes_after_mirrors_and_warning_does_not_fail_core(self):
-        from types import SimpleNamespace
         from unittest.mock import Mock
 
         from server_app.pipeline import ProcessResult, UpdatePipeline
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            pub = Mock()
+            from server_app.portraits.publication import Publication
+            pub = Publication(root, instance_id='test', source_id='fixed', cdn_base='https://fixture.invalid')
+            raw = json.dumps({'timestamp': 123, 'data': [{'name': name, 'hash': char*32, 'size': 2, 'ver': 1} for name, char in [('Data', 'a'), ('Arts', 'b')]]}).encode()
+            pin = pub.capture(raw, version=123, version_file='fixture.json', bootstrap=False)
+            pub.attest_published = Mock()
             def process(staging):
                 (staging/'character_data/current.json').write_text('{}')
-                return ProcessResult(processed=True, version_timestamp=123, schedule_enabled=False, portrait_pin=SimpleNamespace(version='123'))
+                return ProcessResult(processed=True, version_timestamp=123, schedule_enabled=False, portrait_pin=pin)
             pipeline = UpdatePipeline(root, process, publication=pub)
             def complete(version, **kwargs):
                 self.assertTrue((root/'current_version.json').is_file())
                 self.assertTrue((root/'character_data/current.json').is_file())
                 self.assertTrue((root/'versions/123/character_cards').is_dir())
                 raise OSError('secret must not reach status')
-            pub.complete.side_effect = complete
-            result = pipeline.run_once()
+            pub.complete = Mock(side_effect=complete)
+            result = run_owned(pipeline)
             self.assertTrue(result.processed)
             self.assertIsNone(result.error)
             self.assertIn('portrait: request deferred', result.warnings)
@@ -158,12 +183,12 @@ class ProcessorTests(PublicationTests):
                 if legacy: (self.root/'current_version.json').unlink(missing_ok=True)
                 processor = self.processor()
                 from server_app.pipeline import UpdatePipeline
-                result = UpdatePipeline(self.root, processor).run_once()
+                result = run_owned(UpdatePipeline(self.root, processor))
                 self.assertFalse(result.processed)
                 self.assertFalse(result.warnings)
                 self.assertFalse((self.root/'update_events.jsonl').exists())
                 self.assertEqual(len(self.pub.list_requests()), 1)
-                UpdatePipeline(self.root, processor).run_once()
+                run_owned(UpdatePipeline(self.root, processor))
                 self.assertLessEqual(processor.client.fetch_version_bytes.call_count, 1)
 
     def test_actual_data_path_survives_strict_pin_failure_single_fetch(self):
@@ -182,7 +207,7 @@ class ProcessorTests(PublicationTests):
              patch.object(module, 'parse_character_snapshot', return_value={'characters': {'1': {'name':'A'}}, 'index':[], 'words':{}}), \
              patch.object(module, '_attempt_rerun_schedule', return_value=(None, ())), \
              patch.object(module, 'stage_gacha_catalog', return_value=()):
-            result = UpdatePipeline(self.root, processor).run_once()
+            result = run_owned(UpdatePipeline(self.root, processor))
         self.assertTrue(result.processed, result.error)
         self.assertEqual(processor.client.fetch_version_bytes.call_count, 1)
         processor.client.fetch_version_catalog.assert_not_called()
@@ -232,7 +257,7 @@ class ProcessorTests(PublicationTests):
              patch.object(module, '_attempt_rerun_schedule', return_value=(None, ())), \
              patch.object(module, 'stage_gacha_catalog', return_value=()), \
              patch.object(processor, '_write_update_status', side_effect=status):
-            result = UpdatePipeline(self.root, processor).run_once()
+            result = run_owned(UpdatePipeline(self.root, processor))
         self.assertTrue(result.processed, result.error)
         self.assertEqual(observed, [[]])
         request = self.pub.read_request(self.pub.list_requests()[0])
@@ -295,7 +320,7 @@ class ProcessorTests(PublicationTests):
         self.write('character_data/current.json', {'version':123, 'characters':{}, 'index':[], 'words':{}})
         processor = self.processor()
         from server_app.pipeline import UpdatePipeline
-        result = UpdatePipeline(self.root, processor).run_once()
+        result = run_owned(UpdatePipeline(self.root, processor))
         self.assertFalse(result.processed)
         self.assertTrue(result.warnings)
         processor.client.fetch_version_bytes.assert_not_called()
@@ -418,11 +443,11 @@ class ProcessorTests(PublicationTests):
             return ProcessResult(processed=True,version_timestamp=123,portrait_pin=pin,schedule_enabled=False)
         pipeline = UpdatePipeline(self.root, process, publication=self.pub)
         with patch.object(pipeline, '_carry_forward_cards', side_effect=OSError('final phase failed')), self.assertLogs('server_app.pipeline', level='ERROR'):
-            result = pipeline.run_once()
+            result = run_owned(pipeline)
         self.assertTrue(result.error)
         self.assertEqual(self.pub.reconcile(), [(1,123,'failed')])
         self.assertEqual(self.pub.list_requests(), [])
-        bootstrap = UpdatePipeline(self.root, self.processor()).run_once()
+        bootstrap = run_owned(UpdatePipeline(self.root, self.processor()))
         self.assertTrue(bootstrap.warnings)
         self.assertEqual(self.pub.list_requests(), [])
 
@@ -516,7 +541,7 @@ class ProcessorTests(PublicationTests):
             self.pub.stage_cards(123,reason='baseline')
             return ProcessResult(processed=True,version_timestamp=123,portrait_pin=pin,schedule_enabled=False)
         with patch.object(self.pub,'_write_request',side_effect=OSError('request crash')):
-            result = UpdatePipeline(self.root,process,publication=self.pub).run_once()
+            result = run_owned(UpdatePipeline(self.root,process,publication=self.pub))
         self.assertTrue(result.processed)
         self.assertIsNone(result.error)
         self.assertIn('portrait: request deferred',result.warnings)

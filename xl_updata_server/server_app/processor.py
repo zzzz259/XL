@@ -21,7 +21,12 @@ from .gacha_catalog import stage_gacha_catalog
 from .gacha_history import rebuild_gacha_history
 from .lua_decoder import decode_lua_directory
 from .pipeline import ProcessResult
-from .rerun_schedule import DEFAULT_ANCHOR, project_schedule, publish_schedule_snapshot, render_schedule_png
+from .rerun_schedule import (
+    DEFAULT_ANCHOR,
+    project_schedule,
+    publish_schedule_snapshot,
+    render_schedule_png,
+)
 from .selector import bundle_hashes_for_assets, select_lua_assets
 from .versioning import read_current_pointer
 
@@ -271,13 +276,23 @@ class ProductionUpdateProcessor:
 
     def __call__(self, staging: Path) -> ProcessResult:
         update_info = self.client.fetch_update_info()
+        from .portraits.core_outcomes import current_run
+        context = current_run()
+        if self.publication is not None and (context is None or context.journal.publication is not self.publication or self.config.data_dir.absolute() != self.publication.data_root):
+            raise ValueError("enabled processor requires owned core run context")
         current_version = read_current_pointer(self.config.data_dir)
         if current_version == update_info.timestamp:
+            if context is not None:
+                context.bind_target(update_info.timestamp, classification='bootstrap', announcement_eligible=False)
             return self._portrait_bootstrap(update_info)
         current = _load_current(self.config.data_dir / "character_data" / "current.json")
         if current_version is None and current and int(current.get("version", 0)) == update_info.timestamp:
+            if context is not None:
+                context.bind_target(update_info.timestamp, classification='bootstrap', announcement_eligible=False)
             return self._portrait_bootstrap(update_info)
 
+        if context is not None:
+            context.bind_target(update_info.timestamp, classification='processed', announcement_eligible=True)
         # 进入真实处理前向 Bot 广播更新开始；结束（含失败）后写出结果状态
         self._write_update_status(updating=True, version=update_info.timestamp)
         try:
@@ -304,9 +319,9 @@ class ProductionUpdateProcessor:
             except FileNotFoundError:
                 raw = self.client.fetch_version_bytes(update_info.file)
                 self.publication.capture(raw, version=update_info.timestamp, version_file=update_info.file)
-            self.publication.complete(update_info.timestamp,
+            ready_ref = self.publication.complete(update_info.timestamp,
                                       schedule_enabled=getattr(self.config, "rerun_schedule_enabled", True))
-            return ProcessResult()
+            return ProcessResult(version_timestamp=update_info.timestamp, portrait_ready_ref=ready_ref)
         except Exception as error:  # noqa: BLE001 - isolate optional metadata failures
             if isinstance(error, (ValueError, FileNotFoundError)):
                 try:
@@ -314,7 +329,8 @@ class ProductionUpdateProcessor:
                                              'missing-pin' if isinstance(error, FileNotFoundError) else 'invalid-core')
                 except (OSError, ValueError):
                     pass
-            return ProcessResult(warnings=("portrait: bootstrap deferred",))
+            return ProcessResult(version_timestamp=update_info.timestamp, warnings=("portrait: bootstrap deferred",),
+                                 portrait_source_state="failed" if isinstance(error, (ValueError, FileNotFoundError)) else "pending")
 
     def _write_update_status(
         self,
@@ -337,9 +353,13 @@ class ProductionUpdateProcessor:
         )
         # 事件流水：开始/结束各追加一行，Bot 按行消费，
         # 避免短于轮询间隔的快速更新被漏报
+        from .portraits.core_outcomes import current_run
+        context = current_run()
+        correlation = {"run_id": context.run_id} if context is not None else {}
         event = "start" if updating else "finish"
         line = json.dumps(
             {
+                **correlation,
                 "event": event,
                 "version": version,
                 "new_characters": new_characters,
@@ -356,7 +376,9 @@ class ProductionUpdateProcessor:
     def _process(self, staging: Path, update_info, current: dict | None) -> ProcessResult:
         total_started = time.perf_counter()
         portrait_pin = None
+        portrait_pin_digest = None
         portrait_warnings = ()
+        portrait_source_state = "failed"
         if self.publication is None:
             version_catalog = self.client.fetch_version_catalog(update_info.file)
         else:
@@ -365,7 +387,9 @@ class ProductionUpdateProcessor:
             try:
                 portrait_pin = self.publication.capture(raw, version=update_info.timestamp,
                                                         version_file=update_info.file, bootstrap=False)
-            except Exception:  # noqa: BLE001 - isolate optional metadata failures
+                portrait_pin_digest = portrait_pin.pin_digest
+            except Exception as error:  # noqa: BLE001 - isolate optional metadata failures
+                portrait_source_state = "pending" if isinstance(error, OSError) else "failed"
                 portrait_warnings = ("portrait: invalid or unavailable source pin",)
                 try:
                     self.publication.failure(update_info.timestamp, 'invalid-pin')
@@ -468,15 +492,19 @@ class ProductionUpdateProcessor:
             LOGGER.info("stage=export_character_cards skipped reason=cards.enabled=false")
 
         def freeze_cards(raw):
-            nonlocal portrait_pin, portrait_warnings
+            nonlocal portrait_pin, portrait_warnings, portrait_source_state
             if portrait_pin is not None:
                 try:
                     self.publication.stage_cards(update_info.timestamp, reason='no-new-output', manifest_bytes=raw)
                     return self.publication.frozen_card_manifest(update_info.timestamp)
-                except Exception:  # noqa: BLE001 - isolate optional metadata failures
+                except Exception as error:  # noqa: BLE001 - isolate optional metadata failures
+                    portrait_source_state = "pending" if isinstance(error, OSError) else "failed"
                     portrait_pin = None
                     portrait_warnings = ("portrait: card evidence deferred",)
 
+        card_intent = {'kind': 'handoff_unresolved'}
+        if is_baseline or not self.config.render_cards or not any(str(cid) in new_character_ids for cid, _ in card_report.character_outputs):
+            card_intent = {'kind': 'none', 'reason': 'baseline' if is_baseline else 'disabled-cards' if not self.config.render_cards else 'no-new-output'}
         if new_character_ids and not is_baseline:
             _write_outbox(
                 self.config.data_dir, update_info.timestamp, card_report, characters,
@@ -528,13 +556,17 @@ class ProductionUpdateProcessor:
         )
         if portrait_pin is not None:
             try:
-                self.publication.stage_cards(update_info.timestamp, reason=(
+                card_intent = self.publication.stage_cards(update_info.timestamp, reason=(
                     'baseline' if is_baseline else 'disabled-cards' if not self.config.render_cards else 'no-new-output'))
-            except Exception:  # noqa: BLE001 - isolate optional metadata failures
+            except Exception as error:  # noqa: BLE001 - isolate optional metadata failures
+                portrait_source_state = "pending" if isinstance(error, OSError) else "failed"
                 portrait_pin = None
                 portrait_warnings = ("portrait: card evidence deferred",)
         return ProcessResult(
             portrait_pin=portrait_pin,
+            card_intent=card_intent,
+            portrait_source_state=portrait_source_state,
+            portrait_pin_digest=portrait_pin_digest,
             version_timestamp=update_info.timestamp,
             processed=True,
             downloaded_hashes=tuple(sorted(lua_hashes)),
