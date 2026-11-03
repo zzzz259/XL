@@ -21,7 +21,8 @@ def inherited_lease_kwargs(env=None):
         target = Path(path)
         if not target.is_absolute() or target.resolve(strict=True) != target or target.is_symlink():
             raise ValueError('unsafe protected worker lease path')
-        actual = os.fstat(fd); expected = target.stat()
+        actual = os.fstat(fd)
+        expected = target.stat()
         if (fd < 3 or not stat.S_ISREG(actual.st_mode) or actual.st_uid != os.getuid()
                 or actual.st_nlink != 1 or actual.st_mode & 0o077
                 or (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)):
@@ -30,13 +31,18 @@ def inherited_lease_kwargs(env=None):
         import fcntl
         probe = os.open(target, os.O_RDWR | os.O_NOFOLLOW)
         try:
-            try: fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError: pass
-            else: raise ValueError('inherited lease is not locked')
-        finally: os.close(probe)
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                pass
+            else:
+                raise ValueError('inherited lease is not locked')
+        finally:
+            os.close(probe)
         # Same inode alone is insufficient: this open-file description must own
         # the flock, not a different descriptor held by the dispatcher.
-        try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise ValueError('descriptor does not own inherited lease') from exc
     except OSError as exc:

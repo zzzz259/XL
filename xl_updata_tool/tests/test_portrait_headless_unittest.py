@@ -162,13 +162,16 @@ if mode!='nolog': print(json.dumps(dict(phase='complete',output=p['output'],widt
 '''.replace('__CAPABILITY__',repr(capability)))
         def command(job, cli, temporary_dir):
             descriptor = write_scene_descriptor(job, temporary_dir)
-            data=json.loads(descriptor.read_text());data['scene_schema_version']=schema
+            data=json.loads(descriptor.read_text())
+            data['scene_schema_version']=schema
             descriptor.write_text(json.dumps(data))
             return [sys.executable, str(script), str(descriptor), mode]
         return command
 
     def test_bounded_rows_handshake_and_original_schema_are_preserved(self):
-        api=self.api();self.package();self.request['png_working_rows']=128
+        api=self.api()
+        self.package()
+        self.request['png_working_rows']=128
         with patch.object(api,'build_scene_command',self.native('bounded',schema=2)):
             result=api.run_request(self.request)
         self.assertEqual(result['status'],'success',result)
@@ -183,7 +186,9 @@ if mode!='nolog': print(json.dumps(dict(phase='complete',output=p['output'],widt
     @unittest.skipUnless(os.name == 'posix', 'POSIX descriptor inheritance')
     def test_both_real_native_children_inherit_worker_lease(self):
         import fcntl
-        api=self.api(); self.package(); self.request['png_working_rows']=128
+        api=self.api()
+        self.package()
+        self.request['png_working_rows']=128
         with (self.root/'lease').open('w') as lock:
             os.chmod(lock.name, 0o600)
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -193,8 +198,11 @@ if mode!='nolog': print(json.dumps(dict(phase='complete',output=p['output'],widt
         self.assertEqual(result['status'],'success',result)
 
     def test_unsupported_bounded_native_never_starts_render(self):
-        api=self.api();self.package();self.request['png_working_rows']=128
-        target=self.root/'output/job-1.png';target.write_bytes(b'previous')
+        api=self.api()
+        self.package()
+        self.request['png_working_rows']=128
+        target=self.root/'output/job-1.png'
+        target.write_bytes(b'previous')
         for capability in ('old','malformed'):
             with self.subTest(capability=capability),patch.object(api,'build_scene_command',self.native('bounded',schema=2,capability=capability)):
                 result=api.run_request(self.request)
@@ -309,7 +317,7 @@ if mode!='nolog': print(json.dumps(dict(phase='complete',output=p['output'],widt
         link = self.root / 'work/escape'
         try:
             link.symlink_to(outside, target_is_directory=True)
-        except OSError as exc:
+        except OSError:
             if sys.platform != 'win32':
                 raise
             junction = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(outside)], capture_output=True, text=True)

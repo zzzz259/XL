@@ -18,4 +18,5 @@ class NativePngRegression(unittest.TestCase):
         for key in ('width', 'height', 'float_peak', 'bounds', 'frames', 'snapshot_time'):
             self.assertEqual(before[key], after[key], key)
         self.assertGreater(before['float_peak'], 1, 'fixture must exercise HDR accumulation')
-if __name__ == '__main__': unittest.main()
+if __name__ == '__main__':
+    unittest.main()
