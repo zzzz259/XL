@@ -147,10 +147,14 @@ def _canonical_character(data) -> str:
     return json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
 
 
-def _write_json(path: Path, payload: dict) -> None:
+def _write_json(path: Path, payload: dict, *, before_publish=None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".part")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    if before_publish is not None:
+        frozen = before_publish(temporary.read_bytes())
+        if frozen is not None:
+            temporary.write_bytes(frozen)
     temporary.replace(path)
 
 
@@ -214,6 +218,7 @@ def _write_outbox(
     card_report: CardExportReport,
     characters: dict[str | int, dict[str, Any]],
     only_character_ids: set[str],
+    before_publish=None,
 ) -> None:
     """把新增长图复制到 outbox 并写清单，供 QQ Bot 消费。
 
@@ -242,14 +247,15 @@ def _write_outbox(
             "name": name,
             "filename": source_path.name,
         })
-    _write_json(
-        outbox_dir / "manifest.json",
-        {
-            "version": version,
-            "created_at": datetime.now().astimezone().isoformat(),
-            "characters": items,
-        },
-    )
+    manifest = {
+        "version": version,
+        "created_at": datetime.now().astimezone().isoformat(),
+        "characters": items,
+    }
+    if before_publish is None:
+        _write_json(outbox_dir / "manifest.json", manifest)
+    else:
+        _write_json(outbox_dir / "manifest.json", manifest, before_publish=before_publish)
 
 
 class ProductionUpdateProcessor:
@@ -257,15 +263,20 @@ class ProductionUpdateProcessor:
         self.config = config
         self.client = CdnClient(config.cdn_base)
         self.catalog_dir = config.data_dir / "catalogs"
+        self.publication = None
+        if getattr(config, "portrait_sources_enabled", False):
+            from .portraits.publication import Publication
+            self.publication = Publication(config.data_dir, instance_id=config.instance_id,
+                                           source_id=config.portrait_source_id, cdn_base=config.cdn_base)
 
     def __call__(self, staging: Path) -> ProcessResult:
         update_info = self.client.fetch_update_info()
         current_version = read_current_pointer(self.config.data_dir)
         if current_version == update_info.timestamp:
-            return ProcessResult()
+            return self._portrait_bootstrap(update_info)
         current = _load_current(self.config.data_dir / "character_data" / "current.json")
         if current_version is None and current and int(current.get("version", 0)) == update_info.timestamp:
-            return ProcessResult()
+            return self._portrait_bootstrap(update_info)
 
         # 进入真实处理前向 Bot 广播更新开始；结束（含失败）后写出结果状态
         self._write_update_status(updating=True, version=update_info.timestamp)
@@ -282,6 +293,28 @@ class ProductionUpdateProcessor:
             new_characters=result.new_character_count,
         )
         return result
+
+    def _portrait_bootstrap(self, update_info):
+        if self.publication is None:
+            return ProcessResult()
+        try:
+            self.publication.check_existing_core(update_info.timestamp)
+            try:
+                self.publication.load_pin(update_info.timestamp)
+            except FileNotFoundError:
+                raw = self.client.fetch_version_bytes(update_info.file)
+                self.publication.capture(raw, version=update_info.timestamp, version_file=update_info.file)
+            self.publication.complete(update_info.timestamp,
+                                      schedule_enabled=getattr(self.config, "rerun_schedule_enabled", True))
+            return ProcessResult()
+        except Exception as error:  # noqa: BLE001 - isolate optional metadata failures
+            if isinstance(error, (ValueError, FileNotFoundError)):
+                try:
+                    self.publication.failure(update_info.timestamp,
+                                             'missing-pin' if isinstance(error, FileNotFoundError) else 'invalid-core')
+                except (OSError, ValueError):
+                    pass
+            return ProcessResult(warnings=("portrait: bootstrap deferred",))
 
     def _write_update_status(
         self,
@@ -322,7 +355,22 @@ class ProductionUpdateProcessor:
 
     def _process(self, staging: Path, update_info, current: dict | None) -> ProcessResult:
         total_started = time.perf_counter()
-        version_catalog = self.client.fetch_version_catalog(update_info.file)
+        portrait_pin = None
+        portrait_warnings = ()
+        if self.publication is None:
+            version_catalog = self.client.fetch_version_catalog(update_info.file)
+        else:
+            raw = self.client.fetch_version_bytes(update_info.file)
+            version_catalog = CdnClient.parse_version_catalog(json.loads(raw))
+            try:
+                portrait_pin = self.publication.capture(raw, version=update_info.timestamp,
+                                                        version_file=update_info.file, bootstrap=False)
+            except Exception:  # noqa: BLE001 - isolate optional metadata failures
+                portrait_warnings = ("portrait: invalid or unavailable source pin",)
+                try:
+                    self.publication.failure(update_info.timestamp, 'invalid-pin')
+                except (OSError, ValueError):
+                    pass
         data_entry = next((entry for entry in version_catalog.categories if entry.name == "Data"), None)
         if data_entry is None:
             raise ValueError("版本清单缺少 Data 分类")
@@ -419,10 +467,21 @@ class ProductionUpdateProcessor:
             )
             LOGGER.info("stage=export_character_cards skipped reason=cards.enabled=false")
 
+        def freeze_cards(raw):
+            nonlocal portrait_pin, portrait_warnings
+            if portrait_pin is not None:
+                try:
+                    self.publication.stage_cards(update_info.timestamp, reason='no-new-output', manifest_bytes=raw)
+                    return self.publication.frozen_card_manifest(update_info.timestamp)
+                except Exception:  # noqa: BLE001 - isolate optional metadata failures
+                    portrait_pin = None
+                    portrait_warnings = ("portrait: card evidence deferred",)
+
         if new_character_ids and not is_baseline:
             _write_outbox(
                 self.config.data_dir, update_info.timestamp, card_report, characters,
                 only_character_ids=new_character_ids,
+                **({"before_publish": freeze_cards} if self.publication is not None else {}),
             )
         elif is_baseline:
             LOGGER.info("stage=baseline skip_outbox version=%s reason=首跑建立基线，跳过 outbox 分发", update_info.timestamp)
@@ -467,7 +526,15 @@ class ProductionUpdateProcessor:
             card_report.created,
             card_report.failed,
         )
+        if portrait_pin is not None:
+            try:
+                self.publication.stage_cards(update_info.timestamp, reason=(
+                    'baseline' if is_baseline else 'disabled-cards' if not self.config.render_cards else 'no-new-output'))
+            except Exception:  # noqa: BLE001 - isolate optional metadata failures
+                portrait_pin = None
+                portrait_warnings = ("portrait: card evidence deferred",)
         return ProcessResult(
+            portrait_pin=portrait_pin,
             version_timestamp=update_info.timestamp,
             processed=True,
             downloaded_hashes=tuple(sorted(lua_hashes)),
@@ -478,7 +545,7 @@ class ProductionUpdateProcessor:
             card_failure_count=card_report.failed,
             new_character_count=len(new_character_ids),
             updated_character_count=len(updated_character_ids),
-            warnings=tuple((*schedule_warnings, *catalog_warnings)),
+            warnings=(*portrait_warnings, *schedule_warnings, *catalog_warnings),
             schedule_enabled=getattr(self.config, "rerun_schedule_enabled", True),
         )
 

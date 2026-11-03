@@ -7,11 +7,20 @@ import json
 import logging
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .versioning import VersionWorkspace, publish_version, read_current_pointer, write_current_pointer
+if TYPE_CHECKING:
+    from .portraits.source_io import SourcePin
+
 from .gacha_catalog import publish_catalog, read_published_catalog
+from .versioning import (
+    VersionWorkspace,
+    publish_version,
+    read_current_pointer,
+    write_current_pointer,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,13 +40,15 @@ class ProcessResult:
     updated_character_count: int = 0  # 同 ID 但内容变更、被重渲的角色数（v1 全字段比较，从严）
     warnings: tuple[str, ...] = ()
     schedule_enabled: bool = True
+    portrait_pin: SourcePin | None = field(default=None, repr=False)
 
 
 class UpdatePipeline:
-    def __init__(self, data_dir: str | Path, processor: Callable[[Path], ProcessResult] | None = None):
+    def __init__(self, data_dir: str | Path, processor: Callable[[Path], ProcessResult] | None = None, *, publication=None):
         self.data_dir = Path(data_dir)
         self.versions_dir = self.data_dir / "versions"
         self.processor = processor or self._not_configured
+        self.publication = publication if publication is not None else getattr(processor, "publication", None)
 
     @staticmethod
     def _not_configured(_staging_dir: Path) -> ProcessResult:
@@ -69,6 +80,12 @@ class UpdatePipeline:
                         else:
                             warnings = warnings[:5]
                         result = replace(result, warnings=tuple(warnings))
+            if result.processed and result.portrait_pin is not None and self.publication is not None:
+                try:
+                    self.publication.attest_published(result.version_timestamp, schedule_enabled=result.schedule_enabled)
+                    self.publication.complete(result.version_timestamp, schedule_enabled=result.schedule_enabled)
+                except Exception:  # noqa: BLE001 - optional portrait handoff cannot fail published core
+                    result = replace(result, warnings=(*result.warnings[:4], "portrait: request deferred"))
             return result
         except Exception as error:
             LOGGER.exception("update processing failed")

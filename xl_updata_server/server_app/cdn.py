@@ -83,6 +83,10 @@ class CdnClient:
     def fetch_version_catalog(self, version_file: str) -> VersionCatalog:
         validate_remote_name(version_file)
         payload = json.loads(self._get_bytes(f"{self.base_url}/{version_file}").decode("utf-8"))
+        return self.parse_version_catalog(payload)
+
+    @staticmethod
+    def parse_version_catalog(payload: dict) -> VersionCatalog:
         categories = tuple(
             CategoryInfo(
                 name=str(item["name"]),

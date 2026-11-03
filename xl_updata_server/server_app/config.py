@@ -50,6 +50,8 @@ class ServerConfig:
     rerun_schedule_forecast_limit: int = 20
     rerun_schedule_overrides: tuple[dict, ...] = ()
     instance_id: str = "default"
+    portrait_sources_enabled: bool = False
+    portrait_source_id: str = ""
 
 
 def _read_int(section: dict, key: str, default: int) -> int:
@@ -85,6 +87,11 @@ def load_config(path: str | Path) -> ServerConfig:
     instance_id = str(server.get("instance_id", environment)).strip()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", instance_id):
         raise ValueError("server.instance_id must be a lowercase instance identifier")
+    portrait = dict(raw.get("portrait_sources", {}))
+    portrait_sources_enabled = _read_bool(portrait, "enabled", False)
+    portrait_source_id = str(portrait.get("source_id", "")).strip()
+    if portrait_sources_enabled and not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", portrait_source_id):
+        raise ValueError("portrait_sources.source_id must be explicit")
     configured_polling = _read_bool(polling, "enabled", True)
     cdn_poll_enabled = configured_polling
 
@@ -206,4 +213,6 @@ def load_config(path: str | Path) -> ServerConfig:
         rerun_schedule_forecast_limit=_read_int(rerun, "forecast_limit", 20),
         rerun_schedule_overrides=tuple(parsed_overrides),
         instance_id=instance_id,
+        portrait_sources_enabled=portrait_sources_enabled,
+        portrait_source_id=portrait_source_id,
     )

@@ -25,6 +25,7 @@ class UpdateCoordinator:
     ):
         self.config = config
         self.pipeline = pipeline
+        self.publication = getattr(pipeline, "publication", None)
         self.state_store = state_store
         self.job_store = job_store or UpdateJobStore(state_store.path)
         self.clock = clock or (lambda: datetime.now().astimezone())
@@ -42,7 +43,37 @@ class UpdateCoordinator:
         self._active_job_id: str | None = None
         self._active_source: str | None = None
         self._last_result: dict | None = None
-        self.job_store.mark_incomplete_interrupted(self.clock())
+        if self.publication is None:
+            self.job_store.mark_incomplete_interrupted(self.clock())
+
+    def _acquire_run(self) -> bool:
+        if not self._run_lock.acquire(blocking=False):
+            return False
+        owned = False
+        try:
+            if self.publication is not None:
+                owned = self.publication.acquire_run()
+                if not owned:
+                    self._run_lock.release()
+                    return False
+                # A constructor cannot distinguish an abandoned job from a live
+                # sibling. Only exclusive OS ownership permits restart repair.
+                self.job_store.mark_incomplete_interrupted(self.clock())
+            return True
+        except BaseException:
+            try:
+                if owned:
+                    self.publication.release_run()
+            finally:
+                self._run_lock.release()
+            raise
+
+    def _release_run(self) -> None:
+        try:
+            if self.publication is not None:
+                self.publication.release_run()
+        finally:
+            self._run_lock.release()
 
     def run_scheduled_if_due(self, now: datetime) -> ProcessResult | None:
         if not self.config.cdn_poll_enabled:
@@ -57,10 +88,16 @@ class UpdateCoordinator:
         last_check = state.last_check
         if last_check is not None and (now - last_check).total_seconds() < interval:
             return None
-        if not self._run_lock.acquire(blocking=False):
+        if not self._acquire_run():
             return None
         job_id = str(uuid.uuid4())
         with self._metadata_lock:
+            if self.publication is not None:
+                try:
+                    self.publication.set_guard(True)
+                except Exception:
+                    self._release_run()
+                    raise
             self._idle.clear()
             self._active_job_id = job_id
             self._active_source = "scheduled"
@@ -86,17 +123,62 @@ class UpdateCoordinator:
         finally:
             self._finish_run()
 
+    def run_controlled_once(self) -> ProcessResult:
+        """Synchronous CLI execution with the same admission and finalization owner."""
+        with self._metadata_lock:
+            if not self._accepting or not self._acquire_run():
+                return ProcessResult(error="update already running")
+            job_id = str(uuid.uuid4())
+            created = False
+            try:
+                self.job_store.create(job_id, "manual", self.clock())
+                created = True
+                if self.publication is not None:
+                    self.publication.set_guard(True)
+            except Exception:
+                try:
+                    if created:
+                        self.job_store.finish(job_id, "failed", self.clock(),
+                                              {"error": "update admission failed"})
+                finally:
+                    self._release_run()
+                raise
+            self._idle.clear()
+            self._active_job_id = job_id
+            self._active_source = "manual"
+        try:
+            self.job_store.mark_running(job_id, self.clock())
+            result = self._execute_locked("manual", job_id)
+            self.job_store.finish(job_id, "failed" if result.error else "succeeded",
+                                  self.clock(), _result_fields(result))
+            return result
+        except Exception:
+            self.job_store.finish(job_id, "failed", self.clock(), {"error": "update job failed"})
+            raise
+        finally:
+            self._finish_run()
+
     def enqueue_manual(self) -> str | None:
         with self._metadata_lock:
-            if not self._accepting or not self._run_lock.acquire(blocking=False):
+            if not self._accepting or not self._acquire_run():
                 return None
             job_id = str(uuid.uuid4())
             now = self.clock()
             try:
                 self.job_store.create(job_id, "manual", now)
             except Exception:
-                self._run_lock.release()
+                self._release_run()
                 raise
+            if self.publication is not None:
+                try:
+                    self.publication.set_guard(True)
+                except Exception:
+                    try:
+                        self.job_store.finish(job_id, "failed", self.clock(),
+                                              {"error": "updater guard unavailable"})
+                    finally:
+                        self._release_run()
+                    raise
             self._idle.clear()
             self._active_job_id = job_id
             self._active_source = "manual"
@@ -115,10 +197,15 @@ class UpdateCoordinator:
                     self.clock(),
                     {"error": "worker could not start"},
                 )
+                if self.publication is not None:
+                    try:
+                        self.publication.set_guard(False)
+                    except (OSError, ValueError):
+                        pass  # Keep companion fail-closed, but always release owned run lock.
                 self._active_job_id = None
                 self._active_source = None
+                self._release_run()
                 self._idle.set()
-                self._run_lock.release()
                 raise
             return job_id
 
@@ -169,10 +256,15 @@ class UpdateCoordinator:
 
     def _finish_run(self) -> None:
         with self._metadata_lock:
+            if self.publication is not None:
+                try:
+                    self.publication.set_guard(False)
+                except (OSError, ValueError):
+                    pass  # Leave unreadable/busy guard fail-closed; next owned run repairs it.
             self._active_job_id = None
             self._active_source = None
+            self._release_run()
             self._idle.set()
-        self._run_lock.release()
 
     def status(self) -> dict:
         with self._metadata_lock:

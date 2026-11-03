@@ -90,7 +90,11 @@ def main() -> int:
     )
     if args.once:
         pipeline = UpdatePipeline(config.data_dir, processor=ProductionUpdateProcessor(config))
-        result = pipeline.run_once()
+        if pipeline.publication is None:
+            result = pipeline.run_once()
+        else:
+            coordinator = UpdateCoordinator(config, pipeline, StateStore(config.data_dir / "state.sqlite"))
+            result = coordinator.run_controlled_once()
         logging.getLogger(__name__).info("run_once result=%s", result)
         return 1 if result.error else 0
     stop_event = threading.Event()
