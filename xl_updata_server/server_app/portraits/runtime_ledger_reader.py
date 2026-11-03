@@ -252,3 +252,56 @@ class RuntimeLedgerReader:
                 "runs": db.execute("SELECT count(*) FROM runs").fetchone()[0],
                 "transitions": self._anchor[0],
             }
+
+    def read_fence(self):
+        """Exact existing ledger identity and history high-water, without mutation."""
+        with self._connection() as db:
+            high, prefix = self._continuity(db)
+            return {
+                "database_id": self.database_id,
+                "file_id": self.incarnation,
+                "sequence": high,
+                "prefix": prefix,
+            }
+
+    def read_runs_page(self, *, cursor=None, limit=16, max_bytes=MAX_DOCUMENT):
+        """Primary-key pagination over one stable ledger revision; no phase scan."""
+        if type(limit) is not int or not 1 <= limit <= 16:
+            raise ValueError("invalid runtime page limit")
+        if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_DOCUMENT:
+            raise ValueError("invalid runtime page byte bound")
+        with self._connection() as db:
+            high, prefix = self._continuity(db)
+            fence = {
+                "database_id": self.database_id,
+                "file_id": self.incarnation,
+                "sequence": high,
+                "prefix": prefix,
+            }
+            after = ""
+            if cursor is not None:
+                if (
+                    type(cursor) is not dict
+                    or set(cursor) != {"fence", "after"}
+                    or cursor["fence"] != fence
+                ):
+                    raise ValueError("runtime scan fence changed")
+                after = cursor["after"]
+                if after != "":
+                    hash_value(after)
+                    self._read(db, after)
+            items, size = [], 0
+            keys = db.execute(
+                "SELECT key FROM runs WHERE key>? ORDER BY key LIMIT ?", (after, limit)
+            ).fetchall()
+            for (key,) in keys:
+                value = self._read(db, key)
+                length = len(encode(value).encode())
+                if size + length > max_bytes:
+                    if not items:
+                        raise ValueError("first runtime mapping exceeds page bound")
+                    break
+                items.append(value)
+                size += length
+                after = key
+            return {"items": items, "cursor": {"fence": fence, "after": after}}

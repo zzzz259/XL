@@ -448,6 +448,53 @@ class RuntimeLedger(RuntimeLedgerReader):
     def start_prepare(self, identity, run_id, *, now):
         return self._start(identity, run_id, now, "prepare")
 
+    def freeze_prepare_policy(self, identity, run_id, policy):
+        """Freeze the finite metadata-only transfer policy before starting work."""
+        if type(policy) is not dict or set(policy) != {
+            "max_fetches",
+            "max_fetches_per_replay",
+            "max_wire_bytes",
+            "attempt_timeout",
+        }:
+            raise ValueError("invalid metadata transfer policy")
+        for field, maximum in (
+            ("max_fetches", 9),
+            ("max_fetches_per_replay", 3),
+            ("max_wire_bytes", 3 * 128 * 1024**2),
+            ("attempt_timeout", 300),
+        ):
+            if type(policy[field]) is not int or not 1 <= policy[field] <= maximum:
+                raise ValueError("invalid metadata transfer budget")
+        with self._edit(identity, run_id) as (_, value):
+            if "prepare_policy" in value:
+                if value["prepare_policy"] != policy:
+                    raise ValueError("immutable metadata transfer policy conflict")
+                return
+            if (
+                value["metadata_phase"] not in ("source_ready", "prepare_pending")
+                or value["prepare_budget"]["attempts"]
+            ):
+                raise ValueError("transfer policy requires unstarted preparation")
+            value["prepare_policy"] = policy
+            value["transfer_reserved"] = {"fetches": 0, "wire_bytes": 0}
+
+    def reserve_prepare_fetch(self, identity, run_id, *, wire_size):
+        """Conservative declared-byte reservation; no refunds after attempted IO."""
+        if type(wire_size) is not int or not 0 < wire_size <= 128 * 1024**2:
+            raise ValueError("invalid declared wire size")
+        with self._edit(identity, run_id) as (_, value):
+            if value["metadata_phase"] != "prepare_started":
+                raise ValueError("transfer requires started preparation")
+            policy, reserved = value["prepare_policy"], value["transfer_reserved"]
+            if (
+                reserved["fetches"] >= policy["max_fetches"]
+                or reserved["wire_bytes"] + wire_size > policy["max_wire_bytes"]
+            ):
+                return False
+            reserved["fetches"] += 1
+            reserved["wire_bytes"] += wire_size
+            return True
+
     def _retry(self, identity, run_id, now, stage, cooperative):
         number(now)
         if type(cooperative) is not bool:
@@ -469,7 +516,9 @@ class RuntimeLedger(RuntimeLedgerReader):
     def retry_prepare(self, identity, run_id, *, now, cooperative=False):
         self._retry(identity, run_id, now, "prepare", cooperative)
 
-    def source_ready(self, identity, run_id, *, request_ref, pin):
+    def source_ready(self, identity, run_id, *, request_ref, pin, recovered=False):
+        if type(recovered) is not bool:
+            raise ValueError("invalid source recovery flag")
         _metadata(request_ref)
         encode(pin)
         if (
@@ -485,7 +534,17 @@ class RuntimeLedger(RuntimeLedgerReader):
                 and value["pin"] == pin
             ):
                 return
-            if value["metadata_phase"] != "source_started":
+            allowed = (
+                (
+                    "source_pending",
+                    "source_started",
+                    "source_resolution_exhausted",
+                    "fail_link_pending",
+                )
+                if recovered
+                else ("source_started",)
+            )
+            if value["metadata_phase"] not in allowed:
                 raise ValueError("source is not started")
             if pin["version"] != value["original_observed"]["version"]:
                 raise ValueError("resolved native pin version mismatch")
@@ -495,10 +554,15 @@ class RuntimeLedger(RuntimeLedgerReader):
             ):
                 raise ValueError("original native pin mismatch")
             value.update(
-                metadata_phase="source_ready", request_ref=request_ref, pin=pin
+                metadata_phase="source_ready",
+                request_ref=request_ref,
+                pin=pin,
+                disposition="pending",
             )
 
-    def source_failed(self, identity, run_id, code):
+    def source_failed(self, identity, run_id, code, *, recovered=False):
+        if type(recovered) is not bool:
+            raise ValueError("invalid source recovery flag")
         text(code)
         with self._edit(identity, run_id) as (_, value):
             if (
@@ -506,7 +570,17 @@ class RuntimeLedger(RuntimeLedgerReader):
                 and value.get("failure_code") == code
             ):
                 return
-            if value["metadata_phase"] not in ("source_pending", "source_started"):
+            allowed = (
+                (
+                    "source_pending",
+                    "source_started",
+                    "source_resolution_exhausted",
+                    "fail_link_pending",
+                )
+                if recovered
+                else ("source_pending", "source_started")
+            )
+            if value["metadata_phase"] not in allowed:
                 raise ValueError("source failure conflicts with ready/terminal state")
             value.update(
                 metadata_phase="source_failed",
@@ -783,7 +857,10 @@ class RuntimeLedger(RuntimeLedgerReader):
         prepared_ref,
         desired,
         reader,
+        pending=False,
     ):
+        if type(pending) is not bool:
+            raise ValueError("invalid alias pending flag")
         self._owned()
         origin = self.read_run_mapping(origin_identity, origin_run_id)
         if origin["metadata_phase"] not in ("registered", "acked"):
@@ -799,6 +876,7 @@ class RuntimeLedger(RuntimeLedgerReader):
                 "source_ready",
                 "prepared",
                 "existing_plan_alias",
+                "alias_registered",
             ):
                 raise ValueError("alias conflicts with frozen intent")
             if (
@@ -821,14 +899,36 @@ class RuntimeLedger(RuntimeLedgerReader):
                 and value["prepared_ref"] != prepared_ref
             ):
                 raise ValueError("alias conflicts with already prepared evidence")
+            if value["metadata_phase"] == "alias_registered" and not pending:
+                raise ValueError("pending alias requires explicit ACK")
+            if value["metadata_phase"] == "existing_plan_alias":
+                return
             value.update(
-                metadata_phase="existing_plan_alias",
-                disposition="existing_plan_alias",
+                metadata_phase="alias_registered" if pending else "existing_plan_alias",
+                disposition="alias_pending" if pending else "existing_plan_alias",
                 plan_id=origin["plan_id"],
                 origin_core=origin["origin_core"],
                 delivery_owner=origin["delivery_owner"],
                 registration=origin["registration"],
                 prepared_ref=prepared_ref,
+            )
+
+    def ack_alias(self, identity, run_id, reader):
+        """Caller has published while current, or proved alias is now obsolete."""
+        mapping = self.read_run_mapping(identity, run_id)
+        origin = mapping["origin_core"]
+        proof = self._registration(
+            origin["identity"], origin["outcome"]["run_id"], reader
+        )
+        with self._edit(identity, run_id) as (_, value):
+            if (
+                value["metadata_phase"]
+                not in ("alias_registered", "existing_plan_alias")
+                or value["registration"] != proof
+            ):
+                raise ValueError("alias ACK requires original registration proof")
+            value.update(
+                metadata_phase="existing_plan_alias", disposition="existing_plan_alias"
             )
 
     def supersede_unregistered(self, identity, run_id, reader):

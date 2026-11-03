@@ -453,7 +453,7 @@ class CoreJournal:
             raise ValueError('invalid diagnostic code')
         self._link(run_id, {'state': 'failed', 'code': code})
 
-    def resolve_pending_source(self, original_run_id, *, outcomes_cursor, ready_ref=None):
+    def resolve_pending_source(self, original_run_id, *, outcomes_cursor, ready_ref=None, existing_only=False):
         """Resolve one original run under raw ownership and a durable outcomes fence.
 
         Returns {status: ready|failed|prerequisite|superseded, ref: MetadataRef|None,
@@ -461,9 +461,13 @@ class CoreJournal:
         OSError is retryable storage failure; malformed/conflicting evidence and
         invalid fences raise ValueError (native schema errors also propagate).
         No caller configuration, outcome or promotion grants attestation authority.
+        existing_only is a strict boolean restriction: reuse native links or an
+        installed request only, never complete a new request from a bare proof.
         Schema2 is read-only and requires an explicit operational rollout decision.
         """
         from .source_io import MetadataRef
+        if type(existing_only) is not bool:
+            raise ValueError('existing_only must be boolean')
         self._owned()
         self._writer_schema()
         if outcomes_cursor is None:
@@ -490,12 +494,22 @@ class CoreJournal:
             if ready_ref is not None and ready_ref != previous:
                 raise ValueError('source resolution conflict')
             ready_ref = previous
+        if existing_only and not link:
+            try:
+                installed = MetadataRef(**pub._record('requests', version))
+            except FileNotFoundError:
+                return {'status': 'prerequisite', 'ref': None, 'code': 'missing_existing_resolution'}
+            if ready_ref is not None and ready_ref != installed:
+                raise ValueError('source resolution conflict')
+            ready_ref = installed
         if ready_ref is None:
             try:
                 ready_ref = MetadataRef(**pub._record('requests', version))
             except FileNotFoundError:
                 pass
         if ready_ref is None:
+            if existing_only:
+                return {'status': 'prerequisite', 'ref': None, 'code': 'missing_existing_resolution'}
             # The first promoted bootstrap may repair an installed request link,
             # but never complete from proof or create fresh source evidence.
             if outcome['phase'] != 'published':
