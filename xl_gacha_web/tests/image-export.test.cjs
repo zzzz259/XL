@@ -567,14 +567,14 @@ test('mobile account art follows the game head viewport and surrounding frame ge
 test('mobile career cards retain average metrics beside counts with room before pity and tags', () => {
   assetBridge();
   const LongImage = freshLongImage(), report = imageReport();
-  report.analysis.categories.limited = {name: '限定池', pull_count: 200, five_count: 5, up_count: 3, off_count: 2, average_five_interval: 49.25, since_five: 1, hard_pity: 70};
+  report.analysis.categories.limited = {name: '限定池', pull_count: 200, five_count: 5, up_count: 4, off_count: 1, average_five_interval: 49.25, since_five: 1, hard_pity: 70};
   report.analysis.categories.collection = {name: '典藏池', pull_count: 0, five_count: 0, up_count: 0, off_count: 0, average_five_interval: null};
   globalThis.MobileInsights = {analyze: () => ({tags: [{key: 'up_streak', text: '4连UP', count: 1}]})};
   globalThis.document = {createElement: () => mockCanvas(), getElementById: () => null};
   const page = LongImage.planPages(report)[0];
   const canvas = LongImage.draw(report, page, 0, 1, 'all', {brand: null, characters: new Map(), insights: globalThis.MobileInsights.analyze()});
   const texts = canvas.ops.filter(op => op[0] === 'fillText');
-  const averages = ['66.7', '49.3', '—'].map(value => texts.find(op => op[1] === value));
+  const averages = ['66.7', '50.0', '—'].map(value => texts.find(op => op[1] === value));
   assert.ok(averages.every(Boolean), 'average values must use the same one-decimal calculation and empty state as the app');
   const labels = texts.filter(op => op[1] === '五星平均' || op[1] === '平均UP');
   assert.equal(labels.length, 3);

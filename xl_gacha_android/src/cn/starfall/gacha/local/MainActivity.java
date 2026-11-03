@@ -90,11 +90,17 @@ public class MainActivity extends Activity {
    IO.execute(()->{try{JSONObject body=new JSONObject(raw),result;
     switch(action){
      case "catalogStatus":result=catalogStatus();break;
+     case "appNews":result=AppNews.get(MainActivity.this,updates.status().optString("source",""),body.optBoolean("force"));break;
      case "catalogCheck":updates.start(body.optBoolean("force",true));result=catalogStatus();break;
      case "catalogSource":updates.setSource(body.getString("url"));updates.start(true);result=catalogStatus();break;
      case "visualStatus":result=visuals.status();break;
      case "visualCheck":visuals.start(updates.catalog(),updates.status().optString("source",""),body.optBoolean("force",true));result=visuals.status();break;
      case "query":result=GachaClient.query(getApplicationContext(),body.getString("credential"));break;
+     case "credentialStatus":result=CredentialStore.status(MainActivity.this,body.getString("id"));break;
+     case "credentialConfigure":CredentialStore.configure(MainActivity.this,body.getString("id"),body.getBoolean("enabled"));result=CredentialStore.status(MainActivity.this,body.getString("id"));break;
+     case "credentialImport":CredentialStore.importState(MainActivity.this,body.getString("id"),body.getString("content"));result=CredentialStore.status(MainActivity.this,body.getString("id"));break;
+     case "credentialDelete":CredentialStore.delete(MainActivity.this,body.getString("id"));result=object("deleted",true);break;
+     case "querySaved":{String account=body.getString("id");CredentialRenewal.renew(MainActivity.this,account);result=GachaClient.query(MainActivity.this,CredentialStore.read(MainActivity.this,account));if(!account.equals(GachaClient.accountId(result.getString("uid"),result.getString("channel"))))throw GachaClient.error("ACCOUNT_ID_MISMATCH");break;}
      case "loginStatus":result=loginStatus(MainActivity.this);break;
      case "copyBiliDiagnostics":String diagnostic="星落手记 B 服脱敏诊断（无账号 UID、令牌）\n"+BiliDiagnostics.report(MainActivity.this).toString(2);runOnUiThread(()->{((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("B 服诊断",diagnostic));Toast.makeText(MainActivity.this,"脱敏诊断已复制",Toast.LENGTH_SHORT).show();});result=object("copied",true);break;
      case "copyTapDiagnostics":runOnUiThread(()->TapLoginController.copyDiagnostic(MainActivity.this));result=object("copied",true);break;

@@ -59,6 +59,7 @@ adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.Lo
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
 adb shell am instrument -w -e mobile true cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration
 adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.MobileUiIntegration
+adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.CredentialsIntegration
 adb uninstall cn.starfall.gacha.returnqa
 ```
 

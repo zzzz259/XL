@@ -5,6 +5,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
+const actualView=require('../web/mobile-view-model.js');
 
 function harness(){
  class Element{
@@ -23,7 +24,7 @@ function harness(){
  const ids=new Map();
  const document={body:new Element(),createElement:tag=>new Element(tag),createElementNS:(_,tag)=>new Element(tag),createTextNode:text=>new Element('#text',text),getElementById:id=>{if(!ids.has(id))ids.set(id,new Element());return ids.get(id);},querySelector:()=>null,querySelectorAll:()=>[]};
  const insights={tags:[{key:'up_140',text:'旧文案',count:2}],career:null,recent:null,multi:{byPool:{}}};
- const context=vm.createContext({document,MobileAssets:{character:()=>null,player:()=>({head:null,frame:null,rank:null})},MobileView:{number:String,eventGrade:()=>null,pools:()=>[]},MobileServices:{accountName:()=> '合成玩家'},MobileInsights:{analyze:()=>insights,tagText:()=> '吃满140*2'}});
+ const context=vm.createContext({document,MobileAssets:{character:()=>null,player:()=>({head:null,frame:null,rank:null})},MobileView:{number:String,eventGrade:()=>null,pools:()=>[],categoryAverage:actualView.categoryAverage},MobileServices:{accountName:()=> '合成玩家'},MobileInsights:{analyze:()=>insights,tagText:()=> '吃满140*2'}});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/mobile-render.js'),'utf8')+'\nglobalThis.render=MobileRender;',context);
  return {render:context.render,document,insights};
 }
@@ -66,4 +67,30 @@ test('career tags use the shared insights formatter',()=>{
  const {render,document}=harness();
  render.recordPage({report:{account:{},summary:{pull_count:0,rarity_counts:{},pool_pull_counts:{}},analysis:{categories:{}}},poolCategory:'all',eventLimits:{},characterLimits:{},poolLimit:20});
  assert.equal(document.getElementById('career-tags').textContent,'吃满140*2');
+});
+
+test('career guarantee badge requires an explicit next guaranteed UP in an eligible category',()=>{
+ const {render,document}=harness();
+ const category=(name,next)=>({name,pull_count:90,five_count:2,up_count:1,off_count:1,since_five:20,since_five_exact:true,hard_pity:70,average_five_interval:45,next_guaranteed:next});
+ const state={report:{account:{},summary:{pull_count:270,rarity_counts:{5:6},pool_pull_counts:{}},analysis:{categories:{normal:category('普通池',true),limited:category('限定池',true),collection:category('典藏池',null)}}},poolCategory:'all',eventLimits:{},characterLimits:{},poolLimit:20};
+ render.recordPage(state);
+ const cards=document.getElementById('career-categories').children;
+ assert.equal(cards[0].querySelectorAll('.career-guarantee').length,0);
+ assert.equal(cards[1].querySelector('.career-guarantee')?.textContent,'保');
+ assert.equal(cards[2].querySelectorAll('.career-guarantee').length,0);
+ state.report.analysis.categories.limited.next_guaranteed=false;
+ render.recordPage(state);
+ assert.equal(document.getElementById('career-categories').querySelectorAll('.career-guarantee').length,0);
+});
+
+test('career renders average UP rather than average five-star count for the reported 510-pull case',()=>{
+ const {render,document}=harness();
+ const value={name:'典藏池',pull_count:510,five_count:12,up_count:7,off_count:5,since_five:7,since_five_exact:true,hard_pity:70,average_five_interval:42.5};
+ const state={report:{account:{},summary:{pull_count:510,rarity_counts:{5:12},pool_pull_counts:{}},analysis:{categories:{collection:value}}},poolCategory:'all',eventLimits:{},characterLimits:{},poolLimit:20};
+ render.recordPage(state);
+ let average=document.getElementById('career-categories').children[0].querySelector('.career-metrics').children[1];
+ assert.equal(average.textContent,'72.9平均UP');
+ value.up_count=0;render.recordPage(state);
+ average=document.getElementById('career-categories').children[0].querySelector('.career-metrics').children[1];
+ assert.equal(average.textContent,'—平均UP');
 });

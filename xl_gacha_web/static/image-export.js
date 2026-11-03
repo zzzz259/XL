@@ -354,14 +354,23 @@ const LongImage = (() => {
         label(s.off_count,x+114,684,28,P.red,700,54,'center');
       }
       label(key === 'normal' ? '出卡数' : 'UP/歪',x+84,714,21,P.muted,400,120,'center');
-      const average = s.average_five_interval == null || !Number.isFinite(Number(s.average_five_interval)) ? '—' : Number(s.average_five_interval).toFixed(1);
+      const mean = key === 'normal' ? s.average_five_interval : s.up_count > 0 ? s.pull_count/s.up_count : null;
+      const average = mean == null || !Number.isFinite(Number(mean)) ? '—' : Number(mean).toFixed(1);
       label(average,x+228,684,28,P.text,650,120,'center');
       label(key === 'normal' ? '五星平均' : '平均UP',x+228,714,21,P.muted,400,120,'center');
       rect(x+156,662,1,58,'#354044');
       rect(x+20,742,272,30,P.track);
       const hard = s.hard_pity || 70, since = s.since_five || 0;
       if (s.pull_count) rect(x+20,742,Math.round(272*Math.min(1,since/hard)),30,s.since_five_exact ? (key === 'collection' ? P.blue : P.teal) : P.gray);
-      label(`已垫 ${s.pull_count ? `${s.since_five_exact ? '' : '≥'}${since}` : '—'} / ${s.hard_pity || '—'}`,cx,764,21,P.text,650,264,'center');
+      const pityText = `已垫 ${s.pull_count ? `${s.since_five_exact ? '' : '≥'}${since}` : '—'} / ${s.hard_pity || '—'}`;
+      const guaranteed = key !== 'normal' && s.next_guaranteed === true;
+      const textWidth = measure(pityText,21,650), startX = cx-(textWidth+(guaranteed ? 34 : 0))/2;
+      label(pityText,startX,764,21,P.text,650,guaranteed ? 230 : 264);
+      if (guaranteed) {
+        const bx = startX+Math.min(textWidth,230)+8;
+        rect(bx,747,26,22,'#343025');
+        label('保',bx+13,764,18,P.gold,650,24,'center');
+      }
     }
     const rows = tagRows(insights?.tags, text => measure(text,22,650));
     for (const [rowIndex, row] of rows.entries()) {

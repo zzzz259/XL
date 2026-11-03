@@ -6,10 +6,14 @@ const MobileView=(()=>{
  const names={normal:'普通池',limited:'限定池',collection:'典藏池',beginner:'启程池',unknown:'未分类'};
  const number=value=>Number(value||0).toLocaleString('zh-CN');
  const percent=value=>`${Math.max(0,Math.min(100,value)).toFixed(1)}%`;
+ function categoryAverage(key,value){
+  if(!['limited','collection'].includes(key))return value.average_five_interval??null;
+  return value.up_count>0&&Number.isFinite(value.pull_count)?value.pull_count/value.up_count:null;
+ }
  function category(key,value){
   const hasRecords=Boolean(value.pull_count),limited=['limited','collection'].includes(key);
   return {key,name:value.name||names[key],pullCount:value.pull_count,fiveCount:value.five_count,
-   average:value.average_five_interval,fiveRate:value.pull_count?value.five_count/value.pull_count*100:null,upCount:value.up_count,offCount:value.off_count,
+   average:categoryAverage(key,value),fiveRate:value.pull_count?value.five_count/value.pull_count*100:null,upCount:value.up_count,offCount:value.off_count,
    guaranteedCount:value.guaranteed_count,pity:value.since_five,pityExact:value.since_five_exact,
    pityText:hasRecords?`${value.since_five_exact?'':'≥'}${number(value.since_five)}`:'—',
    hardPity:value.hard_pity,progress:hasRecords&&value.hard_pity?percent(value.since_five/value.hard_pity*100):null,
@@ -63,7 +67,7 @@ const MobileView=(()=>{
   const total=items.length,pages=Math.max(1,Math.ceil(total/pageSize)),page=Math.min(Math.max(1,Number(options.page)||1),pages);
   return {items:items.slice((page-1)*pageSize,page*pageSize),total,page,pages,pageSize};
  }
- return {summary,pools,records,number,eventGrade:MobileProbabilityApi.eventGrade};
+ return {summary,pools,records,number,categoryAverage,eventGrade:MobileProbabilityApi.eventGrade};
 })();
 
 if(typeof module!=='undefined')module.exports=MobileView;

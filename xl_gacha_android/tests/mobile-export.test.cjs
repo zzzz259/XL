@@ -41,6 +41,31 @@ test('shared long-image engine loads without the legacy desktop dialog',()=>{
  assert.equal(typeof context.module.exports.prepare,'function');
 });
 
+test('long image marks only explicitly guaranteed limited or collection pity',async()=>{
+ const LongImage=freshLongImage();assetBridge();globalThis.document={createElement:()=>mockCanvas(),getElementById:()=>null};
+ const report=imageReport(),category={pull_count:70,five_count:1,up_count:0,off_count:1,since_five:0,since_five_exact:true,hard_pity:70,next_guaranteed:true};
+ report.analysis.categories={normal:{...category,name:'普通池'},limited:{...category,name:'限定池'},collection:{...category,name:'典藏池',next_guaranteed:null}};
+ const page=LongImage.planPages(report,'all')[0],assets=await LongImage.prepare(report,[page]);
+ let canvas=LongImage.draw(report,page,0,1,'all',assets);
+ assert.equal(canvas.ops.filter(op=>op[0]==='fillText'&&op[1]==='保').length,1);
+ report.analysis.categories.limited.next_guaranteed=false;
+ canvas=LongImage.draw(report,page,0,1,'all',assets);
+ assert.equal(canvas.ops.filter(op=>op[0]==='fillText'&&op[1]==='保').length,0);
+});
+
+test('long image uses UP count for featured averages and retains normal five-star averages',async()=>{
+ const LongImage=freshLongImage();assetBridge();globalThis.document={createElement:()=>mockCanvas(),getElementById:()=>null};
+ const report=imageReport(),value={pull_count:510,five_count:12,up_count:7,off_count:5,average_five_interval:42.5,since_five:7,since_five_exact:true,hard_pity:70};
+ report.analysis.categories={normal:{...value,name:'普通池'},limited:{...value,name:'限定池'},collection:{...value,name:'典藏池'}};
+ const page=LongImage.planPages(report,'all')[0],assets=await LongImage.prepare(report,[page]);
+ let canvas=LongImage.draw(report,page,0,1,'all',assets);
+ assert.equal(canvas.ops.filter(op=>op[0]==='fillText'&&op[1]==='72.9').length,2);
+ assert.equal(canvas.ops.filter(op=>op[0]==='fillText'&&op[1]==='42.5').length,1);
+ report.analysis.categories.collection.up_count=0;
+ canvas=LongImage.draw(report,page,0,1,'all',assets);
+ assert.equal(canvas.ops.filter(op=>op[0]==='fillText'&&op[1]==='72.9').length,1);
+});
+
 function freshLongImage(){
  delete require.cache[require.resolve('../../xl_gacha_web/static/image-export.js')];
  return require('../../xl_gacha_web/static/image-export.js');
