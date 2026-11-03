@@ -119,28 +119,29 @@ def _identity(ref):
     return f'{ref.bundle_hash}:{ref.path_id}'
 
 
-def query_portrait_metadata(skeleton_path, atlas_path):
+def query_portrait_metadata(skeleton_path, atlas_path, *, launch=None):
     """Query actual CLI metadata; failures remain explicit instead of guessed names."""
     from .spine_adapter import SpineQueryRunner, _parse_animation_table, _run_spine_cli
     from app.platform.tool_locator import ToolLocator
 
-    locator = ToolLocator.create()
-    runner = SpineQueryRunner()
+    runner = SpineQueryRunner(launch=launch)
     skins = runner.query_skins(skeleton_path, atlas_path)
-    command = [runner.spine_cli, 'query', os.fspath(Path(skeleton_path).resolve()),
+    command = [*runner.command_prefix, 'query', os.fspath(Path(skeleton_path).resolve()),
                '--atlas', os.fspath(Path(atlas_path).resolve()), '--animation']
-    result = _run_spine_cli(
-        command, cwd=os.path.dirname(runner.spine_cli) or None,
-        capture_output=True, text=True, timeout=15, env=locator.subprocess_env(),
+    options = {} if launch else dict(cwd=os.path.dirname(runner.spine_cli) or None,
+        env=ToolLocator.create().subprocess_env(),
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
     )
+    run = launch.run if launch else _run_spine_cli
+    result = run(command, capture_output=True, text=True, timeout=15, **options)
+    animations = _parse_animation_table(result.stdout) if result.returncode == 0 else {}
     return {
         'internal_skins': list(skins.skin_names),
-        'animations': _parse_animation_table(result.stdout) if result.returncode == 0 else {},
-        'query_ok': skins.ok and result.returncode == 0,
+        'animations': animations,
+        'query_ok': skins.ok and result.returncode == 0 and bool(animations),
         'skin_query_stdout': skins.stdout, 'skin_query_stderr': skins.stderr,
         'animation_query_stdout': result.stdout, 'animation_query_stderr': result.stderr,
-        'diagnostic': skins.error or skins.diagnostic,
+        'diagnostic': skins.error or ('animation query failed or returned no table' if not animations else skins.diagnostic),
     }
 
 

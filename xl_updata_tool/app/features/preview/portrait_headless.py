@@ -137,7 +137,7 @@ def validate_png(path, job, completion):
             'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()}
 
 
-def run_request(payload):
+def run_request(payload, *, launch=None):
     """Run one native process; preserve any previous artifact on every failure."""
     result = {'schema_version': 1, 'job_id': payload.get('job_id', '') if isinstance(payload, dict) else '',
               'status': 'error', 'diagnostics': []}
@@ -147,8 +147,12 @@ def run_request(payload):
         result['work_directory'] = str(work)
         job = plan_request(request, work)
         from app.platform.tool_locator import ToolLocator
-        locator = ToolLocator.create()
-        command = build_scene_command(job, locator.spineviewer_cli(), work)
+        locator = ToolLocator.create() if launch is None else None
+        if launch is None:
+            command = build_scene_command(job, locator.spineviewer_cli(), work)
+        else:
+            from .scene_export_adapter import write_scene_descriptor
+            command = [*launch.native_prefix, str(write_scene_descriptor(job, work))]
         # Read the descriptor we just created, never a previous staged/final file.
         descriptors = tuple(work.glob('scene-*.json'))
         if len(descriptors) != 1:
@@ -159,14 +163,20 @@ def run_request(payload):
             raise ValueError('native output must not exist before this attempt')
         rows = request['png_working_rows']
         actual_rows = rows if descriptor['scene_schema_version'] == 2 else 0
-        native_env = locator.subprocess_env()
+        native_env = locator.subprocess_env() if locator else None
+        if launch is not None and not actual_rows:
+            raise ValueError('protected Linux runtime requires disk_rows schema 2')
         result.update(png_working_rows=actual_rows, resource_mode=(
             'disk_rows' if actual_rows else 'legacy_schema1' if rows else 'memory_default'))
         if actual_rows:
             # Query this exact command's renderer, not a different PATH tool.
-            probe = subprocess.run([*command[:2], '--capabilities'], cwd=work,
-                env=native_env, capture_output=True, text=True,
-                timeout=15, check=False, **inherited_lease_kwargs(native_env))
+            if launch is not None:
+                probe = launch.run([*command[:2], '--capabilities'],
+                    capture_output=True, text=True, timeout=15, check=False)
+            else:
+                probe = subprocess.run([*command[:2], '--capabilities'], cwd=work,
+                    env=native_env, capture_output=True, text=True,
+                    timeout=15, check=False, **inherited_lease_kwargs(native_env))
             if probe.returncode or len(probe.stdout.encode('utf-8')) > 65536:
                 raise ValueError('native bounded PNG capability query failed')
             caps = json.loads(probe.stdout)
@@ -182,8 +192,13 @@ def run_request(payload):
             (work / 'capabilities.json').write_text(json.dumps(caps), encoding='utf-8')
         with (work / 'stdout.jsonl').open('w', encoding='utf-8') as stdout, (
                 work / 'stderr.log').open('w', encoding='utf-8') as stderr:
-            process = subprocess.run(command, cwd=work, env=native_env,
-                stdout=stdout, stderr=stderr, check=False, **inherited_lease_kwargs(native_env))
+            if launch is not None:
+                process = launch.run(command, capture_output=True, text=True, check=False)
+                stdout.write(process.stdout or '')
+                stderr.write(process.stderr or '')
+            else:
+                process = subprocess.run(command, cwd=work, env=native_env,
+                    stdout=stdout, stderr=stderr, check=False, **inherited_lease_kwargs(native_env))
         if process.returncode != 0:
             raise ValueError(f'native process failed with exit code {process.returncode}; see {work}')
         completion = None
@@ -197,6 +212,8 @@ def run_request(payload):
                         Path(record.get('output', '')).resolve() == staged):
                     completion = record
         metadata = validate_png(staged, job, completion)
+        if launch is not None:
+            launch.remaining()
         target = _inside(Path(request['output_root']) / (request['job_id'] + '.png'),
                          Path(request['output_root']), 'published output')
         publish_scene_result(staged, target)

@@ -122,6 +122,7 @@ def run_external_process(
     cancel_check=None,
     cancel_input: str | bytes | None = None,
     cancel_tree: bool = False,
+    log_root: str | os.PathLike[str] | None = None,
     **kwargs,
 ) -> subprocess.CompletedProcess:
     """运行外部工具并持续保存其 stdout/stderr 与声明的原生日志。
@@ -158,9 +159,11 @@ def run_external_process(
     session = get_log_session()
     log_context = get_log_context()
     command_dir = None
-    if session and session.external_dir:
+    if log_root is not None or (session and session.external_dir):
         safe_tool = re.sub(r"[^A-Za-z0-9_.-]+", "_", tool).strip("._-") or "tool"
-        if log_context.task_id and log_context.task_id != "-":
+        if log_root is not None:
+            external_root = Path(log_root)
+        elif log_context.task_id and log_context.task_id != "-":
             external_root = session.directory / "tasks" / log_context.task_id / "external"
         else:
             external_root = session.external_dir
@@ -385,6 +388,10 @@ def run_external_process(
     result.xl_command_id = command_id
     result.xl_log_dir = command_dir
     result.xl_cancelled = cancelled
+    result.xl_stdout_truncated = stdout_capture.truncated
+    result.xl_stderr_truncated = stderr_capture.truncated
+    result.xl_stdout_bytes = stdout_capture.total_bytes
+    result.xl_stderr_bytes = stderr_capture.total_bytes
     if check and return_code != 0:
         raise subprocess.CalledProcessError(return_code, command, output=stdout_value, stderr=stderr_value)
     return result
