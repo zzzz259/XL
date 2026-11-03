@@ -24,6 +24,18 @@ class MetadataConfig:
     resource_policy: object = None
     publication_guards: tuple = ()
     legacy_status_paths: tuple = ()
+    plan_window_seconds: float = 604800
+
+    def __post_init__(self):
+        import math
+
+        value = self.plan_window_seconds
+        if (
+            type(value) not in (int, float)
+            or not math.isfinite(value)
+            or not 300 <= value <= 31536000
+        ):
+            raise ValueError("plan window must be finite in [300, 31536000]")
 
 
 class MetadataRuntime:
@@ -37,7 +49,7 @@ class MetadataRuntime:
         if config.enabled:
             self._validate_config()
 
-    def _validate_config(self):
+    def _validate_config(self, *, require_store=True):
         from .core_outcomes import CoreJournal, CoreReader
         from .executor import ResourcePolicy
         from .publication import Publication
@@ -119,8 +131,9 @@ class MetadataRuntime:
             CoreJournal(self.publication).path, scope=self.publication.scope
         )
         self.core.identity()
-        self.store_reader = PortraitReader(c.store_path, c.instance_id, c.source_id)
-        self._check_missing_ledger()
+        if require_store or c.store_path.exists():
+            self.store_reader = PortraitReader(c.store_path, c.instance_id, c.source_id)
+            self._check_missing_ledger()
 
     def _check_missing_ledger(self):
         if self.config.ledger_path.exists():
@@ -701,7 +714,7 @@ class MetadataRuntime:
                 jobs=jobs,
                 recovery={
                     "max_crashes": 2,
-                    "deadline": now + 300,
+                    "deadline": now + self.config.plan_window_seconds,
                     "backoff_seconds": 1,
                 },
             )

@@ -4,14 +4,23 @@ No writer construction, migrations, mkdir, journal-mode changes or network I/O.
 Cursors are scoped to the durable database identity. Legacy events are explicitly
 lineage_unknown and never become eligible new-format accepted artifacts.
 """
-from contextlib import contextmanager
 import json
-from pathlib import Path
 import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
 
-from .model import digest, _hash, _text, validate_job
-from .store import (MAX_RECORD_BYTES, MAX_PLAN_BYTES, _integer, _json,
-                    check_v2, plan_snapshot, validate_result, TERMINAL)
+from .model import _hash, _text, digest, validate_job
+from .store import (
+    MAX_PLAN_BYTES,
+    MAX_RECORD_BYTES,
+    TERMINAL,
+    _integer,
+    _json,
+    check_v2,
+    plan_snapshot,
+    validate_result,
+    validate_source_reference,
+)
 
 
 class PortraitReader:
@@ -169,3 +178,39 @@ class PortraitReader:
             if len(row[0].encode('utf-8'))>MAX_PLAN_BYTES: raise ValueError('oversize manifest')
             p=json.loads(row[0]); _json(p,MAX_PLAN_BYTES)
             return p
+
+    def read_job(self, job_id):
+        """Exact global immutable V2 payload, independent of current ownership."""
+        if not _hash(job_id):
+            raise ValueError('invalid job id')
+        with self._connection() as db:
+            row = db.execute('SELECT substr(payload,1,?) FROM jobs WHERE job_id=?', (MAX_RECORD_BYTES+1, job_id)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if len(row[0].encode('utf-8')) > MAX_RECORD_BYTES:
+                raise ValueError('job record exceeds bound')
+            try:
+                job = json.loads(row[0])
+            except (ValueError, RecursionError) as exc:
+                raise ValueError('malformed job') from exc
+            _json(job, MAX_RECORD_BYTES)
+            if type(job) is not dict or type(job.get('schema_version')) is not int or job['schema_version'] != 2:
+                raise ValueError('registered V2 job required')
+            if set(job) & {'attempt', 'owner', 'lease_until', 'state', 'result', 'plan_id', 'recovery_required', 'recovery', 'crash_count', 'retry_at', 'failure_class'}:
+                raise ValueError('mutable execution fields in immutable job')
+            validate_job(dict(job, schema_version=1))
+            validate_source_reference(job)
+            if (job['job_id'], job['instance_id'], job['source_id']) != (job_id, self.instance_id, self.source_id):
+                raise ValueError('job payload identity mismatch')
+            return job
+
+    def read_status(self):
+        """Fixed-size aggregate status; never returns payloads or opens a writer."""
+        with self._connection() as db:
+            jobs = dict.fromkeys(('pending', 'running', *TERMINAL), 0)
+            for state, count in db.execute('SELECT state,count(*) FROM jobs GROUP BY state'):
+                if state not in jobs:
+                    raise ValueError('unknown job state')
+                jobs[state] = count
+            total, sealed = db.execute('SELECT count(*),count(final) FROM plans').fetchone()
+            return {'jobs': jobs, 'plans': {'total': total, 'sealed': sealed, 'unsealed': total-sealed}}
