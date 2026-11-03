@@ -478,3 +478,37 @@ def normalize_bundle(verified_blob, *, cache_root, output_root):
                     actual = _stream(check,d.size-offset)
                     if actual[1] != normalized_sha: raise ValueError('conflicting normalized target')
     return NormalizedBundle(d,relative+'/'+target,d.size-offset,normalized_sha,*evidence)
+
+
+@contextmanager
+def open_normalized_bundle(normalized, *, normalized_root):
+    """Hold a no-follow verified parser view open, positioned at its first byte.
+
+    Descriptor integrity is checked, including the wire/source scope and header.
+    Authentic membership in a pinned catalog remains the caller's responsibility.
+    """
+    d = normalized
+    if type(d) is not NormalizedBundle or type(d.wire) is not VerifiedBlob:
+        raise ValueError('expected normalized source descriptor')
+    w = d.wire
+    for value in (d.format_version,d.info_compressed_size,d.info_uncompressed_size,d.flags):
+        if type(value) is not int: raise ValueError('invalid normalized header field type')
+    for value in (d.engine_version,d.player_version):
+        if type(value) is not str: raise ValueError('invalid normalized version field type')
+    for value,n in ((d.sha256,64),(w.sha256,64),(w.scope_key,64),(w.pin_digest,64),(w.wire_md5,32)):
+        _hex(value,n)
+    validate_remote_name(w.remote_name)
+    _positive(w.size,MAX_BLOB_BYTES); _positive(d.size,MAX_BLOB_BYTES)
+    if type(d.prefix_offset) is not int or not 0 <= d.prefix_offset < 4096 or d.size+d.prefix_offset != w.size:
+        raise ValueError('inconsistent normalized length')
+    relative=f'{w.scope_key}/{w.pin_digest}'
+    if w.locator != relative+'/'+digest([w.remote_name,w.wire_md5,w.size])+'.blob' or d.locator != relative+'/'+d.sha256+'.bundle':
+        raise ValueError('inconsistent normalized source locator')
+    with _directory(normalized_root,relative) as directory, _read_file(directory,d.sha256+'.bundle') as stream:
+        if _stream(stream,d.size)[1] != d.sha256: raise ValueError('normalized SHA mismatch')
+        stream.seek(0)
+        header=_header(stream.read(4096),d.size)
+        if header != (0,d.format_version,d.engine_version,d.player_version,d.info_compressed_size,d.info_uncompressed_size,d.flags):
+            raise ValueError('normalized header descriptor mismatch')
+        stream.seek(0)
+        yield stream
