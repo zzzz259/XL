@@ -236,5 +236,31 @@ def _cleanup_attempt(slot,area):
     slot._require_owner()
     if slot.poisoned or slot.process is not None or slot.fd is None:
         raise CleanupError('retained package attempt after unconfirmed ownership or reap')
+    # Prove the actual OFD still owns the private lock before deleting anything.
+    # Admission/updater state is irrelevant to cleanup of a quiescent attempt.
+    import os
+    import stat
+    try:
+        import fcntl
+        target = slot.policy.lock_path
+        actual = os.fstat(slot.fd)
+        if (not target.is_absolute() or target.resolve(strict=True) != target
+                or target.is_symlink() or not stat.S_ISREG(actual.st_mode)
+                or actual.st_uid != os.getuid() or actual.st_nlink != 1
+                or actual.st_mode & 0o077):
+            raise ValueError('unsafe cleanup lease')
+        probe = os.open(target, os.O_RDWR | os.O_NOFOLLOW)
+        try:
+            expected = os.fstat(probe)
+            if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+                raise ValueError('cleanup lease identity changed')
+            try:fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:pass
+            else:raise ValueError('cleanup lease no longer locked')
+            # A different OFD may own the same inode: identity alone is insufficient.
+            fcntl.flock(slot.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:os.close(probe)
+    except (OSError, ValueError, ImportError, AttributeError) as exc:
+        raise CleanupError('retained attempt after unconfirmed live lease') from exc
     try:shutil.rmtree(area)
     except OSError as exc:raise CleanupError('owned package cleanup failed') from exc

@@ -1,7 +1,5 @@
 """Second guarded phase: real managed metadata and private portable packages."""
 import os
-import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,16 +24,6 @@ from .source_worker import (
     _path,
     _publish,
 )
-
-
-def _copy_namespace_tools(tools, shadow):
-    if type(tools) is not dict or set(tools)!={'/usr/bin/mount','/usr/bin/sh'} or any(_sha(p)!=sha for p,sha in tools.items()):
-        raise BoundaryError('namespace operational identity mismatch')
-    for executable in ('sh','mount'):
-        source='/usr/bin/'+executable
-        shutil.copyfile(source,shadow/executable);(shadow/executable).chmod(0o755)
-        if _sha(shadow/executable)!=tools[source]:
-            raise BoundaryError('namespace copy mismatch')
 
 
 def run_request(value, *, request_path, result_path):
@@ -73,32 +61,8 @@ def run_request(value, *, request_path, result_path):
         exact_assets = validate_extraction(catalog,scene_document,ledger,a,stage_a/'materials')
         validate_arts_counts(ar['counts'],catalog,scene_document,ledger)
         identities = {(row['wire_md5'],row['path_id']) for row in ledger}
-        # Reuse accepted private mount view; no host filesystem mount is changed.
-        tools=value['namespace_tools']
-        if type(tools) is not dict or set(tools)!={'/usr/bin/mount','/usr/bin/sh'} or any(_sha(p)!=sha for p,sha in tools.items()):
-            raise BoundaryError('namespace operational identity mismatch')
-        python=_path(value['python'])
-        if _sha(python)!=value['python_sha256']:
-            raise BoundaryError('namespace Python identity mismatch')
-        from app.platform.resource_lease import inherited_lease_kwargs
-        def mount(*args):
-            guard()
-            subprocess.run(['/usr/bin/mount',*args],check=True,timeout=min(5,a['deadline']-time.monotonic()),
-                           **inherited_lease_kwargs())
-            guard()
-        ns=attempt/'ns-tmp';ns.mkdir(mode=0o1777);ns.chmod(0o1777)
-        mount('--make-rprivate','/')
-        mount('--bind',str(ns),'/tmp')
-        shadow=ns/'bin';shadow.mkdir(mode=0o700)
-        _copy_namespace_tools(tools,shadow)
-        resolved=python.resolve();shutil.copyfile(resolved,shadow/resolved.name);(shadow/resolved.name).chmod(0o755)
-        if _sha(shadow/resolved.name)!=value['python_sha256']:
-            raise BoundaryError('namespace Python copy mismatch')
-        if resolved.name!='python3':(shadow/'python3').symlink_to(resolved.name)
-        xkb=native['xkbcomp'];shutil.copyfile(xkb['path'],shadow/'xkbcomp');(shadow/'xkbcomp').chmod(0o755)
-        if _sha(shadow/'xkbcomp')!=xkb['sha256']:
-            raise BoundaryError('namespace xkbcomp identity mismatch')
-        mount('--bind',str(shadow),'/usr/bin')
+        from .private_namespace import prepare_namespace
+        prepare_namespace(value,native,attempt,guard,a['deadline'])
         from app.features.preview.portrait_config.asset_index import AssetIndex
         from app.features.preview.portrait_config.model import PortraitScene
         from app.features.preview.portrait_config.scope_policy import (
