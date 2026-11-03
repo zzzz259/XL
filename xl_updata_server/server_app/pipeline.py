@@ -144,6 +144,12 @@ class UpdatePipeline:
             cards=result.card_intent,
             pin_digest=result.portrait_pin.pin_digest if result.portrait_pin is not None else result.portrait_ready_ref.pin_digest if result.portrait_ready_ref is not None else result.portrait_pin_digest,
             bootstrap_ref=result.portrait_ready_ref,
+            source_recovery=({'kind': 'published_attestation', 'schedule_enabled': result.schedule_enabled}
+                             if phase == 'published' and result.portrait_pin is not None
+                             and result.card_intent is not None
+                             and result.card_intent.get('kind') in ('none', 'batch')
+                             and result.card_intent.get('reason') != 'bootstrap-history-unavailable'
+                             else None),
             code='core_failed' if result.error else None,
         )
 

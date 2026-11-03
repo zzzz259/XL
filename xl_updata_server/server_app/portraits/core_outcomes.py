@@ -106,7 +106,7 @@ def _cards(value, scope, pin, *, unresolved=False):
             raise ValueError('card path mismatch')
 
 
-def _validate(value, scope, run_id, table):
+def _validate(value, scope, run_id, table, schema=3):
     if value.get('scope') != scope or value.get('run_id') != run_id:
         raise ValueError('malformed journal identity')
     _hex_digest(scope)
@@ -117,6 +117,8 @@ def _validate(value, scope, run_id, table):
     if table == 'outcomes':
         required = {'run_id', 'scope', 'trigger', 'version', 'classification', 'announcement_eligible',
                     'phase', 'source_state', 'counts', 'warnings', 'cards', 'pin_digest', 'code', 'promotion'}
+        if schema == 3:
+            required.add('source_recovery')
         if set(value) != required or value['phase'] not in ('published', 'failed', 'interrupted', 'no_change'):
             raise ValueError('malformed outcome')
         if value['trigger'] not in ('manual', 'scheduled') or value['source_state'] not in ('pending', 'failed', 'not_requested'):
@@ -142,6 +144,14 @@ def _validate(value, scope, run_id, table):
         if value['pin_digest'] is not None:
             _hex_digest(value['pin_digest'])
         _cards(value['cards'], scope, value['pin_digest'], unresolved=True)
+        policy = value.get('source_recovery')
+        if policy is not None and (type(policy) is not dict or set(policy) != {'kind', 'schedule_enabled'}
+                    or policy['kind'] != 'published_attestation' or type(policy['schedule_enabled']) is not bool
+                    or value['classification'] != 'processed' or value['phase'] != 'published'
+                    or value['source_state'] != 'pending' or value['pin_digest'] is None
+                    or value['cards']['kind'] == 'handoff_unresolved'
+                    or value['cards'].get('reason') == 'bootstrap-history-unavailable'):
+            raise ValueError('invalid source recovery policy')
     elif value.get('state') == 'failed':
         if set(value) != {'run_id', 'scope', 'promotion', 'state', 'code'}:
             raise ValueError('malformed failure link')
@@ -207,7 +217,7 @@ class CoreReader:
             db.execute('PRAGMA query_only=ON')
             db.execute('BEGIN')
             rows = db.execute('SELECT schema,scope,journal_id FROM identity').fetchall()
-            if len(rows) != 1 or rows[0][:2] != (2, self.scope):
+            if len(rows) != 1 or (rows[0][0] not in (2, 3) or rows[0][1] != self.scope):
                 raise ValueError('journal scope/schema mismatch')
             _journal_identity(rows[0][2])
             if self.journal_id is not None and rows[0][2] != self.journal_id:
@@ -227,7 +237,8 @@ class CoreReader:
     def _row(self, db, table, row):
         sequence, run_id, raw, prefix = row
         value = _decode(raw)
-        _validate(value, self.scope, run_id, table)
+        schema = db.execute('SELECT schema FROM identity').fetchone()[0]
+        _validate(value, self.scope, run_id, table, schema)
         _hex_digest(prefix)
         prior = db.execute(f'SELECT prefix FROM {table} WHERE sequence<? ORDER BY sequence DESC LIMIT 1', (sequence,)).fetchone()
         if prefix != _chain(prior[0] if prior else '0'*64, sequence, raw):
@@ -237,7 +248,7 @@ class CoreReader:
             raise ValueError('journal promotion column mismatch')
         if table == 'source_links':
             outcome = _decode(parent[1])
-            _validate(outcome, self.scope, run_id, 'outcomes')
+            _validate(outcome, self.scope, run_id, 'outcomes', schema)
             if outcome['promotion'] != parent[0] or outcome['phase'] not in ('published', 'no_change'):
                 raise ValueError('source link parent mismatch')
             if value['state'] == 'ready' and outcome['pin_digest'] is not None and outcome['pin_digest'] != value['pin_digest']:
@@ -348,10 +359,26 @@ class CoreJournal:
         if (handle_stat.st_dev, handle_stat.st_ino) != (path_stat.st_dev, path_stat.st_ino):
             raise ValueError('ownership descriptor mismatch')
 
+    def _writer_schema(self):
+        # Read-only preflight precedes directory healing, PRAGMAs and DDL.
+        if self.path.exists():
+            db = sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True)
+            try:
+                # A rolled-back first transaction leaves an empty SQLite file.
+                # Only that exact empty state may retry initialization.
+                if not db.execute('SELECT 1 FROM sqlite_master LIMIT 1').fetchone():
+                    return
+            finally:
+                db.close()
+            with CoreReader(self.path, scope=self.scope)._db() as db:
+                if db.execute('SELECT schema FROM identity').fetchone()[0] != 3:
+                    raise ValueError('schema2 writer refused: operational rollout decision required')
+
     @contextmanager
     def _db(self):
         from .source_io import _directory, _sync_directory, _unsafe
         self._owned()
+        self._writer_schema()
         # SourceIO heals every ancestor entry even when a previous mkdir/flush failed.
         with _directory(self.publication.data_root, f'portrait_sources/{self.scope}', create=True) as directory:
             for suffix in ('', '-wal', '-shm'):
@@ -367,8 +394,8 @@ class CoreJournal:
                 db.execute('BEGIN IMMEDIATE')
                 db.execute('CREATE TABLE IF NOT EXISTS identity(schema INTEGER,scope TEXT,journal_id TEXT)')
                 if not db.execute('SELECT 1 FROM identity').fetchone():
-                    db.execute('INSERT INTO identity VALUES(2,?,?)', (self.scope, str(uuid.uuid4())))
-                if db.execute('SELECT schema,scope FROM identity').fetchall() != [(2, self.scope)]:
+                    db.execute('INSERT INTO identity VALUES(3,?,?)', (self.scope, str(uuid.uuid4())))
+                if db.execute('SELECT schema,scope FROM identity').fetchall() != [(3, self.scope)]:
                     raise ValueError('journal scope/schema mismatch')
                 _journal_identity(db.execute('SELECT journal_id FROM identity').fetchone()[0])
                 db.execute('CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY,payload TEXT NOT NULL)')
@@ -426,6 +453,109 @@ class CoreJournal:
             raise ValueError('invalid diagnostic code')
         self._link(run_id, {'state': 'failed', 'code': code})
 
+    def resolve_pending_source(self, original_run_id, *, outcomes_cursor, ready_ref=None):
+        """Resolve one original run under raw ownership and a durable outcomes fence.
+
+        Returns {status: ready|failed|prerequisite|superseded, ref: MetadataRef|None,
+        code: stable snake_case diagnostic|None}.
+        OSError is retryable storage failure; malformed/conflicting evidence and
+        invalid fences raise ValueError (native schema errors also propagate).
+        No caller configuration, outcome or promotion grants attestation authority.
+        Schema2 is read-only and requires an explicit operational rollout decision.
+        """
+        from .source_io import MetadataRef
+        self._owned()
+        self._writer_schema()
+        if outcomes_cursor is None:
+            raise ValueError('durable outcomes cursor required')
+        reader = CoreReader(self.path, scope=self.scope)
+        reader.read_outcomes_page(cursor=outcomes_cursor, limit=1)
+        outcome = reader.read_run(original_run_id)
+        if outcome is None:
+            return {'status': 'prerequisite', 'ref': None, 'code': 'missing_original_run'}
+        with reader._db() as db:
+            row = db.execute('SELECT sequence,run_id,substr(payload,1,65537),prefix FROM source_links WHERE run_id=?', (original_run_id,)).fetchone()
+            link = reader._row(db, 'source_links', row) if row else None
+        if link and link['state'] == 'failed':
+            if ready_ref is not None:
+                raise ValueError('source resolution conflict')
+            return {'status': 'failed', 'ref': None, 'code': link['code']}
+        promoted_bootstrap = (outcome['phase'] == 'no_change' and outcome['classification'] == 'bootstrap'
+                              and outcome['promotion'] is not None)
+        if not link and ((outcome['phase'] != 'published' and not promoted_bootstrap) or outcome['source_state'] != 'pending'):
+            return {'status': 'prerequisite', 'ref': None, 'code': 'ineligible_original_run'}
+        pub, version = self.publication, outcome['version']
+        if link:
+            previous = MetadataRef(**link['ref'])
+            if ready_ref is not None and ready_ref != previous:
+                raise ValueError('source resolution conflict')
+            ready_ref = previous
+        if ready_ref is None:
+            try:
+                ready_ref = MetadataRef(**pub._record('requests', version))
+            except FileNotFoundError:
+                pass
+        if ready_ref is None:
+            # The first promoted bootstrap may repair an installed request link,
+            # but never complete from proof or create fresh source evidence.
+            if outcome['phase'] != 'published':
+                return {'status': 'prerequisite', 'ref': None, 'code': 'ineligible_original_run'}
+            if outcome['pin_digest'] is None:
+                return {'status': 'prerequisite', 'ref': None, 'code': 'unknown_original_pin'}
+            try:
+                pin_record = pub._record('pins', version)
+            except FileNotFoundError:
+                return {'status': 'prerequisite', 'ref': None, 'code': 'missing_native_pin'}
+            try:
+                cards = pub._record('cards', version)
+            except FileNotFoundError:
+                return {'status': 'prerequisite', 'ref': None, 'code': 'missing_staged_cards'}
+            pin = pub.load_pin(version)
+            if pin.pin_digest != outcome['pin_digest'] or (outcome['cards']['kind'] != 'handoff_unresolved' and cards != outcome['cards']):
+                raise ValueError('original source pin/card mismatch')
+            if pin_record.get('bootstrap') is not False:
+                return {'status': 'prerequisite', 'ref': None, 'code': 'not_normal_capture'}
+            if outcome['cards']['kind'] == 'handoff_unresolved':
+                return {'status': 'prerequisite', 'ref': None, 'code': 'unknown_original_cards'}
+            try:
+                pub._record('proofs', version)
+            except FileNotFoundError:
+                policy = outcome['source_recovery']
+                if policy is None:
+                    return {'status': 'prerequisite', 'ref': None, 'code': 'missing_original_policy'}
+                latest = reader.latest_promotion()
+                if latest is None or (latest['run_id'], latest['promotion']) != (original_run_id, outcome['promotion']):
+                    return {'status': 'superseded', 'ref': None, 'code': 'superseded_before_attestation'}
+                # Descriptor equality is not authentication of its frozen bytes.
+                # Reject permanent conflicts and damaged batch evidence before
+                # _prove can store artifacts or install new publication authority.
+                pub._check_card_conflict(version)
+                if cards['kind'] == 'batch':
+                    manifest = pub.frozen_card_manifest(version)
+                    if hashlib.sha256(manifest).hexdigest() != cards['manifest_sha256']:
+                        raise ValueError('card evidence corrupt')
+                # Ordinary recovery requires a native current pointer, never the
+                # bootstrap/legacy-snapshot fallback inside _prove.
+                from .publication import _json
+                pointer = _json(pub._read(pub.data_root, 'current_version.json'))
+                if str(pointer.get('version')) != version:
+                    raise ValueError('current core mismatch')
+                pub._put('proofs', version, pub._prove(pin, policy['schedule_enabled']))
+            ready_ref = pub.complete(version)
+        request = pub.read_request(ready_ref)
+        if request['version'] != version or (outcome['pin_digest'] is not None and ready_ref.pin_digest != outcome['pin_digest']):
+            raise ValueError('original source identity mismatch')
+        if outcome['cards']['kind'] != 'handoff_unresolved' and request['cards'] != outcome['cards']:
+            raise ValueError('original source card mismatch')
+        pub._register_ready(version, ready_ref)
+        # A bounded exact lookup verifies that readiness really is discoverable.
+        with pub._index() as db:
+            row = db.execute('SELECT reference FROM ready WHERE version=?', (version,)).fetchone()
+            if row is None or MetadataRef(**json.loads(row[0])) != ready_ref:
+                raise ValueError('native ready reference not discoverable')
+        self.link_source(original_run_id, ready_ref)
+        return {'status': 'ready', 'ref': ready_ref, 'code': None}
+
     def link_source(self, run_id, ref):
         request = self.publication.read_request(ref)
         outcome = CoreReader(self.path, scope=self.scope).read_run(run_id)
@@ -467,7 +597,7 @@ class CoreRunContext:
                 raise ValueError('run already closed')
             db.execute('UPDATE runs SET payload=? WHERE run_id=?', (_encode(new), self.run_id))
 
-    def finish(self, *, phase, source_state, counts=None, warnings=(), cards=None, pin_digest=None, code=None, bootstrap_ref=None):
+    def finish(self, *, phase, source_state, counts=None, warnings=(), cards=None, pin_digest=None, code=None, bootstrap_ref=None, source_recovery=None):
         if phase not in ('published', 'failed', 'interrupted', 'no_change') or source_state not in ('pending', 'failed', 'not_requested'):
             raise ValueError('invalid terminal state')
         bootstrap_request = self.journal.publication.read_request(bootstrap_ref) if bootstrap_ref is not None else None
@@ -488,7 +618,7 @@ class CoreRunContext:
                 promotion = db.execute('SELECT COALESCE(MAX(promotion),0)+1 FROM outcomes').fetchone()[0]
             value.update(phase=phase, source_state=source_state, counts=counts, warnings=list(warnings)[:5],
                          cards=cards or {'kind': 'handoff_unresolved'}, pin_digest=pin_digest,
-                         code=code, promotion=promotion)
+                         code=code, promotion=promotion, source_recovery=source_recovery)
             _validate(value, self.journal.scope, self.run_id, 'outcomes')
             raw = _encode(value)
             if old:
