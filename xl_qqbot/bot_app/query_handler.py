@@ -266,6 +266,12 @@ class QueryHandler:
                 await self._sender.send_text(group_openid, "立绘安全本地上传接口暂不可用", reply_to)
                 return
             content = (f"立绘为旧版本 {result.get('source_version')}（当前目录版本 {result.get('catalog_version')}）" if status == "stale" else "")
+            if status == "stale" and result.get('reason') == 'artifact_inputs_changed':
+                content = f"已有立绘与当前输入或工具不一致，来源版本 {result.get('source_version')}"
+            elif status == "stale" and result.get('reason') == 'legacy_lineage_unknown':
+                content = f"已有立绘来源信息不完整，记录版本 {result.get('source_version')}"
+            elif status == "stale" and result.get('reason') == 'retained_artifact' and result.get('source_version') == result.get('catalog_version'):
+                content = f"当前任务尚未成功，展示已有立绘，来源版本 {result.get('source_version')}"
             sent = await send(str(result["image_path"]), content, [group_openid], reply_to)
             if not (sent.get(group_openid, False) if isinstance(sent, dict) else bool(sent)):
                 await self._sender.send_text(group_openid, "立绘图片上传失败，请稍后再试", reply_to)

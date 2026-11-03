@@ -305,7 +305,8 @@ def _metadata_ref(ref,scope=None):
     if ref['size']>32*1024**2 or not _text(ref['locator']): raise ValueError('invalid metadata reference size/locator')
 
 
-def _plan_references(p):
+def validate_source_reference(p):
+    """Validate native PreparedSourceRef identity without publication authority."""
     scope=digest([p['instance_id'],p['source_id']]); ref=p['source_capture_ref']
     fields={'schema','instance_id','source_id','version','pin_digest','tool_fingerprint','capture',
             'snapshot_digest','assigned','available','blocked','unassigned'}
@@ -318,6 +319,9 @@ def _plan_references(p):
     if ref['capture']['pin_digest']!=ref['pin_digest']: raise ValueError('capture pin mismatch')
     for key in ('assigned','available','blocked','unassigned'): _integer(ref[key],0)
     if ref['assigned']!=ref['available']+ref['blocked']: raise ValueError('prepared availability mismatch')
+def _plan_references(p):
+    validate_source_reference(p)
+    ref=p['source_capture_ref']
     # Publication scopes also bind CDN and absolute data root. Its configured
     # read_request authenticates that domain; it is not the prepared scope.
     _metadata_ref(p['core_publication_ref'])

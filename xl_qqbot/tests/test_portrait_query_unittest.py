@@ -33,6 +33,19 @@ class CatalogTests(unittest.TestCase):
         (self.root / 'catalog/v.json').write_bytes(data)
         (self.root / 'current.json').write_text(json.dumps(dict(schema_version=1, version='v', catalog_path='catalog/v.json', sha256=hashlib.sha256(data).hexdigest())))
 
+    def test_known_same_version_key_tool_and_unknown_stale(self):
+        row=self.catalog['skins'][0]
+        row.update(artifact_lineage='known',render_key='a'*64,artifact_render_key='a'*64,tool_fingerprint='b'*64,artifact_tool_fingerprint='b'*64)
+        self.publish(); self.assertEqual(self.querier.find('100',1)['status'],'found')
+        for field in ('artifact_render_key','artifact_tool_fingerprint'):
+            old=row[field]; row[field]='c'*64; self.publish()
+            answer=self.querier.find('100',1)
+            self.assertEqual(answer['status'],'stale'); self.assertEqual(answer['reason'],'artifact_inputs_changed'); row[field]=old
+        row['artifact_lineage']='legacy_unknown'; self.publish()
+        self.assertEqual(self.querier.find('100',1)['reason'],'legacy_lineage_unknown')
+        row['artifact_lineage']='known'; row['state']='failed'; self.publish()
+        self.assertEqual(self.querier.find('100',1)['status'],'stale')
+
     def test_positions(self):
         self.assertEqual(self.querier.find('100', 1)['status'], 'found')
         self.assertEqual(self.querier.find('100', 2)['status'], 'not_generated')

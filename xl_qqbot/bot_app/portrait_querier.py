@@ -110,7 +110,7 @@ class PortraitQuerier:
                 return dict(result, status='out_of_range', reason='ordinal outside configured skins')
             skin = skins[ordinal - 1]
             result.update({k: skin[k] for k in ('name', 'skin_id', 'source_version')})
-            if skin['state'] != 'published':
+            if skin['state'] != 'published' and not (skin.get('artifact_lineage') in ('known','legacy_unknown') and skin.get('artifact_path')):
                 return dict(result, status='blocked' if skin['state'] == 'blocked' else 'not_generated',
                             reason=skin['state'])
             provenance = skin['source_version']
@@ -135,5 +135,19 @@ class PortraitQuerier:
                 raise ValueError('PNG exceeds decode pixel budget')
         with Image.open(io.BytesIO(data)) as picture:
             picture.load()
-        return dict(result, status='found' if skin['source_version'] == version else 'stale',
-                    image_path=path, reason='published')
+        reason='published'
+        matching=skin['source_version']==version
+        lineage=skin.get('artifact_lineage')
+        if lineage=='legacy_unknown':
+            matching=False; reason='legacy_lineage_unknown'
+        elif lineage=='known':
+            keys=('artifact_render_key','render_key','artifact_tool_fingerprint','tool_fingerprint')
+            if any(not isinstance(skin.get(k),str) or re.fullmatch('[0-9a-f]{64}',skin[k]) is None for k in keys):
+                raise ValueError('invalid known artifact identity')
+            if skin['artifact_render_key']!=skin['render_key'] or skin['artifact_tool_fingerprint']!=skin['tool_fingerprint']:
+                matching=False; reason='artifact_inputs_changed'
+            elif skin['state']!='published':
+                matching=False; reason='retained_artifact'
+        elif lineage is not None:
+            raise ValueError('invalid artifact lineage')
+        return dict(result,status='found' if matching else 'stale',image_path=path,reason=reason)

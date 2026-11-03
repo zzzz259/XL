@@ -24,7 +24,7 @@ def validate_job(payload):
     """Copy a fixed-profile job; lease acceptance remains the store's concern."""
     if not isinstance(payload, dict): raise ValueError('job must be an object')
     job = copy.deepcopy(payload)
-    if type(job.get('schema_version')) is not int or job['schema_version'] != 1:
+    if type(job.get('schema_version')) is not int or job['schema_version'] not in (1, 2):
         raise ValueError('invalid job schema')
     if not all(_text(job.get(k)) for k in ('instance_id', 'source_id', 'version')):
         raise ValueError('invalid job scope/version')
@@ -40,7 +40,69 @@ def validate_job(payload):
         raise ValueError('invalid job reason')
     if 'attempt' in job and (type(job['attempt']) is not int or not 1 <= job['attempt'] < 2**63):
         raise ValueError('invalid attempt')
+    if job['schema_version'] == 2:
+        validate_capture(job)
     return job
+
+# Artifact fields deliberately do not include desired tool/render metadata.
+ARTIFACT_FIELDS = ('artifact_path','artifact_sha256','source_version','archive_path',
+    'archive_sha256','archive_profile','delivery_profile','width','height','archive_width',
+    'archive_height','artifact_lineage','artifact_render_key','artifact_tool_fingerprint',
+    'job_id','attempt','input_snapshot_digest','source_capture_ref','artifact_event','plan_id')
+KNOWN_FIELDS = ('artifact_render_key','artifact_tool_fingerprint','job_id','attempt',
+                'input_snapshot_digest','source_capture_ref')
+
+
+
+def desired_generation(catalog, execution_plan_id=None):
+    """Identity of desired metadata/execution, independent of mutable outcomes."""
+    metadata=copy.deepcopy(catalog)
+    for key in ('desired_generation','desired_execution_plan_id'):
+        metadata.pop(key,None)
+    metadata['publication_protocol']=2
+    for row in metadata['skins']:
+        for key in (*ARTIFACT_FIELDS,'state','diagnostics'): row.pop(key,None)
+    return digest([metadata,execution_plan_id])
+
+
+def validate_capture(job):
+    from .store import validate_source_reference
+    if not all(_hash(job.get(k)) for k in ('input_snapshot_digest','tool_fingerprint')):
+        raise ValueError('invalid pinned execution hashes')
+    if not isinstance(job.get('source_capture_ref'),dict):
+        raise ValueError('missing prepared source')
+    validate_source_reference(job)
+
+
+def validate_artifact(catalog, row):
+    base=('artifact_path','artifact_sha256','source_version')
+    if not row.get('artifact_path'):
+        if any(row.get(k) is not None for k in ARTIFACT_FIELDS):
+            raise ValueError('provenance without artifact')
+        return
+    if not all(row.get(k) for k in base): raise ValueError('partial artifact')
+    known=any(row.get(k) is not None for k in KNOWN_FIELDS)
+    if not known:
+        if row.get('artifact_lineage') not in (None,'legacy_unknown'):
+            raise ValueError('invalid legacy lineage')
+        row['artifact_lineage']='legacy_unknown'
+        return
+    if row.get('artifact_lineage') != 'known' or not all(row.get(k) is not None for k in KNOWN_FIELDS):
+        raise ValueError('partial known lineage')
+    job=dict(schema_version=2,instance_id=catalog['instance_id'],source_id=catalog['source_id'],
+        version=row['source_version'],character_id=row['character_id'],skin_id=row['skin_id'],
+        render_key=row['artifact_render_key'],tool_fingerprint=row['artifact_tool_fingerprint'],
+        profile=PROFILE,reason='manual_backfill',**{k:row[k] for k in ('job_id','attempt','input_snapshot_digest','source_capture_ref')})
+    validate_job(job)
+    from .store import validate_result
+    validate_result(job,row['attempt'],dict(row,**job,status='success',diagnostics=[]))
+    if row.get('plan_id') is not None and not _hash(row['plan_id']):
+        raise ValueError('invalid accepted plan identity')
+    event=row.get('artifact_event')
+    if event is not None and (type(event) is not dict or set(event)!={'database_id','id'} or
+            not _hash(event['database_id']) or type(event['id']) is not int or event['id']<1):
+        raise ValueError('invalid committed event reference')
+
 
 def render_key(catalog, row):
     return digest([catalog['instance_id'], catalog['source_id'], row['character_id'], row['skin_id'], PROFILE, *[row[k] for k in FINGERPRINTS]])
@@ -50,6 +112,8 @@ def validate_catalog(payload: dict) -> dict:
     if not isinstance(payload, dict): raise ValueError('catalog must be an object')
     result=copy.deepcopy(payload)
     if type(result.get('schema_version')) is not int or result['schema_version'] != 1: raise ValueError('unsupported schema')
+    if 'publication_protocol' in result and (type(result['publication_protocol']) is not int or result['publication_protocol']!=2):
+        raise ValueError('unsupported publication protocol')
     for key in ('instance_id','source_id','version'):
         if not _text(result.get(key)): raise ValueError('invalid '+key)
     if not isinstance(result.get('skins'),list): raise ValueError('skins must be a list')
@@ -76,10 +140,18 @@ def validate_catalog(payload: dict) -> dict:
             if key not in row or (row[key] is not None and not _text(row[key])): raise ValueError('invalid '+key)
         if 'artifact_sha256' not in row or (row['artifact_sha256'] is not None and not _hash(row['artifact_sha256'])): raise ValueError('invalid artifact hash')
         if row['state']=='published' and not all(row[k] for k in ('artifact_path','artifact_sha256','source_version')): raise ValueError('published artifact incomplete')
+        validate_artifact(result,row)
         ordinals.setdefault(row['character_id'],[]).append(row)
     for rows in ordinals.values():
         if [r['ordinal'] for r in sorted(rows,key=lambda r:int(r['skin_id']))] != list(range(1,len(rows)+1)): raise ValueError('invalid numeric skin ordering')
     result['skins'].sort(key=lambda r:(int(r['character_id']),int(r['skin_id'])))
+    if 'desired_generation' in result or 'desired_execution_plan_id' in result:
+        if result.get('publication_protocol')!=2 or not _hash(result.get('desired_generation')) or 'desired_execution_plan_id' not in result:
+            raise ValueError('invalid desired generation identity')
+        plan=result['desired_execution_plan_id']
+        if plan is not None and not _hash(plan): raise ValueError('invalid desired execution plan')
+        if result['desired_generation']!=desired_generation(result,plan):
+            raise ValueError('desired generation metadata mismatch')
     return result
 
 def build_catalog(instance_id: str, source_id: str, version: str, skins: list[dict]) -> dict:

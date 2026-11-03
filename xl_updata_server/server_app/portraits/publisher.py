@@ -17,9 +17,8 @@ import stat
 import uuid
 import warnings
 
-from PIL import Image
 
-from .model import PROFILE, _hash, validate_catalog, validate_job
+from .model import PROFILE, ARTIFACT_FIELDS, desired_generation, _hash, validate_catalog, validate_job
 from .store import _json, MAX_PLAN_BYTES
 
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
@@ -101,6 +100,7 @@ def _copy_snapshot(source, temporary, expected):
 
 
 def _decode(path, expected):
+    from PIL import Image
     try:
         with warnings.catch_warnings():
             warnings.simplefilter('error', Image.DecompressionBombWarning)
@@ -124,11 +124,16 @@ def _decode(path, expected):
 def publish_png(job, result, data_root, *, staging_root,
                 max_delivery_bytes=20*1024*1024, max_delivery_pixels=8_388_608):
     """Prepare immutable files and return a candidate, never an acceptance claim."""
+    from PIL import Image
     job = validate_job(job)
     if 'attempt' not in job: raise ValueError('explicit claimed attempt required')
     _positive(max_delivery_bytes,'delivery byte budget'); _positive(max_delivery_pixels,'delivery pixel budget')
     if not isinstance(result,dict) or result.get('status') != 'success' or result.get('job_id') != job['job_id']:
         raise ValueError('result status/job mismatch')
+    if job['schema_version'] == 2:
+        for key in _IDENTITY + ('input_snapshot_digest','tool_fingerprint','source_capture_ref'):
+            if _json(result.get(key),MAX_PLAN_BYTES) != _json(job.get(key),MAX_PLAN_BYTES):
+                raise ValueError('staged execution identity mismatch: '+key)
     dimensions = tuple(_positive(result.get(k),k) for k in ('width','height'))
     if dimensions[0]*dimensions[1] > MAX_CANVAS_PIXELS: raise ValueError('canvas exceeds pixel limit')
     expected = result.get('sha256')
@@ -183,6 +188,9 @@ def publish_png(job, result, data_root, *, staging_root,
         archive_sha256=expected,archive_profile=copy.deepcopy(PROFILE),archive_width=dimensions[0],
         archive_height=dimensions[1],artifact_path=artifact_path,artifact_sha256=delivery_hash,
         width=delivery_size[0],height=delivery_size[1],delivery_profile=profile,diagnostics=[])
+    if job['schema_version'] == 2:
+        output.update({k:copy.deepcopy(job[k]) for k in ('input_snapshot_digest','tool_fingerprint','source_capture_ref')})
+        output.update(artifact_render_key=job['render_key'],artifact_tool_fingerprint=job['tool_fingerprint'])
     return output
 
 
@@ -196,7 +204,7 @@ def _validate_media(result):
     for key in ('width','height','archive_width','archive_height'): _positive(result.get(key),key)
 
 
-def project_catalog(catalog, accepted_results):
+def _project_legacy(catalog, accepted_results):
     """Project trusted durable result objects (not staged files or attempt output).
 
     Input order is irrelevant: the greatest accepted attempt wins per exact job.
@@ -229,11 +237,90 @@ def project_catalog(catalog, accepted_results):
             row['state'] = 'blocked' if item['status']=='blocked' else 'failed'
             row['diagnostics'] = list(item.get('diagnostics',[])) or [item['status']]
     for row in result['skins']:
-        if row['state'] != 'published' and all(row.get(k) for k in ('artifact_path','artifact_sha256','source_version')):
+        if row.get('artifact_lineage')!='known' and row['state'] != 'published' and all(row.get(k) for k in ('artifact_path','artifact_sha256','source_version')):
             row['diagnostics'] = list(row['diagnostics']) + [f"retained previous artifact: {row['state']}"]
             row['state'] = 'published'
     return validate_catalog(result)
 
+
+
+def carry_forward(desired, previous):
+    """Copy actual artifact provenance; desired metadata/state stay desired."""
+    desired=validate_catalog(desired)
+    if previous is None: return desired
+    previous=validate_catalog(previous)
+    if any(desired[k]!=previous[k] for k in ('instance_id','source_id')):
+        raise ValueError('carry scope mismatch')
+    old={(r['character_id'],r['skin_id']):r for r in previous['skins']}
+    for row in desired['skins']:
+        prior=old.get((row['character_id'],row['skin_id']))
+        if prior and prior['profile']==row['profile'] and prior.get('artifact_path'):
+            if _matching(row):
+                prior_matches=(prior.get('artifact_lineage')=='known' and
+                    prior.get('artifact_render_key')==row['render_key'] and
+                    prior.get('artifact_tool_fingerprint')==row['tool_fingerprint'])
+                if not prior_matches: continue
+                if _rank(row,desired['version'])>=_rank(prior,desired['version']): continue
+            for k in ARTIFACT_FIELDS:
+                row.pop(k,None)
+                if k in prior: row[k]=copy.deepcopy(prior[k])
+    return validate_catalog(desired)
+
+
+def _matching(row):
+    return (row.get('artifact_lineage')=='known' and
+        row.get('artifact_render_key')==row['render_key'] and
+        row.get('artifact_tool_fingerprint')==row['tool_fingerprint'])
+
+
+def _rank(row, version):
+    # One total order, shared by carry and projection. Within one durable store,
+    # later accepted attempts necessarily have later committed event IDs.
+    event=row.get('artifact_event') or {}
+    return (row['source_version']==version,event.get('id',0),row['job_id'],row['attempt'])
+
+
+def project_catalog(catalog, accepted_results):
+    """Trusted-data compatibility helper, NOT an acceptance boundary.
+
+    Runtime must use project_accepted, which obtains its own durable Reader page.
+    Wire-1 keeps the historical state convention. Wire-2 never calls reuse a
+    successful desired execution, and stores actual capture/job provenance.
+    """
+    catalog=validate_catalog(catalog)
+    legacy=[r for r in accepted_results if r.get('schema_version')==1]
+    if legacy or (not accepted_results and any(r.get('artifact_lineage')=='legacy_unknown' for r in catalog['skins'])):
+        catalog=_project_legacy(catalog,legacy)
+    rows={(r['character_id'],r['skin_id']):r for r in catalog['skins']}
+    from .store import validate_result
+    for item in accepted_results:
+        if item.get('schema_version')==1: continue
+        # Durable result envelopes omit reason; reason is not artifact identity.
+        job=validate_job(dict(item,reason=item.get('reason','manual_backfill')))
+        validate_result(job,job['attempt'],item)
+        if any(job[k]!=catalog[k] for k in ('instance_id','source_id')):
+            raise ValueError('result scope mismatch')
+        row=rows.get((job['character_id'],job['skin_id']))
+        if row is None or job['render_key']!=row['render_key'] or job['tool_fingerprint']!=row['tool_fingerprint']: continue
+        expected_plan=catalog.get('desired_execution_plan_id')
+        owns_state=(job['version']==catalog['version'] and
+            (expected_plan is None or item.get('plan_id')==expected_plan))
+        if item['status']!='success':
+            if owns_state and (expected_plan is not None or not _matching(row)):
+                row.update(state='blocked' if item['status']=='blocked' else 'failed',diagnostics=copy.deepcopy(item['diagnostics']))
+            continue
+        # A closed plan owns its terminal state independently of which accepted
+        # artifact wins. Foreign newer media must not suppress that evidence.
+        if owns_state and expected_plan is not None:
+            row.update(state='published',diagnostics=copy.deepcopy(item['diagnostics']))
+        candidate={k:copy.deepcopy(item[k]) for k in ARTIFACT_FIELDS if k in item}
+        candidate['artifact_lineage']='known'
+        if _matching(row) and _rank(row,catalog['version'])>_rank(candidate,catalog['version']): continue
+        for k in ARTIFACT_FIELDS: row.pop(k,None)
+        row.update(candidate)
+        if owns_state and expected_plan is None:
+            row.update(state='published',diagnostics=copy.deepcopy(item['diagnostics']))
+    return validate_catalog(catalog)
 
 def _version(value):
     if not isinstance(value,str) or not re.fullmatch(r'[A-Za-z0-9_-]+',value): raise ValueError('unsafe catalog version')
@@ -244,7 +331,6 @@ def _version(value):
 def _lock(root):
     path = _path(root,'.publisher.lock')
     with path.open('a+b') as stream:
-        if stream.tell() == 0: stream.write(b'\0'); stream.flush()
         stream.seek(0)
         if os.name == 'nt':
             import msvcrt
@@ -252,7 +338,12 @@ def _lock(root):
         else:
             import fcntl
             fcntl.flock(stream.fileno(),fcntl.LOCK_EX)
-        try: yield
+        try:
+            # Windows byte locks may cover EOF. Initialize only after ownership;
+            # concurrent openers must never write a byte another writer locked.
+            if os.fstat(stream.fileno()).st_size == 0:
+                stream.write(b'\0'); stream.flush()
+            yield
         finally:
             stream.seek(0)
             if os.name == 'nt': msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
@@ -266,7 +357,7 @@ def _atomic_json(root, relative, raw):
     os.replace(temporary,target); _sync_directory(target.parent)
 
 
-def publish_catalog(catalog, data_root, *, promote=False):
+def _write_catalog(catalog, root, *, promote=False):
     """Install a hashed immutable revision, then version and optional current pointers."""
     catalog = validate_catalog(catalog); version = _version(catalog['version'])
     if type(promote) is not bool: raise ValueError('promotion must be explicit boolean')
@@ -274,18 +365,17 @@ def publish_catalog(catalog, data_root, *, promote=False):
         for key in ('artifact_path','archive_path'):
             if row.get(key) is not None: _relative(row[key])
     raw = _json(catalog,MAX_PLAN_BYTES).encode('utf-8'); sha = hashlib.sha256(raw).hexdigest()
-    root = Path(data_root).resolve(); root.mkdir(parents=True,exist_ok=True)
     relative = f'catalog/{version}/{sha}.json'
     pointer = dict(schema_version=1,version=version,catalog_path=relative,sha256=sha)
-    with _lock(root):
-        temporary = _temporary(root,f'catalog/{version}')
-        with temporary.open('xb') as stream:
-            stream.write(raw); stream.flush(); os.fsync(stream.fileno())
-        _install(temporary,_path(root,relative),sha)
-        pointer_raw = _json(pointer,65536).encode('utf-8')
-        _atomic_json(root,f'catalog/{version}.json',pointer_raw)
-        if promote: _atomic_json(root,'current.json',pointer_raw)
+    temporary = _temporary(root,f'catalog/{version}')
+    with temporary.open('xb') as stream:
+        stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+    _install(temporary,_path(root,relative),sha)
+    pointer_raw = _json(pointer,65536).encode('utf-8')
+    _atomic_json(root,f'catalog/{version}.json',pointer_raw)
+    if promote: _atomic_json(root,'current.json',pointer_raw)
     return pointer
+
 
 
 def read_catalog(data_root, version=None):
@@ -309,3 +399,119 @@ def read_catalog(data_root, version=None):
     catalog = validate_catalog(json.loads(raw))
     if catalog['version'] != pointed_version: raise ValueError('catalog version mismatch')
     return catalog
+
+
+def publish_catalog(catalog, data_root, *, promote=False):
+    """Legacy snapshot writer only; new callers use publish_desired/project_accepted."""
+    root=Path(data_root).resolve(); root.mkdir(parents=True,exist_ok=True)
+    with _lock(root):
+        for snapshot in (validate_catalog(catalog),_optional_catalog(root),_optional_catalog(root,catalog['version'])):
+            if snapshot and (snapshot.get('publication_protocol')==2 or any(r.get('artifact_lineage')=='known' for r in snapshot['skins'])):
+                raise ValueError('new lineage requires locked desired/accepted APIs')
+        return _write_catalog(catalog,root,promote=promote)
+
+
+def _optional_catalog(root,version=None):
+    try: return read_catalog(root,version)
+    except FileNotFoundError:
+        pointer=root/('current.json' if version is None else f'catalog/{_version(version)}.json')
+        if pointer.exists(): raise
+        return None
+
+
+def catalog_token(data_root):
+    """Opaque canonical current snapshot token; None means no current pointer."""
+    from .model import digest
+    current=_optional_catalog(Path(data_root).resolve())
+    return None if current is None else digest(current)
+
+
+@contextmanager
+def locked_mutation(data_root):
+    """Trusted bounded coordinator hook. Publisher FIRST; raw updater OS mutex
+    must then be acquired NONBLOCKING, token rechecked, metadata committed, and
+    updater released in finally. Only bounded metadata DB transactions are allowed;
+    no heavy work, long DB transactions, guard/recovery or network.
+    Context object is invalid after exit; callers must not nest publisher locks.
+    """
+    root=Path(data_root).resolve(); root.mkdir(parents=True,exist_ok=True)
+    with _lock(root):
+        mutation=_LockedMutation(root)
+        try: yield mutation
+        finally: mutation.active=False
+
+
+class _LockedMutation:
+    def __init__(self,root): self.root=root; self.active=True
+    def publish_desired(self,catalog,*,expected_current,execution_plan_id=None):
+        if not self.active: raise RuntimeError('closed publisher mutation')
+        if catalog_token(self.root)!=expected_current: raise ValueError('current pointer conflict; reread and retry')
+        if execution_plan_id is not None and not _hash(execution_plan_id):
+            raise ValueError('invalid desired execution plan')
+        incoming=copy.deepcopy(catalog)
+        if not isinstance(incoming,dict): raise ValueError('catalog must be an object')
+        for key in ('desired_generation','desired_execution_plan_id'): incoming.pop(key,None)
+        desired=validate_catalog(incoming)
+        desired['publication_protocol']=2
+        for row in desired['skins']:
+            for key in ARTIFACT_FIELDS: row.pop(key,None)
+            row.update(artifact_path=None,artifact_sha256=None,source_version=None)
+            if row['state']=='published': row['state']='not_generated'
+        desired['desired_execution_plan_id']=execution_plan_id
+        desired['desired_generation']=desired_generation(desired,execution_plan_id)
+        current=_optional_catalog(self.root)
+        prior=_optional_catalog(self.root,desired['version'])
+        # Read both snapshots under lock; preserve any accepted change committed
+        # since lifecycle prepared its desired metadata. Existing version wins.
+        desired=carry_forward(desired,current)
+        desired=carry_forward(desired,prior)
+        for snapshot in (current,prior):
+            if snapshot and snapshot.get('desired_generation')==desired['desired_generation']:
+                states={(r['character_id'],r['skin_id']):r for r in snapshot['skins']}
+                for row in desired['skins']:
+                    saved=states[(row['character_id'],row['skin_id'])]
+                    row.update(state=saved['state'],diagnostics=copy.deepcopy(saved['diagnostics']))
+        return _write_catalog(desired,self.root,promote=True)
+
+
+def publish_desired(catalog,data_root,*,expected_current,execution_plan_id=None):
+    """Trusted lifecycle promotion, with mandatory optimistic current token.
+    A conflict requires lifecycle revalidation, never blind automatic promotion.
+    execution_plan_id is the trusted closed-plan identity; a different plan
+    starts a new desired generation even with identical render metadata. None
+    supports legacy automatic same-metadata publication, not manual execution
+    fencing. Caller-derived generation fields are ignored and recomputed.
+    Caller JSON (including published=True) grants no lifecycle authority.
+    """
+    with locked_mutation(data_root) as mutation:
+        return mutation.publish_desired(catalog,expected_current=expected_current,execution_plan_id=execution_plan_id)
+
+
+def project_accepted(reader,data_root,*,after_id=0,limit=16,max_bytes=4*1024*1024,cursor=None):
+    """Read a bounded durable StoreV2 page, then merge latest under one lock.
+    Returned cursor may be checkpointed ONLY after this call returns. Failure
+    leaves it unchanged so replay repairs partial version/current writes.
+    """
+    from .reader import PortraitReader
+    if type(reader) is not PortraitReader: raise TypeError('real PortraitReader required')
+    page=reader.read_events(after_id,limit,max_bytes,cursor=cursor)
+    results=[]
+    for event in page['events']:
+        if event['provenance']!='registered': continue
+        item=copy.deepcopy(event['result'])
+        item['plan_id']=event['plan_id']
+        item['artifact_event']=dict(database_id=page['cursor']['database_id'],id=event['id'])
+        results.append(item)
+    root=Path(data_root).resolve(); root.mkdir(parents=True,exist_ok=True)
+    with _lock(root):
+        current=_optional_catalog(root)
+        versions={r['version'] for r in results}
+        if current is not None: versions.add(current['version'])
+        for version in sorted(versions):
+            catalog=_optional_catalog(root,version)
+            if catalog is None: raise ValueError('desired version not published: '+version)
+            if (catalog['instance_id'],catalog['source_id'])!=(reader.instance_id,reader.source_id):
+                raise ValueError('reader/catalog scope mismatch')
+            merged=project_catalog(catalog,results)
+            _write_catalog(merged,root,promote=current is not None and current['version']==version)
+    return page

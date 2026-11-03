@@ -92,6 +92,12 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.store.get('g','u'))
         self.assertEqual(len(self.sender.cards),1)
 
+    async def test_same_version_mismatch_caption(self):
+        self.reader.result=dict(status='stale',image_path='test.png',source_version='v',catalog_version='v',reason='artifact_inputs_changed')
+        await self.handler._answer_query('g','Unit2 2','u')
+        self.assertNotIn('旧版本',self.sender.images[-1][1])
+        self.assertIn('输入或工具',self.sender.images[-1][1])
+
     async def test_states_and_safe_upload_failures(self):
         self.reader.result={'status':'out_of_range','available_skins':[{'ordinal':1,'name':'原版','state':'complete'},{'ordinal':2,'name':'占位','state':'failed'}]}
         await self.handler._answer_query('g','Unit2 9','u')

@@ -42,6 +42,28 @@ class PublisherTests(unittest.TestCase):
         return self.publisher().publish_png(self.job, result or self.fixture(), self.root,
                                             staging_root=self.stage, **kwargs)
 
+    def test_registered_candidate_pins_full_execution_and_does_not_accept(self):
+        from test_portrait_lineage_unittest import catalog, execution
+        from server_app.portraits.reader import PortraitReader
+        c=catalog(); p=execution(c); store=PortraitStore(self.base/'registered.db','i','s')
+        pid=store.register_closed_plan(p)['plan_id']; self.job=store.claim('worker',0,10,allowed_plan_ids=[pid])
+        raw=self.fixture(); raw.update({k:copy.deepcopy(self.job[k]) for k in
+            ('schema_version','instance_id','source_id','version','character_id','skin_id','render_key','profile','reason','attempt','input_snapshot_digest','tool_fingerprint','source_capture_ref')})
+        for key,value in [('attempt',2),('tool_fingerprint','f'*64),('input_snapshot_digest','f'*64),('source_capture_ref',{})]:
+            with self.subTest(key=key),self.assertRaises(ValueError): self.publish(dict(raw,**{key:value}))
+        out=self.publish(raw)
+        self.assertEqual(out['artifact_render_key'],self.job['render_key'])
+        self.assertEqual(out['source_capture_ref'],self.job['source_capture_ref'])
+        self.assertNotEqual(out['source_capture_ref']['capture']['sha256'],out['input_snapshot_digest'])
+        self.assertEqual(PortraitReader(self.base/'registered.db','i','s').read_events()['events'],[])
+        self.assertFalse(store.finish(self.job['job_id'],1,out,owner='worker',now=11))
+        self.assertFalse((self.root/'current.json').exists())
+        self.assertEqual(PortraitReader(self.base/'registered.db','i','s').read_events()['events'],[])
+        self.job=store.claim('worker',11,10,allowed_plan_ids=[pid])
+        raw['attempt']=self.job['attempt']; out=self.publish(raw)
+        self.assertTrue(store.finish(self.job['job_id'],self.job['attempt'],out,owner='worker',now=12))
+        self.assertEqual(len(PortraitReader(self.base/'registered.db','i','s').read_events()['events']),1)
+
     def test_original_is_exact_and_public_metadata_has_no_local_paths(self):
         raw = self.fixture(); expected = Path(raw['staged_path']).read_bytes()
         out = self.publish(raw)
