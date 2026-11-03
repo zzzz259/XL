@@ -27,9 +27,11 @@ class AutomationRuntime:
     bilibili_watcher: BilibiliWatcher | None
     leaderboard_job: object | None
     stop_event: asyncio.Event
+    portrait_consumers: tuple = ()
 
     async def run(self) -> None:
         jobs = [watcher.run() for watcher in self.watchers]
+        jobs.extend(consumer.run(self.stop_event) for consumer in self.portrait_consumers)
         if self.status_monitor is not None:
             jobs.append(self.status_monitor.run(self.stop_event))
         if self.bilibili_watcher is not None:
@@ -72,6 +74,20 @@ def build_automation_runtime(
         )
         for source in sources
     )
+    consumers = []
+    if config.portrait_delivery:
+        from .portrait_consumer import build_consumer
+        if not isinstance(config.portrait_delivery, dict):
+            raise ValueError("portrait_delivery must be a source mapping")
+        unknown = set(config.portrait_delivery) - {source.name for source in sources}
+        if unknown:
+            raise ValueError("portrait_delivery contains unknown update source")
+        for watcher in watchers:
+            settings = config.portrait_delivery.get(watcher.source.name, {})
+            consumer = build_consumer(config, watcher, settings, notification_client)
+            if consumer is not None:
+                watcher.portrait_consumer = consumer
+                consumers.append(consumer)
     status_monitor = build_status_monitor(
         config,
         outbox=None,
@@ -97,6 +113,7 @@ def build_automation_runtime(
         bilibili_watcher=bilibili_watcher,
         leaderboard_job=leaderboard_job,
         stop_event=asyncio.Event(),
+        portrait_consumers=tuple(consumers),
     )
 
 

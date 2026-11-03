@@ -292,7 +292,7 @@ class ProductionUpdateProcessor:
             return self._portrait_bootstrap(update_info)
 
         if context is not None:
-            context.bind_target(update_info.timestamp, classification='processed', announcement_eligible=True)
+            context.bind_target(update_info.timestamp, classification='processed', announcement_eligible=(current is not None))
         # 进入真实处理前向 Bot 广播更新开始；结束（含失败）后写出结果状态
         self._write_update_status(updating=True, version=update_info.timestamp)
         try:

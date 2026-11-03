@@ -205,6 +205,7 @@ class Config:
     instance: InstanceConfig = field(default_factory=InstanceConfig)
     leaderboard: LeaderboardConfig = field(default_factory=LeaderboardConfig)
     portrait_query: PortraitQueryConfig = field(default_factory=PortraitQueryConfig)
+    portrait_delivery: dict[str, dict] = field(default_factory=dict)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -617,6 +618,7 @@ def load_config(path: str = "config.toml") -> Config:
 
     return Config(
         portrait_query=portrait_query,
+        portrait_delivery=raw.get("portrait_delivery", {}),
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
             outbox_dir=outbox_dir,

@@ -32,6 +32,7 @@ class Watcher:
         proactive_outbox: ProactiveOutbox | None = None,
         source: UpdateSourceConfig | None = None,
         notification_client=None,
+        portrait_consumer=None,
     ):
         self.config = config
         self.source = source or UpdateSourceConfig(
@@ -39,6 +40,7 @@ class Watcher:
         )
         self.sender = sender
         self.notification_client = notification_client
+        self.portrait_consumer = portrait_consumer
         self.proactive_outbox = (
             proactive_outbox
             if proactive_outbox is not None
@@ -79,7 +81,19 @@ class Watcher:
         """将更新事件按日志顺序展开为 start -> 对应图片 -> finish。"""
         events_path = Path(self.source.outbox_dir).parent / "update_events.jsonl"
         offset = self.notice.consumed_events
-        events, new_offset = read_new_events(events_path, offset)
+        events, new_offset = read_new_events(
+            events_path, offset, limit=128 if self.portrait_consumer is not None else None
+        )
+        if self.portrait_consumer is not None:
+            for event in events:
+                self.portrait_consumer.observe_lifecycle(event)
+                if (not event.run_id and event.event in ("start", "finish")
+                        and event.line_number > self.portrait_consumer.state.get("activation")["physical_eof"]):
+                    await self._enqueue_update_event(event)
+                self.notice.mark_consumed(event.line_number)
+            if new_offset > self.notice.consumed_events:
+                self.notice.mark_consumed(new_offset)
+            return
         batches = {
             batch.version: batch
             for batch in list_version_batches(self.source.outbox_dir)
@@ -104,11 +118,11 @@ class Watcher:
                 )
             else:
                 _logger.error(
-                    "未知游戏更新事件，停止消费以保留日志顺序 line=%s event=%s",
+                    "未知游戏更新事件，记录隔离并继续消费 line=%s event=%s",
                     event.line_number,
                     event.event,
                 )
-                break
+                self.notice.quarantine(event)
             consumed = event.line_number
             self.notice.mark_consumed(consumed)
 
