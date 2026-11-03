@@ -161,7 +161,8 @@ def prepare_lazy_package(slot, ready_ref, prepared_ref, lazy_input, *, publicati
         for candidate in selected['candidate_bundles']:
             guard()
             wire=candidate['wire_md5'];name=wire+'.bundle'
-            blob=io.acquire_blob(pin,remote_name=name,wire_md5=wire,size=candidate['size'],cache_root=data_root/'wire',open_remote=remote)
+            from .source_transfer import acquire_authorized
+            blob=acquire_authorized(pin,remote_name=name,wire_md5=wire,size=candidate['size'],provenance='lazyArts',selection_ref=digest([prepared_ref.capture.sha256,prepared_ref.snapshot_digest,selected]),cache_root=data_root/'wire',open_remote=remote)
             guard()
             view=io.normalize_bundle(blob,cache_root=data_root/'wire',output_root=data_root/'normalized')
             with io.open_normalized_bundle(view,normalized_root=data_root/'normalized') as source,(stage_a/'views'/name).open('xb') as output:

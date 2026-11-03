@@ -354,9 +354,10 @@ def prepare_source(slot,pin,*,data_root,work_root,runtime,tool_fingerprint,open_
                     if isinstance(close_error,(Deferred,BoundaryError)):raise
                     raise PreparationError('source transport close failed') from diagnostic
         guard()
-    def acquire(name,md5,size):
+    def acquire(name,md5,size,provenance,selection_ref):
         guard()
-        blob=io.acquire_blob(pin,remote_name=name,wire_md5=md5,size=size,cache_root=data_root/'wire',open_remote=remote)
+        from .source_transfer import acquire_authorized
+        blob=acquire_authorized(pin,remote_name=name,wire_md5=md5,size=size,provenance=provenance,selection_ref=selection_ref,cache_root=data_root/'wire',open_remote=remote)
         guard()
         view=io.normalize_bundle(blob,cache_root=data_root/'wire',output_root=data_root/'normalized')
         guard(); return blob,view
@@ -400,12 +401,12 @@ def prepare_source(slot,pin,*,data_root,work_root,runtime,tool_fingerprint,open_
                     if not slot.poisoned and slot.process is None:request_path.unlink(missing_ok=True)
         # Keep Arts on disk through every heavy phase.
         for category in pin.categories:
-            blob,view=acquire(f'{category.name.lower()}_{category.hash}.json',category.hash,category.size)
+            blob,view=acquire(f'{category.name.lower()}_{category.hash}.json',category.hash,category.size,'category',pin.pin_digest)
             blobs[category.name]=asdict(blob)
             metadata[category.name]=asdict(worker(view,'category',category.name))
         tree=_load(io.read_metadata(io.MetadataRef(**metadata['Data']),data_root=data_root))
         owner=select_owner(tree); del tree; gc.collect()
-        blob,view=acquire(owner['wire_md5']+'.bundle',owner['wire_md5'],owner['size'])
+        blob,view=acquire(owner['wire_md5']+'.bundle',owner['wire_md5'],owner['size'],'Dataowner',digest([metadata['Data'],owner]))
         blobs['owner']=asdict(blob)
         raw_ref=worker(view,'textasset','BaseFashion.lua'); metadata['raw']=asdict(raw_ref)
         raw=io.read_metadata(raw_ref,data_root=data_root)
