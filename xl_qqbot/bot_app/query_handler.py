@@ -261,7 +261,9 @@ class QueryHandler:
         result = self._portrait_querier.find(str(match.character_id), ordinal)
         status = result["status"]
         if status in ("found", "stale") and result.get("image_path"):
-            send = getattr(self._sender, "send_schedule_image", None)
+            send = getattr(self._sender, "send_local_image", None) or getattr(
+                self._sender, "send_schedule_image", None
+            )
             if send is None:
                 await self._sender.send_text(group_openid, "立绘安全本地上传接口暂不可用", reply_to)
                 return

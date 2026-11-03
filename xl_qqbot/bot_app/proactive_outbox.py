@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from .local_image import MAX_BYTES, SHA_RE, validate_png_file
+
 PathLike = str | os.PathLike[str]
 
 
@@ -29,6 +31,7 @@ class OutboxMessage:
     next_attempt_at: float
     created_at: float
     status: str
+    image_delivery_mode: str = "legacy"
 
 
 class ProactiveOutbox:
@@ -75,8 +78,17 @@ class ProactiveOutbox:
         source_path: PathLike,
         *,
         content: str = "",
+        image_delivery_mode: str = "legacy",
+        expected_sha256: str | None = None,
     ) -> int:
         self._validate_key(event_key, recipient, ordinal)
+        if image_delivery_mode not in ("legacy", "local_multipart"):
+            raise ValueError("invalid image delivery mode")
+        if image_delivery_mode == "local_multipart":
+            if not isinstance(expected_sha256, str) or not SHA_RE.fullmatch(expected_sha256):
+                raise ValueError("local multipart requires expected SHA256")
+        elif expected_sha256 is not None:
+            raise ValueError("expected SHA256 requires local multipart mode")
         source = Path(source_path)
         if not source.is_file():
             raise FileNotFoundError(source)
@@ -84,10 +96,13 @@ class ProactiveOutbox:
             raise TypeError("image content must be a string")
         stored_content = content or None
 
+        if image_delivery_mode == "local_multipart":
+            validate_png_file(source, expected_sha256)
         existing = self._find_existing_key(event_key, recipient, ordinal)
         if existing is not None:
             if (
-                existing.kind != "image"
+                existing.image_delivery_mode != image_delivery_mode
+                or existing.kind != "image"
                 or existing.media_sha256 != self._file_hash(source)
                 or existing.text != stored_content
             ):
@@ -103,7 +118,18 @@ class ProactiveOutbox:
                 raise ValueError("idempotency key refers to missing or corrupt media")
             return existing.sequence
 
-        temporary_path, content_hash = self._copy_to_temporary_spool(source)
+        if image_delivery_mode == "local_multipart":
+            temporary_path, content_hash = self._copy_to_temporary_spool(
+                source, max_bytes=MAX_BYTES
+            )
+        else:
+            temporary_path, content_hash = self._copy_to_temporary_spool(source)
+        if image_delivery_mode == "local_multipart":
+            try:
+                validate_png_file(temporary_path, expected_sha256)
+            except Exception:
+                temporary_path.unlink(missing_ok=True)
+                raise
         spool_name = self._spool_name(
             event_key, recipient, ordinal, content_hash, source
         )
@@ -129,7 +155,8 @@ class ProactiveOutbox:
                 if existing is not None:
                     existing_path = existing["media_path"]
                     if (
-                        existing["kind"] != "image"
+                        existing["image_delivery_mode"] != image_delivery_mode
+                        or existing["kind"] != "image"
                         or existing["text"] != stored_content
                         or existing["media_sha256"] != content_hash
                         or not existing_path
@@ -146,8 +173,8 @@ class ProactiveOutbox:
                     """
                     INSERT INTO messages (
                         event_key, recipient, ordinal, kind, text, media_path,
-                        media_sha256, created_at
-                    ) VALUES (?, ?, ?, 'image', ?, ?, ?, ?)
+                        media_sha256, created_at, image_delivery_mode
+                    ) VALUES (?, ?, ?, 'image', ?, ?, ?, ?, ?)
                     """,
                     (
                         event_key,
@@ -157,6 +184,7 @@ class ProactiveOutbox:
                         relative_path,
                         content_hash,
                         time.time(),
+                        image_delivery_mode,
                     ),
                 )
                 return int(cursor.lastrowid)
@@ -319,6 +347,13 @@ class ProactiveOutbox:
                 )
                 """
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(messages)")}
+            if "image_delivery_mode" not in columns:
+                connection.execute(
+                    "ALTER TABLE messages ADD COLUMN image_delivery_mode "
+                    "TEXT NOT NULL DEFAULT 'legacy' "
+                    "CHECK (image_delivery_mode IN ('legacy', 'local_multipart'))"
+                )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS pending_sequence_idx "
                 "ON messages(status, sequence)"
@@ -368,7 +403,7 @@ class ProactiveOutbox:
             (event_key, recipient, ordinal),
         ).fetchone()
 
-    def _copy_to_temporary_spool(self, source: Path) -> tuple[Path, str]:
+    def _copy_to_temporary_spool(self, source: Path, *, max_bytes: int | None = None) -> tuple[Path, str]:
         file_descriptor, temp_name = tempfile.mkstemp(
             prefix=".incoming-", dir=self.spool_dir
         )
@@ -379,7 +414,11 @@ class ProactiveOutbox:
                 os.fdopen(file_descriptor, "wb") as destination,
                 source.open("rb") as origin,
             ):
+                copied = 0
                 while chunk := origin.read(1024 * 1024):
+                    copied += len(chunk)
+                    if max_bytes is not None and copied > max_bytes:
+                        raise ValueError("portrait exceeds byte budget")
                     destination.write(chunk)
                     digest.update(chunk)
                 destination.flush()
@@ -457,4 +496,5 @@ class ProactiveOutbox:
             next_attempt_at=float(row["next_attempt_at"]),
             created_at=float(row["created_at"]),
             status=str(row["status"]),
+            image_delivery_mode=str(row["image_delivery_mode"]),
         )

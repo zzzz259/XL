@@ -14,10 +14,11 @@ import aiohttp
 from aiohttp import web
 
 from .config import Config, load_config
+from .gateway import gateway_transport_for_config
 from .groups import GroupStore
+from .local_image import resolve_artifact, validate_roots
 from .proactive_dispatcher import ProactiveDispatcher
 from .proactive_outbox import ProactiveOutbox
-from .gateway import gateway_transport_for_config
 
 _logger = logging.getLogger(__name__)
 _EVENT_KEY_RE = re.compile(r"[\w.:_-]{1,200}")
@@ -159,7 +160,7 @@ class NotificationClient:
 class NotificationService:
     """Validate instance ownership and persist each item before acknowledging."""
 
-    def __init__(self, *, instance_id: str, allowed_groups, outbox: ProactiveOutbox):
+    def __init__(self, *, instance_id: str, allowed_groups, outbox: ProactiveOutbox, portrait_roots=None):
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", instance_id):
             raise ValueError("notification service instance_id is invalid")
         self.instance_id = instance_id
@@ -167,6 +168,7 @@ class NotificationService:
             group for group in allowed_groups if isinstance(group, str) and group
         )
         self.outbox = outbox
+        self.portrait_roots = validate_roots({} if portrait_roots is None else portrait_roots)
 
     def enqueue(self, payload: object) -> tuple[int, dict]:
         if not isinstance(payload, dict):
@@ -180,6 +182,10 @@ class NotificationService:
             return 403, {"ok": False, "error": "instance is outside service scope"}
         if not isinstance(messages, list) or not messages or len(messages) > 100:
             return 400, {"ok": False, "error": "messages must contain 1 to 100 items"}
+
+        if any(isinstance(item, dict) and item.get("image_delivery_mode") == "local_multipart"
+               for item in messages) and set(payload) - {"event_key", "instance_id", "messages"}:
+            return 400, {"ok": False, "error": "unknown local image envelope fields"}
 
         validated = []
         for item in messages:
@@ -206,6 +212,7 @@ class NotificationService:
                         item["ordinal"],
                         item["media_path"],
                         content=item["text"],
+                        **item.get("delivery_options", {}),
                     )
                 queued.append(
                     {
@@ -245,6 +252,11 @@ class NotificationService:
         text = item.get("text", "")
         if not isinstance(text, str) or len(text) > 4000:
             return 400, {"ok": False, "error": "invalid text"}
+        mode = item.get("image_delivery_mode", "legacy")
+        if mode not in ("legacy", "local_multipart") or (kind == "text" and "image_delivery_mode" in item):
+            return 400, {"ok": False, "error": "invalid image delivery mode"}
+        if mode == "legacy" and any(key in item for key in ("source_id", "artifact_path", "expected_sha256")):
+            return 400, {"ok": False, "error": "portrait references require local multipart mode"}
         if kind == "text":
             if not text.strip():
                 return 400, {"ok": False, "error": "text message cannot be empty"}
@@ -254,6 +266,16 @@ class NotificationService:
                 "kind": kind,
                 "text": text,
             }
+        if kind == "image" and mode == "local_multipart":
+            allowed = {"kind", "recipient", "ordinal", "text", "image_delivery_mode", "source_id", "artifact_path", "expected_sha256"}
+            if set(item) - allowed:
+                return 400, {"ok": False, "error": "unknown local image fields"}
+            try:
+                path = resolve_artifact(self.portrait_roots, item.get("source_id"), item.get("artifact_path"), item.get("expected_sha256"))
+            except (OSError, ValueError, TypeError):
+                return 400, {"ok": False, "error": "invalid local image reference"}
+            return {"recipient": recipient, "ordinal": ordinal, "kind": kind, "text": text,
+                    "media_path": str(path), "delivery_options": {"image_delivery_mode": mode, "expected_sha256": item["expected_sha256"]}}
         if kind == "image":
             media_path = item.get("media_path")
             if not isinstance(media_path, str) or not media_path:
@@ -298,7 +320,7 @@ def build_notification_app(
         dispatcher_task = request.app.get(_DISPATCH_TASK_KEY)
         ready = dispatcher_task is not None and not dispatcher_task.done()
         return web.json_response(
-            {"ok": ready, "ready": ready, "instance_id": service.instance_id},
+            {"ok": ready, "ready": ready, "instance_id": service.instance_id, "image_delivery_modes": ["legacy", "local_multipart"], "portrait_sources": sorted(service.portrait_roots)},
             status=200 if ready else 503,
         )
 
@@ -376,6 +398,7 @@ def main(argv=None) -> None:
         instance_id=instance_id,
         allowed_groups=allowed_notification_groups(config, instance_id),
         outbox=outbox,
+        portrait_roots=config.notification.portrait_roots.get(instance_id, {}),
     )
     app = build_notification_app(
         service,

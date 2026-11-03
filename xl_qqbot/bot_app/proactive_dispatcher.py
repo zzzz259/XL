@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from .local_image import validate_png_file
 from .proactive_outbox import OutboxMessage, ProactiveOutbox
 
 _logger = logging.getLogger(__name__)
@@ -87,7 +88,14 @@ class ProactiveDispatcher:
             if not message.media_path:
                 raise RuntimeError("queued image is missing its durable spool path")
             media_path = self.outbox.data_dir / message.media_path
-            results = await self.sender.send_image(
+            if message.image_delivery_mode == "local_multipart":
+                validate_png_file(media_path, message.media_sha256)
+                send = self.sender.send_local_image
+            elif message.image_delivery_mode == "legacy":
+                send = self.sender.send_image
+            else:
+                raise RuntimeError("unsupported image delivery mode")
+            results = await send(
                 str(media_path), message.text or "", [message.recipient]
             )
             return isinstance(results, dict) and results.get(message.recipient) is True

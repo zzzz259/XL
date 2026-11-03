@@ -119,6 +119,7 @@ class NotificationConfig:
     test_port: int = 8786
     production_port: int = 8787
     instance_ports: dict[str, int] = field(default_factory=dict)
+    portrait_roots: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -420,6 +421,20 @@ def load_config(path: str = "config.toml") -> Config:
         for instance_id, port in notification_instance_ports.items()
     ):
         raise ValueError("[notification.instance_ports] 实例 ID 或端口无效")
+    from .local_image import ID_RE, validate_roots
+    portrait_roots = notification_raw.get("portrait_roots", {})
+    if not isinstance(portrait_roots, dict):
+        raise ValueError("notification portrait_roots must be an instance mapping")  # noqa: TRY004 - configuration error contract
+    known_notification_instances = {
+        instance_id, "test", "production", *router_config.instance_ports,
+        *notification_instance_ports,
+    }
+    for owner, roots in portrait_roots.items():
+        if not isinstance(owner, str) or not ID_RE.fullmatch(owner):
+            raise ValueError("invalid portrait root instance")
+        if owner not in known_notification_instances:
+            raise ValueError("unknown portrait root instance")
+        validate_roots(roots)
     notification_config = NotificationConfig(
         api_token=str(notification_raw.get("api_token", "")).strip(),
         test_port=int(notification_raw.get("test_port", NotificationConfig.test_port)),
@@ -429,6 +444,7 @@ def load_config(path: str = "config.toml") -> Config:
             )
         ),
         instance_ports=notification_instance_ports,
+        portrait_roots=portrait_roots,
     )
     notification_ports = {
         notification_config.test_port,

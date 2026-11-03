@@ -64,14 +64,17 @@ class QQSender:
             results[group_openid] = await self._send_to_group(file_path, content, group_openid, reply_to)
         return results
 
-    async def send_schedule_image(
+    async def send_schedule_image(self, file_path, content, group_openids, reply_to=""):
+        return await self.send_local_image(file_path, content, group_openids, reply_to)
+
+    async def send_local_image(
         self,
         file_path: str,
         content: str,
         group_openids: List[str],
         reply_to: str = "",
     ) -> Dict[str, bool]:
-        """Send a schedule image through local multipart upload, never outbox URL mapping."""
+        """Send a local image through forced multipart upload."""
         results: Dict[str, bool] = {}
         for group_openid in group_openids:
             results[group_openid] = await self._send_to_group(

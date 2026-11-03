@@ -261,7 +261,10 @@ class GatewayTransportClient:
     ) -> dict[str, bool]:
         return await self._send_image(file_path, content, group_openids, reply_to, False)
 
-    async def send_schedule_image(
+    async def send_schedule_image(self, file_path, content, group_openids, reply_to=""):
+        return await self.send_local_image(file_path, content, group_openids, reply_to)
+
+    async def send_local_image(
         self, file_path: str, content: str, group_openids: list[str], reply_to: str = ""
     ) -> dict[str, bool]:
         return await self._send_image(file_path, content, group_openids, reply_to, True)
@@ -676,7 +679,7 @@ def build_gateway_control_app(
                 handle.write(media)
             try:
                 if payload.get("force_multipart") is True:
-                    result = await sender.send_schedule_image(media_path, text, [recipient], reply_to)
+                    result = await sender.send_local_image(media_path, text, [recipient], reply_to)
                 else:
                     result = await sender.send_image(media_path, text, [recipient], reply_to)
             except Exception:
