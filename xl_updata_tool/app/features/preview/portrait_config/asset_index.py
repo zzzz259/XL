@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 import ntpath
 import re
@@ -35,6 +36,7 @@ class AssetIndex:
     cab_cache_path: Path | None = field(default=None, repr=False, compare=False)
     container_entries: tuple = ()
     exact_schema: str = ""
+    environment_provider: Any = field(default=None, repr=False, compare=False, kw_only=True)
     _entries_by_path: Mapping = field(init=False, repr=False, compare=False)
     _entries_by_leaf: Mapping = field(init=False, repr=False, compare=False)
     _discovered: dict[tuple[str, int], IndexedAsset] = field(default_factory=dict, init=False, repr=False, compare=False)
@@ -103,7 +105,8 @@ class AssetIndex:
 
     @classmethod
     def from_exact_catalog(cls, catalog_path: Path, bundle_root: Path,
-                           version_timestamp: int, *, cab_cache_path: Path | None = None) -> "AssetIndex":
+                           version_timestamp: int, *, cab_cache_path: Path | None = None,
+                           environment_provider=None) -> "AssetIndex":
         """Read only bounded explicit exact-schema input; never downgrade to AS."""
         from .exact_catalog import MAX_BYTES, parse_catalog
         catalog_path, bundle_root = Path(catalog_path), Path(bundle_root)
@@ -118,7 +121,8 @@ class AssetIndex:
             assets, entries = parse_catalog(payload, bundle_root, version_timestamp)
         except (KeyError, TypeError, AttributeError) as exc:
             raise ValueError('malformed exact catalog') from exc
-        return cls(version_timestamp, assets, bundle_root, cab_cache_path, entries, payload['schema'])
+        return cls(version_timestamp, assets, bundle_root, cab_cache_path, entries, payload['schema'],
+                   environment_provider=environment_provider)
 
     @classmethod
     def from_catalog(cls, catalog_path: Path, bundle_root: Path,
@@ -247,41 +251,45 @@ class AssetIndex:
             self._external_matches[key] = tuple(matches)
         return self._external_matches[key]
 
+    def _environment(self, path):
+        if self.environment_provider is not None:
+            return self.environment_provider(path)
+        from .unity_scene import _load_environment
+        return nullcontext(_load_environment(path))
+
     def _serialized_identities(self, path: Path) -> dict[tuple[str, int], str]:
         if path not in self._serialized_objects:
-            from .unity_scene import _load_environment
-
             identities = {}
             try:
-                env = _load_environment(path)
-                for obj in env.objects:
-                    cab = canonical_bundle_hash(str(getattr(getattr(obj, "assets_file", None), "name", "")))
-                    if cab:
-                        identities[(cab, int(obj.path_id))] = str(obj.type.name)
+                with self._environment(path) as env:
+                    for obj in env.objects:
+                        cab = canonical_bundle_hash(str(getattr(getattr(obj, "assets_file", None), "name", "")))
+                        if cab:
+                            identities[(cab, int(obj.path_id))] = str(obj.type.name)
             except Exception:
-                # Failed verification cannot turn a coincident PathID into a match.
+                if self.environment_provider is not None:
+                    raise
                 identities = {}
             self._serialized_objects[path] = identities
         return self._serialized_objects[path]
 
     def object_references(self, asset: IndexedAsset) -> tuple[Any, ...]:
-        """Read and cache only one metadata object's required core PPtrs."""
+        """Read and cache detached required core PPtrs inside the owning scope."""
         from .scope_policy import required_dependency_field
-        from .unity_scene import _load_environment, _pointer_records, _typetree
-
+        from .unity_scene import _pointer_records, _typetree
         key = (asset.bundle_hash, asset.path_id)
         if key not in self._object_pointers:
             pointers = ()
             if asset.asset_type in {"Material", "Sprite", "MonoBehaviour"}:
-                env = _load_environment(asset.bundle_path)
-                matches = [obj for obj in env.objects if int(obj.path_id) == asset.path_id
-                           and str(obj.type.name) == asset.asset_type]
-                if len(matches) != 1:
-                    raise ValueError(f"metadata object identity is absent or ambiguous: {key}")
-                obj = matches[0]
-                pointers = tuple(pointer for pointer in _pointer_records(
-                    {asset.path_id: _typetree(obj)}, {asset.path_id: obj}, asset.bundle_hash,
-                ) if required_dependency_field(pointer.field_path))
+                with self._environment(asset.bundle_path) as env:
+                    matches = [obj for obj in env.objects if int(obj.path_id) == asset.path_id
+                               and str(obj.type.name) == asset.asset_type]
+                    if len(matches) != 1:
+                        raise ValueError(f"metadata object identity is absent or ambiguous: {key}")
+                    obj = matches[0]
+                    pointers = tuple(pointer for pointer in _pointer_records(
+                        {asset.path_id: _typetree(obj)}, {asset.path_id: obj}, asset.bundle_hash,
+                    ) if required_dependency_field(pointer.field_path))
             self._object_pointers[key] = pointers
         return self._object_pointers[key]
 
@@ -289,19 +297,19 @@ class AssetIndex:
         return self._read_object(ref)[1]
 
     def _read_object(self, ref):
-        from .unity_scene import _load_environment, _typetree
+        from .unity_scene import _typetree
         key=(ref.bundle_hash,ref.path_id)
         if key not in self._trees:
             path=self.bundle_path_for(ref.bundle_hash)
             if path is None:
                 raise ValueError(f'metadata bundle unavailable: {ref.bundle_hash}')
-            env=_load_environment(path)
-            matches=[o for o in env.objects if int(o.path_id)==ref.path_id]
-            if len(matches)!=1:
-                raise ValueError(f'metadata object unavailable/ambiguous: {ref}')
-            obj=matches[0]
-            external=tuple(str(e.path) for e in getattr(getattr(obj,'assets_file',None),'externals',()))
-            self._trees[key]=(external,_typetree(obj))
+            with self._environment(path) as env:
+                matches=[o for o in env.objects if int(o.path_id)==ref.path_id]
+                if len(matches)!=1:
+                    raise ValueError(f'metadata object unavailable/ambiguous: {ref}')
+                obj=matches[0]
+                external=tuple(str(e.path) for e in getattr(getattr(obj,'assets_file',None),'externals',()))
+                self._trees[key]=(external,_typetree(obj))
         return self._trees[key]
 
     def resolve_object_pointer(self, source, pointer, *, expected_type):

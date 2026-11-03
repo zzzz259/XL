@@ -344,16 +344,23 @@ def _pointer_records(trees: dict[int, dict[str, Any]], objects: dict[int, Any],
 
 
 def parse_unity_scene(bundle_path: Path, bundle_hash: str,
-                      version_timestamp: int | None = None) -> UnitySceneParseResult:
-    """Read a prefab's object graph and retain exact Unity object identities."""
-    diagnostics: list[SceneDiagnostic] = []
+                      version_timestamp: int | None = None, *,
+                      environment_provider=None) -> UnitySceneParseResult:
+    """Parse while a scoped provider owns every reader; desktop default is unchanged."""
+    if environment_provider is not None:
+        with environment_provider(Path(bundle_path)) as env:
+            return _parse_environment(env, bundle_hash, version_timestamp)
     try:
         env = _load_environment(Path(bundle_path))
     except Exception as exc:
         return UnitySceneParseResult(str(bundle_hash), (), (), (), (), (
             SceneDiagnostic("bundle_load_failed", f"UnityPy could not load {bundle_path}: {exc}"),
         ), version_timestamp=version_timestamp)
+    return _parse_environment(env, bundle_hash, version_timestamp)
 
+
+def _parse_environment(env, bundle_hash, version_timestamp):
+    diagnostics: list[SceneDiagnostic] = []
     source_objects = tuple(env.objects)
     owners = {str(getattr(getattr(obj, 'assets_file', None), 'name', '')) for obj in source_objects}
     if len(owners) > 1 or len({int(obj.path_id) for obj in source_objects}) != len(source_objects):

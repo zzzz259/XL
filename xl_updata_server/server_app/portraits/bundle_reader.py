@@ -130,6 +130,20 @@ def select_textasset(objects, exact_name, *, limits=ReaderLimits()):
                 size=len(data), sha256=hashlib.sha256(data).hexdigest())
 
 
+def validate_texture_stream(tree, cab, resources, cap):
+    stream = tree.get('m_StreamData')
+    if not stream or not stream.get('path'):
+        return
+    path, offset, size = stream.get('path'), stream.get('offset'), stream.get('size')
+    name = cab + '.resS'
+    if path not in (name, 'archive:/' + cab + '/' + name):
+        raise ValueError('texture resource owner/path mismatch')
+    reader = resources.get(name)
+    if (reader is None or type(offset) is not int or type(size) is not int
+            or offset < 0 or not 0 < size <= cap or offset + size > reader.Length):
+        raise ValueError('texture resource range limit')
+
+
 class BundleReader:
     def __init__(self, bundle, source, limits):
         self._bundle = bundle
@@ -141,6 +155,127 @@ class BundleReader:
 
     def _require_open(self):
         if self._bundle is None: raise ValueError('reader is closed')
+
+    @property
+    def expanded_bytes(self):
+        self._require_open()
+        return self._bundle.expanded_bytes
+
+    @property
+    def objects(self):
+        """Borrow objects only while this reader's owning context is entered."""
+        self._require_open()
+        objects = []
+        identities = set()
+        owners = set()
+        for obj in self._bundle.get_objects():
+            if len(objects) >= self.limits.objects:
+                raise ValueError('object count limit')
+            if type(obj.path_id) is not int or not -(2**63) <= obj.path_id < 2**63 or obj.path_id == 0:
+                raise ValueError('invalid physical PathID')
+            if type(obj.byte_size) is not int or not 0 < obj.byte_size <= self.limits.selected_bytes:
+                raise ValueError('metadata object byte budget')
+            key = (str(obj.assets_file.name), obj.path_id)
+            if key in identities:
+                raise ValueError('duplicate physical object')
+            owners.add(id(obj.assets_file))
+            if len(owners) > 1:
+                raise ValueError('multiple SerializedFile ownership unsupported')
+            identities.add(key)
+            objects.append(obj)
+        return tuple(objects)
+
+    def exact_census(self, version_timestamp):
+        """Detached physical census with the complete owner-qualified preload ledger."""
+        objects = self.objects
+        if not objects:
+            raise ValueError('empty physical bundle')
+        abobjects = [obj for obj in objects if obj.type.name == 'AssetBundle']
+        if len(abobjects) != 1 or not 0 < abobjects[0].byte_size <= self.limits.selected_bytes:
+            raise ValueError('require one bounded AssetBundle')
+        sf = objects[0].assets_file
+        wire = self.source.wire.wire_md5
+        cab = str(sf.name)
+        if re.fullmatch(r'(?i)CAB-[0-9a-f]{32}', cab) is None:
+            raise ValueError('unsupported SerializedFile name')
+        def pointer(p):
+            f, n = p.m_FileID, p.m_PathID
+            if type(f) is not int or type(n) is not int or not 0 <= f <= len(sf.externals) or not -(2**63) <= n < 2**63:
+                raise ValueError('invalid raw pointer')
+            return dict(file_id=f, path_id=n)
+        if len(sf.externals) > 4096:
+            raise ValueError('external count limit')
+        ab = abobjects[0].read()
+        if len(ab.m_PreloadTable) > 100000 or len(ab.m_Container) > 10000:
+            raise ValueError('container ledger limit')
+        preload = [pointer(p) for p in ab.m_PreloadTable]
+        entries = []
+        for ordinal, (path, info) in enumerate(ab.m_Container):
+            if type(path) is not str or not 0 < len(path) <= 4096:
+                raise ValueError('container path limit')
+            start, count = info.preloadIndex, info.preloadSize
+            if type(start) is not int or type(count) is not int or min(start, count) < 0 or start + count > len(preload):
+                raise ValueError('invalid preload range')
+            entries.append(dict(path=path, owner_bundle_hash=wire, owner_serialized_file=cab,
+                asset_bundle_path_id=abobjects[0].path_id, ordinal=ordinal, asset=pointer(info.asset),
+                preload_index=start, preload_size=count))
+        assets = []
+        for obj in objects:
+            name = obj.peek_name() or ''
+            if type(name) is not str or len(name) > 4096:
+                raise ValueError('object name limit')
+            assets.append(dict(bundle_hash=wire, serialized_file=cab, path_id=obj.path_id,
+                name=name, asset_type=obj.type.name, version_timestamp=version_timestamp,
+                source='normalized/' + self.source.sha256 + '/' + cab + '#' + str(obj.path_id)))
+        return dict(assets=assets, serialized_files=[dict(bundle_hash=wire, serialized_file=cab,
+            externals=[str(e.path) for e in sf.externals], preload=preload)], container_entries=entries)
+
+    def extract_selected(self, *, cab, path_id, asset_type, name):
+        """Decode one census-authenticated leaf; never dereference external objects."""
+        if asset_type not in ('TextAsset', 'Texture2D') or type(path_id) is not int:
+            raise ValueError('unsupported selected identity')
+        matches = [obj for obj in self.objects if obj.path_id == path_id
+                   and str(obj.assets_file.name).casefold() == cab.casefold()]
+        if len(matches) != 1:
+            raise ValueError('selected physical identity missing or ambiguous')
+        obj = matches[0]
+        if obj.type.name != asset_type or (obj.peek_name() or '') != name:
+            raise ValueError('selected type/name mismatch')
+        if not 0 < obj.byte_size <= self.limits.selected_bytes:
+            raise ValueError('selected object byte budget')
+        if asset_type == 'TextAsset':
+            value = obj.read().m_Script
+            data = value.encode('utf-8', 'surrogateescape') if isinstance(value, str) else bytes(value)
+        else:
+            # Dimensions are read before UnityPy's image property allocates RGBA.
+            tree = obj.read_typetree()
+            width, height = tree.get('m_Width'), tree.get('m_Height')
+            if (type(width) is not int or type(height) is not int or min(width, height) <= 0
+                    or max(width, height) > 4096 or width * height > 4194304):
+                raise ValueError('selected texture pixel budget')
+            validate_texture_stream(tree, str(obj.assets_file.name), self._bundle.files, self.limits.selected_bytes)
+            del tree
+            import io
+            cap = self.limits.selected_bytes
+            class BoundedOutput(io.BytesIO):
+                def write(self, value):
+                    if self.tell() + len(value) > cap:
+                        raise ValueError('encoded texture byte budget')
+                    return super().write(value)
+            with BoundedOutput() as output:
+                image = obj.read().image
+                try:
+                    if image.size != (width, height):
+                        raise ValueError('decoded texture dimension mismatch')
+                    image.save(output, format='PNG')
+                    data = output.getvalue()
+                finally:
+                    image.close()
+        if not 0 < len(data) <= self.limits.selected_bytes:
+            raise ValueError('selected output byte budget')
+        return dict(data=data, size=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                    wire_md5=self.source.wire.wire_md5, source_sha256=self.source.sha256,
+                    cab=cab, path_id=path_id, asset_type=asset_type, name=name)
 
     def extract_textasset(self, exact_name):
         self._require_open()
@@ -227,6 +362,7 @@ def open_bundle(normalized, *, normalized_root, work_root, decrypt_key, limits=R
         def disk():
             return stack.enter_context(tempfile.TemporaryFile(dir=work))
         class ScopedEnvironment(UnityPy.Environment):
+            def load_file(self,*args,**kwargs): raise ValueError('ambient file loading forbidden')
             def find_file(self,*args,**kwargs): raise ValueError('external file resolution forbidden')
         class DiskBundle(BundleFile):
             def read_fs(self, reader):
@@ -257,6 +393,7 @@ def open_bundle(normalized, *, normalized_root, work_root, decrypt_key, limits=R
                 if not old and flags & 0x200: reader.align_stream(16)
                 available=(size-cs if tail else size)-reader.Position
                 blocks,nodes=parse_metadata(data,compressed_available=available,limits=limits,encrypted=self.decryptor is not None)
+                self.expanded_bytes=sum(b[0] for b in blocks)
                 estimate=sum(b[0] for b in blocks)+sum(n[1] for n in nodes)
                 if shutil.disk_usage(work).free < estimate + 16*1024**2: raise ValueError('insufficient spill disk')
                 output=disk()
@@ -287,6 +424,8 @@ def open_bundle(normalized, *, normalized_root, work_root, decrypt_key, limits=R
                             if obj.byte_start<0 or obj.byte_size<0 or obj.byte_start+obj.byte_size>size:
                                 raise ValueError('object outside CAB')
                     parsed.flags=flags;self.files[name]=parsed
+                    if kind == 'resource':
+                        self.environment.register_cab(name, parsed)
         source.seek(0)
         bundle=DiskBundle(EndianBinaryReader(source),ScopedEnvironment(path=str(work)),name=d.wire.wire_md5+'.bundle')
         result=BundleReader(bundle,d,limits)

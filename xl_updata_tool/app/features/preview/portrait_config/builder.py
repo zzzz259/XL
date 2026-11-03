@@ -636,6 +636,7 @@ def build_portrait_scenes(
 
         parsed = parse_unity_scene(
             prefab_asset.bundle_path, prefab_asset.bundle_hash, version_timestamp,
+            **({"environment_provider": index.environment_provider} if index.environment_provider is not None else {}),
         )
         if container_assets or parsed.container_roots:
             parsed = _scope_to_container(
