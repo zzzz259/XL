@@ -77,6 +77,17 @@ def _sync_directory(path):
         finally: os.close(fd)
 
 
+def _sync_directory_chain(path):
+    """Heal directory entries bottom-up through the resolved filesystem anchor.
+
+    Existing ancestors may have been created by an interrupted prior call, so
+    existence alone is not durability evidence. Work is bounded by path depth.
+    The platform-specific directory barrier remains the existing helper.
+    """
+    for directory in (path,*path.parents):
+        _sync_directory(directory)
+
+
 def _install(temporary, target, expected):
     """Atomic no-clobber creation; competing identical writers are idempotent."""
     try: os.link(temporary, target)
@@ -357,10 +368,9 @@ def _atomic_json(root, relative, raw):
     os.replace(temporary,target); _sync_directory(target.parent)
 
 
-def _write_catalog(catalog, root, *, promote=False):
-    """Install a hashed immutable revision, then version and optional current pointers."""
+def _install_catalog(catalog, root):
+    """Install and durably heal one immutable revision without pointer changes."""
     catalog = validate_catalog(catalog); version = _version(catalog['version'])
-    if type(promote) is not bool: raise ValueError('promotion must be explicit boolean')
     for row in catalog['skins']:
         for key in ('artifact_path','archive_path'):
             if row.get(key) is not None: _relative(row[key])
@@ -371,9 +381,26 @@ def _write_catalog(catalog, root, *, promote=False):
     with temporary.open('xb') as stream:
         stream.write(raw); stream.flush(); os.fsync(stream.fileno())
     _install(temporary,_path(root,relative),sha)
-    pointer_raw = _json(pointer,65536).encode('utf-8')
-    _atomic_json(root,f'catalog/{version}.json',pointer_raw)
-    if promote: _atomic_json(root,'current.json',pointer_raw)
+    # Persist every containing entry, including newly made root ancestors.
+    # Identical cached revisions repeat the complete chain to heal a crash.
+    _sync_directory_chain(_path(root,'catalog'))
+    return pointer
+
+
+def _write_version_pointer(root, pointer):
+    _atomic_json(root,f"catalog/{pointer['version']}.json",_json(pointer,65536).encode('utf-8'))
+
+
+def _write_current_pointer(root, pointer):
+    _atomic_json(root,'current.json',_json(pointer,65536).encode('utf-8'))
+
+
+def _write_catalog(catalog, root, *, promote=False):
+    """Shared legacy/lifecycle writer; projection chooses pointers separately."""
+    if type(promote) is not bool: raise ValueError('promotion must be explicit boolean')
+    pointer = _install_catalog(catalog,root)
+    _write_version_pointer(root,pointer)
+    if promote: _write_current_pointer(root,pointer)
     return pointer
 
 
@@ -426,6 +453,45 @@ def catalog_token(data_root):
     return None if current is None else digest(current)
 
 
+def version_catalog_token(data_root, version):
+    """Exact version snapshot token; only an absent pointer returns None."""
+    from .model import digest
+    catalog=_optional_catalog(Path(data_root).resolve(),_version(version))
+    return None if catalog is None else digest(catalog)
+
+
+def _desired_snapshot(catalog, execution_plan_id):
+    incoming=copy.deepcopy(catalog)
+    if not isinstance(incoming,dict): raise ValueError('catalog must be an object')
+    for key in ('desired_generation','desired_execution_plan_id'): incoming.pop(key,None)
+    desired=validate_catalog(incoming)
+    desired['publication_protocol']=2
+    for row in desired['skins']:
+        for key in ARTIFACT_FIELDS: row.pop(key,None)
+        row.update(artifact_path=None,artifact_sha256=None,source_version=None)
+        if row['state']=='published': row['state']='not_generated'
+    desired['desired_execution_plan_id']=execution_plan_id
+    desired['desired_generation']=desired_generation(desired,execution_plan_id)
+    return validate_catalog(desired)
+
+
+def _desired_ref(pointer):
+    return {'revision':pointer['sha256'],'locator':pointer['catalog_path'],'sha256':pointer['sha256']}
+
+
+def stage_desired_snapshot(catalog,data_root,*,execution_plan_id):
+    """Trusted immutable metadata staging before closed-plan registration.
+
+    Never writes a pointer or grants acceptance/promotion authority. No CAS or
+    publisher/core lock is needed for the shared atomic no-clobber installer.
+    Caller authenticates and freezes plan/source identity before use.
+    """
+    if not _hash(execution_plan_id): raise ValueError('explicit desired execution plan required')
+    desired=_desired_snapshot(catalog,execution_plan_id)
+    root=Path(data_root).resolve(); root.mkdir(parents=True,exist_ok=True)
+    return {'desired_catalog_ref':_desired_ref(_install_catalog(desired,root))}
+
+
 @contextmanager
 def locked_mutation(data_root):
     """Trusted bounded coordinator hook. Publisher FIRST; raw updater OS mutex
@@ -448,17 +514,7 @@ class _LockedMutation:
         if catalog_token(self.root)!=expected_current: raise ValueError('current pointer conflict; reread and retry')
         if execution_plan_id is not None and not _hash(execution_plan_id):
             raise ValueError('invalid desired execution plan')
-        incoming=copy.deepcopy(catalog)
-        if not isinstance(incoming,dict): raise ValueError('catalog must be an object')
-        for key in ('desired_generation','desired_execution_plan_id'): incoming.pop(key,None)
-        desired=validate_catalog(incoming)
-        desired['publication_protocol']=2
-        for row in desired['skins']:
-            for key in ARTIFACT_FIELDS: row.pop(key,None)
-            row.update(artifact_path=None,artifact_sha256=None,source_version=None)
-            if row['state']=='published': row['state']='not_generated'
-        desired['desired_execution_plan_id']=execution_plan_id
-        desired['desired_generation']=desired_generation(desired,execution_plan_id)
+        desired=_desired_snapshot(catalog,execution_plan_id)
         current=_optional_catalog(self.root)
         prior=_optional_catalog(self.root,desired['version'])
         # Read both snapshots under lock; preserve any accepted change committed
@@ -473,6 +529,34 @@ class _LockedMutation:
                     row.update(state=saved['state'],diagnostics=copy.deepcopy(saved['diagnostics']))
         return _write_catalog(desired,self.root,promote=True)
 
+    def install_manual_desired(self,catalog,*,execution_plan_id,expected_current,expected_version):
+        if not self.active: raise RuntimeError('closed publisher mutation')
+        if not _hash(execution_plan_id): raise ValueError('explicit manual execution plan required')
+        desired=_desired_snapshot(catalog,execution_plan_id)
+        if catalog_token(self.root)!=expected_current:
+            raise ValueError('current pointer conflict; reread and retry')
+        if version_catalog_token(self.root,desired['version'])!=expected_version:
+            raise ValueError('version pointer conflict; reread and retry')
+        current=_optional_catalog(self.root)
+        prior=_optional_catalog(self.root,desired['version'])
+        for snapshot in (current,prior):
+            if snapshot and any(snapshot[k]!=desired[k] for k in ('instance_id','source_id')):
+                raise ValueError('manual catalog scope mismatch')
+        same_current=current is not None and current['version']==desired['version']
+        if same_current and current.get('desired_execution_plan_id') is None:
+            raise ValueError('manual reuse requires authenticated explicit baseline bootstrap')
+        pointer=_install_catalog(desired,self.root)
+        disposition='immutable_only'
+        if prior is None:
+            if same_current:
+                canonical=_install_catalog(current,self.root)
+                _write_version_pointer(self.root,canonical)
+                disposition='current_version_recovered'
+            else:
+                _write_version_pointer(self.root,pointer)
+                disposition='version_seeded'
+        return {'desired_catalog_ref':_desired_ref(pointer),'disposition':disposition}
+
 
 def publish_desired(catalog,data_root,*,expected_current,execution_plan_id=None):
     """Trusted lifecycle promotion, with mandatory optimistic current token.
@@ -485,6 +569,19 @@ def publish_desired(catalog,data_root,*,expected_current,execution_plan_id=None)
     """
     with locked_mutation(data_root) as mutation:
         return mutation.publish_desired(catalog,expected_current=expected_current,execution_plan_id=execution_plan_id)
+
+
+def install_manual_desired(catalog,data_root,*,execution_plan_id,expected_current,expected_version):
+    """Trusted metadata-only installer, never a current promotion or acceptance.
+
+    Caller authenticates source/selection/plan and freezes request identity before
+    use. Both snapshot tokens are mandatory CAS fences, distinct from external
+    core authority. Registration and accepted events remain separate operations.
+    Same-current legacy None binding requires a real lifecycle baseline first.
+    """
+    with locked_mutation(data_root) as mutation:
+        return mutation.install_manual_desired(catalog,execution_plan_id=execution_plan_id,
+            expected_current=expected_current,expected_version=expected_version)
 
 
 def project_accepted(reader,data_root,*,after_id=0,limit=16,max_bytes=4*1024*1024,cursor=None):
@@ -506,12 +603,19 @@ def project_accepted(reader,data_root,*,after_id=0,limit=16,max_bytes=4*1024*102
     with _lock(root):
         current=_optional_catalog(root)
         versions={r['version'] for r in results}
-        if current is not None: versions.add(current['version'])
+        if current is not None and results: versions.add(current['version'])
         for version in sorted(versions):
             catalog=_optional_catalog(root,version)
             if catalog is None: raise ValueError('desired version not published: '+version)
             if (catalog['instance_id'],catalog['source_id'])!=(reader.instance_id,reader.source_id):
                 raise ValueError('reader/catalog scope mismatch')
             merged=project_catalog(catalog,results)
-            _write_catalog(merged,root,promote=current is not None and current['version']==version)
+            _write_version_pointer(root,_install_catalog(merged,root))
+        if current is not None and results:
+            if (current['instance_id'],current['source_id'])!=(reader.instance_id,reader.source_id):
+                raise ValueError('reader/catalog scope mismatch')
+            # Always start from actual current, even after a version-only crash.
+            # A different same-version generation remains independently owned.
+            merged=project_catalog(current,results)
+            _write_current_pointer(root,_install_catalog(merged,root))
     return page
