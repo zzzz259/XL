@@ -15,6 +15,17 @@ HEADERS = {
 }
 
 
+def validate_remote_name(value: str) -> str:
+    """Require an unambiguous relative POSIX name, never a caller URL."""
+    if type(value) is not str or not value or len(value) > 4096:
+        raise ValueError("invalid remote name")
+    if any(ord(c) < 33 or ord(c) == 127 for c in value) or any(c in value for c in "\\:?#%"):
+        raise ValueError("unsafe remote name")
+    if any(part in ("", ".", "..") for part in value.split("/")):
+        raise ValueError("unsafe remote name")
+    return value
+
+
 @dataclass(frozen=True)
 class UpdateInfo:
     timestamp: int
@@ -46,12 +57,31 @@ class CdnClient:
         with urllib.request.urlopen(request, context=self.ssl_context, timeout=self.timeout_seconds) as response:
             return response.read()
 
+    def fetch_version_bytes(self, version_file: str, max_bytes: int = 8 * 1024 * 1024) -> bytes:
+        """Fetch exact original version bytes with a hard response limit.
+
+        Kept separate from legacy _get_bytes mocks/consumers intentionally.
+        """
+        validate_remote_name(version_file)
+        if type(max_bytes) is not int or not 0 < max_bytes <= 8 * 1024 * 1024:
+            raise ValueError("invalid version response limit")
+        request = urllib.request.Request(f"{self.base_url}/{version_file}", headers=HEADERS)
+        chunks, total = [], 0
+        with urllib.request.urlopen(request, context=self.ssl_context, timeout=self.timeout_seconds) as response:
+            while chunk := response.read(min(1024 * 1024, max_bytes - total + 1)):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError("version response too large")
+                chunks.append(chunk)
+        return b"".join(chunks)
+
     def fetch_update_info(self) -> UpdateInfo:
         url = f"{self.base_url.rsplit('/Android/Bundles', 1)[0]}/Android/UpdateInfo/updateinfo.json"
         payload = json.loads(self._get_bytes(url).decode("utf-8"))
         return UpdateInfo(timestamp=int(payload["timestamp"]), file=str(payload["file"]))
 
     def fetch_version_catalog(self, version_file: str) -> VersionCatalog:
+        validate_remote_name(version_file)
         payload = json.loads(self._get_bytes(f"{self.base_url}/{version_file}").decode("utf-8"))
         categories = tuple(
             CategoryInfo(
