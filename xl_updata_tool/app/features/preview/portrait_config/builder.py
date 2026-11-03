@@ -27,7 +27,7 @@ from .model import (
 )
 from .unity_scene import UnitySceneParseResult, UnityScenePart, parse_unity_scene
 
-PARSER_VERSION = "13"
+PARSER_VERSION = "14-exact-v1"
 
 # Confirmed by the user as Japan-only entries retained in the CN Lua tables.
 # If an exact resource becomes available in a later version it is used normally.
@@ -49,11 +49,16 @@ def _metadata(root: PortraitRoot) -> dict[str, str]:
 
 def _root_config_hash(
     root: PortraitRoot, prefab_hash: str, container_assets: tuple[IndexedAsset, ...] = (),
+    container_entries: tuple = (),
 ) -> str:
     # Hash this parsed root rather than its whole Lua source file: one unrelated
     # skin entry changing must not invalidate every skin declared in that file.
     from .interaction_metadata import source_fingerprints
     payload = {
+        "exact_bindings": sorted(({
+            **asdict(entry), 'raw_path': entry.path,
+        } for entry in container_entries), key=lambda entry: json.dumps(entry, sort_keys=True)),
+        "parser_version": PARSER_VERSION,
         "interaction_sources": source_fingerprints(root),
         "skin_id": root.skin_id,
         "version_timestamp": root.version_timestamp,
@@ -63,9 +68,9 @@ def _root_config_hash(
         "unresolved_reason": root.unresolved_reason,
         "event_runtime": asdict(root.event_runtime) if root.event_runtime else None,
         "container_assets": [
-            (item.name, item.container, item.path_id, item.asset_type)
+            (item.name, item.container, item.bundle_hash, item.path_id, item.asset_type)
             for item in sorted(container_assets, key=lambda asset: (
-                asset.name.casefold(), asset.path_id, asset.asset_type,
+                asset.name.casefold(), asset.bundle_hash, asset.path_id, asset.asset_type,
             ))
         ],
     }
@@ -104,9 +109,21 @@ def _scope_to_container(
     container_roots = tuple((name, ref) for name, ref in parsed.container_roots if ref in game_objects)
     containers = {a.container.casefold() for a in assets}
     roots = {ref for name, ref in container_roots if name in containers}
-    if not roots and prefab_ref is not None:
+    if index.exact_schema:
+        from .exact_catalog import normalized_path
+        from .asset_index import canonical_bundle_hash
+        root_assets = index.find_exact(prefab_ref.bundle_hash, prefab_ref.path_id) if prefab_ref else ()
+        if (len(root_assets) != 1 or root_assets[0].asset_type != 'GameObject'
+                or canonical_bundle_hash(parsed.serialized_file) != root_assets[0].serialized_file):
+            diagnostic = SceneDiagnostic('exact_prefab_owner_mismatch', 'Parsed SerializedFile does not match exact root owner/type')
+            return replace(parsed, parts=(), interactions=(), references=(), diagnostics=(diagnostic,))
+        roots = {ref for name, ref in container_roots if normalized_path(name) == normalized_path(prefab_name)}
+        if roots != {prefab_ref}:
+            diagnostic = SceneDiagnostic('exact_prefab_root_mismatch', 'Exact ledger root disagrees with parsed container root')
+            return replace(parsed, parts=(), interactions=(), references=(), diagnostics=(diagnostic,))
+    if not index.exact_schema and not roots and prefab_ref is not None:
         roots = {ref for _, ref in container_roots if ref == prefab_ref}
-    if not roots and prefab_name:
+    if not index.exact_schema and not roots and prefab_name:
         configured = prefab_name.replace("\\", "/").strip("/").casefold()
         roots = {ref for name, ref in container_roots
                  if (name == configured if "/" in configured else name.rsplit("/", 1)[-1] == configured)}
@@ -119,7 +136,7 @@ def _scope_to_container(
         return replace(parsed, parts=(), interactions=(), references=(), game_objects=(),
                        component_refs=(), diagnostics=(diagnostic,))
     ancestry = dict(parsed.object_ancestry)
-    owned = {go for go, chain in ancestry.items() if roots.intersection(chain)}
+    owned = roots | {go for go, chain in ancestry.items() if roots.intersection(chain)}
     parts = tuple(part for part in parsed.parts if
                   (part.game_object_ref in owned if roots else bool(_container_part_refs(part) & listed)))
     selected_objects = {
@@ -185,7 +202,7 @@ def _scope_to_container(
     }
     indexed_refs = tuple(
         pointer for pointer in scoped_refs
-        if pointer.file_id != 0
+        if index.exact_schema or pointer.file_id != 0
         or (parsed.bundle_hash.casefold(), pointer.path_id) in indexed_paths
     )
     return replace(
@@ -517,9 +534,32 @@ def build_portrait_scenes(
                  ("evidence", ";".join(root.event_runtime.evidence))),
             ))
             continue
-        prefab_matches = index.find_by_name_exact(root.prefab_name)
+        entries = ()
+        exact_path = ''
         container_assets: tuple[IndexedAsset, ...] = ()
-        if not prefab_matches:
+        if index.exact_schema:
+            entries = index.find_container_entries_exact(root.prefab_name)
+            groups = {(entry.owner_bundle_hash, entry.owner_serialized_file, entry.path) for entry in entries}
+            code = ''
+            if len(groups) != 1:
+                code = 'ambiguous_prefab_asset' if groups else 'prefab_root_unresolved'
+            else:
+                owner_hash, owner_file, exact_path = next(iter(groups))
+                direct = {edge.target for entry in entries for edge in entry.edges if edge.role == 'direct' and edge.target is not None}
+                roots = {key for key in direct if index.find_exact(*key)[0].asset_type == 'GameObject'}
+                unresolved_direct = any(edge.unresolved_reason and edge.unresolved_reason != 'null' for entry in entries for edge in entry.edges if edge.role == 'direct')
+                if len(roots) != 1 or unresolved_direct:
+                    code = 'ambiguous_prefab_root' if len(roots) > 1 else 'prefab_root_unresolved'
+                elif next(iter(roots))[0] != owner_hash:
+                    code = 'external_prefab_root_unsupported'
+            if code:
+                scenes.append(_incomplete_scene(version_timestamp, root, game_version, code, 'Exact container has no supported unique direct GameObject root'))
+                continue
+            prefab_matches = index.find_exact(*next(iter(roots)))
+            container_assets = index.container_members(entries)
+        else:
+            prefab_matches = index.find_by_name_exact(root.prefab_name)
+        if not index.exact_schema and not prefab_matches:
             container_assets = index.find_by_container_exact(root.prefab_name)
             bundle_hashes = {item.bundle_hash for item in container_assets}
             container_paths = {item.container.casefold() for item in container_assets}
@@ -584,7 +624,7 @@ def build_portrait_scenes(
             ))
             continue
 
-        config_hash = _root_config_hash(root, prefab_asset.bundle_hash, container_assets)
+        config_hash = _root_config_hash(root, prefab_asset.bundle_hash, container_assets, entries)
         cache_key = cache.key_for(version_timestamp, root.skin_id) if cache else ""
         if cache is not None:
             cached = cache.load(cache_key, config_hash, index)
@@ -600,8 +640,8 @@ def build_portrait_scenes(
         if container_assets or parsed.container_roots:
             parsed = _scope_to_container(
                 parsed, container_assets or (prefab_asset,), index,
-                prefab_name=str(root.prefab_name),
-                prefab_ref=None if container_assets else AssetRef(prefab_asset.bundle_hash, prefab_asset.path_id),
+                prefab_name=exact_path or str(root.prefab_name),
+                prefab_ref=AssetRef(prefab_asset.bundle_hash, prefab_asset.path_id) if index.exact_schema or not container_assets else None,
             )
             if not parsed.parts:
                 incomplete = _incomplete_scene(
@@ -643,7 +683,7 @@ def build_portrait_scenes(
         asset_dependencies = _asset_dependencies(resolved)
         source_bundle_details = _source_bundle_details(source_bundles, asset_dependencies, index)
         prefab_ref = (
-            None if container_assets
+            None if container_assets and not index.exact_schema
             else AssetRef(prefab_asset.bundle_hash, prefab_asset.path_id)
         )
         scene = PortraitScene(
@@ -660,9 +700,9 @@ def build_portrait_scenes(
             diagnostics=_unique_diagnostics((*resolved.diagnostics, *runtime_notes)),
             source_bundle_details=source_bundle_details,
             asset_dependencies=asset_dependencies,
-            prefab_container=container_assets[0].container if container_assets else "",
+            prefab_container=exact_path or (container_assets[0].container if container_assets else ""),
             display_position=root.position,
-            config_metadata=tuple(metadata.items()),
+            config_metadata=tuple(metadata.items()) + (("exact_container_bindings", json.dumps([asdict(entry) for entry in entries], sort_keys=True)),) if entries else tuple(metadata.items()),
         )
         resource_diagnostics = []
         for source_part, model_part in zip(parsed.sorted_parts(), parts, strict=True):

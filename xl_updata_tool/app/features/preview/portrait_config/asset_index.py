@@ -24,6 +24,7 @@ class IndexedAsset:
     bundle_present: bool
     evidence: str
     asset_type: str = ""
+    serialized_file: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,10 @@ class AssetIndex:
     assets: tuple[IndexedAsset, ...]
     bundle_root: Path | None = field(default=None, repr=False, compare=False)
     cab_cache_path: Path | None = field(default=None, repr=False, compare=False)
+    container_entries: tuple = ()
+    exact_schema: str = ""
+    _entries_by_path: Mapping = field(init=False, repr=False, compare=False)
+    _entries_by_leaf: Mapping = field(init=False, repr=False, compare=False)
     _discovered: dict[tuple[str, int], IndexedAsset] = field(default_factory=dict, init=False, repr=False, compare=False)
     _cab_paths: dict = field(default_factory=dict, init=False, repr=False, compare=False)
     _trees: dict = field(default_factory=dict, init=False, repr=False, compare=False)
@@ -64,6 +69,24 @@ class AssetIndex:
             leaves.setdefault(PurePosixPath(asset.container).name.casefold(), []).append(asset)
             bundle_paths.setdefault(bundle_hash, set()).add(asset.bundle_path)
 
+        entry_paths, entry_leaves = {}, {}
+        if self.exact_schema:
+            containers, leaves, resolved = {}, {}, {}
+            for entry in self.container_entries:
+                entry_paths.setdefault(entry.path, []).append(entry)
+                leaf = entry.path.rsplit('/', 1)[-1]
+                entry_leaves.setdefault(leaf, []).append(entry)
+                for edge in entry.edges:
+                    if edge.target is None:
+                        continue
+                    asset = exact[edge.target][0]
+                    for groups, key in ((containers, entry.path), (leaves, leaf),
+                                        (resolved, (entry.path, asset.name.replace('\\', '/').rsplit('/', 1)[-1].casefold()))):
+                        group = groups.setdefault(key, [])
+                        if asset not in group:
+                            group.append(asset)
+        object.__setattr__(self, '_entries_by_path', MappingProxyType({k: tuple(v) for k, v in entry_paths.items()}))
+        object.__setattr__(self, '_entries_by_leaf', MappingProxyType({k: tuple(v) for k, v in entry_leaves.items()}))
         # Freeze both levels so callers cannot alter another lookup's results.
         # These tables belong to this instance, never to a process-wide cache.
         for attribute, groups in (
@@ -79,10 +102,31 @@ class AssetIndex:
         }))
 
     @classmethod
+    def from_exact_catalog(cls, catalog_path: Path, bundle_root: Path,
+                           version_timestamp: int, *, cab_cache_path: Path | None = None) -> "AssetIndex":
+        """Read only bounded explicit exact-schema input; never downgrade to AS."""
+        from .exact_catalog import MAX_BYTES, parse_catalog
+        catalog_path, bundle_root = Path(catalog_path), Path(bundle_root)
+        with catalog_path.open('rb') as stream:
+            raw = stream.read(MAX_BYTES + 1)
+        if len(raw) > MAX_BYTES:
+            raise ValueError('exact catalog byte limit exceeded')
+        try:
+            payload = json.loads(raw.decode('utf-8-sig'))
+            if not isinstance(payload, dict):
+                raise ValueError('exact catalog must be an object')
+            assets, entries = parse_catalog(payload, bundle_root, version_timestamp)
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise ValueError('malformed exact catalog') from exc
+        return cls(version_timestamp, assets, bundle_root, cab_cache_path, entries, payload['schema'])
+
+    @classmethod
     def from_catalog(cls, catalog_path: Path, bundle_root: Path,
                      version_timestamp: int, *, cab_cache_path: Path | None = None) -> "AssetIndex":
         catalog_path, bundle_root = Path(catalog_path), Path(bundle_root)
         payload: Any = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
+        if isinstance(payload, dict) and ('schema' in payload or 'container_entries' in payload or 'serialized_files' in payload):
+            raise ValueError('exact catalog requires bounded AssetIndex.from_exact_catalog')
         catalog_version = payload.get("version_timestamp") if isinstance(payload, dict) else None
         if catalog_version is not None and int(catalog_version) != int(version_timestamp):
             raise ValueError(f"catalog version {catalog_version} does not match requested {version_timestamp}")
@@ -121,6 +165,15 @@ class AssetIndex:
                 asset_type=str(raw.get("asset_type", raw.get("Type", ""))),
             ))
         return cls(int(version_timestamp), tuple(records), bundle_root, cab_cache_path)
+
+    def find_container_entries_exact(self, path_or_leaf):
+        from .exact_catalog import normalized_path
+        key = normalized_path(path_or_leaf)
+        return (self._entries_by_path if '/' in key else self._entries_by_leaf).get(key, ())
+
+    def container_members(self, entries):
+        keys = {edge.target for entry in entries for edge in entry.edges if edge.target is not None}
+        return tuple(self._exact[key][0] for key in sorted(keys))
 
     def find_exact(self, bundle_hash: str, path_id: int) -> tuple[IndexedAsset, ...]:
         """Return exact version-bound matches without guessing by asset name."""
@@ -172,13 +225,13 @@ class AssetIndex:
         if key not in self._external_matches:
             matches = []
             for asset in self._path_ids.get(int(path_id), ()):
-                if not asset.bundle_present:
+                if not asset.bundle_present or (self.exact_schema and asset.serialized_file != cab):
                     continue
                 identities = self._serialized_identities(asset.bundle_path)
                 actual_type = identities.get(key)
                 if actual_type is not None and (not asset.asset_type or asset.asset_type == actual_type):
                     matches.append(asset)
-            if not matches and self.bundle_root is not None:
+            if not matches and self.bundle_root is not None and not self.exact_schema:
                 from .cab_index import load_headers
                 if 'headers' not in self._cab_paths:
                     self._cab_paths['headers'] = load_headers(self.bundle_root, self.version_timestamp, self.cab_cache_path)

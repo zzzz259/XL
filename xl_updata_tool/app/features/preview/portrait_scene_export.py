@@ -158,7 +158,7 @@ def _resolve_asset_path(index: AssetIndex, material_root: Path, reference: Asset
         raise ValueError("AssetStudio identity belongs to another game version")
     if not asset.bundle_present:
         raise ValueError(f"source bundle is missing: {asset.bundle_hash}")
-    if not asset.name or not asset.container:
+    if not asset.name:
         raise ValueError(f"AssetStudio identity has no export path: {reference}")
     from .portrait_config.extracted_paths import identity_output_path
     root = material_root.resolve()
@@ -167,6 +167,8 @@ def _resolve_asset_path(index: AssetIndex, material_root: Path, reference: Asset
         raise ValueError(f"exact Unity asset path escapes material root: {reference}")
     if exact.is_file() and exact.stat().st_size > 0:
         return exact
+    if not asset.container:
+        raise ValueError(f"exact Unity output missing and no legacy export path: {reference}")
     same_export_path = tuple(
         item for item in index.assets
         if item.version_timestamp == index.version_timestamp

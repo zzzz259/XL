@@ -5,7 +5,8 @@ from pathlib import PurePosixPath
 
 def identity_output_path(asset):
     name = PurePosixPath(asset.name.replace('\\', '/'))
-    if (not re.fullmatch(r'[A-Za-z0-9_-]+', asset.bundle_hash)
+    if (type(asset.path_id) is not int or not -(2**63) <= asset.path_id < 2**63 or asset.path_id == 0
+            or not re.fullmatch(r'[A-Za-z0-9_-]+', asset.bundle_hash)
             or name.is_absolute() or '..' in name.parts or len(name.parts) != 1
             or ':' in str(name) or str(name) in {'', '.'}):
         raise ValueError('unsafe exact Unity asset identity path')

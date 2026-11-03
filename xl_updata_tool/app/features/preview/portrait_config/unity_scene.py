@@ -109,6 +109,8 @@ class UnitySceneParseResult:
     container_roots: tuple[tuple[str, AssetRef], ...] = ()
     object_ancestry: tuple[tuple[AssetRef, tuple[AssetRef, ...]], ...] = ()
 
+    serialized_file: str = ""
+
     def sort_key(self, part: UnityScenePart) -> tuple[Any, ...]:
         sibling_path = tuple(node.sibling_index for node in part.transform_chain)
         return (
@@ -352,7 +354,13 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
             SceneDiagnostic("bundle_load_failed", f"UnityPy could not load {bundle_path}: {exc}"),
         ), version_timestamp=version_timestamp)
 
-    objects = {int(obj.path_id): obj for obj in env.objects}
+    source_objects = tuple(env.objects)
+    owners = {str(getattr(getattr(obj, 'assets_file', None), 'name', '')) for obj in source_objects}
+    if len(owners) > 1 or len({int(obj.path_id) for obj in source_objects}) != len(source_objects):
+        return UnitySceneParseResult(str(bundle_hash), (), (), (), (), (
+            SceneDiagnostic('unsupported_serialized_file_ownership', 'Whole-bundle parser requires one unambiguous SerializedFile'),
+        ), version_timestamp=version_timestamp)
+    objects = {int(obj.path_id): obj for obj in source_objects}
     external_files = _external_files(objects)
     types = {path_id: str(obj.type.name) for path_id, obj in objects.items()}
     accepted_types = {"GameObject", "Transform", "RectTransform", "MeshRenderer", "SkinnedMeshRenderer",
@@ -740,4 +748,4 @@ def parse_unity_scene(bundle_path: Path, bundle_hash: str,
     references = _pointer_records(trees, objects, str(bundle_hash))
     return UnitySceneParseResult(str(bundle_hash), game_objects, component_refs, tuple(parts),
                                 tuple(interactions), tuple(diagnostics), references, external_files,
-                                version_timestamp, container_roots, tuple(ancestry.items()))
+                                version_timestamp, container_roots, tuple(ancestry.items()), next(iter(owners), ""))
