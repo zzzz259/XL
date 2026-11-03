@@ -115,10 +115,10 @@ class PortraitStore:
 
     @contextmanager
     def _connection(self, write=False):
-        db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+        db = sqlite3.connect(self.path, timeout=1, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
-            db.execute('PRAGMA busy_timeout=10000')
+            db.execute('PRAGMA busy_timeout=1000')
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA journal_mode=WAL')
             db.execute('PRAGMA synchronous=FULL')
@@ -241,3 +241,314 @@ class PortraitStore:
                 event['result'] = json.loads(event['result'])
                 result.append(event)
             return result
+
+# V1 API remains available only for unregistered rows. Registered executions use
+# the fenced V2 methods below; no legacy call can claim or finish their work.
+_LegacyPortraitStore = PortraitStore
+
+_V2_CHANGES = (
+    'ALTER TABLE metadata ADD COLUMN database_id TEXT',
+    '''CREATE TABLE plans (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, plan_id TEXT NOT NULL UNIQUE,
+        manifest TEXT NOT NULL, context TEXT NOT NULL, expected_count INTEGER NOT NULL,
+        final TEXT)''',
+    '''CREATE TABLE members (
+        plan_id TEXT NOT NULL REFERENCES plans(plan_id),
+        job_id TEXT NOT NULL REFERENCES jobs(job_id),
+        start_attempt INTEGER NOT NULL, final_attempt INTEGER,
+        PRIMARY KEY(plan_id,job_id))''',
+    'ALTER TABLE jobs ADD COLUMN plan_id TEXT REFERENCES plans(plan_id)',
+    'ALTER TABLE jobs ADD COLUMN crash_count INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE jobs ADD COLUMN retry_at REAL NOT NULL DEFAULT 0',
+    'ALTER TABLE jobs ADD COLUMN failure_class TEXT',
+    'ALTER TABLE events ADD COLUMN plan_id TEXT REFERENCES plans(plan_id)',
+    'CREATE INDEX jobs_plan_claim ON jobs(plan_id,state,retry_at,seq)',
+    'CREATE INDEX events_plan ON events(plan_id,id)',
+)
+
+
+def _definitions(db):
+    return {r[0]: ' '.join(r[1].split()) for r in db.execute(
+        "SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table','index','view') AND name NOT LIKE 'sqlite_%'")}
+
+
+def _expected_v2():
+    db = sqlite3.connect(':memory:')
+    try:
+        for sql in _SCHEMA + _V2_CHANGES: db.execute(sql)
+        return _definitions(db)
+    finally: db.close()
+
+
+_V2_DEFINITIONS = _expected_v2()
+
+
+def check_v2(db, instance_id, source_id, database_id=None):
+    if db.execute('PRAGMA user_version').fetchone()[0] != 2 or _definitions(db) != _V2_DEFINITIONS:
+        raise ValueError('incompatible portrait store schema')
+    rows = db.execute('SELECT * FROM metadata').fetchall()
+    if len(rows) != 1 or tuple(rows[0])[:4] != (1,2,instance_id,source_id) or not _hash(rows[0][4]):
+        raise ValueError('portrait store scope/schema mismatch')
+    identity = rows[0][4]
+    if database_id is not None and identity != database_id:
+        raise ValueError('portrait database identity mismatch')
+    return identity
+
+
+def _metadata_ref(ref,scope=None):
+    """Validate frozen MetadataRef wire fields; no file reads or authority claim."""
+    if type(ref) is not dict or set(ref)!={'scope_key','pin_digest','locator','size','sha256'}:
+        raise ValueError('invalid metadata reference fields')
+    if any(not _hash(ref[k]) for k in ('scope_key','pin_digest','sha256')) or (scope is not None and ref['scope_key']!=scope):
+        raise ValueError('metadata reference scope/hash mismatch')
+    _integer(ref['size'],1)
+    if ref['size']>32*1024**2 or not _text(ref['locator']): raise ValueError('invalid metadata reference size/locator')
+
+
+def _plan_references(p):
+    scope=digest([p['instance_id'],p['source_id']]); ref=p['source_capture_ref']
+    fields={'schema','instance_id','source_id','version','pin_digest','tool_fingerprint','capture',
+            'snapshot_digest','assigned','available','blocked','unassigned'}
+    if set(ref)!=fields or ref.get('schema')!='portrait-prepared-v1': raise ValueError('invalid PreparedSourceRef fields')
+    for key in ('instance_id','source_id','version','tool_fingerprint'):
+        if ref[key]!=p[key]: raise ValueError('prepared reference identity mismatch: '+key)
+    if ref['snapshot_digest']!=p['input_snapshot_digest'] or not _hash(ref['pin_digest']):
+        raise ValueError('prepared snapshot/pin mismatch')
+    _metadata_ref(ref['capture'],scope)
+    if ref['capture']['pin_digest']!=ref['pin_digest']: raise ValueError('capture pin mismatch')
+    for key in ('assigned','available','blocked','unassigned'): _integer(ref[key],0)
+    if ref['assigned']!=ref['available']+ref['blocked']: raise ValueError('prepared availability mismatch')
+    # Publication scopes also bind CDN and absolute data root. Its configured
+    # read_request authenticates that domain; it is not the prepared scope.
+    _metadata_ref(p['core_publication_ref'])
+    if p['core_publication_ref']['pin_digest']!=ref['pin_digest']:
+        raise ValueError('core publication pin mismatch')
+    catalog=p['desired_catalog_ref']
+    # Truthful wrapper: revision identity, immutable locator and byte SHA256.
+    if set(catalog)!={'revision','locator','sha256'} or not _hash(catalog['sha256']) or not all(_text(catalog[k]) for k in ('revision','locator')):
+        raise ValueError('invalid desired catalog reference')
+
+
+def validate_result(job, attempt, result):
+    for key in ('schema_version','job_id','instance_id','source_id','version','character_id','skin_id',
+                'render_key','profile','input_snapshot_digest','tool_fingerprint','source_capture_ref'):
+        if _json(result.get(key),MAX_RECORD_BYTES) != _json(job[key],MAX_RECORD_BYTES): raise ValueError('result identity mismatch: '+key)
+    if type(result.get('attempt')) is not int or result['attempt'] != attempt:
+        raise ValueError('result attempt mismatch')
+    if result.get('status') not in TERMINAL: raise ValueError('invalid terminal result')
+    if type(result.get('diagnostics')) is not list or not all(type(x) is str for x in result['diagnostics']):
+        raise ValueError('invalid diagnostics')
+    if result['status'] != 'success': return
+    for key, expected in (('artifact_render_key',job['render_key']),
+                          ('artifact_tool_fingerprint',job['tool_fingerprint']),
+                          ('source_version',job['version']),('archive_profile',PROFILE)):
+        if result.get(key) != expected: raise ValueError('invalid artifact lineage: '+key)
+    for path, sha, directory in (('artifact_path','artifact_sha256','artifacts'),('archive_path','archive_sha256','archive')):
+        if not _hash(result.get(sha)) or result.get(path) != directory+'/'+result[sha]+'.png':
+            raise ValueError('invalid media identity')
+    if result.get('delivery_profile') not in ('original','fitted_png'): raise ValueError('invalid delivery profile')
+    for key in ('width','height','archive_width','archive_height'): _integer(result.get(key),1)
+    if result['archive_width']*result['archive_height'] > 64*1024*1024:
+        raise ValueError('archive pixel bound')
+    if result['width'] > result['archive_width'] or result['height'] > result['archive_height']:
+        raise ValueError('delivery exceeds archive dimensions')
+    if result['delivery_profile']=='original' and any(result[a]!=result[b] for a,b in (
+            ('artifact_sha256','archive_sha256'),('width','archive_width'),('height','archive_height'))):
+        raise ValueError('original media mismatch')
+
+
+def plan_snapshot(db, plan_id):
+    p=db.execute('SELECT * FROM plans WHERE plan_id=?',(plan_id,)).fetchone()
+    if p is None: raise KeyError(plan_id)
+    if p['final'] is not None: return json.loads(p['final'])
+    counts=dict.fromkeys(('pending','running',*TERMINAL),0)
+    for row in db.execute('SELECT j.state,count(*) FROM members m JOIN jobs j ON j.job_id=m.job_id AND j.plan_id=m.plan_id WHERE m.plan_id=? GROUP BY j.state',(plan_id,)):
+        counts[row[0]]=row[1]
+    if sum(counts.values())!=p['expected_count']: raise ValueError('broken plan membership')
+    return dict(**json.loads(p['context']),plan_id=plan_id,registration=p['seq'],expected_count=p['expected_count'],sealed=False,counts=counts,
+                watermark=db.execute('SELECT coalesce(max(id),0) FROM events WHERE plan_id=?',(plan_id,)).fetchone()[0])
+
+
+class PortraitStore(_LegacyPortraitStore):
+    """V2 writer. SourceReady validation belongs to the trusted coordinator.
+
+    Omitted allowed_plan_ids explicitly selects legacy/unregistered compatibility.
+    Runtime MUST provide a nonempty, bounded registered selection after admission.
+    Times are finite shared wall-clock seconds; no network/worker work occurs here.
+    """
+    def __init__(self,path,instance_id,source_id):
+        import secrets
+        if not _text(instance_id) or not _text(source_id): raise ValueError('invalid scope')
+        self.path=str(Path(path))
+        if self.path==':memory:': raise ValueError('store requires persistent path')
+        self.instance_id,self.source_id=instance_id,source_id
+        with self._connection(write=True) as db:
+            version=db.execute('PRAGMA user_version').fetchone()[0]
+            if version==0 and not _definitions(db):
+                for sql in _SCHEMA: db.execute(sql)
+                db.execute('INSERT INTO metadata VALUES (1,1,?,?)',(instance_id,source_id))
+                db.execute('PRAGMA user_version=1'); version=1
+            if version==1:
+                _LegacyPortraitStore._check_schema(self,db)
+                for sql in _V2_CHANGES: db.execute(sql)
+                db.execute('UPDATE metadata SET schema_version=2,database_id=?',(secrets.token_hex(32),))
+                db.execute('PRAGMA user_version=2')
+            self.database_id=check_v2(db,instance_id,source_id)
+
+    def _check_schema(self,db):
+        check_v2(db,self.instance_id,self.source_id,self.database_id)
+
+    def register_closed_plan(self,plan):
+        from .model import validate_job
+        p=json.loads(_json(plan,MAX_PLAN_BYTES))
+        if type(p) is not dict or type(p.get('schema_version')) is not int or p['schema_version']!=2:
+            raise ValueError('invalid closed plan schema')
+        if (p.get('instance_id'),p.get('source_id'))!=(self.instance_id,self.source_id): raise ValueError('plan scope mismatch')
+        if not _text(p.get('version')) or p.get('kind') not in ('automatic','manual'): raise ValueError('invalid generation')
+        for key in ('input_snapshot_digest','tool_fingerprint','expected_jobset_digest'):
+            if not _hash(p.get(key)): raise ValueError('invalid '+key)
+        for key in ('source_capture_ref','core_publication_ref','desired_catalog_ref','comparison_evidence'):
+            if type(p.get(key)) is not dict or not p[key]: raise ValueError('missing immutable '+key)
+        _plan_references(p)
+        if type(p['comparison_evidence'].get('baseline')) is not bool: raise ValueError('missing baseline classification')
+        policy=p.get('recovery')
+        if type(policy) is not dict: raise ValueError('missing recovery policy')
+        _integer(policy.get('max_crashes'),1)
+        if policy['max_crashes']>100: raise ValueError('crash budget exceeds bound')
+        _number(policy.get('deadline'))
+        if not 0<=_number(policy.get('backoff_seconds'))<=MAX_LEASE_SECONDS: raise ValueError('invalid backoff')
+        jobs=p.get('jobs')
+        if type(jobs) is not list or len(jobs)>10000: raise ValueError('invalid jobs')
+        if digest(jobs)!=p['expected_jobset_digest']: raise ValueError('jobset digest mismatch')
+        validated=[]; seen=set()
+        for j in jobs:
+            if type(j) is not dict or type(j.get('schema_version')) is not int or j['schema_version']!=2: raise ValueError('invalid job schema')
+            validate_job(dict(j,schema_version=1))
+            for key in ('instance_id','source_id','version','input_snapshot_digest','tool_fingerprint','source_capture_ref'):
+                if j.get(key)!=p[key]: raise ValueError('job/plan mismatch: '+key)
+            if j['job_id'] in seen: raise ValueError('duplicate member')
+            seen.add(j['job_id']); validated.append((j,_json(j,MAX_RECORD_BYTES)))
+        identity=[self.instance_id,self.source_id,p['kind']]
+        if p['kind']=='manual':
+            if not _text(p.get('request_id')): raise ValueError('missing request id')
+            identity.append(p['request_id'])
+        else: identity.extend(p[k] for k in ('version','input_snapshot_digest','tool_fingerprint'))
+        pid=digest(identity); payload=_json(p,MAX_PLAN_BYTES)
+        with self._connection(write=True) as db:
+            self._check_schema(db)
+            old=db.execute('SELECT manifest FROM plans WHERE plan_id=?',(pid,)).fetchone()
+            if old:
+                if old[0]!=payload: raise ValueError('conflicting immutable closed plan')
+                return dict(plan_id=pid,inserted=0)
+            context={k:p[k] for k in ('kind','version','instance_id','source_id','input_snapshot_digest','tool_fingerprint')}
+            context['summary_key']=digest(['portrait_summary',self.instance_id,self.source_id,pid])
+            db.execute('INSERT INTO plans(plan_id,manifest,context,expected_count) VALUES (?,?,?,?)',(pid,payload,_json(context,MAX_RECORD_BYTES),len(jobs)))
+            for j,body in validated:
+                old=db.execute('SELECT * FROM jobs WHERE job_id=?',(j['job_id'],)).fetchone()
+                if old:
+                    if old['payload']!=body: raise ValueError('conflicting immutable job')
+                    if old['plan_id'] is None: raise ValueError('legacy job requires explicit reconciliation')
+                    previous=db.execute('SELECT final FROM plans WHERE plan_id=?',(old['plan_id'],)).fetchone()
+                    if p['kind']!='manual' or previous is None or previous[0] is None: raise ValueError('overlapping execution ownership')
+                    db.execute("UPDATE jobs SET plan_id=?,state='pending',owner=NULL,lease_until=NULL,result=NULL,crash_count=0,retry_at=0,failure_class=NULL WHERE job_id=?",(pid,j['job_id']))
+                else:
+                    db.execute("INSERT INTO jobs(job_id,payload,version,state,plan_id) VALUES (?,?,?,'pending',?)",(j['job_id'],body,j['version'],pid))
+                db.execute('INSERT INTO members VALUES (?,?,?,NULL)',(pid,j['job_id'],old['attempt'] if old else 0))
+        return dict(plan_id=pid,inserted=len(jobs))
+
+    def seal_plan(self,plan_id):
+        if not _hash(plan_id): raise ValueError('invalid plan id')
+        with self._connection(write=True) as db:
+            self._check_schema(db); snap=plan_snapshot(db,plan_id)
+            if snap['sealed']: return snap
+            if snap['counts']['pending'] or snap['counts']['running']: return None
+            db.execute('UPDATE members SET final_attempt=(SELECT attempt FROM jobs WHERE jobs.job_id=members.job_id) WHERE plan_id=?',(plan_id,))
+            snap['watermark']=db.execute('SELECT coalesce(max(id),0) FROM events').fetchone()[0]
+            snap['sealed']=True; snap['counts']={s:snap['counts'][s] for s in TERMINAL}
+            db.execute('UPDATE plans SET final=? WHERE plan_id=?',(_json(snap,MAX_RECORD_BYTES),plan_id))
+            return snap
+
+    def claim(self,owner,now,lease_seconds=60,*,allowed_plan_ids=None):
+        now,until=self._lease(owner,now,lease_seconds)
+        if allowed_plan_ids is not None and (type(allowed_plan_ids) not in (list,tuple) or not 1<=len(allowed_plan_ids)<=100 or not all(_hash(x) for x in allowed_plan_ids)):
+            raise ValueError('invalid registered plan selection')
+        with self._connection(write=True) as db:
+            self._check_schema(db)
+            params=[now,now]
+            where='j.plan_id IS NULL'
+            if allowed_plan_ids is not None:
+                where='j.plan_id IN ('+','.join('?' for _ in allowed_plan_ids)+') AND p.final IS NULL'
+                params+=list(allowed_plan_ids)
+            row=db.execute("SELECT j.*,p.manifest FROM jobs j LEFT JOIN plans p ON p.plan_id=j.plan_id WHERE (j.state='pending' OR (j.state='running' AND j.lease_until<=?)) AND j.retry_at<=? AND "+where+' ORDER BY j.seq LIMIT 1',params).fetchone()
+            if row is None: return None
+            attempt=row['attempt']+1; _integer(attempt,1)
+            crashes=row['crash_count']+(row['state']=='running' and row['plan_id'] is not None)
+            policy=json.loads(row['manifest'])['recovery'] if row['manifest'] else None
+            exhausted=bool(policy and (crashes>=policy['max_crashes'] or now>=policy['deadline']))
+            failure='crash_budget_exhausted' if policy and crashes>=policy['max_crashes'] else ('deadline_exhausted' if exhausted else ('worker_expired' if crashes>row['crash_count'] else row['failure_class']))
+            if policy and row['state']=='running' and not exhausted and policy['backoff_seconds']>0:
+                db.execute("UPDATE jobs SET state='pending',owner=NULL,lease_until=NULL,result=NULL,crash_count=?,failure_class=?,retry_at=? WHERE job_id=?",(crashes,failure,now+policy['backoff_seconds'],row['job_id']))
+                return None
+            db.execute("UPDATE jobs SET state='running',attempt=?,owner=?,lease_until=?,crash_count=?,failure_class=? WHERE job_id=?",(attempt,owner,until,crashes,failure,row['job_id']))
+            out=json.loads(row['payload']); out.update(attempt=attempt,owner=owner,lease_until=until)
+            if policy: out.update(plan_id=row['plan_id'],crash_count=crashes,recovery_required=exhausted,failure_class=failure,recovery=policy)
+            return out
+
+    @staticmethod
+    def _lease(owner,now,seconds):
+        if not _text(owner): raise ValueError('invalid owner')
+        now,seconds=_number(now),_number(seconds); until=now+seconds
+        if not 0<seconds<=MAX_LEASE_SECONDS or not math.isfinite(until) or until<=now: raise ValueError('invalid lease')
+        return now,until
+
+    def _owned(self,db,job_id,attempt,owner,now):
+        if not _hash(job_id) or not _text(owner): raise ValueError('invalid ownership identity')
+        _integer(attempt,1); now=_number(now)
+        return db.execute("SELECT j.*,p.manifest FROM jobs j JOIN plans p ON p.plan_id=j.plan_id WHERE job_id=? AND attempt=? AND owner=? AND state='running' AND lease_until>? AND p.final IS NULL",(job_id,attempt,owner,now)).fetchone()
+
+    def renew(self,job_id,attempt,owner,now,lease_seconds=60):
+        now,until=self._lease(owner,now,lease_seconds)
+        with self._connection(write=True) as db:
+            self._check_schema(db); row=self._owned(db,job_id,attempt,owner,now)
+            if row is None: return False
+            policy=json.loads(row['manifest'])['recovery']
+            if now>=policy['deadline'] or row['crash_count']>=policy['max_crashes']: return False
+            db.execute('UPDATE jobs SET lease_until=? WHERE job_id=?',(max(until,row['lease_until']),job_id)); return True
+
+    def defer(self,job_id,attempt,owner,now,reason,*,retry_at=None):
+        if reason not in ('updater','resource','stop','transport'): raise ValueError('invalid cooperative defer reason')
+        now=_number(now); retry_at=now if retry_at is None else _number(retry_at)
+        if not now<=retry_at<=now+MAX_LEASE_SECONDS: raise ValueError('invalid retry time')
+        with self._connection(write=True) as db:
+            self._check_schema(db); row=self._owned(db,job_id,attempt,owner,now)
+            if row is None: return False
+            policy=json.loads(row['manifest'])['recovery']
+            if row['crash_count']>=policy['max_crashes'] or now>=policy['deadline']: return False
+            db.execute("UPDATE jobs SET state='pending',owner=NULL,lease_until=NULL,result=NULL,retry_at=? WHERE job_id=?",(retry_at,job_id)); return True
+
+    def finish(self,job_id,attempt,result,*,owner=None,now=None):
+        if not _hash(job_id): raise ValueError('invalid job id')
+        _integer(attempt,1); payload=_json(result,MAX_RECORD_BYTES); result=json.loads(payload)
+        if type(result) is not dict or result.get('status') not in TERMINAL: raise ValueError('invalid terminal result')
+        with self._connection(write=True) as db:
+            self._check_schema(db)
+            if owner is None and now is None:
+                row=db.execute("SELECT * FROM jobs WHERE job_id=? AND attempt=? AND state='running' AND plan_id IS NULL",(job_id,attempt)).fetchone()
+            else: row=self._owned(db,job_id,attempt,owner,now)
+            if row is None: return False
+            if row['plan_id'] is not None:
+                validate_result(json.loads(row['payload']),attempt,result)
+                policy=json.loads(row['manifest'])['recovery']
+                failure='crash_budget_exhausted' if row['crash_count']>=policy['max_crashes'] else ('deadline_exhausted' if now>=policy['deadline'] else None)
+                if failure and (result['status']!='failed' or result.get('failure_class')!=failure or not result['diagnostics']): raise ValueError('exhausted recovery requires truthful failure')
+            db.execute('UPDATE jobs SET state=?,result=?,owner=NULL,lease_until=NULL WHERE job_id=?',(result['status'],payload,job_id))
+            db.execute('INSERT INTO events(event_key,job_id,attempt,instance_id,source_id,version,result,plan_id) VALUES (?,?,?,?,?,?,?,?)',(digest([job_id,attempt]),job_id,attempt,self.instance_id,self.source_id,row['version'],payload,row['plan_id']))
+            return True
+
+    def requeue(self,job_id):
+        if not _hash(job_id): raise ValueError('invalid job id')
+        with self._connection(write=True) as db:
+            self._check_schema(db)
+            # Registered terminal decisions are final for that execution; retry
+            # through a new explicit manual plan after sealing.
+            return db.execute("UPDATE jobs SET state='pending',owner=NULL,lease_until=NULL WHERE job_id=? AND plan_id IS NULL AND state IN ('failed','blocked','cancelled')",(job_id,)).rowcount==1
