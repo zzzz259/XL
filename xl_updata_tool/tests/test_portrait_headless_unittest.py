@@ -2,6 +2,7 @@ import contextlib
 import io
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -136,9 +137,12 @@ assert not any(x.startswith('PySide6') for x in sys.modules)
     def native(self, mode, schema=1, capability='valid'):
         from app.features.preview.scene_export_adapter import write_scene_descriptor
         script = self.root / 'native.py'
-        script.write_text('''import json,sys
+        script.write_text('''import json,sys,os
 from pathlib import Path
 from PIL import Image
+if os.environ.get('XL_PORTRAIT_RESOURCE_LOCK_FD'):
+ fd=int(os.environ['XL_PORTRAIT_RESOURCE_LOCK_FD'])
+ assert os.fstat(fd).st_ino==Path(os.environ['XL_PORTRAIT_RESOURCE_LOCK_PATH']).stat().st_ino
 capability=__CAPABILITY__
 if sys.argv[1]=='--capabilities':
  if capability=='old': sys.exit(1)
@@ -175,6 +179,18 @@ if mode!='nolog': print(json.dumps(dict(phase='complete',output=p['output'],widt
         self.assertEqual(legacy['status'],'success',legacy)
         self.assertEqual(legacy['resource_mode'],'legacy_schema1')
         self.assertEqual(legacy['png_working_rows'],0)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX descriptor inheritance')
+    def test_both_real_native_children_inherit_worker_lease(self):
+        import fcntl
+        api=self.api(); self.package(); self.request['png_working_rows']=128
+        with (self.root/'lease').open('w') as lock:
+            os.chmod(lock.name, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.dict(os.environ, XL_PORTRAIT_RESOURCE_LOCK_FD=str(lock.fileno()), XL_PORTRAIT_RESOURCE_LOCK_PATH=lock.name):
+                with patch.object(api,'build_scene_command',self.native('bounded',schema=2)):
+                    result=api.run_request(self.request)
+        self.assertEqual(result['status'],'success',result)
 
     def test_unsupported_bounded_native_never_starts_render(self):
         api=self.api();self.package();self.request['png_working_rows']=128

@@ -18,6 +18,7 @@ from typing import Sequence
 
 from .logger import get_log_session, logger
 from .logging_context import get_log_context
+from .resource_lease import inherited_lease_kwargs
 
 
 DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024
@@ -187,6 +188,11 @@ def run_external_process(
     )
 
     popen_kwargs = dict(kwargs)
+    lease_kwargs = inherited_lease_kwargs(env)
+    if lease_kwargs:
+        if cancel_tree or popen_kwargs.get('start_new_session') or popen_kwargs.get('process_group') is not None or popen_kwargs.get('preexec_fn') is not None:
+            raise ValueError('protected worker subprocess must retain guardian process group')
+        popen_kwargs['pass_fds'] = tuple(sorted(set(popen_kwargs.get('pass_fds', ())) | set(lease_kwargs['pass_fds'])))
     popen_kwargs.update(
         cwd=cwd,
         env=env,

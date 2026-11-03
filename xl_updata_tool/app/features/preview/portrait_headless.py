@@ -19,6 +19,7 @@ import sys
 import tempfile
 
 from .scene_export_adapter import build_scene_command, publish_scene_result
+from app.platform.resource_lease import inherited_lease_kwargs
 
 PROFILE = {'format': 'png', 'scale': 2, 'scope': 'full'}
 
@@ -158,13 +159,14 @@ def run_request(payload):
             raise ValueError('native output must not exist before this attempt')
         rows = request['png_working_rows']
         actual_rows = rows if descriptor['scene_schema_version'] == 2 else 0
+        native_env = locator.subprocess_env()
         result.update(png_working_rows=actual_rows, resource_mode=(
             'disk_rows' if actual_rows else 'legacy_schema1' if rows else 'memory_default'))
         if actual_rows:
             # Query this exact command's renderer, not a different PATH tool.
             probe = subprocess.run([*command[:2], '--capabilities'], cwd=work,
-                env=locator.subprocess_env(), capture_output=True, text=True,
-                timeout=15, check=False)
+                env=native_env, capture_output=True, text=True,
+                timeout=15, check=False, **inherited_lease_kwargs(native_env))
             if probe.returncode or len(probe.stdout.encode('utf-8')) > 65536:
                 raise ValueError('native bounded PNG capability query failed')
             caps = json.loads(probe.stdout)
@@ -180,8 +182,8 @@ def run_request(payload):
             (work / 'capabilities.json').write_text(json.dumps(caps), encoding='utf-8')
         with (work / 'stdout.jsonl').open('w', encoding='utf-8') as stdout, (
                 work / 'stderr.log').open('w', encoding='utf-8') as stderr:
-            process = subprocess.run(command, cwd=work, env=locator.subprocess_env(),
-                stdout=stdout, stderr=stderr, check=False)
+            process = subprocess.run(command, cwd=work, env=native_env,
+                stdout=stdout, stderr=stderr, check=False, **inherited_lease_kwargs(native_env))
         if process.returncode != 0:
             raise ValueError(f'native process failed with exit code {process.returncode}; see {work}')
         completion = None
