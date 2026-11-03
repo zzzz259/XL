@@ -512,3 +512,51 @@ def open_normalized_bundle(normalized, *, normalized_root):
             raise ValueError('normalized header descriptor mismatch')
         stream.seek(0)
         yield stream
+
+
+@dataclass(frozen=True)
+class MetadataRef:
+    scope_key: str
+    pin_digest: str
+    locator: str
+    size: int
+    sha256: str
+
+
+def read_metadata(ref, *, data_root):
+    """Read bounded immutable metadata through the accepted no-follow handles."""
+    if type(ref) is not MetadataRef: raise ValueError('expected metadata reference')
+    for value in (ref.scope_key, ref.pin_digest, ref.sha256): _hex(value, 64)
+    _positive(ref.size, 32*1024**2)
+    relative = f'metadata/{ref.scope_key}/{ref.pin_digest}'
+    name = ref.sha256+'.jsonbytes'
+    if ref.locator != relative+'/'+name: raise ValueError('metadata locator mismatch')
+    with _directory(data_root, relative) as directory, _read_file(directory, name) as stream:
+        data = stream.read(ref.size+1)
+    if len(data)!=ref.size or hashlib.sha256(data).hexdigest()!=ref.sha256:
+        raise ValueError('metadata digest mismatch')
+    return data
+
+
+def store_metadata(data, *, data_root, scope_key, pin_digest):
+    """Publish bytes without overwrite; repeat publication cannot grow partials."""
+    if type(data) is not bytes: raise ValueError('metadata bytes required')
+    _positive(len(data), 32*1024**2)
+    _hex(scope_key,64); _hex(pin_digest,64)
+    sha = hashlib.sha256(data).hexdigest()
+    relative = f'metadata/{scope_key}/{pin_digest}'; name = sha+'.jsonbytes'
+    ref = MetadataRef(scope_key,pin_digest,relative+'/'+name,len(data),sha)
+    with _directory(data_root,relative,create=True) as directory:
+        try:
+            with _read_file(directory,name) as stream:
+                found=stream.read(len(data)+1)
+            if found!=data: raise ValueError('metadata immutable conflict')
+            _sync_directory(directory)
+        except FileNotFoundError:
+            with _partial(directory) as (partial,output):
+                output.write(data)
+                installed=_publish(directory,partial,name,output)
+                with _published_file(directory,name,output,installed) as stream:
+                    if stream.read(len(data)+1)!=data: raise ValueError('metadata immutable conflict')
+    read_metadata(ref,data_root=data_root)
+    return ref
