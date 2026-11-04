@@ -219,6 +219,23 @@ def managed_identity(data):
         raise BundleError("malformed managed PE") from exc
 
 
+def _origin_needed_suffix(name):
+    """Recognize only bounded, anchored loader ORIGIN direct dependencies."""
+    for prefix in ("$ORIGIN/", "${ORIGIN}/"):
+        if name.startswith(prefix):
+            suffix = name[len(prefix) :]
+            parts = suffix.split("/")
+            if (
+                len(name) > 512
+                or len(parts) > 64
+                or any(not re.fullmatch(r"[A-Za-z0-9_.+~-]+", part) for part in parts)
+                or parts[-1] in (".", "..")
+            ):
+                raise BundleError("nonportable ELF dependency")
+            return suffix
+    return None
+
+
 def elf_identity(data):
     """Parse ELF64 LE x86-64 section/dynamic tables; stripped tables fail closed.
 
@@ -280,7 +297,11 @@ def elf_identity(data):
                 tag, value = struct.unpack_from("<qQ", data, pos)
                 if tag in (1, 14):
                     name = string(blob, value)
-                    if "/" in name or not name:
+                    direct = _origin_needed_suffix(name) if tag == 1 else None
+                    if direct is None and (
+                        not re.fullmatch(r"[A-Za-z0-9_.+~-]+", name)
+                        or name in (".", "..")
+                    ):
                         raise BundleError("nonportable ELF dependency")
                     if tag == 1:
                         needed.append(name)
@@ -412,6 +433,11 @@ def declared_path(path, aliases):
         else:
             return path
     raise BundleError("loaded-module alias chain bound")
+
+
+def _same_dso_origin(loading_path, actual_path, aliases):
+    """File aliases retain their loading directory; directory aliases traverse."""
+    return declared_path(loading_path.parent, aliases) == actual_path.parent
 
 
 def verify_inventory(
@@ -565,6 +591,9 @@ def _verify_elf_context(
     loader_roots,
     host_alias_targets,
     interpreters,
+    direct_needed,
+    origin_sensitive,
+    declared_aliases,
 ):
     """Prove bounded glibc RPATH chains for one real process entry point.
 
@@ -618,6 +647,11 @@ def _verify_elf_context(
             != host_alias_targets.get(paths[provider], paths[provider])
         ):
             raise BundleError(f"unproven {context} ELF NEEDED loader closure")
+        actual = host_alias_targets.get(paths[provider], paths[provider])
+        if actual in origin_sensitive and not _same_dso_origin(
+            candidate, actual, declared_aliases
+        ):
+            raise BundleError("DSO alias changes loading origin")
         return provider
 
     while pending:
@@ -643,7 +677,14 @@ def _verify_elf_context(
                 raise BundleError(f"unproven {context} ELF interpreter closure")
             dependencies.append(interpreter)
         for name in abi["needed"]:
-            dependencies.append(verify_candidate(name, directories))
+            if _origin_needed_suffix(name) is not None:
+                if context != "source python" or (key, name) not in direct_needed:
+                    raise BundleError(
+                        "ORIGIN NEEDED requires private Python source context"
+                    )
+                dependencies.append(direct_needed[key, name])
+            else:
+                dependencies.append(verify_candidate(name, directories))
         for dependency in dependencies:
             state = (dependency, ancestors)
             if state not in scheduled:
@@ -661,6 +702,8 @@ def _verify_elf_context(
         if binaries[key].get("runpath"):
             continue
         for name in binaries[key]["needed"]:
+            if _origin_needed_suffix(name) is not None:
+                continue
             for directory in possible_ancestors:
                 if (directory / name).is_file():
                     verify_candidate(name, (directory,))
@@ -835,6 +878,94 @@ def _resolve_bundle(config, decrypt_key_hex=""):
                 continue
             raise BundleError("ambiguous ELF provider")
         providers[name] = key
+    # Direct NEEDED paths never consult SONAME providers or loader directories.
+    # All target bytes/ABI and aliases have already been checked above.
+    python_root = roots["python"]
+    python_actual = {binary_paths[key]: key for key in binaries if key[0] == "python"}
+    direct_needed = {}
+    needed_aliases = {**aliases, **host_alias_targets}
+    origin_sensitive = {
+        path
+        for path, key in python_actual.items()
+        if any(
+            _origin_needed_suffix(name) is not None for name in binaries[key]["needed"]
+        )
+        or any(
+            "$ORIGIN" in name or "${ORIGIN}" in name
+            for name in (*binaries[key]["rpath"], *binaries[key]["runpath"])
+        )
+    }
+    # A DSO may enter through SONAME lookup or a late import, independently of
+    # any direct edge below. Prove every declared loading name up front. Only
+    # the configured main executable's literal alias chain has real-executable
+    # ORIGIN semantics; candidate selection above still treats DSO uses as DSOs.
+    main_aliases = set()
+    main_key = tuple(config["entrypoints"]["python"])
+    if main_key not in binaries:
+        raise BundleError("ELF executable entrypoint required")
+    if main_key[0] == "host":
+        main_actual = host_alias_targets.get(
+            binary_paths[main_key], binary_paths[main_key]
+        )
+        if main_actual in python_actual:
+            identity = main_key[1]
+            for _ in range(32):
+                node = value["host_files"][identity]
+                if "alias_of" not in node:
+                    break
+                main_aliases.add(host_paths[identity])
+                identity = node["alias_of"]
+    for loading_path, actual_path in host_alias_targets.items():
+        if (
+            actual_path in origin_sensitive
+            and loading_path not in main_aliases
+            and not _same_dso_origin(loading_path, actual_path, needed_aliases)
+        ):
+            raise BundleError("DSO alias changes loading origin")
+    for key, abi in binaries.items():
+        for name in abi["needed"]:
+            suffix = _origin_needed_suffix(name)
+            if suffix is None:
+                continue
+            origin = declared_path(
+                host_alias_targets.get(binary_paths[key], binary_paths[key]),
+                needed_aliases,
+            )
+            if (
+                origin not in python_actual
+                or key[0] not in ("python", "host")
+                or value["source_scopes"].get("python", [""]) != [""]
+            ):
+                raise BundleError(
+                    "ORIGIN NEEDED requires complete private Python origin"
+                )
+            target = Path(os.path.abspath(origin.parent / suffix))
+            if not target.is_relative_to(python_root):
+                raise BundleError("ORIGIN NEEDED escapes private Python root")
+            # Preserve kernel component semantics: alias/.. uses the alias's
+            # real parent, and missing/file/.. must not vanish by normalization.
+            target = origin.parent
+            parts = suffix.split("/")
+            for index, part in enumerate(parts):
+                target = Path(os.path.abspath(target / part))
+                if not target.is_relative_to(python_root):
+                    raise BundleError("ORIGIN NEEDED escapes private Python root")
+                loading_directory = target.parent
+                target = declared_path(target, needed_aliases)
+                if index == len(parts) - 1 and target.parent != loading_directory:
+                    # DSO ORIGIN follows its loading name, unlike the main
+                    # executable. Keep one actual-origin traversal only when
+                    # the final file alias preserves that verified directory.
+                    raise BundleError("DSO file alias changes loading origin")
+                if not target.is_relative_to(python_root):
+                    raise BundleError("ORIGIN NEEDED alias escapes private Python root")
+                if index < len(parts) - 1 and not target.is_dir():
+                    raise BundleError("ORIGIN NEEDED non-directory component")
+            if target not in python_actual:
+                raise BundleError(
+                    "ORIGIN NEEDED target is not inventoried private Python ELF"
+                )
+            direct_needed[key, name] = python_actual[target]
     descriptor = Path(config["descriptor_path"])
     if not descriptor.is_absolute() or descriptor.is_symlink():
         raise BundleError("absolute immutable descriptor required")
@@ -938,6 +1069,9 @@ def _resolve_bundle(config, decrypt_key_hex=""):
             loader_roots=loader_roots,
             host_alias_targets=host_alias_targets,
             interpreters=interpreters,
+            direct_needed=direct_needed,
+            origin_sensitive=origin_sensitive,
+            declared_aliases=needed_aliases,
         )
         covered.update(
             host_alias_targets.get(binary_paths[key], binary_paths[key])

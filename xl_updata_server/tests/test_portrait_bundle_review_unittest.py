@@ -72,6 +72,445 @@ def add_host(config, value, name, raw):
 
 
 class ReviewRegressionTests(unittest.TestCase):
+    def _origin_fixture(self, root, needed="$ORIGIN/../lib/libpython3.12.so.1.0"):
+        config, value = fixture(root)
+        add(
+            config,
+            value,
+            "python",
+            "lib/libpython3.12.so.1.0",
+            elf(soname="libpython3.12.so.1.0"),
+            "elf",
+        )
+        # Independent expected ABI ensures RED reaches the resolver itself.
+        ref = add(config, value, "python", "lib/libpython3.so", elf(), "elf")
+        raw = elf(needed=(needed,))
+        Path(config["roots"]["python"], ref[1]).write_bytes(raw)
+        entry = next(e for e in value["entries"] if [e["role"], e["path"]] == ref)
+        entry.update(size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+        entry["abi"]["needed"] = [needed]
+        seal(config, value)
+        return config, value
+
+    def test_private_python_origin_needed_and_relocation(self):
+        for needed in (
+            "$ORIGIN/../lib/libpython3.12.so.1.0",
+            "${ORIGIN}/./libpython3.12.so.1.0",
+        ):
+            with self.subTest(needed=needed), tempfile.TemporaryDirectory() as temp:
+                first, _ = self._origin_fixture(Path(temp) / "first", needed)
+                second, _ = self._origin_fixture(Path(temp) / "second", needed)
+                self.assertEqual(
+                    _resolve_bundle(first).tool_fingerprint,
+                    _resolve_bundle(second).tool_fingerprint,
+                )
+
+    def test_origin_needed_rejects_lexical_ambiguity_and_soname(self):
+        for name in (
+            "../lib.so",
+            "/lib.so",
+            "C:/lib.so",
+            "$LIB/lib.so",
+            "$ORIGIN",
+            "$ORIGIN//lib.so",
+            "$ORIGIN/",
+            "$ORIGIN/..",
+            "$ORIGIN/a\\b",
+            "$ORIGIN/a:b",
+            "$ORIGIN/a\n",
+            "$ORIGIN/${LIB}/lib.so",
+            "$ORIGIN/" + "a/" * 64 + "b",
+        ):
+            with self.subTest(name=name), self.assertRaises(BundleError):
+                elf_identity(elf(needed=(name,)))
+        for name in ("$ORIGIN/lib.so", "${ORIGIN}/lib.so", "$FOO", "a/b"):
+            with self.subTest(soname=name), self.assertRaises(BundleError):
+                elf_identity(elf(soname=name))
+
+    def test_origin_needed_rejects_escape_missing_cross_role_and_partial_prefix(self):
+        for needed in (
+            "$ORIGIN/../../native/libpython3.12.so.1.0",
+            "$ORIGIN/missing/libpython3.12.so.1.0",
+        ):
+            with self.subTest(needed=needed), tempfile.TemporaryDirectory() as temp:
+                config, _ = self._origin_fixture(Path(temp), needed)
+                with self.assertRaisesRegex(BundleError, "ORIGIN NEEDED"):
+                    _resolve_bundle(config)
+        with tempfile.TemporaryDirectory() as temp:
+            config, value = self._origin_fixture(Path(temp))
+            value["source_scopes"]["python"] = ["lib"]
+            seal(config, value)
+            with self.assertRaisesRegex(BundleError, "source closure"):
+                _resolve_bundle(config)
+
+    def test_origin_needed_target_identity_and_recursive_closure(self):
+        for mutation in ("hash", "abi", "unlisted", "recursive"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                config, value = self._origin_fixture(Path(temp))
+                ref = ["python", "lib/libpython3.12.so.1.0"]
+                entry = next(
+                    e for e in value["entries"] if [e["role"], e["path"]] == ref
+                )
+                if mutation == "hash":
+                    Path(config["roots"]["python"], ref[1]).write_bytes(
+                        elf() + b"tamper"
+                    )
+                elif mutation == "abi":
+                    entry["abi"]["soname"] = "wrong.so"
+                elif mutation == "unlisted":
+                    value["entries"].remove(entry)
+                else:
+                    replace_elf(config, value, ref, elf(needed=("absent.so",)))
+                seal(config, value)
+                with self.assertRaises(BundleError):
+                    _resolve_bundle(config)
+
+    def test_origin_needed_has_no_basename_environment_fallback_or_shadow(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config, value = self._origin_fixture(Path(temp))
+            # This unlisted host sibling is in the real Python loader environment.
+            host = Path(config["host_files"]["env"]).parent
+            (host / "libpython3.12.so.1.0").write_bytes(elf() + b"shadow")
+            native = ["host", "env"]
+            value["descriptor_groups"]["native_files"] = [native]
+            config["loader_dirs"] = value["loader_dirs"] = [
+                ["host", "env"],
+                *value["loader_dirs"],
+            ]
+            seal(config, value)
+            self.assertTrue(_resolve_bundle(config).tool_fingerprint)
+            replace_elf(
+                config,
+                value,
+                ["python", "lib/libpython3.so"],
+                elf(needed=("$ORIGIN/missing/libpython3.12.so.1.0",)),
+            )
+            seal(config, value)
+            with self.assertRaisesRegex(BundleError, "ORIGIN NEEDED"):
+                _resolve_bundle(config)
+
+    def test_origin_needed_rejects_copied_and_non_python_contexts(self):
+        for ref in (
+            ["display", "xkbcomp"],
+            ["display", "Xvfb"],
+            ["dotnet", "dotnet"],
+            ["java", "java"],
+            ["native", "prlimit"],
+        ):
+            with self.subTest(ref=ref), tempfile.TemporaryDirectory() as temp:
+                config, value = fixture(Path(temp))
+                replace_elf(config, value, ref, elf(needed=("$ORIGIN/target.so",)))
+                seal(config, value)
+                with self.assertRaisesRegex(BundleError, "private Python"):
+                    _resolve_bundle(config)
+        with tempfile.TemporaryDirectory() as temp:
+            config, value = self._origin_fixture(Path(temp))
+            value["descriptor_groups"]["runtime_files"].append(
+                ["python", "lib/libpython3.so"]
+            )
+            value["descriptor_groups"]["runtime_files"].sort()
+            seal(config, value)
+            with self.assertRaisesRegex(BundleError, "source context"):
+                _resolve_bundle(config)
+
+    def test_origin_needed_declared_directory_and_file_aliases(self):
+        for alias_kind in ("directory", "file", "executable"):
+            with (
+                self.subTest(alias_kind=alias_kind),
+                tempfile.TemporaryDirectory() as temp,
+            ):
+                config, value = self._origin_fixture(Path(temp))
+                root = Path(config["roots"]["python"])
+                if alias_kind == "directory":
+                    (root / "lib64").symlink_to("lib", target_is_directory=True)
+                    value["directory_aliases"] = [
+                        {
+                            "role": "python",
+                            "path": "lib64",
+                            "target_role": "python",
+                            "target_path": "lib",
+                        }
+                    ]
+                    needed = "$ORIGIN/../lib64/libpython3.12.so.1.0"
+                else:
+                    name = (
+                        "python"
+                        if alias_kind == "executable"
+                        else "lib/libpython3.12.so.1.0"
+                    )
+                    if alias_kind == "executable":
+                        replace_elf(
+                            config,
+                            value,
+                            ["python", "python"],
+                            elf(needed=("$ORIGIN/lib/libpython3.12.so.1.0",)),
+                        )
+                    target = root / name
+                    alias = root / (
+                        "python-alias" if alias_kind == "executable" else "lib/alias.so"
+                    )
+                    alias.symlink_to(target)
+                    entry = next(
+                        e
+                        for e in value["entries"]
+                        if e["role"] == "python" and e["path"] == name
+                    )
+                    evidence = {
+                        k: entry[k]
+                        for k in ("size", "sha256", "abi", "platform", "provenance")
+                    }
+                    config["host_files"].update(
+                        py_actual=str(target), py_alias=str(alias)
+                    )
+                    value["host_files"].update(
+                        py_actual=evidence,
+                        py_alias={**evidence, "alias_of": "py_actual"},
+                    )
+                    needed = "$ORIGIN/alias.so"
+                    if alias_kind == "executable":
+                        config["entrypoints"]["python"] = ["host", "py_alias"]
+                        value["entrypoints"]["python"] = ["host", "py_alias"]
+                        needed = "$ORIGIN/../lib/libpython3.12.so.1.0"
+                replace_elf(
+                    config,
+                    value,
+                    ["python", "lib/libpython3.so"],
+                    elf(needed=(needed,)),
+                )
+                seal(config, value)
+                self.assertTrue(_resolve_bundle(config).tool_fingerprint)
+                if alias_kind == "directory":
+                    value["directory_aliases"] = []
+                else:
+                    value["host_files"].pop("py_alias")
+                    config["host_files"].pop("py_alias")
+                seal(config, value)
+                with self.assertRaises(BundleError):
+                    _resolve_bundle(config)
+
+    def test_origin_needed_does_not_normalize_away_missing_or_file_components(self):
+        for middle in ("missing", "libpython3.12.so.1.0"):
+            with self.subTest(middle=middle), tempfile.TemporaryDirectory() as temp:
+                config, _ = self._origin_fixture(
+                    Path(temp), "$ORIGIN/" + middle + "/../libpython3.12.so.1.0"
+                )
+                with self.assertRaises(BundleError):
+                    _resolve_bundle(config)
+
+    def test_origin_needed_uses_actual_target_not_soname_index(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config, value = self._origin_fixture(Path(temp))
+            replace_elf(
+                config,
+                value,
+                ["python", "lib/libpython3.12.so.1.0"],
+                elf(soname="different-soname.so"),
+            )
+            seal(config, value)
+            self.assertTrue(_resolve_bundle(config).tool_fingerprint)
+
+    def test_origin_needed_alias_parent_uses_real_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config, value = self._origin_fixture(
+                Path(temp), "$ORIGIN/../link/../libpython3.12.so.1.0"
+            )
+            root = Path(config["roots"]["python"])
+            (root / "lib/sub").mkdir()
+            (root / "link").symlink_to("lib/sub", target_is_directory=True)
+            value["directory_aliases"] = [
+                {
+                    "role": "python",
+                    "path": "link",
+                    "target_role": "python",
+                    "target_path": "lib/sub",
+                }
+            ]
+            seal(config, value)
+            self.assertTrue(_resolve_bundle(config).tool_fingerprint)
+
+    def _dso_alias_origin_fixture(
+        self,
+        root,
+        tag,
+        *,
+        equivalent=False,
+        shadow=False,
+        incoming="direct",
+        cross_role=False,
+    ):
+        config, value = fixture(root)
+        python_root = Path(config["roots"]["python"])
+        add(config, value, "python", "real/child.so", elf(soname="child.so"), "elf")
+        if tag == "needed":
+            raw = elf(needed=("$ORIGIN/child.so",), soname="origin-a.so")
+        elif tag == "rpath":
+            raw = rpath_elf(needed=("child.so",), soname="origin-a.so", rpath="$ORIGIN")
+        else:
+            raw = elf(needed=("child.so",), soname="origin-a.so", runpath="${ORIGIN}")
+        ref = add(config, value, "python", "real/a.so", raw, "elf")
+        if equivalent:
+            (python_root / "alias").symlink_to("real", target_is_directory=True)
+            value["directory_aliases"] = [
+                {
+                    "role": "python",
+                    "path": "alias",
+                    "target_role": "python",
+                    "target_path": "real",
+                }
+            ]
+            alias = python_root / "real/alias-a.so"
+        else:
+            (python_root / "alias").mkdir()
+            alias = python_root / "alias/alias-a.so"
+        if incoming == "soname":
+            alias = alias.with_name("origin-a.so")
+        if cross_role:
+            alias = Path(config["roots"]["native"]) / alias.name
+        target = python_root / "real/a.so"
+        alias.symlink_to(target)
+        entry = next(e for e in value["entries"] if [e["role"], e["path"]] == ref)
+        evidence = {
+            k: entry[k] for k in ("size", "sha256", "abi", "platform", "provenance")
+        }
+        config["host_files"].update(dso_actual=str(target), dso_alias=str(alias))
+        value["host_files"].update(
+            dso_actual=evidence, dso_alias={**evidence, "alias_of": "dso_actual"}
+        )
+        if shadow:
+            add(
+                config,
+                value,
+                "python",
+                "alias/child.so",
+                elf(soname="different-child.so"),
+                "elf",
+            )
+        if incoming == "soname":
+            main = rpath_elf(needed=("origin-a.so",), rpath="$ORIGIN/alias")
+        elif incoming == "late":
+            main = elf()
+        else:
+            main = elf(needed=("$ORIGIN/alias/alias-a.so",))
+        replace_elf(config, value, ["python", "python"], main)
+        seal(config, value)
+        return config
+
+    def test_cross_directory_dso_alias_rejects_missing_load_origin_child(self):
+        for tag in ("needed", "rpath", "runpath"):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as temp:
+                config = self._dso_alias_origin_fixture(Path(temp), tag)
+                with self.assertRaisesRegex(BundleError, "DSO.*origin"):
+                    _resolve_bundle(config)
+
+    def test_cross_directory_dso_alias_rejects_different_load_origin_child(self):
+        for tag in ("needed", "rpath", "runpath"):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as temp:
+                config = self._dso_alias_origin_fixture(Path(temp), tag, shadow=True)
+                with self.assertRaisesRegex(BundleError, "DSO.*origin"):
+                    _resolve_bundle(config)
+
+    def test_dso_alias_with_equivalent_loading_directory_is_valid(self):
+        for tag in ("needed", "rpath", "runpath"):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as temp:
+                config = self._dso_alias_origin_fixture(
+                    Path(temp), tag, equivalent=True
+                )
+                self.assertTrue(_resolve_bundle(config).tool_fingerprint)
+
+    def test_origin_dso_soname_incoming_alias_rejected(self):
+        for tag in ("needed", "rpath", "runpath"):
+            for shadow in (False, True):
+                with (
+                    self.subTest(tag=tag, shadow=shadow),
+                    tempfile.TemporaryDirectory() as temp,
+                ):
+                    config = self._dso_alias_origin_fixture(
+                        Path(temp), tag, incoming="soname", shadow=shadow
+                    )
+                    with self.assertRaisesRegex(BundleError, "DSO.*origin"):
+                        _resolve_bundle(config)
+
+    def test_origin_dso_late_alias_rejected_without_incoming_edge(self):
+        for tag in ("needed", "rpath", "runpath"):
+            for cross_role in (False, True):
+                with (
+                    self.subTest(tag=tag, cross_role=cross_role),
+                    tempfile.TemporaryDirectory() as temp,
+                ):
+                    config = self._dso_alias_origin_fixture(
+                        Path(temp), tag, incoming="late", cross_role=cross_role
+                    )
+                    with self.assertRaisesRegex(BundleError, "DSO.*origin"):
+                        _resolve_bundle(config)
+
+    def test_origin_dso_equivalent_alias_soname_and_late_are_valid(self):
+        for tag in ("needed", "rpath", "runpath"):
+            for incoming in ("soname", "late"):
+                with (
+                    self.subTest(tag=tag, incoming=incoming),
+                    tempfile.TemporaryDirectory() as temp,
+                ):
+                    config = self._dso_alias_origin_fixture(
+                        Path(temp), tag, incoming=incoming, equivalent=True
+                    )
+                    self.assertTrue(_resolve_bundle(config).tool_fingerprint)
+
+    def _cross_directory_python_main_alias_fixture(self, root, *, dso_incoming=False):
+        config, value = self._origin_fixture(root)
+        replace_elf(
+            config,
+            value,
+            ["python", "python"],
+            elf(needed=("$ORIGIN/lib/libpython3.12.so.1.0",)),
+        )
+        target = Path(config["roots"]["python"], "python")
+        alias = Path(config["host_files"]["env"]).parent / "python"
+        hop = alias.with_name("python-hop")
+        hop.symlink_to(target)
+        alias.symlink_to(hop)
+        entry = next(
+            e
+            for e in value["entries"]
+            if e["role"] == "python" and e["path"] == "python"
+        )
+        evidence = {
+            k: entry[k] for k in ("size", "sha256", "abi", "platform", "provenance")
+        }
+        config["host_files"].update(
+            main_actual=str(target), main_hop=str(hop), main_alias=str(alias)
+        )
+        value["host_files"].update(
+            main_actual=evidence,
+            main_hop={**evidence, "alias_of": "main_actual"},
+            main_alias={**evidence, "alias_of": "main_hop"},
+        )
+        config["entrypoints"]["python"] = ["host", "main_alias"]
+        value["entrypoints"]["python"] = ["host", "main_alias"]
+        if dso_incoming:
+            add(
+                config,
+                value,
+                "python",
+                "lib/gateway.so",
+                rpath_elf(needed=("python",), rpath="$ORIGIN/../../host"),
+                "elf",
+            )
+        seal(config, value)
+        return config
+
+    def test_origin_main_executable_cross_directory_alias_is_valid(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = self._cross_directory_python_main_alias_fixture(Path(temp))
+            self.assertTrue(_resolve_bundle(config).tool_fingerprint)
+
+    def test_origin_main_alias_cannot_be_used_as_dso_exception(self):
+        with tempfile.TemporaryDirectory() as temp:
+            config = self._cross_directory_python_main_alias_fixture(
+                Path(temp), dso_incoming=True
+            )
+            with self.assertRaisesRegex(BundleError, "DSO.*origin"):
+                _resolve_bundle(config)
+
     def _ancestor_fixture(
         self, root, *, runpath=False, bridge_runpath=False, late=False
     ):
