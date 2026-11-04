@@ -98,6 +98,19 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('旧版本',self.sender.images[-1][1])
         self.assertIn('输入或工具',self.sender.images[-1][1])
 
+    async def test_same_version_retained_artifact_caption_is_neutral(self):
+        self.reader.result = {
+            'status': 'stale', 'image_path': 'test.png', 'source_version': 'v',
+            'catalog_version': 'v', 'reason': 'retained_artifact',
+        }
+        original = self.reader.result.copy()
+        await self.handler._answer_query('g', 'Unit2 2', 'u')
+        self.assertEqual(
+            self.sender.images[-1][1], '展示已生成的立绘，来源版本 v',
+        )
+        self.assertEqual(self.reader.result, original)
+        self.assertFalse(self.sender.texts)
+
     async def test_states_and_safe_upload_failures(self):
         self.reader.result={'status':'out_of_range','available_skins':[{'ordinal':1,'name':'原版','state':'complete'},{'ordinal':2,'name':'占位','state':'failed'}]}
         await self.handler._answer_query('g','Unit2 9','u')
