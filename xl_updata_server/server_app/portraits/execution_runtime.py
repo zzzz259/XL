@@ -196,7 +196,10 @@ class PortraitRuntime:
         if not self.config.metadata.enabled:
             return {"enabled": False}
         result = self.metadata.tick(now=time.time(), stop_event=self.stop_event)
-        if result.get("status") != "idle":
+        if result.get("status") != "idle" and (
+            result.get("status") not in ("observed", "prepared", "committed", "repaired", "prepare_retry")
+            or not self.metadata.execution_ready()
+        ):
             return result
         page = self.metadata.store_reader.list_plans(
             cursor=self._plan_cursor, limit=1, sealed=False

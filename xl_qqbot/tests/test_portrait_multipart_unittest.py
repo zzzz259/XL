@@ -396,7 +396,7 @@ class PortraitMultipartIntakeBoundaries(PortraitMultipartFixture):
         # Deterministic cross-platform guard checks; no symlink privilege required.
         with patch.object(Path, "is_symlink", return_value=True):
             self.assertEqual(service.enqueue(payload)[0], 400)
-        with patch.object(Path, "is_junction", return_value=True):
+        with patch.object(Path, "is_junction", return_value=True, create=True):
             self.assertEqual(service.enqueue(payload)[0], 400)
 
 

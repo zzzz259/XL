@@ -192,7 +192,7 @@ def render_candidate(
             log_root=area / "logs",
             stop_event=stop_event,
         )
-        check_stage(result)
+        check_stage(result, stage_name="render", log_root=area / "logs")
         guard()
         candidate = validate_result(
             _load(_bounded(attempt / "result.json", 65536)), request

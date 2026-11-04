@@ -143,7 +143,7 @@ def fetch_once(slot, pin, fetch, *, data_root, work_root, runtime, tool_fingerpr
                             '--request', str(area/'request.json'), '--result', str(attempt/'result.json')],
                            cwd=area, env=env, timeout=min(timeout_seconds, slot.policy.stage_seconds),
                            log_root=area/'logs', stop_event=stop_event)
-    check_stage(result)
+    check_stage(result, stage_name='download', log_root=area/'logs')
     _idle(slot)
     value = _load(_bounded(attempt/'result.json', 65536))
     if set(value) != {'schema', 'status', 'request_digest', 'blob'} or value['schema'] != 'portrait-download-result/v1' or value['status'] != 'ok' or value['request_digest'] != digest(request):

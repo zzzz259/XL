@@ -45,6 +45,8 @@ class MetadataRuntime:
         self.config = config
         self.ledger = None
         self._scan = None
+        self._advance_next = False
+        self._discovery_stream = 0
         self._tick_mutex = threading.Lock()
         if config.enabled:
             self._validate_config()
@@ -238,22 +240,26 @@ class MetadataRuntime:
                 if not self._reconcile():
                     return {"enabled": True, "status": "reconciling"}
                 scan = self._scan
-                if scan["repair"] is not None:
-                    self._scan = None
-                    status = self._commit(self._mapping(scan["repair"]))
+                if scan["repair"]:
+                    key = min(
+                        scan["repair"].values(), key=lambda value: value["promotion"]
+                    )
+                    status = self._commit(self._mapping(key))
                     return {
                         "enabled": True,
                         "status": "repaired" if status == "committed" else status,
                     }
-                if self._discover(now):
-                    self._scan = None
+                pending = scan["pending"]
+                if not (pending and self._advance_next) and self._discover(now):
+                    self._advance_next = True
                     return {"enabled": True, "status": "observed"}
-                if scan["pending"] is not None:
-                    self._scan = None
+                if pending:
+                    self._advance_next = False
+                    key = min(pending.values(), key=lambda value: value["promotion"])
                     return {
                         "enabled": True,
                         "status": self._advance(
-                            self._mapping(scan["pending"]),
+                            self._mapping(key),
                             now,
                             stop_event,
                             scan["comparison"],
@@ -310,96 +316,110 @@ class MetadataRuntime:
         return True
 
     def _reconcile(self):
-        fence = self.ledger.read_fence()
-        if self._scan is None or self._scan["fence"] != fence:
+        if self._scan is None:
             self._scan = {
-                "fence": fence,
                 "cursor": None,
                 "store_cursor": None,
-                "stage": "runs",
-                "repair": None,
-                "pending": None,
+                "audit_cursor": None,
+                "ready": False,
+                "repair": {},
+                "pending": {},
                 "comparison": None,
             }
         state = self._scan
-        if state["stage"] == "runs":
-            page = self.ledger.read_runs_page(
-                cursor=state["cursor"], limit=1, max_bytes=1024 * 1024
-            )
-            state["cursor"] = page["cursor"]
-            terminal = {
-                "acked",
-                "existing_plan_alias",
-                "ineligible_original_run",
-                "superseded_before_registration",
-                "source_failed",
-                "preparation_exhausted",
-            }
-            for mapping in page["items"]:
-                self.core.read_outcomes_page(
-                    cursor=mapping["observation_cursor"], limit=1
+        changes = self.ledger.read_changes_page(cursor=state["cursor"], limit=16)
+        for mapping in changes["items"]:
+            self._reconcile_mapping(mapping)
+        state["cursor"] = changes["cursor"]
+        plans = self.store_reader.list_plans(cursor=state["store_cursor"], limit=16)
+        for plan in plans["plans"]:
+            manifest = self.store_reader.read_manifest(plan["plan_id"])
+            if manifest["kind"] != "automatic":
+                continue
+            origin = manifest.get("origin_core")
+            if origin is None:
+                raise ValueError("automatic Store plan has no runtime origin")
+            try:
+                mapping = self.ledger.read_run_mapping(
+                    origin["identity"], origin["outcome"]["run_id"]
                 )
-                if (
-                    self.core.read_run(mapping["run_id"])
-                    != mapping["original_observed"]
-                ):
-                    raise ValueError("observed Core outcome changed")
-                registered = self._proof(mapping)
-                phase = mapping["metadata_phase"]
-                if registered and phase in ("acked", "existing_plan_alias"):
-                    key = self._key(mapping)
-                    if (
-                        state["comparison"] is None
-                        or key["promotion"] > state["comparison"]["promotion"]
-                    ):
-                        state["comparison"] = key
-                target = (
-                    "repair"
-                    if registered and phase not in ("acked", "existing_plan_alias")
-                    else "pending"
-                )
-                if target == "repair" or phase not in terminal:
-                    key = self._key(mapping)
-                    if (
-                        state[target] is None
-                        or key["promotion"] < state[target]["promotion"]
-                    ):
-                        state[target] = key
-            if not page["items"]:
-                state["stage"] = "store"
+            except KeyError as error:
+                raise ValueError("orphan registered automatic plan") from error
+            if mapping.get("frozen_plan_id") != plan["plan_id"] or not self._proof(
+                mapping
+            ):
+                raise ValueError("orphan Store registration")
+            self._reconcile_mapping(mapping)
+        state["store_cursor"] = plans["cursor"]
+        state["ready"] = (
+            changes["caught_up"]
+            and plans["cursor"]["position"] == plans["cursor"]["highwater"]
+        )
+        # Continue checking retained payloads even when no legitimate history
+        # entry announces their alteration. Appends cannot restart this audit;
+        # insertions behind its keyset are independently covered by history.
+        audit = self.ledger.read_runs_page(
+            cursor=state["audit_cursor"], limit=1, live=True
+        )
+        for mapping in audit["items"]:
+            self._reconcile_mapping(mapping)
+        state["audit_cursor"] = audit["cursor"] if audit["items"] else None
+        return state["ready"]
+
+    def _reconcile_mapping(self, mapping):
+        state = self._scan
+        self.core.read_outcomes_page(cursor=mapping["observation_cursor"], limit=1)
+        if self.core.read_run(mapping["run_id"]) != mapping["original_observed"]:
+            raise ValueError("observed Core outcome changed")
+        registered = self._proof(mapping)
+        phase = mapping["metadata_phase"]
+        key = self._key(mapping)
+        run = mapping["run_id"]
+        state["pending"].pop(run, None)
+        state["repair"].pop(run, None)
+        if registered and phase in ("acked", "existing_plan_alias"):
+            if (
+                state["comparison"] is None
+                or key["promotion"] > state["comparison"]["promotion"]
+            ):
+                state["comparison"] = key
+        elif registered:
+            state["repair"][run] = key
+        elif phase not in {
+            "acked",
+            "existing_plan_alias",
+            "ineligible_original_run",
+            "superseded_before_registration",
+            "source_failed",
+            "preparation_exhausted",
+        }:
+            state["pending"][run] = key
+
+    def execution_ready(self):
+        """Fresh latest-promotion proof, never a cached boolean execution permit."""
+        if self._scan is None or not self._scan["ready"] or self._scan["repair"]:
             return False
-        if state["stage"] == "store":
-            page = self.store_reader.list_plans(cursor=state["store_cursor"], limit=1)
-            state["store_cursor"] = page["cursor"]
-            for plan in page["plans"]:
-                manifest = self.store_reader.read_manifest(plan["plan_id"])
-                if manifest["kind"] != "automatic":
-                    continue
-                origin = manifest.get("origin_core")
-                if origin is None:
-                    raise ValueError("automatic Store plan has no runtime origin")
-                try:
-                    mapping = self.ledger.read_run_mapping(
-                        origin["identity"], origin["outcome"]["run_id"]
-                    )
-                except KeyError as error:
-                    raise ValueError("orphan registered automatic plan") from error
-                if mapping.get("frozen_plan_id") != plan["plan_id"] or not self._proof(
-                    mapping
-                ):
-                    raise ValueError("orphan Store registration")
-            if not page["plans"]:
-                state["stage"] = "ready"
+        latest = self.core.latest_promotion()
+        if latest is None:
+            return not self._scan["pending"]
+        cursor = self.ledger.read_cursor("outcomes")
+        if cursor is None:
             return False
-        # Revalidate Store high-water even after an idle scan, before discovery.
-        page = self.store_reader.list_plans(cursor=state["store_cursor"], limit=1)
-        if page["plans"]:
-            state["stage"] = "store"
+        identity = {key: cursor[key] for key in ("scope", "journal_id", "file_id")}
+        try:
+            mapping = self.ledger.read_run_mapping(identity, latest["run_id"])
+        except KeyError:
             return False
-        return True
+        self._reconcile_mapping(mapping)
+        if mapping["metadata_phase"] in ("acked", "existing_plan_alias"):
+            return self._proof(mapping)
+        return mapping["metadata_phase"] in ("source_failed", "preparation_exhausted")
 
     def _discover(self, now):
-        for stream in ("outcomes", "source_links"):
+        streams = ("outcomes", "source_links")
+        for offset in range(2):
+            position = (self._discovery_stream + offset) % 2
+            stream = streams[position]
             previous = self.ledger.read_cursor(stream)
             page = getattr(self.core, "read_" + stream + "_page")(
                 cursor=previous, limit=1
@@ -413,6 +433,11 @@ class MetadataRuntime:
             outcome = (
                 item if stream == "outcomes" else self.core.read_run(item["run_id"])
             )
+            if stream == "source_links":
+                try:
+                    self.ledger.read_run_mapping(identity, item["run_id"])
+                except KeyError:
+                    continue  # Persist the original outcome before its independent link.
             self.ledger.observe(
                 identity,
                 outcome,
@@ -422,6 +447,7 @@ class MetadataRuntime:
                 stream=stream,
                 source_link=None if stream == "outcomes" else item,
             )
+            self._discovery_stream = 1 - position
             return True
         return False
 
@@ -599,7 +625,7 @@ class MetadataRuntime:
                     self.ledger.retry_prepare(
                         identity, run, now=now + time.monotonic() - started
                     )
-                    raise
+                    return "prepare_retry"
             return "prepared"
         if phase == "prepared":
             from . import publisher

@@ -39,13 +39,23 @@ def resolve_artifact(roots, source, artifact, expected):
     root = roots[source]
     path = root / "artifacts" / (expected + ".png")
     for component in (path, *path.parents):
-        if component.is_symlink() or component.is_junction():
+        if component.is_symlink() or _is_junction(component):
             raise ValueError("portrait path cannot contain links")
     path.resolve(strict=True).relative_to(root.resolve(strict=True))
     if not stat.S_ISREG(path.stat().st_mode):
         raise ValueError("portrait artifact must be a regular file")
     validate_png_file(path, expected)
     return path
+
+
+def _is_junction(path):
+    predicate = getattr(path, "is_junction", None)
+    if callable(predicate):
+        return predicate()
+    # Python 3.11 Windows exposes the mount-point reparse tag through lstat.
+    return getattr(path.lstat(), "st_reparse_tag", 0) == getattr(
+        stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003
+    )
 
 
 def validate_png_file(path, expected):

@@ -264,12 +264,74 @@ class RuntimeLedgerReader:
                 "prefix": prefix,
             }
 
-    def read_runs_page(self, *, cursor=None, limit=16, max_bytes=MAX_DOCUMENT):
+    def _validate_frontier(self, db, cursor):
+        if (
+            type(cursor) is not dict
+            or set(cursor) != {"database_id", "file_id", "sequence", "prefix"}
+            or cursor["database_id"] != self.database_id
+            or cursor["file_id"] != self.incarnation
+            or type(cursor["sequence"]) is not int
+            or not 0 <= cursor["sequence"] <= MAX_EVENTS
+        ):
+            raise ValueError("invalid runtime frontier")
+        row = (
+            db.execute(
+                "SELECT prefix FROM history WHERE sequence=?", (cursor["sequence"],)
+            ).fetchone()
+            if cursor["sequence"]
+            else ("0" * 64,)
+        )
+        if row != (cursor["prefix"],):
+            raise ValueError("runtime frontier continuity mismatch")
+
+    def read_changes_page(self, *, cursor=None, limit=16, max_bytes=MAX_RECORD):
+        """Bounded history delta; every returned mapping is its authenticated current state."""
+        if type(limit) is not int or not 1 <= limit <= 16:
+            raise ValueError("invalid runtime page limit")
+        if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_DOCUMENT:
+            raise ValueError("invalid runtime page byte bound")
+        with self._connection() as db:
+            high, _ = self._continuity(db)
+            after, prefix = 0, "0" * 64
+            if cursor is not None:
+                self._validate_frontier(db, cursor)
+                after, prefix = cursor["sequence"], cursor["prefix"]
+            items, size = {}, 0
+            for sequence, key, next_prefix in db.execute(
+                "SELECT sequence,key,prefix FROM history WHERE sequence>? ORDER BY sequence LIMIT ?",
+                (after, limit),
+            ):
+                if not key.startswith("cursor:") and key not in items:
+                    value = self._read(db, key)
+                    length = len(encode(value).encode())
+                    if size + length > max_bytes:
+                        if not items:
+                            raise ValueError("first runtime mapping exceeds page bound")
+                        break
+                    items[key] = value
+                    size += length
+                after, prefix = sequence, next_prefix
+            return {
+                "items": list(items.values()),
+                "cursor": {
+                    "database_id": self.database_id,
+                    "file_id": self.incarnation,
+                    "sequence": after,
+                    "prefix": prefix,
+                },
+                "caught_up": after == high,
+            }
+
+    def read_runs_page(
+        self, *, cursor=None, limit=16, max_bytes=MAX_DOCUMENT, live=False
+    ):
         """Primary-key pagination over one stable ledger revision; no phase scan."""
         if type(limit) is not int or not 1 <= limit <= 16:
             raise ValueError("invalid runtime page limit")
         if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_DOCUMENT:
             raise ValueError("invalid runtime page byte bound")
+        if type(live) is not bool:
+            raise ValueError("invalid runtime live scan")
         with self._connection() as db:
             high, prefix = self._continuity(db)
             fence = {
@@ -283,9 +345,11 @@ class RuntimeLedgerReader:
                 if (
                     type(cursor) is not dict
                     or set(cursor) != {"fence", "after"}
-                    or cursor["fence"] != fence
+                    or (not live and cursor["fence"] != fence)
                 ):
                     raise ValueError("runtime scan fence changed")
+                if live:
+                    self._validate_frontier(db, cursor["fence"])
                 after = cursor["after"]
                 if after != "":
                     hash_value(after)

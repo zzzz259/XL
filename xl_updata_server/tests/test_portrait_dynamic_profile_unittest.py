@@ -277,6 +277,8 @@ class DynamicProfileTests(unittest.TestCase):
 
             def digest(path):
                 path = Path(path)
+                if path in {Path(name) for name in value["namespace_tools"]}:
+                    return "a" * 64
                 return (
                     hashlib.sha256(path.read_bytes()).hexdigest()
                     if path.is_file()

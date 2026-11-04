@@ -190,7 +190,7 @@ def prepare_lazy_package(slot, ready_ref, prepared_ref, lazy_input, *, publicati
         def stage(command,log):
             guard()
             result=slot.run_stage(command,cwd=area,env=env,timeout=min(slot.policy.stage_seconds,deadline-time.monotonic()),log_root=area/log,stop_event=stop_event)
-            check_stage(result);guard()
+            check_stage(result,stage_name={'arts-logs':'arts','package-logs':'package'}[log],log_root=area/log);guard()
             return result
         save(area/'arts-request.json',a)
         first=stage([str(runtime.python),'-m','server_app.portraits.arts_worker','--request',str(area/'arts-request.json'),'--result',str(stage_a/'result.json')],'arts-logs')

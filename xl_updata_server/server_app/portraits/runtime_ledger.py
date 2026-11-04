@@ -331,7 +331,8 @@ class RuntimeLedger(RuntimeLedgerReader):
                 and promotion == 1
             )
         )
-        text(outcome["version"])
+        if eligible or outcome["version"] is not None:
+            text(outcome["version"])
         if outcome.get("pin_digest") is not None:
             hash_value(outcome["pin_digest"])
         with self._write() as db:

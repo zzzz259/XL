@@ -247,14 +247,38 @@ def select_owner(tree):
     return owner
 
 
-def check_stage(stage, *, worker=True):
-    if stage.reason=='timeout': raise PreparationError('stage timeout')
+def _stage_failure(message, stage_name, log_root):
+    if stage_name is None:
+        return PreparationError(message)
+    if stage_name not in ('source', 'lua_decode', 'download', 'arts', 'package', 'render'):
+        raise BoundaryError('invalid diagnostic stage')
+    diagnostic = stage_name + ': ' + message
+    if log_root is not None:
+        try:
+            with io._directory(log_root) as directory, io._read_file(directory, 'stderr.log') as stream:
+                raw = stream.read(4096).decode('utf-8', errors='replace')
+        except OSError:
+            diagnostic += '; stderr unavailable'
+        else:
+            # Child text may contain raw input, paths, URLs or secrets. Retain
+            # only fixed exception-class tokens; redact every dynamic detail.
+            allowed = ('ValueError', 'TypeError', 'OSError', 'RuntimeError',
+                       'MemoryError', 'TimeoutError', 'PreparationError',
+                       'BoundaryError', 'ImportError', 'FileNotFoundError')
+            found = [name for name in allowed if re.search(r'\b' + name + r'\b', raw)]
+            if raw:
+                diagnostic += '; stderr: ' + ','.join(found) + ' [details redacted]'
+    return PreparationError(diagnostic[:512])
+
+
+def check_stage(stage, *, worker=True, stage_name=None, log_root=None):
+    if stage.reason=='timeout': raise _stage_failure('stage timeout', stage_name, log_root)
     if stage.reason=='descendants': raise BoundaryError('stage descendants')
     if stage.reason!='exit': raise Deferred(stage.reason)
-    if not worker and stage.returncode!=0: raise PreparationError('decoder stage failed')
+    if not worker and stage.returncode!=0: raise _stage_failure('decoder stage failed', stage_name, log_root)
     if stage.returncode==2: raise Deferred('worker deferred')
     if stage.returncode==3: raise BoundaryError('worker boundary unavailable')
-    if stage.returncode!=0: raise PreparationError('stage failed')
+    if stage.returncode!=0: raise _stage_failure('stage failed', stage_name, log_root)
 
 
 @_typed_errors(BoundaryError, 'trusted runtime unavailable or malformed')
@@ -364,7 +388,7 @@ def prepare_source(slot,pin,*,data_root,work_root,runtime,tool_fingerprint,open_
     def stage(argv,area,log, *, worker=True):
         guard()
         result=slot.run_stage(argv,cwd=area,env=env,timeout=min(slot.policy.stage_seconds,deadline-time.monotonic()),log_root=log,stop_event=stop_event)
-        check_stage(result,worker=worker); guard()
+        check_stage(result,worker=worker,stage_name='source' if worker else 'lua_decode',log_root=log); guard()
     @contextmanager
     def attempt_directory(prefix, parent):
         # No TemporaryDirectory finalizer: an unconfirmed live child retains inputs.
