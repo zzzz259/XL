@@ -101,11 +101,8 @@ def render_candidate(
         raise BoundaryError("managed descriptor digest mismatch")
     native = _load(raw)
     pinned = dict(runtime.runtime_manifest)
-    entries = [
-        e
-        for group in native.values()
-        for e in ([group] if type(group) is dict else group)
-    ]
+    from app.platform.portrait_dynamic_profile import descriptor_files
+    entries = descriptor_files(native)
     if any(pinned.get(e["path"]) != e["sha256"] for e in entries):
         raise BoundaryError("native outside trusted runtime")
     for filename in ("SpineViewerCLI.dll", "PortraitSceneCLI.dll"):

@@ -1,0 +1,25 @@
+# Standalone default-off companion. No Install section or deploy allowlist.
+# Operator must prepare immutable bundle and explicitly approve manual start.
+[Unit]
+Description=XL main portrait companion (manual activation only)
+After=network-online.target
+ConditionPathExists=/home/admin/xl_deploy/shared/portrait/main/activation-approved
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/xl_deploy/shared/portrait/main
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONNOUSERSITE=1
+EnvironmentFile=/home/admin/xl_deploy/shared/portrait/main/runtime.env
+ExecStart=/usr/bin/env ${PORTRAIT_PYTHON} -P -m server_app.portraits.cli daemon --enable --config /home/admin/xl_deploy/shared/portrait/main/runtime.json
+Restart=no
+CPUAffinity=1
+CPUQuota=100%
+MemoryMax=256M
+MemorySwapMax=0
+LimitCORE=0
+KillMode=control-group
+TimeoutStopSec=30
+Nice=10
+UMask=0077

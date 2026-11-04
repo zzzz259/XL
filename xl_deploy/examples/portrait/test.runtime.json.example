@@ -1,0 +1,110 @@
+{
+  "bundle": {
+    "roots": {
+      "server": "/home/admin/xl_deploy/releases/REPLACE_WITH_RELEASE_SHA/runtime/portrait-sources/xl_updata_server",
+      "tool": "/home/admin/xl_deploy/releases/REPLACE_WITH_RELEASE_SHA/runtime/portrait-sources/xl_updata_tool",
+      "python": "/immutable/REPLACE_WITH_RELEASE_SHA/test/python",
+      "dotnet": "/immutable/REPLACE_WITH_RELEASE_SHA/test/dotnet",
+      "java": "/immutable/REPLACE_WITH_RELEASE_SHA/test/java",
+      "native": "/immutable/REPLACE_WITH_RELEASE_SHA/test/native",
+      "display": "/immutable/REPLACE_WITH_RELEASE_SHA/test/display"
+    },
+    "inventory_sha256": "REPLACE_WITH_INVENTORY_SHA256",
+    "descriptor_path": "/immutable/REPLACE_WITH_RELEASE_SHA/test/descriptor.json",
+    "descriptor_sha256": "REPLACE_WITH_DESCRIPTOR_SHA256",
+    "host_files": {
+      "unshare": "/usr/bin/unshare",
+      "mount": "/usr/bin/mount",
+      "sh": "/usr/bin/sh",
+      "prlimit": "/usr/bin/prlimit",
+      "env": "/usr/bin/env",
+      "python-venv": "/immutable/REPLACE_WITH_RELEASE_SHA/test/python/venvs/test/bin/python",
+      "python-base": "/immutable/REPLACE_WITH_RELEASE_SHA/test/python/bin/python3"
+    },
+    "entrypoints": {
+      "python": [
+        "host",
+        "python-venv"
+      ],
+      "java": [
+        "java",
+        "bin/java"
+      ],
+      "unluac": [
+        "tool",
+        "tools/lua/unluac.jar"
+      ],
+      "opmap": [
+        "tool",
+        "tools/lua/opmap"
+      ],
+      "prlimit": [
+        "host",
+        "prlimit"
+      ]
+    },
+    "dependency_roles": [
+      "python"
+    ],
+    "loader_dirs": [
+      [
+        "native",
+        "lib"
+      ],
+      [
+        "display",
+        "lib"
+      ]
+    ],
+    "retention": {
+      "authority_path": "/absolute/REPLACE_WITH_CONTROLLER_STATE_DIR/release-storage.json",
+      "release_path": "/home/admin/xl_deploy/releases/REPLACE_WITH_RELEASE_SHA"
+    }
+  },
+  "decrypt_key_env": "XL_PORTRAIT_DECRYPT_KEY_HEX",
+  "metadata": {
+    "enabled": false,
+    "instance_id": "test-bot",
+    "source_id": "portrait-test-source",
+    "cdn_base": "https://REPLACE_WITH_TEST_EXPLICIT_CDN.invalid/Bundles",
+    "updater_data_root": "/home/admin/xl_deploy/shared/portrait/test/updater",
+    "prepared_source_root": "/home/admin/xl_deploy/shared/portrait/test/source",
+    "portrait_root": "/home/admin/xl_deploy/shared/portrait/test/artifacts",
+    "work_root": "/home/admin/xl_deploy/shared/portrait/test/work",
+    "ledger_path": "/home/admin/xl_deploy/shared/portrait/test/ledger/state.db",
+    "store_path": "/home/admin/xl_deploy/shared/portrait/test/store/portraits.db",
+    "publication_guards": [
+      [
+        "/home/admin/xl_deploy/shared/portrait/main/updater/portrait_updater_guard.json",
+        "REPLACE_WITH_MAIN_PUBLICATION_SCOPE_SHA256"
+      ],
+      [
+        "/home/admin/xl_deploy/shared/portrait/test/updater/portrait_updater_guard.json",
+        "REPLACE_WITH_TEST_PUBLICATION_SCOPE_SHA256"
+      ]
+    ],
+    "legacy_status_paths": [
+      "/home/admin/xl_deploy/shared/portrait/main/legacy/update_status.json",
+      "/home/admin/xl_deploy/shared/portrait/test/legacy/update_status.json"
+    ],
+    "resource_policy": {
+      "lock_path": "/home/admin/xl_deploy/shared/portrait/host.lock",
+      "updater_status_paths": [
+        "/home/admin/xl_deploy/shared/portrait/main/updater/portrait_updater_guard.json",
+        "/home/admin/xl_deploy/shared/portrait/test/updater/portrait_updater_guard.json",
+        "/home/admin/xl_deploy/shared/portrait/main/legacy/update_status.json",
+        "/home/admin/xl_deploy/shared/portrait/test/legacy/update_status.json"
+      ],
+      "disk_roots": [
+        "/home/admin/xl_deploy/shared/portrait/test"
+      ],
+      "memory_bytes": 268435456,
+      "admission_bytes": 335544320,
+      "stage_seconds": 120
+    }
+  },
+  "owner": "portrait-test",
+  "lease_seconds": 60,
+  "renew_interval": 10,
+  "job_seconds": 300
+}

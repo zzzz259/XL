@@ -18,6 +18,7 @@ import threading
 
 from .resource_lease import inherited_lease_kwargs
 from .processes import run_external_process, _StreamCapture, _drain_stream
+from .portrait_dynamic_profile import DynamicProfile, clean_environment, require_invariant
 
 
 @dataclass(frozen=True)
@@ -46,11 +47,14 @@ class LinuxManagedRuntime:
     xkbcomp: RuntimeFile
     x_libraries: tuple[RuntimeFile, ...]
     runtime_files: tuple[RuntimeFile, ...] = ()
+    dynamic_profile: DynamicProfile | None = None
 
     def __post_init__(self):
         for name in ('app_files', 'native_files', 'x_libraries', 'runtime_files'):
             if type(getattr(self, name)) is not tuple:
                 raise ValueError('runtime manifests must be immutable tuples')
+        if self.dynamic_profile is not None and type(self.dynamic_profile) is not DynamicProfile:
+            raise ValueError('dynamic profile must be verified and immutable')
 
     def prepare(self, work, *, deadline, cancel_check=None):
         if not math.isfinite(deadline) or deadline <= time.monotonic():
@@ -62,6 +66,12 @@ class LinuxManagedRuntime:
                 raise TimeoutError('managed preparation stopped')
             entry.verify()
         names = [Path(entry.path).name for entry in self.app_files]
+        for entry in self.app_files:
+            with Path(entry.path).open('rb') as stream:
+                if stream.read(4) == b'\x7fELF':
+                    raise ValueError('staged app ELF/native asset forbidden')
+        if self.dynamic_profile is not None:
+            require_invariant(self.app_files)
         if len(set(names)) != len(names):
             raise ValueError('duplicate runtime app file')
         for stem in ('SpineViewerCLI', 'PortraitSceneCLI'):
@@ -98,6 +108,9 @@ class ManagedLaunch:
         self.native_prefix = (runtime.dotnet.path, str(app / 'PortraitSceneCLI.dll'))
         self.display = None
         self.env = dict(os.environ)
+        if getattr(runtime, 'dynamic_profile', None) is not None:
+            self.env = clean_environment(self.env)
+            self.env.update(runtime.dynamic_profile.environment(app.parent))
         for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'DOTNET_ADDITIONAL_DEPS',
                     'DOTNET_SHARED_STORE', 'DOTNET_STARTUP_HOOKS', 'LD_PRELOAD', 'LD_AUDIT'):
             self.env.pop(key, None)
@@ -188,7 +201,8 @@ class PrivateDisplay:
                 str(Path(e.path).parent) for e in runtime.x_libraries)))
             fds = inherited_lease_kwargs(env)['pass_fds'] + (write_fd,)
             self.process = subprocess.Popen([runtime.xvfb.path, '-displayfd', str(write_fd),
-                '-screen', '0', '128x128x24', '-nolisten', 'tcp', '-noreset'],
+                '-screen', '0', '128x128x24', '-nolisten', 'tcp', '-noreset',
+                *(['-fp', runtime.dynamic_profile.font_argument] if getattr(runtime, 'dynamic_profile', None) is not None else [])],
                 env=env, pass_fds=fds, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             self.reader = threading.Thread(target=_drain_stream, args=(
                 self.process.stdout, self.log, 'xvfb', None, 'utf-8', 'replace'), daemon=True)

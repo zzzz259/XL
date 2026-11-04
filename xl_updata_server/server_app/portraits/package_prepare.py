@@ -119,7 +119,8 @@ def prepare_lazy_package(slot, ready_ref, prepared_ref, lazy_input, *, publicati
         raise BoundaryError('package runtime manifest mismatch')
     native = _load(runtime_data)
     pinned = dict(runtime.runtime_manifest)
-    native_entries = [e for group in native.values() for e in ([group] if type(group) is dict else group)]
+    from app.platform.portrait_dynamic_profile import descriptor_files
+    native_entries = descriptor_files(native)
     if any(pinned.get(e['path']) != e['sha256'] for e in native_entries):
         raise BoundaryError('managed runtime missing from trusted runtime identity')
     for filename in ('SpineViewerCLI.dll','PortraitSceneCLI.dll'):

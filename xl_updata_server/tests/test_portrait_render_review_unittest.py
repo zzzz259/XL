@@ -1,6 +1,7 @@
 """Independent review regression cases; stdlib and deterministic fault injection."""
 
 import copy
+import json
 import os
 import tempfile
 import unittest
@@ -130,6 +131,9 @@ class WorkerOrderingTests(unittest.TestCase):
 
         with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
+            from test_portrait_bundle_unittest import fixture as bundle_fixture
+            bundle_config, _ = bundle_fixture(root / "runtime-inputs")
+            descriptor = json.loads(Path(bundle_config["descriptor_path"]).read_bytes())
             request = fixtures.EnvelopeTests().request(root)
             attempt = Path(request["attempt_root"])
             attempt.mkdir(parents=True)
@@ -181,9 +185,9 @@ class WorkerOrderingTests(unittest.TestCase):
                 return raw
 
             native = ModuleType("app.platform.portrait_linux_runtime")
-            native.LinuxManagedRuntime = lambda **kw: SimpleNamespace(prepare=prepare)
+            native.LinuxManagedRuntime = lambda **kw: SimpleNamespace(prepare=prepare, **kw)
             native.PrivateDisplay = Display
-            native.RuntimeFile = lambda **kw: kw
+            native.RuntimeFile = lambda **kw: SimpleNamespace(**kw)
             packaged = ModuleType("app.features.preview.portrait_package")
             packaged.load_portrait_package = lambda _: SimpleNamespace(
                 scene=SimpleNamespace(
@@ -213,14 +217,15 @@ class WorkerOrderingTests(unittest.TestCase):
                     ("_directory", nullcontext(0)),
                     ("read_package", b"{}"),
                     ("read_bound_file", b"{}"),
-                    ("_load", {}),
+                    ("_load", descriptor),
                 ]:
                     stack.enter_context(patch.object(worker, name, return_value=value))
                 stack.enter_context(patch.object(worker, "_guard", side_effect=guard))
                 stack.enter_context(
                     patch.object(worker.time, "monotonic", return_value=1)
                 )
-                stack.enter_context(patch.object(worker.os, "listdir", return_value=[]))
+                actual_listdir = os.listdir
+                stack.enter_context(patch.object(worker.os, "listdir", side_effect=lambda path: [] if path == 0 else actual_listdir(path)))
                 stack.enter_context(
                     patch.object(Path, "read_text", return_value="0 1000 1")
                 )

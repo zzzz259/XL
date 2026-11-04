@@ -1,0 +1,26 @@
+# Merge into the existing stable-bot config; do not create a second Gateway.
+# The updater server.instance_id and runtime metadata.instance_id must also be stable-bot.
+[portrait_query]
+enabled = false
+data_dir = "/home/admin/xl_deploy/shared/portrait/main/artifacts"
+source_id = "portrait-main-source"
+max_decode_pixels = 8388608
+max_manifest_bytes = 65536
+max_catalog_bytes = 4194304
+max_image_bytes = 20971520
+
+# This name MUST be an existing watch.update_sources key.
+[portrait_delivery.main]
+enabled = false
+# On explicit activation provide every field below with enabled=true:
+# source_id = "portrait-main-source"
+# core_scope = "REPLACE_WITH_ACTUAL_PUBLICATION_SCOPE_SHA256"
+# core_journal = "/home/admin/xl_deploy/shared/portrait/main/updater/portrait_sources/REPLACE_WITH_ACTUAL_PUBLICATION_SCOPE_SHA256/core_outcomes.sqlite"
+# runtime_ledger = "/home/admin/xl_deploy/shared/portrait/main/ledger/state.db"
+# portrait_store = "/home/admin/xl_deploy/shared/portrait/main/store/portraits.db"
+# artifact_root = "/home/admin/xl_deploy/shared/portrait/main/artifacts"
+# updater_root = "/home/admin/xl_deploy/shared/portrait/main/updater"
+# image_delivery_mode = "local_multipart"
+
+[notification.portrait_roots.stable-bot]
+portrait-main-source = "/home/admin/xl_deploy/shared/portrait/main/artifacts"

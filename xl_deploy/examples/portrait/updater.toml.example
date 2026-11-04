@@ -1,0 +1,5 @@
+# Merge into the owner updater configuration only after separate activation review.
+# Each tier has its own server.instance_id, paths.data_dir and CDN base.
+[portrait_sources]
+enabled = false
+source_id = "replace-with-explicit-isolated-source-id"

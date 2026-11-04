@@ -63,6 +63,9 @@ def run_request(value, *, request_path, result_path):
         identities = {(row['wire_md5'],row['path_id']) for row in ledger}
         from .private_namespace import prepare_namespace
         prepare_namespace(value,native,attempt,guard,a['deadline'])
+        from app.platform.portrait_dynamic_profile import guarded_runtime
+        runtime = guarded_runtime(native)
+        del native
         from app.features.preview.portrait_config.asset_index import AssetIndex
         from app.features.preview.portrait_config.model import PortraitScene
         from app.features.preview.portrait_config.scope_policy import (
@@ -73,11 +76,8 @@ def run_request(value, *, request_path, result_path):
             publish_portrait_packages,
         )
         from app.platform.portrait_linux_runtime import (
-            LinuxManagedRuntime,
             PrivateDisplay,
-            RuntimeFile,
         )
-        runtime=LinuxManagedRuntime(**{k:RuntimeFile(**v) if isinstance(v,dict) else tuple(RuntimeFile(**e) for e in v) for k,v in native.items()})
         def forbidden(_):raise BoundaryError('metadata stage source reopen forbidden')
         index=AssetIndex.from_exact_catalog(stage_a/'catalog.json',stage_a/'views',int(source['version']),environment_provider=forbidden)
         scene=PortraitScene.from_dict(_load(scene_raw))

@@ -42,11 +42,13 @@ def run_request(value, *, request_path, result_path):
         from .private_namespace import prepare_namespace
 
         prepare_namespace(value, native, attempt, guard, value["deadline"])
+        from app.platform.portrait_dynamic_profile import guarded_runtime
+
+        runtime = guarded_runtime(native)
+        del native
         from app.features.preview.portrait_package import load_portrait_package
         from app.platform.portrait_linux_runtime import (
-            LinuxManagedRuntime,
             PrivateDisplay,
-            RuntimeFile,
         )
 
         loaded = load_portrait_package(package.package_path)
@@ -59,14 +61,6 @@ def run_request(value, *, request_path, result_path):
         del loaded
         for name in ("managed", "home", "cache", "output", "work"):
             (attempt / name).mkdir(mode=0o700)
-        runtime = LinuxManagedRuntime(
-            **{
-                k: RuntimeFile(**v)
-                if isinstance(v, dict)
-                else tuple(RuntimeFile(**e) for e in v)
-                for k, v in native.items()
-            }
-        )
         stop = StopLatch(guard)
         try:
             launch = runtime.prepare(

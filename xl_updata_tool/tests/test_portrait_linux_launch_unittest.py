@@ -12,7 +12,7 @@ class LaunchTest(unittest.TestCase):
     def test_command_selection_overrides_never_reach_process_runner(self):
         from app.platform.portrait_linux_runtime import ManagedLaunch
         from unittest.mock import Mock
-        runtime = Mock(native_files=(), x_libraries=())
+        runtime = Mock(native_files=(), x_libraries=(), dynamic_profile=None)
         runtime.dotnet.path = '/trusted/dotnet'
         launch = ManagedLaunch(runtime, Path('/private/app'), __import__('time').monotonic()+5, None)
         launch.display = object()
@@ -36,7 +36,7 @@ class LaunchTest(unittest.TestCase):
         self.assertTrue(getattr(result, 'xl_stderr_truncated', False))
         self.assertEqual(result.xl_stdout_bytes, 98000)
         self.assertEqual(result.xl_stderr_bytes, 70000)
-        runtime = Mock(native_files=(), x_libraries=())
+        runtime = Mock(native_files=(), x_libraries=(), dynamic_profile=None)
         runtime.dotnet.path = '/trusted/dotnet'
         launch = ManagedLaunch(runtime, Path('/private/app'), __import__('time').monotonic()+5, None)
         launch.display = object()
@@ -123,7 +123,7 @@ class LaunchTest(unittest.TestCase):
         from app.platform.portrait_linux_runtime import ManagedLaunch
         from unittest.mock import Mock
         import os
-        runtime = Mock(native_files=(), x_libraries=())
+        runtime = Mock(native_files=(), x_libraries=(), dynamic_profile=None)
         runtime.dotnet.path = '/trusted/dotnet'
         with patch.dict(os.environ, {'LD_PRELOAD': '/bad.so', 'LD_AUDIT': '/bad.so',
                                     'DOTNET_ROOT': '/bad', 'DISPLAY': ':99'}):
@@ -137,7 +137,7 @@ class LaunchTest(unittest.TestCase):
     def test_managed_launch_rejects_escape_options(self):
         from app.platform.portrait_linux_runtime import ManagedLaunch
         from unittest.mock import Mock
-        runtime = Mock(native_files=(), x_libraries=())
+        runtime = Mock(native_files=(), x_libraries=(), dynamic_profile=None)
         runtime.dotnet.path = '/trusted/dotnet'
         launch = ManagedLaunch(runtime, Path('/private/app'), __import__('time').monotonic()+5, None)
         for option in ('env', 'cwd', 'preexec_fn', 'pass_fds', 'start_new_session', 'process_group', 'cancel_tree'):
@@ -155,7 +155,7 @@ class LaunchTest(unittest.TestCase):
     def test_cancelled_managed_success_is_rejected(self):
         from app.platform.portrait_linux_runtime import ManagedLaunch
         from unittest.mock import Mock
-        runtime = Mock(native_files=(), x_libraries=())
+        runtime = Mock(native_files=(), x_libraries=(), dynamic_profile=None)
         runtime.dotnet.path = '/trusted/dotnet'
         launch = ManagedLaunch(runtime, Path('/private/app'), __import__('time').monotonic()+5, None)
         launch.display = object()

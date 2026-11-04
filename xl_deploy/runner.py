@@ -126,7 +126,9 @@ class CommandRunner:
         self._executor(
             ["git", "sparse-checkout", "set", "--no-cone", "/*", "!/*/",
              "/xl_deploy/", "/xl_qqbot/", "/xl_gacha_web/", "/xl_updata_server/",
-             "/xl_updata_tool/tools/lua/", "/xl_updata_tool/app/__init__.py",
+             "/xl_updata_tool/tools/lua/",
+             "/xl_updata_tool/app/features/preview/",
+             "/xl_updata_tool/runtime/portrait/", "/xl_updata_tool/app/__init__.py",
              "/xl_updata_tool/app/features/__init__.py",
              "/xl_updata_tool/app/features/characters/__init__.py",
              "/xl_updata_tool/app/features/characters/parser/",

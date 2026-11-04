@@ -11,18 +11,37 @@ def read_json(path):
         raw = stream.read(1024 * 1024 + 1)
     if len(raw) > 1024 * 1024:
         raise ValueError("configuration exceeds byte bound")
-    return json.loads(raw)
+    from .bundle import strict_json
+
+    return strict_json(raw, canonical_required=False)
 
 
 def load_config(path):
+    import os
+    import re
+
+    from .bundle import resolve_bundle
     from .execution_runtime import ExecutionConfig
     from .executor import ResourcePolicy
     from .metadata_runtime import MetadataConfig
-    from .package_prepare import PackageRuntime
-    from .source_prepare import SourceRuntime
 
     value = read_json(path)
     metadata = dict(value.pop("metadata"))
+    if "package_runtime" in value or {"runtime", "tool_fingerprint"} & metadata.keys():
+        raise ValueError("hand-built runtime configuration is forbidden")
+    bundle_config = value.pop("bundle")
+    secret_name = value.pop("decrypt_key_env")
+    if (
+        not isinstance(secret_name, str)
+        or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", secret_name) is None
+    ):
+        raise ValueError("invalid decrypt secret environment name")
+    secret = os.environ.get(secret_name, "")
+    if re.fullmatch(r"[0-9a-f]{32}", secret) is None:
+        raise ValueError("decrypt secret is missing or invalid")
+    bundle = resolve_bundle(bundle_config, decrypt_key_hex=secret)
+    metadata["runtime"] = bundle.source_runtime
+    metadata["tool_fingerprint"] = bundle.tool_fingerprint
     metadata["enabled"] = True
     for key in (
         "updater_data_root",
@@ -33,22 +52,6 @@ def load_config(path):
         "store_path",
     ):
         metadata[key] = Path(metadata[key])
-    source = metadata["runtime"]
-    for key in (
-        "python",
-        "server_root",
-        "tool_root",
-        "java",
-        "unluac",
-        "opmap",
-        "prlimit",
-    ):
-        source[key] = Path(source[key])
-    source["dependency_roots"] = tuple(Path(p) for p in source["dependency_roots"])
-    for key in ("tool_manifest", "runtime_manifest", "environment"):
-        if key in source:
-            source[key] = tuple(tuple(row) for row in source[key])
-    metadata["runtime"] = SourceRuntime(**source)
     policy = metadata["resource_policy"]
     policy["lock_path"] = Path(policy["lock_path"])
     for key in ("updater_status_paths", "disk_roots"):
@@ -60,11 +63,9 @@ def load_config(path):
     metadata["legacy_status_paths"] = tuple(
         Path(p) for p in metadata.get("legacy_status_paths", ())
     )
-    package = value.pop("package_runtime")
-    package["manifest_path"] = Path(package["manifest_path"])
     return ExecutionConfig(
         metadata=MetadataConfig(**metadata),
-        package_runtime=PackageRuntime(**package),
+        package_runtime=bundle.package_runtime,
         **value,
     )
 
