@@ -13,12 +13,12 @@ from pathlib import Path
 
 from app.platform.diagnostics import logger
 
+from .atlas_pages import _atlas_texture_names as _atlas_texture_names
 from .resource_catalog import discover_preview_resources
 from .resource_model import PreviewResourceCatalog, SpineSkinRecord
 from .spine_adapter import SpineQueryRunner
 
 
-_IMAGE_SUFFIXES = frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tga", ".webp"})
 _INDEX_NAME = "preview_index.json"
 
 
@@ -98,30 +98,6 @@ def _remove_physical_suffix_aliases(destination: Path, path: Path, suffix: str, 
             candidate.unlink()
         except OSError:
             pass
-
-
-def _atlas_texture_names(atlas_path: Path) -> tuple[str, ...]:
-    """Read page names from both .atlas and Unity .atlas.txt files."""
-    if not atlas_path.is_file():
-        return ()
-    try:
-        lines = atlas_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return ()
-    names: list[str] = []
-    seen: set[str] = set()
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line or ":" in line:
-            continue
-        candidate = Path(line)
-        if candidate.suffix.casefold() not in _IMAGE_SUFFIXES:
-            continue
-        normalized = candidate.as_posix()
-        if normalized not in seen:
-            names.append(normalized)
-            seen.add(normalized)
-    return tuple(names)
 
 
 def _record_groups(catalog: PreviewResourceCatalog) -> OrderedDict[str, tuple[str | None, list[SpineSkinRecord]]]:

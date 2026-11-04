@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from .output_publisher import _atlas_texture_names
+from .atlas_pages import _atlas_texture_names
 from .portrait_config.asset_index import AssetIndex, IndexedAsset
 from .portrait_config.model import AssetRef, PortraitScene
 from .portrait_scene_export import _resolve_asset_path, build_portrait_scene_export_jobs
