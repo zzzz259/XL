@@ -24,7 +24,7 @@ class ExecutorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             args = dict(lock_path=Path(d)/'lease', updater_status_paths=(Path(d)/'status',), disk_roots=(Path(d),))
             p = e.ResourcePolicy(**args)
-            self.assertEqual(p.memory_bytes, 268435456)
+            self.assertEqual(p.memory_bytes, 536870912)
             for value in (True, 0, -1, float('inf'), float('nan'), '10'):
                 with self.subTest(value=value), self.assertRaises(ValueError):
                     e.ResourcePolicy(**args, poll_seconds=value)
@@ -162,7 +162,7 @@ class LinuxExecutorTests(ExecutorTests):
 
     def test_kernel_slot_and_inherited_affinity(self):
         boundary = self.e.verify_resource_boundary(self.policy)
-        self.assertLessEqual(boundary.memory_bytes, 268435456)
+        self.assertLessEqual(boundary.memory_bytes, 536870912)
         self.assertEqual(os.sched_getaffinity(0), {1})
         with self.e.ResourceSlot(self.policy) as slot:
             with self.assertRaises(self.e.Deferred):

@@ -50,9 +50,9 @@ class ResourcePolicy:
     lock_path: Path
     updater_status_paths: tuple[Path, ...]
     disk_roots: tuple[Path, ...]
-    memory_bytes: int = 268435456
-    admission_bytes: int = 320 * 1024**2
-    abort_bytes: int = 64 * 1024**2
+    memory_bytes: int = 536870912
+    admission_bytes: int = 640 * 1024**2
+    abort_bytes: int = 128 * 1024**2
     disk_free_bytes: int = 1024**3
     poll_seconds: float = .1
     stage_seconds: float = 120
@@ -69,7 +69,7 @@ class ResourcePolicy:
             object.__setattr__(self, key, tuple(_absolute(v) for v in values))
         for key in ('memory_bytes', 'admission_bytes', 'abort_bytes', 'disk_free_bytes', 'log_bytes'):
             _positive(getattr(self, key), key, integer=True)
-        if self.memory_bytes > 268435456 or self.abort_bytes > self.admission_bytes:
+        if self.memory_bytes > 536870912 or self.abort_bytes > self.admission_bytes:
             raise ValueError('unsafe memory budget')
         for key in ('poll_seconds', 'stage_seconds', 'term_seconds', 'kill_seconds'):
             _positive(getattr(self, key), key)

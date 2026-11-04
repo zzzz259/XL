@@ -35,7 +35,8 @@ class PortraitDeploymentTests(unittest.TestCase):
             for line in (
                 "CPUQuota=100%",
                 "CPUAffinity=1",
-                "MemoryMax=256M",
+                "MemoryHigh=384M",
+                "MemoryMax=512M",
                 "MemorySwapMax=0",
                 "LimitCORE=0",
                 "KillMode=control-group",

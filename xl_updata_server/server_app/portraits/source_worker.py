@@ -80,7 +80,7 @@ def validate_request(value):
         if type(raw[name]) is not list or not 0<len(raw[name])<=16:raise ValueError('invalid policy paths')
         raw[name]=tuple(_path(p) for p in raw[name])
     policy=ResourcePolicy(**raw)
-    if policy.admission_bytes<320*1024**2 or policy.abort_bytes<64*1024**2 or policy.disk_free_bytes<1024**3 or policy.poll_seconds>.1:
+    if policy.admission_bytes<640*1024**2 or policy.abort_bytes<128*1024**2 or policy.disk_free_bytes<1024**3 or policy.poll_seconds>.1:
         raise ValueError('weakened worker policy')
     limits=value.get('limits',LIMIT_CAPS)
     _keys(limits,LIMIT_CAPS)

@@ -138,7 +138,7 @@ class EnvelopeTests(RenderTests):
                 with self.subTest(key=key), self.assertRaises(ValueError):
                     self.api().validate_request(dict(r, **{key: value}))
             for key, value in [
-                ("memory_bytes", 268435457),
+                ("memory_bytes", 536870913),
                 ("admission_bytes", 1),
                 ("abort_bytes", 1),
                 ("disk_free_bytes", 1),

@@ -237,9 +237,10 @@ Both configurations enumerate all main and test publication guards plus every
 still-competing legacy updater status, with exact expected scope. Never substitute
 main CDN/data into test or alter normal test CDN polling policy as a side effect.
 
-Companion caps: one CPU, CPUQuota100%, whole cgroup MemoryMax256M, no swap, core0,
+Companion caps: one CPU, CPUQuota100%, whole cgroup MemoryHigh384M/MemoryMax512M, no swap, core0,
 KillMode control-group, finite stop30s; no child escapes this cap. ResourcePolicy
-uses memory_bytes268435456, admission_bytes335544320 (free320MiB), stage_seconds120,
+uses memory_bytes536870912, admission_bytes671088640 (free640MiB),
+abort_bytes134217728 (cancel below128MiB free), stage_seconds120,
 updater-priority admission and shared host lock. Effective kernel/cgroup evidence
 is checked at admission; unit text alone cannot prove enforcement. Stop only the
 owned companion and its process tree. Existing updater/Bot caps are unchanged.
@@ -266,11 +267,11 @@ proof. UnityPy is pinned1.25.0; other package pins await compatible actual metad
 
 After local bundle review, one separately approved bounded test-only real campfire
 skin may be proposed: current authenticated metadata baseline, no groups or
-notifications, no batch/history, one CPU/tree256MiB/noSwap/120s stage/free320MiB,
+notifications, no batch/history, one CPU/tree512MiB/noSwap/120s stage/free640MiB/cancel below128MiB free,
 all updater guards, finite own-tree stop. Old original-host authorization is spent.
 No deployment, restart of existing services, remote operation or Native test is
-performed by this change. PR/push remain parent-controlled because trusted-base
-CI currently invokes prohibited pytest even for PR-target/draft publication.
+performed by this change. PR/push remain parent-controlled; review trusted-base
+CI behavior before any publication.
 
 ## Fixed source revision and host aliases
 
@@ -398,3 +399,6 @@ boundary implementation. No new SSH/host inspection was performed here.
 Incremental input identity uses each skin's normalized config and dependency
 closure, not the entire DataOwner/BaseFashion blob. Adding a new character does not
 mechanically mark every old skin changed; actual per-skin differences drive work.
+
+MemoryHigh=384M is the cache-pressure/reclaim threshold; MemoryMax=512M is the
+hard whole-tree limit. Historical 256MiB measurements retain their original budget.

@@ -98,8 +98,9 @@
       "disk_roots": [
         "/home/admin/xl_deploy/shared/portrait/test"
       ],
-      "memory_bytes": 268435456,
-      "admission_bytes": 335544320,
+      "memory_bytes": 536870912,
+      "admission_bytes": 671088640,
+      "abort_bytes": 134217728,
       "stage_seconds": 120
     }
   },

@@ -92,8 +92,9 @@ class MetadataRuntime:
                 raise ValueError("metadata storage roles overlap")
         if type(c.resource_policy) is not ResourcePolicy:
             raise ValueError("actual ResourcePolicy required")
-        if c.resource_policy.admission_bytes < 320 * 1024**2:
-            raise ValueError("metadata admission floor")
+        if (c.resource_policy.admission_bytes < 640 * 1024**2
+                or c.resource_policy.abort_bytes < 128 * 1024**2):
+            raise ValueError("metadata memory safety floor")
         hash_value(c.tool_fingerprint)
         _runtime(c.runtime, c.tool_fingerprint)
         for root in (

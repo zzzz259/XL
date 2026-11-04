@@ -54,7 +54,7 @@ def validate_request(value):
         if type(raw[key]) is not list or not 0<len(raw[key])<=16:raise ValueError('policy paths')
         raw[key]=tuple(_path(p) for p in raw[key])
     policy=ResourcePolicy(**raw)
-    if policy.admission_bytes<320*1024**2 or policy.abort_bytes<64*1024**2 or policy.disk_free_bytes<1024**3 or policy.poll_seconds>.1:
+    if policy.admission_bytes<640*1024**2 or policy.abort_bytes<128*1024**2 or policy.disk_free_bytes<1024**3 or policy.poll_seconds>.1:
         raise ValueError('weakened worker policy')
     if any(not any(p==root or root in p.parents for root in policy.disk_roots) for p in (cache,attempt)):
         raise ValueError('unmonitored download storage')
