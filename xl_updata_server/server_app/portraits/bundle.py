@@ -1117,7 +1117,34 @@ def _resolve_bundle(config, decrypt_key_hex=""):
             and entry["path"].endswith((".deps.json", ".runtimeconfig.json"))
         ):
             raise BundleError("staged app native/ELF asset forbidden")
-    _managed_closure(paths, groups)
+    # Host aliases have already passed literal-hop, byte and ABI verification.
+    # Admit only loading names for real descriptor members, in the real managed
+    # environment, without creating another global SONAME provider.
+    native_paths = {
+        paths[tuple(key)]
+        for group in ("native_files", "x_libraries")
+        for key in groups[group]
+    }
+    native_alias_names = set()
+    for loading_path, actual_path in host_alias_targets.items():
+        if loading_path == actual_path or actual_path not in native_paths:
+            continue
+        try:
+            same_origin = _same_dso_origin(loading_path, actual_path, needed_aliases)
+        except BundleError:
+            # An unproven optional name adds no FDD closure evidence.
+            continue
+        if not same_origin:
+            continue
+        candidate = next(
+            (directory / loading_path.name for directory in managed_dirs
+             if (directory / loading_path.name).is_file()),
+            None,
+        )
+        if candidate is None or host_alias_targets.get(candidate, candidate) != actual_path:
+            continue
+        native_alias_names.add(loading_path.name)
+    _managed_closure(paths, groups, native_alias_names=native_alias_names)
     tool_map = {name: hashes[(role, name)] for role, name in paths if role == "tool"}
     tool_map[INVENTORY] = config["inventory_sha256"]
     runtime_map = {str(path): hashes[key] for key, path in paths.items()}
@@ -1199,7 +1226,7 @@ def managed_assets(deps):
     return runtime, native
 
 
-def _managed_closure(paths, groups):
+def _managed_closure(paths, groups, *, native_alias_names=frozenset()):
     apps = [tuple(key) for key in groups["app_files"]]
     admitted_names = set()
     for cli in ("SpineViewerCLI", "PortraitSceneCLI"):
@@ -1242,7 +1269,7 @@ def _managed_closure(paths, groups):
             for group in ("native_files", "x_libraries")
             for key in groups[group]
         }
-        if not managed <= names or not native <= native_names:
+        if not managed <= names or not native <= native_names | native_alias_names:
             raise BundleError("managed deps closure incomplete")
     if {Path(key[1]).name for key in apps} - admitted_names:
         raise BundleError("unreferenced managed application baggage")
