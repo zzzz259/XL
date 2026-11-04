@@ -3,12 +3,17 @@
 import hashlib
 import json
 import os
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+# The runner boundary lives in the repository's sibling Tool source tree.
+TOOL_ROOT = Path(__file__).resolve().parents[2] / "xl_updata_tool"
+sys.path.insert(0, str(TOOL_ROOT))
 
 from app.platform.portrait_dynamic_profile import verify_profile
 from app.platform.portrait_linux_runtime import ManagedLaunch

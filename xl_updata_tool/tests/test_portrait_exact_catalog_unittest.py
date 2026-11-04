@@ -144,7 +144,8 @@ class ScopeTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_bytes(b"x")
             asset = IndexedAsset("x", "", H, 1, (), 1, root / "bundle", True, "fixture")
-            self.assertEqual(_resolve_asset_path(AssetIndex(1, (asset,)), root, AssetRef(H, 1)), path)
+            # Windows temporary roots may use an 8.3 alias; the API returns the canonical path.
+            self.assertEqual(_resolve_asset_path(AssetIndex(1, (asset,)), root, AssetRef(H, 1)), path.resolve())
 
 
 class RootSelectionTests(ExactCatalogTests):

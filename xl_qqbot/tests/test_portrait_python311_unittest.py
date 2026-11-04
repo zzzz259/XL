@@ -6,7 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import test_portrait_multipart_unittest as fixtures
+if __package__:
+    from . import test_portrait_multipart_unittest as fixtures
+else:
+    import test_portrait_multipart_unittest as fixtures
 
 
 class Python311MultipartTests(fixtures.PortraitMultipartFixture):

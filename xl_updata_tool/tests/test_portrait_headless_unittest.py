@@ -224,7 +224,8 @@ if mode!='nolog': print(json.dumps(dict(phase='complete',output=p['output'],widt
                     self.assertEqual(result['status'], 'success', result)
                     self.assertEqual((result['width'], result['height']), (28, 26))
                     self.assertEqual(len(result['sha256']), 64)
-                    self.assertEqual(Path(result['staged_path']), target)
+                    # Windows temporary roots may use an 8.3 alias; publication returns the canonical path.
+                    self.assertEqual(Path(result['staged_path']), target.resolve())
                     with Image.open(target) as image:
                         image.load()
                 else:
