@@ -377,8 +377,8 @@ def loader_directories(path, abi, roots, configured, defaults=()):
     return result
 
 
-def directory_aliases(roots, rows):
-    """Bind explicit same-root directory links without enumerating them twice."""
+def directory_aliases(roots, rows, *, host_files=None):
+    """Bind same-root links and explicitly witnessed external host directories."""
     if not isinstance(rows, list) or len(rows) > 128:
         raise BundleError("directory alias bound")
     aliases = {}
@@ -386,14 +386,36 @@ def directory_aliases(roots, rows):
         if (
             set(row) != {"role", "path", "target_role", "target_path"}
             or row["role"] != row["target_role"]
-            or row["role"] not in roots
+            or row["role"] not in (*roots, "host")
         ):
             raise BundleError("same-root directory alias required")
-        root = Path(roots[row["role"]])
+        host = row["role"] == "host"
+        root = Path("/") if host else Path(roots[row["role"]])
         path, target = (
             root / portable_path(row["path"]),
             root / portable_path(row["target_path"]),
         )
+        if host:
+            if (
+                not isinstance(host_files, dict)
+                or not host_files
+                or any(
+                    not isinstance(name, (str, os.PathLike))
+                    or not Path(name).is_absolute()
+                    for name in host_files.values()
+                )
+            ):
+                raise BundleError("explicit absolute host context required")
+            parents = {Path(name).parent for name in host_files.values()}
+            if path not in parents or target not in parents:
+                raise BundleError("directory alias parents require declared host files")
+            if any(
+                directory.is_relative_to(Path(private))
+                or Path(private).is_relative_to(directory)
+                for directory in (path, target)
+                for private in roots.values()
+            ):
+                raise BundleError("host directory alias overlaps private root")
         if path in aliases or not path.is_symlink():
             raise BundleError("unique actual directory link required")
         link = path.readlink()
@@ -763,7 +785,23 @@ def _resolve_bundle(config, decrypt_key_hex=""):
     for key in ("entrypoints", "dependency_roles", "loader_dirs"):
         if config[key] != value[key]:
             raise BundleError("operational mapping differs from canonical identity")
-    aliases = directory_aliases(roots, value["directory_aliases"])
+    aliases = directory_aliases(
+        roots, value["directory_aliases"], host_files=config["host_files"]
+    )
+    host_directory_aliases = {
+        Path("/") / row["path"]: Path("/") / row["target_path"]
+        for row in value["directory_aliases"]
+        if row["role"] == "host"
+    }
+
+    def host_terminal(path):
+        # File hops were checked literally; only witnessed host directories move.
+        for _ in range(32):
+            if path.parent not in host_directory_aliases:
+                return path
+            path = host_directory_aliases[path.parent] / path.name
+        raise BundleError("host directory alias chain bound")
+
     file_aliases = {
         Path(config["host_files"][key])
         for key, entry in value["host_files"].items()
@@ -828,7 +866,6 @@ def _resolve_bundle(config, decrypt_key_hex=""):
             current = target
         else:
             raise BundleError("host alias chain bound")
-        host_alias_targets[path] = Path(config["host_files"][current])
         _hash(path, entry["size"], entry["sha256"])
         actual = _binary_identity(path, elf_identity)
         if (
@@ -837,6 +874,7 @@ def _resolve_bundle(config, decrypt_key_hex=""):
             or entry.get("platform") != "linux-x86_64"
         ):
             raise BundleError("host ABI/provenance mismatch")
+        host_alias_targets[path] = host_terminal(Path(config["host_files"][current]))
         binaries[("host", identity)] = actual
         host_paths[identity] = path
         paths[("host", identity)] = path
@@ -874,7 +912,10 @@ def _resolve_bundle(config, decrypt_key_hex=""):
             continue
         name = abi["soname"] or binary_paths[key].name
         if name in providers:
-            if binary_paths[providers[name]] == binary_paths[key]:
+            previous, current = binary_paths[providers[name]], binary_paths[key]
+            if host_alias_targets.get(previous, previous) == host_alias_targets.get(
+                current, current
+            ):
                 continue
             raise BundleError("ambiguous ELF provider")
         providers[name] = key
@@ -1121,7 +1162,7 @@ def _resolve_bundle(config, decrypt_key_hex=""):
     # Admit only loading names for real descriptor members, in the real managed
     # environment, without creating another global SONAME provider.
     native_paths = {
-        paths[tuple(key)]
+        host_alias_targets.get(paths[tuple(key)], paths[tuple(key)])
         for group in ("native_files", "x_libraries")
         for key in groups[group]
     }
@@ -1137,11 +1178,17 @@ def _resolve_bundle(config, decrypt_key_hex=""):
         if not same_origin:
             continue
         candidate = next(
-            (directory / loading_path.name for directory in managed_dirs
-             if (directory / loading_path.name).is_file()),
+            (
+                directory / loading_path.name
+                for directory in managed_dirs
+                if (directory / loading_path.name).is_file()
+            ),
             None,
         )
-        if candidate is None or host_alias_targets.get(candidate, candidate) != actual_path:
+        if (
+            candidate is None
+            or host_alias_targets.get(candidate, candidate) != actual_path
+        ):
             continue
         native_alias_names.add(loading_path.name)
     _managed_closure(paths, groups, native_alias_names=native_alias_names)
@@ -1328,7 +1375,9 @@ def verify_python_process(config, verified, inventory):
     """Bind the actual private base prefix, venv and every loaded file byte."""
     roots = {key: Path(value) for key, value in config["roots"].items()}
     base = roots["python"]
-    aliases = directory_aliases(roots, inventory["directory_aliases"])
+    aliases = directory_aliases(
+        roots, inventory["directory_aliases"], host_files=config["host_files"]
+    )
     aliases.update(
         {
             Path(config["host_files"][key]): Path(
