@@ -35,6 +35,30 @@ categories = ["Arts", "Data"]
 [cards]
 enabled = true
 
+# 增量立绘导出：默认关闭。启用后随每次更新在 Lua/图鉴处理后逐套生成完整 2x PNG。
+# 首次启用只记录指纹（not_generated），不自动补历史；失败项下轮恢复，不重复 start/finish。
+[portraits]
+enabled = false
+# Tool 源码根目录（含 app/ 包），默认取仓库相邻检出的 xl_updata_tool
+# tool_dir = "../xl_updata_tool"
+# 渲染入口子进程解释器；空串使用当前解释器
+# python_bin = ""
+# dotnet_path = "tools/portrait/dotnet"
+# scene_cli_path = "tools/portrait/PortraitSceneCLI.dll"
+# query_cli_path = ""      # 可选；缺失时渲染仍可完成，仅元数据不完整
+# xvfb_run_path = ""       # 可选；无 DISPLAY 的 Linux 需要，留空自动从 PATH 查找
+# assetstudio_cli = "tools/assetstudio/AssetStudioCLI"   # 生成 assets_map.json 所需
+# assetstudio_dotnet = ""  # CLI 为 dll 时填写 dotnet 可执行文件
+# work_dir = ""            # 默认 <data_dir>/portrait_work
+# outbox_dir = ""          # 默认 <data_dir>/portrait_outbox
+# memory_max_bytes = 536870912
+# memory_high_bytes = 402653184
+# cpu_affinity = [0]
+# timeout_seconds = 900        # 单套原生渲染超时
+# job_timeout_seconds = 3600   # 单套渲染入口子进程总超时
+# map_timeout_seconds = 900    # AssetStudio map 生成超时
+# png_working_rows = 128
+
 # 普通角色首次复刻排期（每个游戏版本生成一次快照；仅人工锚点代表已确认）
 [rerun_schedule]
 enabled = true

@@ -185,3 +185,98 @@ assetbundle_key = "yunguihaowan1234"
         assert "timezone-aware ISO datetime" in str(error)
     else:
         raise AssertionError("dynamic burst anchors must be rejected")
+
+
+_PORTRAIT_MINIMAL = """[server]
+burst_anchor = "2026-09-18T10:00:00+08:00"
+
+[paths]
+data_dir = "data"
+
+[cdn]
+categories = ["Arts", "Data"]
+
+[security]
+assetbundle_key = "yunguihaowan1234"
+"""
+
+
+def test_portraits_disabled_by_default(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_PORTRAIT_MINIMAL, encoding="utf-8")
+    config = load_config(config_path)
+    assert config.portrait_enabled is False
+    assert config.portrait_tool_dir is None
+    assert config.portrait_work_dir is None
+    assert config.portrait_outbox_dir is None
+    assert config.portrait_memory_max_bytes == 512 * 1024 * 1024
+    assert config.portrait_memory_high_bytes == 384 * 1024 * 1024
+    assert config.portrait_cpu_affinity == (0,)
+    assert config.portrait_timeout_seconds == 900
+    assert config.portrait_png_working_rows == 128
+
+
+def test_portraits_section_parses_paths_and_limits(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        _PORTRAIT_MINIMAL
+        + """[portraits]
+enabled = true
+tool_dir = "../xl_updata_tool"
+dotnet_path = "tools/dotnet/dotnet"
+scene_cli_path = "tools/scene/PortraitSceneCLI.dll"
+query_cli_path = "tools/scene/SpineViewerCLI.dll"
+xvfb_run_path = "tools/xvfb/xvfb-run"
+assetstudio_cli = "tools/as/AssetStudioCLI"
+assetstudio_dotnet = "tools/as/dotnet"
+work_dir = "portrait-work"
+outbox_dir = "portrait-outbox"
+memory_max_bytes = 268435456
+memory_high_bytes = 134217728
+cpu_affinity = [1, 2]
+timeout_seconds = 600
+job_timeout_seconds = 1800
+map_timeout_seconds = 600
+png_working_rows = 64
+""",
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    assert config.portrait_enabled is True
+    assert config.portrait_tool_dir == (tmp_path / "../xl_updata_tool").resolve()
+    assert config.portrait_dotnet_path == (tmp_path / "tools/dotnet/dotnet").resolve()
+    assert config.portrait_query_cli_path == (tmp_path / "tools/scene/SpineViewerCLI.dll").resolve()
+    assert config.portrait_xvfb_run_path == (tmp_path / "tools/xvfb/xvfb-run").resolve()
+    assert config.portrait_assetstudio_cli == (tmp_path / "tools/as/AssetStudioCLI").resolve()
+    assert config.portrait_assetstudio_dotnet == (tmp_path / "tools/as/dotnet").resolve()
+    assert config.portrait_work_dir == (tmp_path / "portrait-work").resolve()
+    assert config.portrait_outbox_dir == (tmp_path / "portrait-outbox").resolve()
+    assert config.portrait_memory_max_bytes == 256 * 1024 * 1024
+    assert config.portrait_memory_high_bytes == 128 * 1024 * 1024
+    assert config.portrait_cpu_affinity == (1, 2)
+    assert config.portrait_timeout_seconds == 600
+    assert config.portrait_job_timeout_seconds == 1800
+    assert config.portrait_map_timeout_seconds == 600
+    assert config.portrait_png_working_rows == 64
+
+
+def test_portraits_rejects_invalid_limits(tmp_path):
+    for snippet in (
+        "cpu_affinity = []\n",
+        'cpu_affinity = ["0"]\n',
+        "memory_max_bytes = 0\n",
+        "memory_high_bytes = 536870912\nmemory_max_bytes = 268435456\n",
+        "timeout_seconds = 0\n",
+        "png_working_rows = 1025\n",
+    ):
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            _PORTRAIT_MINIMAL + "[portraits]\nenabled = true\n" + snippet,
+            encoding="utf-8",
+        )
+        try:
+            load_config(config_path)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid portrait settings accepted: {snippet!r}")

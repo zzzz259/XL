@@ -49,6 +49,24 @@ class ServerConfig:
     rerun_schedule_history_through_gacha_id: int = 24000087
     rerun_schedule_forecast_limit: int = 20
     rerun_schedule_overrides: tuple[dict, ...] = ()
+    portrait_enabled: bool = False
+    portrait_tool_dir: Path | None = None
+    portrait_python_bin: str = ""
+    portrait_dotnet_path: Path | None = None
+    portrait_scene_cli_path: Path | None = None
+    portrait_query_cli_path: Path | None = None
+    portrait_xvfb_run_path: Path | None = None
+    portrait_assetstudio_cli: Path | None = None
+    portrait_assetstudio_dotnet: Path | None = None
+    portrait_work_dir: Path | None = None
+    portrait_outbox_dir: Path | None = None
+    portrait_memory_max_bytes: int = 512 * 1024 * 1024
+    portrait_memory_high_bytes: int = 384 * 1024 * 1024
+    portrait_cpu_affinity: tuple[int, ...] = (0,)
+    portrait_timeout_seconds: int = 900
+    portrait_job_timeout_seconds: int = 3600
+    portrait_map_timeout_seconds: int = 900
+    portrait_png_working_rows: int = 128
     instance_id: str = "default"
 
 
@@ -175,6 +193,27 @@ def load_config(path: str | Path) -> ServerConfig:
     font_value = str(paths.get("character_card_font", "")).strip()
     character_card_font = (base_dir / font_value).resolve() if font_value else None
 
+    portraits = dict(raw.get("portraits", {}))
+    portrait_enabled = _read_bool(portraits, "enabled", False)
+    portrait_memory_max = _read_int(portraits, "memory_max_bytes", 512 * 1024 * 1024)
+    portrait_memory_high = _read_int(portraits, "memory_high_bytes", 384 * 1024 * 1024)
+    if portrait_memory_high > portrait_memory_max:
+        raise ValueError("portraits.memory_high_bytes must not exceed memory_max_bytes")
+    portrait_affinity = portraits.get("cpu_affinity", [0])
+    if (
+        not isinstance(portrait_affinity, list)
+        or not portrait_affinity
+        or any(type(core) is not int or core < 0 for core in portrait_affinity)
+    ):
+        raise ValueError("portraits.cpu_affinity must be a non-empty list of non-negative integers")
+    portrait_rows = portraits.get("png_working_rows", 128)
+    if type(portrait_rows) is not int or not 0 <= portrait_rows <= 1024:
+        raise ValueError("portraits.png_working_rows must be an integer in 0..1024")
+
+    def _portrait_path(key: str) -> Path | None:
+        value = str(portraits.get(key, "")).strip()
+        return (base_dir / value).resolve() if value else None
+
     return ServerConfig(
         config_path=config_path,
         data_dir=(base_dir / str(paths.get("data_dir", "data"))).resolve(),
@@ -205,5 +244,23 @@ def load_config(path: str | Path) -> ServerConfig:
         ),
         rerun_schedule_forecast_limit=_read_int(rerun, "forecast_limit", 20),
         rerun_schedule_overrides=tuple(parsed_overrides),
+        portrait_enabled=portrait_enabled,
+        portrait_tool_dir=_portrait_path("tool_dir"),
+        portrait_python_bin=str(portraits.get("python_bin", "")).strip(),
+        portrait_dotnet_path=_portrait_path("dotnet_path"),
+        portrait_scene_cli_path=_portrait_path("scene_cli_path"),
+        portrait_query_cli_path=_portrait_path("query_cli_path"),
+        portrait_xvfb_run_path=_portrait_path("xvfb_run_path"),
+        portrait_assetstudio_cli=_portrait_path("assetstudio_cli"),
+        portrait_assetstudio_dotnet=_portrait_path("assetstudio_dotnet"),
+        portrait_work_dir=_portrait_path("work_dir"),
+        portrait_outbox_dir=_portrait_path("outbox_dir"),
+        portrait_memory_max_bytes=portrait_memory_max,
+        portrait_memory_high_bytes=portrait_memory_high,
+        portrait_cpu_affinity=tuple(portrait_affinity),
+        portrait_timeout_seconds=_read_int(portraits, "timeout_seconds", 900),
+        portrait_job_timeout_seconds=_read_int(portraits, "job_timeout_seconds", 3600),
+        portrait_map_timeout_seconds=_read_int(portraits, "map_timeout_seconds", 900),
+        portrait_png_working_rows=portrait_rows,
         instance_id=instance_id,
     )
