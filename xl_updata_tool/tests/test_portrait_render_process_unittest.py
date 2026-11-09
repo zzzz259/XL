@@ -64,6 +64,13 @@ class SystemdScopeCommandTest(unittest.TestCase):
         default_argv = systemd_scope_command(['/bin/render'], 'unit-d', RenderProcessLimits())
         self.assertIn(f'RuntimeMaxSec={900 + 60}', ' '.join(default_argv))
 
+    def test_scope_command_writes_explicit_environment_values(self):
+        argv = systemd_scope_command(
+            ['/bin/render'], 'unit-env', RenderProcessLimits(),
+            setenv={'LD_LIBRARY_PATH': '/opt/al8:/opt/other', 'EMPTY': ''})
+        self.assertIn('--setenv=LD_LIBRARY_PATH=/opt/al8:/opt/other', argv)
+        self.assertIn('--setenv=EMPTY=', argv)
+
     def test_scope_command_user_manager_flag(self):
         limits = RenderProcessLimits()
         user_argv = systemd_scope_command(['/bin/render'], 'unit-u', limits, user=True)
