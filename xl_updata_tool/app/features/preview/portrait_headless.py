@@ -346,7 +346,11 @@ def _native_env(request):
                DOTNET_CLI_TELEMETRY_OPTOUT='1', DOTNET_SYSTEM_GLOBALIZATION_INVARIANT='1')
     if os.name == 'posix':
         env.update(LIBGL_ALWAYS_SOFTWARE='1', GALLIUM_DRIVER='llvmpipe', LP_NUM_THREADS='1')
-        entries = [str(cli_dir)]
+        entries = []
+        native_dir = cli_dir / 'runtimes' / 'linux-x64' / 'native'
+        if native_dir.is_dir():
+            entries.append(str(native_dir))
+        entries.append(str(cli_dir))
         for entry in env.get('LD_LIBRARY_PATH', '').split(':'):
             if entry and entry not in entries:
                 entries.append(entry)

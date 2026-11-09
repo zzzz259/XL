@@ -74,7 +74,7 @@ def build(root: Path, dotnet: str | None = None, work_dir: Path | None = None) -
                 {
                     "runtimeOptions": {
                         "tfm": "net8.0",
-                        "includedFrameworks": [{"name": "Microsoft.NETCore.App", "version": "8.0.30"}],
+                        "framework": {"name": "Microsoft.NETCore.App", "version": "8.0.0"},
                     }
                 },
                 indent=2,
@@ -82,11 +82,62 @@ def build(root: Path, dotnet: str | None = None, work_dir: Path | None = None) -
             + "\n",
             encoding="utf-8",
         )
-        for path in (output, runtime):
+        deps = scratch / "PortraitSceneCLI.deps.json"
+        deps.write_text(json.dumps(_portrait_scene_deps(), indent=2) + "\n", encoding="utf-8")
+        for path in (output, runtime, deps):
             staged = tools / (path.name + ".new")
             shutil.copyfile(path, staged)
             os.replace(staged, tools / path.name)
     return tools / "PortraitSceneCLI.dll"
+
+
+def _portrait_scene_deps() -> dict:
+    """Minimal deps.json for the compiled CLI's app-local closure.
+
+    The host only probes app-local assemblies listed here; the compiled CLI
+    binds System.Text.Json 9.x, which shadows the framework 8.x copy, so those
+    entries must carry an explicit assemblyVersion or the framework copy wins.
+    """
+    managed = (
+        ("Spine", "0.16.28"),
+        ("SpineRuntime21", "2.1.25"),
+        ("SpineRuntime34", "3.4.2"),
+        ("SpineRuntime35", "3.5.51"),
+        ("SpineRuntime36", "3.6.53"),
+        ("SpineRuntime37", "3.7.94"),
+        ("SpineRuntime38", "3.8.99"),
+        ("SpineRuntime40", "4.0.64"),
+        ("SpineRuntime41", "4.1.54"),
+        ("SpineRuntime42", "4.2.74"),
+        ("SFML.Graphics", "2.6.1"),
+        ("SFML.System", "2.6.1"),
+        ("SFML.Window", "2.6.1"),
+        ("SkiaSharp", "3.119.0"),
+        ("System.Text.Json", "9.0.0"),
+        ("System.Text.Encodings.Web", "9.0.0"),
+        ("System.IO.Pipelines", "9.0.0"),
+        ("NLog", "5.0.0"),
+        ("FFMpegCore", "5.0.0"),
+        ("Instances", "3.0.1"),
+        ("PsdWriter", "0.16.18"),
+    )
+    shadowed = {"System.Text.Json", "System.Text.Encodings.Web", "System.IO.Pipelines"}
+    target = ".NETCoreApp,Version=v8.0"
+    app = "PortraitSceneCLI/1.0.0"
+    targets = {app: {"dependencies": {}, "runtime": {"PortraitSceneCLI.dll": {}}}}
+    libraries = {app: {"type": "project", "serviceable": False, "sha512": ""}}
+    for name, version in managed:
+        targets[app]["dependencies"][name] = version
+        key = f"{name}/{version}"
+        meta = {"assemblyVersion": "9.0.0.0", "fileVersion": "9.0.0.0"} if name in shadowed else {}
+        targets[key] = {"runtime": {f"{name}.dll": meta}}
+        libraries[key] = {"type": "package", "serviceable": False, "sha512": ""}
+    return {
+        "runtimeTarget": {"name": target, "signature": ""},
+        "compilationOptions": {},
+        "targets": {target: targets},
+        "libraries": libraries,
+    }
 
 
 def main() -> None:
