@@ -40,6 +40,13 @@ class WatchConfig:
 
 
 @dataclass(frozen=True)
+class PortraitConfig:
+    """角色名+末尾数字立绘查询；复用 [watch] character_data/versions_dir 数据根。"""
+
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class TargetConfig:
     group_openids: List[str]
     auto_learn_from_events: bool
@@ -191,6 +198,7 @@ class Config:
     server_status: ServerStatusConfig = field(default_factory=ServerStatusConfig)
     instance: InstanceConfig = field(default_factory=InstanceConfig)
     leaderboard: LeaderboardConfig = field(default_factory=LeaderboardConfig)
+    portraits: PortraitConfig = field(default_factory=PortraitConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -567,6 +575,12 @@ def load_config(path: str = "config.toml") -> Config:
         **lb_budgets,
     )
 
+    portraits_raw = raw.get("portraits", {})
+    portraits_enabled = portraits_raw.get("enabled", False)
+    if not isinstance(portraits_enabled, bool):
+        raise ValueError("[portraits] enabled 必须是布尔值")
+    portraits = PortraitConfig(enabled=portraits_enabled)
+
     return Config(
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
@@ -591,6 +605,7 @@ def load_config(path: str = "config.toml") -> Config:
         server_status=server_status,
         instance=InstanceConfig(instance_id=instance_id),
         leaderboard=leaderboard,
+        portraits=portraits,
     )
 
 

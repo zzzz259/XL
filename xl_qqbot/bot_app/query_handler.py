@@ -12,6 +12,7 @@ import logging
 import re
 
 from .matcher import CharacterMatcher, render_candidates_message
+from .portrait_querier import PortraitQuerier
 from .querier import CharacterQuerier
 from .selection import SelectionStore
 from .sender import QQSender
@@ -23,6 +24,17 @@ _logger = logging.getLogger(__name__)
 BOT_DISPLAY_NAME = "星落罗伯特"
 # QQ 把 @ 嵌入消息文本为 <@openid> 标记，查询前必须剥掉
 _MENTION_RE = re.compile(r"<@[A-Za-z0-9]+>")
+# 角色名后的立绘序号：仅当整个查询以数字结尾、且序号前存在非数字名字时剥离；
+# 纯数字消息（候选选择协议）、纯数字 ID、名字中间夹数字（如"觉醒2世"）都不剥离
+_PORTRAIT_ORDINAL_RE = re.compile(r"^(?P<name>.*?[^0-9\s])[ \u3000]*(?P<ordinal>[0-9]+)$")
+
+
+def _split_portrait_ordinal(query: str) -> tuple[str, int | None]:
+    """剥离查询末尾的立绘序号；无序号返回 (query, None)。"""
+    match = _PORTRAIT_ORDINAL_RE.match(query or "")
+    if not match:
+        return query, None
+    return match.group("name").strip(), int(match.group("ordinal"))
 
 
 def _is_mentioned(content: str, mentions, bot_openid: str) -> bool:
@@ -95,13 +107,14 @@ class QueryHandler:
     def __init__(self, querier: CharacterQuerier, matcher: CharacterMatcher,
                  selection: SelectionStore, sender: QQSender,
                  bot_openid: str = "", mute: ServiceMute | None = None,
-                 rerun_querier=None):
+                 rerun_querier=None, portrait_querier: PortraitQuerier | None = None):
         self._querier = querier
         self._matcher = matcher
         self._selection = selection
         self._sender = sender
         self._bot_openid = bot_openid
         self._rerun_querier = rerun_querier
+        self._portrait_querier = portrait_querier
         # 不传 mute 时自持（路由器转发模式按事件 muted 标志驱动）；
         # 旧一体化入口传入与 watcher 共享的实例（更新静音）
         self._mute = mute or ServiceMute()
@@ -197,6 +210,14 @@ class QueryHandler:
             # 同一用户发起新查询即覆盖旧待选择
             self._selection.clear(group_openid, member_openid)
 
+        name_query, portrait_ordinal = _split_portrait_ordinal(query)
+        if portrait_ordinal is not None and self._portrait_querier is not None:
+            await self._answer_portrait_query(
+                group_openid, name_query, portrait_ordinal, query,
+                member_openid, reply_to,
+            )
+            return
+
         outcome = self._matcher.match(query)
         if outcome.kind in ("direct", "guess"):
             if outcome.kind == "guess":
@@ -243,6 +264,76 @@ class QueryHandler:
         if not succeeded:
             await self._sender.send_text(group_openid, "复刻表图片上传失败，请稍后再试", reply_to)
 
+    async def _answer_portrait_query(self, group_openid: str, name_query: str,
+                                     ordinal: int, original_query: str,
+                                     member_openid: str = "", reply_to: str = "") -> None:
+        """角色名+末尾数字：剥离序号后走现有角色匹配，按当前版本 manifest 查立绘。"""
+        outcome = self._matcher.match(name_query)
+        if outcome.kind == "candidates":
+            await self._sender.send_text(group_openid, render_candidates_message(list(outcome.candidates)), reply_to)
+            if member_openid:
+                self._selection.set(
+                    group_openid, member_openid,
+                    self._matcher.clean(name_query), list(outcome.candidates),
+                    intent="portrait", portrait_ordinal=ordinal,
+                )
+            _logger.info(
+                "候选等待(立绘) group=%s user=%s options=%s ordinal=%s",
+                group_openid, member_openid, [m.name for m in outcome.candidates], ordinal,
+            )
+            return
+        if outcome.kind in ("direct", "guess"):
+            if outcome.kind == "guess":
+                await self._sender.send_text(group_openid, f"已为你匹配到：{outcome.match.name}", reply_to)
+            await self._send_portrait(group_openid, outcome.match, ordinal, reply_to)
+            return
+        await self._sender.send_text(group_openid, f"未找到角色：{original_query}", reply_to)
+
+    async def _send_portrait(self, group_openid: str, match, ordinal: int,
+                             reply_to: str = "") -> None:
+        """按当前版本 manifest 发立绘；未生成/失败只提示，不触发渲染。"""
+        result = self._portrait_querier.find(match.character_id, ordinal)
+        if result.status == "found":
+            content = ""
+            if result.stale:
+                content = (
+                    f"该立绘来自游戏版本 {result.source_version}"
+                    "（旧版本图片，本轮未更新）。"
+                )
+            send_schedule = getattr(self._sender, "send_schedule_image", None)
+            if send_schedule is None:
+                _logger.error("stage=portrait_send status=failed reason=local_upload_unavailable")
+                await self._sender.send_text(group_openid, "立绘图片发送暂不可用", reply_to)
+                return
+            sent = await send_schedule(str(result.image_path), content, [group_openid], reply_to)
+            succeeded = sent.get(group_openid, False) if isinstance(sent, dict) else bool(sent)
+            _logger.info(
+                "角色立绘命中 query=%s -> %s#%s (via=%s) 发图=%s",
+                match.name, result.name, ordinal, match.via, succeeded,
+            )
+            if not succeeded:
+                await self._sender.send_text(group_openid, "立绘图片发送失败，请稍后再试", reply_to)
+            return
+        if result.status == "out_of_range":
+            low, high = result.available_range or (1, 1)
+            await self._sender.send_text(
+                group_openid,
+                f"《{match.name}》的立绘序号 {ordinal} 超出范围，可用序号为 {low}-{high}",
+                reply_to,
+            )
+        elif result.status == "not_generated":
+            await self._sender.send_text(
+                group_openid, f"《{match.name}》的第 {ordinal} 套立绘尚未生成，请稍后再试", reply_to
+            )
+        elif result.status == "failed":
+            await self._sender.send_text(
+                group_openid, f"《{match.name}》的第 {ordinal} 套立绘生成失败，请稍后再试", reply_to
+            )
+        elif result.status == "not_found":
+            await self._sender.send_text(group_openid, f"《{match.name}》暂无立绘数据", reply_to)
+        else:  # unavailable：指针/manifest/产物校验不过
+            await self._sender.send_text(group_openid, "立绘数据暂不可用，请稍后再试", reply_to)
+
     async def _send_character(self, group_openid: str, match, query: str, reply_to: str = "") -> None:
         """按匹配结果发图鉴（图片定位仍归 querier）。"""
         result = self._querier.find(match.character_id)
@@ -269,7 +360,12 @@ class QueryHandler:
         if status == "picked":
             match = payload
             _logger.info("候选选择 group=%s user=%s -> %s", group_openid, member_openid, match.name)
-            await self._send_character(group_openid, match, pending.query, reply_to)
+            if pending.intent == "portrait" and self._portrait_querier is not None:
+                await self._send_portrait(
+                    group_openid, match, pending.portrait_ordinal or 1, reply_to
+                )
+            else:
+                await self._send_character(group_openid, match, pending.query, reply_to)
             record = self._matcher.record_selection(pending.query, match.character_id, member_openid)
             if record:
                 _logger.info(
