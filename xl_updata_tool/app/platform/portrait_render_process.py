@@ -68,11 +68,11 @@ def resolve_systemd_run(value='auto') -> str | None:
 def systemd_scope_command(command, unit, limits, *, user=False, setenv=()):
     affinity = ','.join(str(core) for core in limits.cpu_affinity)
     manager_flag = ('--user',) if user else ()
-    # --pipe forwards the service stdout/stderr to this process; --setenv=NAME
-    # (no value) propagates one caller variable into the unit environment.
+    environment = setenv.items() if hasattr(setenv, 'items') else ((name, None) for name in setenv)
     return [
         'systemd-run', *manager_flag, '--wait', '--pipe', f'--unit={unit}', '--collect',
-        *(f'--setenv={name}' for name in setenv),
+        *(f'--setenv={name}' if value is None else f'--setenv={name}={value}'
+          for name, value in environment),
         '-p', f'MemoryMax={limits.memory_max_bytes}',
         '-p', f'MemoryHigh={limits.memory_high_bytes}',
         '-p', 'MemorySwapMax=0',
@@ -217,9 +217,10 @@ def run_render_process(command, *, work_dir, env, limits, systemd_run='auto', sy
     if systemd is not None:
         user = os.geteuid() != 0 if (systemd_user is None and hasattr(os, 'geteuid')) else bool(systemd_user)
         unit = f'{limits.unit_prefix}-{uuid.uuid4().hex[:12]}'
-        setenv = tuple(name for name in (
+        setenv = {name: env[name] for name in (
             'PATH', 'LD_LIBRARY_PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ',
-            'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR') if env.get(name))
+            'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR',
+            'DBUS_SESSION_BUS_ADDRESS') if name in env}
         argv = systemd_scope_command(command, unit, limits, user=user, setenv=setenv)
         argv[0] = systemd
         return _run_systemd(argv, work_dir=work, env=env, limits=limits, unit=unit, user=user)
