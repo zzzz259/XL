@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 
 class UnsupportedSpriteRenderFeature(ValueError):
@@ -19,6 +19,23 @@ class UnsupportedSpriteRenderFeature(ValueError):
 
     def __init__(self, message: str, *, part_id: str = "") -> None:
         self.part_id = part_id
+        super().__init__(message)
+
+
+class UnsupportedSpineTransform(ValueError):
+    """Native CLI merge cannot place these Spine sources in one coordinate space."""
+
+    code = "SPINE_TRANSFORM_UNSUPPORTED"
+
+    def __init__(self, message: str, part: Any, *, reference_part_id: str = "") -> None:
+        from .model import SceneDiagnostic
+
+        self.part_id = part.part_id
+        self.diagnostic = SceneDiagnostic(
+            "unsupported_spine_transform", message, part_id=part.part_id,
+            source=part.object_ref,
+            details=(("reference_part_id", reference_part_id),),
+        )
         super().__init__(message)
 
 
@@ -36,6 +53,9 @@ class StaticLayerSpec:
     flip_y: bool = False
     mask_interaction: int = 0
     blend_mode: str = "normal"
+    spine_transform_chain: tuple[Any, ...] = ()
+    skeleton_scale: float = 0.01
+    pma: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,24 +123,80 @@ def _rgba_crop(spec: StaticLayerSpec) -> Image.Image:
     return crop
 
 
-def _world_transform(spec: StaticLayerSpec) -> tuple[float, float, float, float, float]:
-    """Compose Unity XY transforms and reject 3-D or sheared sprite planes."""
+def _xy_transform(chain: tuple[Any, ...], part_id: str) -> tuple[float, ...]:
+    """Compose the full XY affine matrix, before choosing the shared local frame."""
     a, b, c, d, tx, ty = 1.0, 0.0, 0.0, 1.0, 0.0, 0.0
-    for node in spec.transform_chain:
+    for node in chain:
         x, y, z, w = tuple(map(float, node.local_rotation))
         if abs(x) > 1e-6 or abs(y) > 1e-6:
             raise UnsupportedSpriteRenderFeature(
-                "SpriteRenderer has an out-of-plane rotation", part_id=spec.part_id,
+                "Renderer has an out-of-plane rotation", part_id=part_id,
             )
         angle = 2.0 * math.atan2(z, w)
         sx, sy, sz = tuple(map(float, node.local_scale))
         if abs(sz) < 1e-9:
-            raise ValueError(f"Sprite part {spec.part_id} has a zero Z scale")
+            raise ValueError(f"Renderer part {part_id} has a zero Z scale")
         cos_a, sin_a = math.cos(angle), math.sin(angle)
         la, lb, lc, ld = cos_a * sx, -sin_a * sy, sin_a * sx, cos_a * sy
         px, py, _ = tuple(map(float, node.local_position))
         tx, ty = a * px + b * py + tx, c * px + d * py + ty
         a, b, c, d = a * la + b * lc, a * lb + b * ld, c * la + d * lc, c * lb + d * ld
+
+    if not all(math.isfinite(value) for value in (a, b, c, d, tx, ty)):
+        raise ValueError(f"Renderer part {part_id} has a non-finite XY transform")
+    if abs(a * d - b * c) < 1e-12:
+        raise ValueError(f"Renderer part {part_id} has a zero XY scale")
+    return a, b, c, d, tx, ty
+
+
+def common_spine_coordinate_space(parts) -> tuple[tuple[Any, ...], float]:
+    """Return the common Spine frame, rejecting placement the CLI cannot merge.
+
+    A common world transform can be removed from every source. Distinct Spine
+    frames cannot: the CLI loads the skeletons' raw coordinates without Unity's
+    per-renderer transforms or SkeletonDataAsset scaling.
+    """
+    reference = None
+    reference_matrix = ()
+    for part in parts:
+        if part.spine is None or (part.renderer is not None and not part.renderer.enabled):
+            continue
+        scale = float(part.spine.skeleton_scale)
+        if not math.isfinite(scale) or scale <= 0:
+            raise UnsupportedSpineTransform("SkeletonDataAsset scale must be finite and positive", part)
+        try:
+            matrix = _xy_transform(part.transform_chain, part.part_id)
+        except ValueError as error:
+            raise UnsupportedSpineTransform(str(error), part) from error
+        if reference is None:
+            reference, reference_matrix = part, matrix
+            continue
+        if not math.isclose(scale, reference.spine.skeleton_scale, rel_tol=1e-7, abs_tol=1e-12) or not all(
+            math.isclose(actual, expected, rel_tol=1e-7, abs_tol=1e-7)
+            for actual, expected in zip(matrix, reference_matrix, strict=True)
+        ):
+            raise UnsupportedSpineTransform(
+                "SpineViewerCLI merge cannot represent different per-part Spine transforms or SkeletonDataAsset scales",
+                part, reference_part_id=reference.part_id,
+            )
+    if reference is None:
+        return (), 0.01
+    return reference.transform_chain, float(reference.spine.skeleton_scale)
+
+
+def _world_transform(spec: StaticLayerSpec) -> tuple[float, float, float, float, float]:
+    """Express Sprite geometry in the shared Spine frame and reject relative shear."""
+    a, b, c, d, tx, ty = _xy_transform(spec.transform_chain, spec.part_id)
+    ra, rb, rc, rd, rx, ry = _xy_transform(spec.spine_transform_chain, spec.part_id)
+    determinant = ra * rd - rb * rc
+    a, b, c, d, tx, ty = (
+        (rd * a - rb * c) / determinant,
+        (rd * b - rb * d) / determinant,
+        (ra * c - rc * a) / determinant,
+        (ra * d - rc * b) / determinant,
+        (rd * (tx - rx) - rb * (ty - ry)) / determinant,
+        (ra * (ty - ry) - rc * (tx - rx)) / determinant,
+    )
 
     x_axis_length = math.hypot(a, c)
     y_axis_length = math.hypot(b, d)
@@ -140,11 +216,19 @@ def _world_transform(spec: StaticLayerSpec) -> tuple[float, float, float, float,
 def generate_static_layer(spec: StaticLayerSpec, work_dir: str | Path) -> GeneratedStaticLayer:
     """Crop/tint a Sprite texture and serialize it as a one-frame Spine layer."""
     crop = _rgba_crop(spec)
+    if spec.pma:
+        red, green, blue, alpha = crop.split()
+        crop = Image.merge("RGBA", (
+            ImageChops.multiply(red, alpha), ImageChops.multiply(green, alpha),
+            ImageChops.multiply(blue, alpha), alpha,
+        ))
     width, height = crop.size
     pivot_x, pivot_y = tuple(map(float, spec.pivot))
     if not all(math.isfinite(value) and 0 <= value <= 1 for value in (pivot_x, pivot_y)):
         raise ValueError(f"Sprite part {spec.part_id} has invalid normalized pivot")
     tx, ty, rotation, scale_x, scale_y = _world_transform(spec)
+    if not math.isfinite(spec.skeleton_scale) or spec.skeleton_scale <= 0:
+        raise ValueError(f"Sprite part {spec.part_id} has invalid SkeletonDataAsset scale")
     center_x = (0.5 - pivot_x) * width / spec.pixels_per_unit
     center_y = (0.5 - pivot_y) * height / spec.pixels_per_unit
     if spec.flip_x:
@@ -170,9 +254,10 @@ def generate_static_layer(spec: StaticLayerSpec, work_dir: str | Path) -> Genera
             "width": width, "height": height, "images": "./",
         },
         "bones": [{
-            "name": "root", "x": world_x * spec.pixels_per_unit,
-            "y": world_y * spec.pixels_per_unit, "rotation": rotation,
-            "scaleX": scale_x, "scaleY": scale_y,
+            "name": "root", "x": world_x / spec.skeleton_scale,
+            "y": world_y / spec.skeleton_scale, "rotation": rotation,
+            "scaleX": scale_x / (spec.pixels_per_unit * spec.skeleton_scale),
+            "scaleY": scale_y / (spec.pixels_per_unit * spec.skeleton_scale),
         }],
         "slots": [{"name": "sprite-layer", "bone": "root", "attachment": layer_name}],
         "skins": [{"name": "default", "attachments": {

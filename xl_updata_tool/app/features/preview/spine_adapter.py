@@ -88,7 +88,8 @@ def build_spine_export_command(job, spine_cli, temporary_dir=None):
                 raise ValueError("mixed Spine/Sprite export requires a per-job temporary directory")
             from .portrait_scene_export import prepare_portrait_scene_export_job
             job = prepare_portrait_scene_export_job(job, temporary_dir)
-        return _build_portrait_scene_command(job, spine_cli)
+        from .scene_export_adapter import build_scene_command
+        return build_scene_command(job, spine_cli, temporary_dir)
 
     raw_records = tuple(getattr(job, "records", ()) or (job.record,))
     records = tuple(
@@ -441,8 +442,11 @@ def _source_skin_identity(skel_path, atlas_path, skin_name):
 class SpineQueryRunner:
     """Run SpineViewerCLI metadata queries without hiding process failures."""
 
-    def __init__(self, spine_cli=None, timeout=15):
-        self.spine_cli = os.fspath(spine_cli or ToolLocator.create().spineviewer_cli())
+    def __init__(self, spine_cli=None, timeout=15, *, launch=None):
+        self.launch = launch
+        self.spine_cli = os.fspath(launch.query_prefix[-1] if launch else
+                                  spine_cli or ToolLocator.create().spineviewer_cli())
+        self.command_prefix = list(launch.query_prefix) if launch else [self.spine_cli]
         self.timeout = timeout
 
     def query_skins(self, skel_path, atlas_path) -> SkinQueryResult:
@@ -452,7 +456,7 @@ class SpineQueryRunner:
         skel_path = os.path.abspath(os.fspath(skel_path))
         atlas_path = os.path.abspath(os.fspath(atlas_path))
         command = [
-            self.spine_cli,
+            *self.command_prefix,
             "query",
             str(skel_path),
             "--atlas",
@@ -460,14 +464,18 @@ class SpineQueryRunner:
             "--skin",
         ]
         try:
-            proc = _run_spine_cli(
-                command,
+            run = self.launch.run if self.launch else _run_spine_cli
+            options = {} if self.launch else dict(
                 cwd=os.path.dirname(self.spine_cli) or None,
+                env=ToolLocator.create().subprocess_env(),
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            proc = run(
+                command,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
-                env=ToolLocator.create().subprocess_env(),
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                **options,
             )
             stdout = proc.stdout or ""
             stderr = proc.stderr or ""
@@ -492,7 +500,8 @@ class SpineQueryRunner:
                 stdout=stdout,
                 stderr=stderr,
                 returncode=proc.returncode,
-                error=("SpineViewerCLI query failed" if proc.returncode else ""),
+                error=("SpineViewerCLI query failed" if proc.returncode else
+                       "SpineViewerCLI returned no skin table" if not skin_names else ""),
                 attachment_fingerprints=attachment_fingerprints,
                 identity_fingerprints=identity_fingerprints,
                 attachment_fingerprint_kind=attachment_kind,

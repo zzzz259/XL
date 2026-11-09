@@ -127,7 +127,7 @@ def test_checked_manifest_scene_uses_its_version_index_and_scene_export_job(tmp_
     assert len(runner.calls) == 1
     assert runner.calls[0].scene == scene
     assert runner.calls[0].sources[0].skeleton_path == skeleton_path
-    assert runner.calls[0].output_path.name == "10118_角色立绘_3.png"
+    assert runner.calls[0].output_path.name == "10118_角色立绘_3_12002183_v134351472190013976.png"
     page.close()
 
 
@@ -165,7 +165,9 @@ def test_selected_export_cancel_stops_worker_and_restores_ui(tmp_path, qapp):
     assert entered.wait(5)
     assert page.btn_reload.text() == "取消导出"
     release.set()
+    worker = controller._selected_export_worker
     controller.cancel_export()
+    assert worker.wait(5000)
     qapp.processEvents()
 
     assert controller._selected_export_worker is None

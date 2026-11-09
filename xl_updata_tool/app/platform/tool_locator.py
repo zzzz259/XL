@@ -120,6 +120,9 @@ class ToolLocator:
     def spineviewer_cli(self) -> str:
         return str(self.tools / "SpineViewer" / "SpineViewerCLI.exe")
 
+    def portrait_scene_cli(self) -> str:
+        return str(self.tools / "SpineViewer" / "PortraitSceneCLI.dll")
+
     def spineviewer_gui(self) -> str:
         return str(self.tools / "SpineViewer" / "SpineViewer.exe")
 
