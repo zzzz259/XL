@@ -12,6 +12,8 @@ TTL_SECONDS = 120
 class PendingSelection:
     query: str  # 用户原始的查询词（学习用，已清洗）
     options: list  # Match 候选列表（不含"都不是"项）
+    intent: str = "card"  # "card" 图鉴 | "portrait" 立绘
+    portrait_ordinal: int | None = None  # 立绘查询的末尾序号
     created_at: float = field(default_factory=time.time)
 
     def expired(self) -> bool:
@@ -24,9 +26,11 @@ class SelectionStore:
     def __init__(self) -> None:
         self._pending: dict[tuple[str, str], PendingSelection] = {}
 
-    def set(self, group_openid: str, member_openid: str, query: str, options: list) -> None:
+    def set(self, group_openid: str, member_openid: str, query: str, options: list,
+            intent: str = "card", portrait_ordinal: int | None = None) -> None:
         self._pending[(group_openid, member_openid)] = PendingSelection(
-            query=query, options=list(options)
+            query=query, options=list(options),
+            intent=intent, portrait_ordinal=portrait_ordinal,
         )
 
     def get(self, group_openid: str, member_openid: str) -> PendingSelection | None:

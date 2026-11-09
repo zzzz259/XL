@@ -62,6 +62,114 @@ BRANCH_UNITS = {
 }
 _SHA_PATTERN = frozenset("0123456789abcdefABCDEF")
 
+#: Ordered include/exclude rules for the Tool files shipped in updater
+#: releases. A repo-relative path ships when the last matching rule includes
+#: it; trailing-slash rules cover their whole subtree. This is the single
+#: source of truth for the sparse checkout and for planner change mapping:
+#: it must stay in sync with the headless portrait import closure
+#: (``app.features.preview.portrait_headless`` and its lazy imports) and the
+#: bundled native tool layouts. Desktop GUI sources, docs and tests are
+#: intentionally absent.
+TOOL_RELEASE_RULES: tuple[tuple[bool, str], ...] = (
+    (True, "xl_updata_tool/app/__init__.py"),
+    (True, "xl_updata_tool/app/features/__init__.py"),
+    (True, "xl_updata_tool/app/features/characters/__init__.py"),
+    (True, "xl_updata_tool/app/features/characters/parser/"),
+    (True, "xl_updata_tool/app/features/preview/__init__.py"),
+    (True, "xl_updata_tool/app/features/preview/atlas_pages.py"),
+    (True, "xl_updata_tool/app/features/preview/character_names.py"),
+    (True, "xl_updata_tool/app/features/preview/export_plan.py"),
+    (True, "xl_updata_tool/app/features/preview/export_presets.py"),
+    (True, "xl_updata_tool/app/features/preview/portrait_config/"),
+    # GUI-side manifest generator; not part of the headless render closure.
+    (False, "xl_updata_tool/app/features/preview/portrait_config/import_service.py"),
+    (True, "xl_updata_tool/app/features/preview/portrait_headless.py"),
+    (True, "xl_updata_tool/app/features/preview/portrait_import.py"),
+    (True, "xl_updata_tool/app/features/preview/portrait_package.py"),
+    (True, "xl_updata_tool/app/features/preview/portrait_scene_export.py"),
+    (True, "xl_updata_tool/app/features/preview/resource_model.py"),
+    (True, "xl_updata_tool/app/features/preview/scene_capabilities.py"),
+    (True, "xl_updata_tool/app/features/preview/scene_export_adapter.py"),
+    (True, "xl_updata_tool/app/features/preview/spine_adapter.py"),
+    (True, "xl_updata_tool/app/platform/"),
+    (True, "xl_updata_tool/app/shared/__init__.py"),
+    (True, "xl_updata_tool/app/shared/contracts.py"),
+    (True, "xl_updata_tool/app/shared/lua.py"),
+    (True, "xl_updata_tool/native/portrait_scene/"),
+    (True, "xl_updata_tool/scripts/build-portrait-scene-renderer.py"),
+    (True, "xl_updata_tool/tools/lua/"),
+    # AssetStudio ships as its CLI subset; GUI binaries, Windows-only native
+    # payloads, satellite assemblies and logs stay out of the release.
+    (True, "xl_updata_tool/tools/AssetStudio/"),
+    (False, "xl_updata_tool/tools/AssetStudio/x64/"),
+    (False, "xl_updata_tool/tools/AssetStudio/x86/"),
+    (False, "xl_updata_tool/tools/AssetStudio/runtimes/"),
+    (True, "xl_updata_tool/tools/AssetStudio/runtimes/linux-x64/"),
+    (False, "xl_updata_tool/tools/AssetStudio/AssetStudio.CLI.exe"),
+    (False, "xl_updata_tool/tools/AssetStudio/AssetStudio.CLI.pdb"),
+    (False, "xl_updata_tool/tools/AssetStudio/AssetStudio.GUI.dll"),
+    (False, "xl_updata_tool/tools/AssetStudio/AssetStudio.GUI.deps.json"),
+    (False, "xl_updata_tool/tools/AssetStudio/AssetStudio.GUI.dll.config"),
+    (False, "xl_updata_tool/tools/AssetStudio/AssetStudio.GUI.exe"),
+    (False, "xl_updata_tool/tools/AssetStudio/AssetStudio.GUI.runtimeconfig.json"),
+    (False, "xl_updata_tool/tools/AssetStudio/log.txt"),
+    (False, "xl_updata_tool/tools/AssetStudio/log_prev.txt"),
+    *((False, f"xl_updata_tool/tools/AssetStudio/{name}/")
+      for name in ("cs", "de", "es", "fr", "it", "ja", "ko", "pl",
+                   "pt-BR", "ru", "tr", "zh-Hans", "zh-Hant")),
+    # PortraitSceneCLI framework-dependent publish pieces only; the WPF
+    # desktop app, Windows runtimes and video encoder stay out. The managed
+    # closure below is pinned by the compiled PortraitSceneCLI/SpineViewerCLI
+    # assembly references (see scripts/build-portrait-scene-renderer.py):
+    # System.Text.Json/Encodings.Web/IO.Pipelines 9.x shadow the framework
+    # 8.x copies, and FFMpegCore/Instances/PsdWriter/NLog must be present for
+    # Spine's implementation resolver to enumerate its types.
+    (True, "xl_updata_tool/tools/SpineViewer/PortraitSceneCLI.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/PortraitSceneCLI.runtimeconfig.json"),
+    (True, "xl_updata_tool/tools/SpineViewer/PortraitSceneCLI.deps.json"),
+    (True, "xl_updata_tool/tools/SpineViewer/Spine.dll"),
+    *((True, f"xl_updata_tool/tools/SpineViewer/SpineRuntime{version}.dll")
+      for version in ("21", "34", "35", "36", "37", "38", "40", "41", "42")),
+    (True, "xl_updata_tool/tools/SpineViewer/SFML.Graphics.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/SFML.System.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/SFML.Window.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/SkiaSharp.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/System.Text.Json.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/System.Text.Encodings.Web.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/System.IO.Pipelines.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/NLog.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/Spectre.Console.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/System.CommandLine.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/FFMpegCore.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/Instances.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/PsdWriter.dll"),
+    (True, "xl_updata_tool/tools/SpineViewer/runtimes/linux-x64/"),
+    # Linux metadata query CLI. The tracked SpineViewerCLI.runtimeconfig.json
+    # stays self-contained for the frozen desktop app, so the server pipeline
+    # uses this framework-dependent copy with its own closure and natives.
+    (True, "xl_updata_tool/tools/SpineViewer/linux/"),
+)
+
+SPARSE_CHECKOUT_PATTERNS: tuple[str, ...] = tuple(
+    ("!/" if not include else "/") + path
+    for include, path in TOOL_RELEASE_RULES
+)
+
+
+def is_tool_runtime_path(path: str) -> bool:
+    """Whether a repo-relative Tool path ships in updater releases.
+
+    Deployment-affecting Tool runtime files map to the backend through this
+    predicate; GUI sources, docs and tests never match.
+    """
+    normalized = path.replace("\\", "/").lstrip("./")
+    shipped = False
+    for include, pattern in TOOL_RELEASE_RULES:
+        prefix = pattern.rstrip("/")
+        if normalized == prefix or normalized.startswith(prefix + "/"):
+            shipped = include
+    return shipped
+
 
 def _subprocess_executor(args: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, text=True, check=True, capture_output=True, **kwargs)
@@ -126,12 +234,7 @@ class CommandRunner:
         self._executor(
             ["git", "sparse-checkout", "set", "--no-cone", "/*", "!/*/",
              "/xl_deploy/", "/xl_qqbot/", "/xl_gacha_web/", "/xl_updata_server/",
-             "/xl_updata_tool/tools/lua/", "/xl_updata_tool/app/__init__.py",
-             "/xl_updata_tool/app/features/__init__.py",
-             "/xl_updata_tool/app/features/characters/__init__.py",
-             "/xl_updata_tool/app/features/characters/parser/",
-             "/xl_updata_tool/app/platform/", "/xl_updata_tool/app/shared/__init__.py",
-             "/xl_updata_tool/app/shared/contracts.py", "/xl_updata_tool/app/shared/lua.py"],
+             *SPARSE_CHECKOUT_PATTERNS],
             cwd=release_path,
         )
         self._executor(["git", "checkout", "--detach", sha], cwd=release_path)

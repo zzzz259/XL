@@ -31,6 +31,9 @@ class ProcessResult:
     updated_character_count: int = 0  # 同 ID 但内容变更、被重渲的角色数（v1 全字段比较，从严）
     warnings: tuple[str, ...] = ()
     schedule_enabled: bool = True
+    portrait_success_count: int = 0
+    portrait_failure_count: int = 0
+    portrait_skip_count: int = 0
 
 
 class UpdatePipeline:

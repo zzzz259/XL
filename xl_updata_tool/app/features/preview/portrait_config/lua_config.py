@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+
+from .event_runtime import EventRuntime, load_event_runtime
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +19,7 @@ class PortraitRoot:
     evidence: str
     field_evidence: tuple[tuple[str, str], ...] = ()
     unresolved_reason: str | None = None
+    event_runtime: EventRuntime | None = None
 
 
 _ENTRY_START = re.compile(r"\[\s*(\d+)\s*\]\s*=\s*\{")
@@ -166,12 +169,7 @@ def load_portrait_roots(lua_root: Path, version_timestamp: int) -> list[Portrait
 
 
 def load_eventcover_roots(lua_root: Path, version_timestamp: int) -> list[PortraitRoot]:
-    """Read concurrent EventCover scenes from configured ``bg_main`` roots.
-
-    Entrance animation ``PATH_LOOKUP`` values are deliberately not scanned:
-    those resources are spawned and disposed sequentially, while this catalog
-    describes the cover Prefab that the game mounts as one background scene.
-    """
+    """Read cover identities; known entrance sequences yield independent stages."""
     source = Path(lua_root) / str(int(version_timestamp)) / "BaseActivityStageConfig.lua"
     try:
         content = source.read_text(encoding="utf-8-sig", errors="replace")
@@ -197,14 +195,24 @@ def load_eventcover_roots(lua_root: Path, version_timestamp: int) -> list[Portra
                 field_evidence = _field_evidence(
                     source, content, match.end(), body, _BG_MAIN, "bg_main",
                 )
+                show_match = re.search(r"\bshow_id\s*=\s*(\d+)", body)
+                runtime = load_event_runtime(
+                    source.parent, show_match.group(1) if show_match else None, prefab_path,
+                )
                 root = PortraitRoot(
                     skin_id=f"eventcovers_{event_id}",
                     version_timestamp=int(version_timestamp),
                     prefab_name=prefab_path,
                     position=None,
-                    metadata=(("entry_id", entry_id), ("eventcover_id", event_id)),
+                    metadata=(("entry_id", entry_id), ("eventcover_id", event_id),
+                              ("runtime_purpose", runtime.purpose),
+                              ("runtime_fade_in_seconds", str(runtime.fade_in_seconds)),
+                              ("runtime_hold_seconds", str(runtime.hold_seconds)),
+                              ("runtime_fade_out_seconds", str(runtime.fade_out_seconds)),
+                              ("runtime_source", ";".join(runtime.evidence))),
                     evidence=f"{source}:{content.count(chr(10), 0, match.start()) + 1}",
                     field_evidence=(field_evidence,) if field_evidence else (),
+                    event_runtime=runtime,
                 )
                 previous = roots_by_event.get(event_id)
                 if previous is None:
@@ -228,4 +236,18 @@ def load_eventcover_roots(lua_root: Path, version_timestamp: int) -> list[Portra
                         unresolved_reason="ambiguous_eventcover_root",
                     )
         cursor = closing_brace + 1
-    return list(roots_by_event.values())
+    roots = []
+    for root in roots_by_event.values():
+        runtime = root.event_runtime
+        if runtime is not None and runtime.purpose == "sequential_entrance":
+            for number, prefab in enumerate(runtime.sequence_prefabs, 1):
+                metadata = dict(root.metadata)
+                metadata.update(stage_index=str(number), stage_prefab=prefab, runtime_purpose="entrance_stage")
+                roots.append(replace(
+                    root, skin_id=f"{root.skin_id}_stage_{number:02d}", prefab_name=prefab,
+                    metadata=tuple(metadata.items()),
+                    event_runtime=replace(runtime, purpose="entrance_stage", sequence_prefabs=(prefab,)),
+                ))
+        else:
+            roots.append(root)
+    return roots

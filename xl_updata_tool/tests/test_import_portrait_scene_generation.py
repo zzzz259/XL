@@ -6,6 +6,33 @@ class _EmptyIndex:
     assets = ()
 
 
+def test_failed_root_keeps_an_incomplete_manifest_instead_of_disappearing(tmp_path, monkeypatch):
+    from app.features.preview.portrait_config.lua_config import PortraitRoot
+    from app.features.preview.portrait_config.cache import PortraitSceneCache
+    from app.features.preview.portrait_config.builder import PARSER_VERSION
+    root = PortraitRoot("12002183", 123, "hero.prefab", None,
+                        (("card_id", "10118"),), "BaseFashion.lua:1")
+    module = "app.features.preview.portrait_config.import_service."
+    monkeypatch.setattr(module + "load_portrait_roots", lambda *_: [root])
+    monkeypatch.setattr(module + "AssetIndex.from_catalog", lambda *_, **_kwargs: _EmptyIndex())
+    monkeypatch.setattr(module + "build_portrait_scenes",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("bad prefab")))
+    data = tmp_path / "data"
+    bundle = data / "bundles" / "123"
+    catalog = bundle / "_map" / "assets_map.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text("[]", encoding="utf-8")
+    lua = tmp_path / "lua"
+    lua.mkdir()
+    result = generate_portrait_manifests(data, 123, catalog, lua, bundle)
+    cache = PortraitSceneCache(data / "cache" / "portrait-scenes" / "_incomplete", PARSER_VERSION)
+    scene = cache.load_manifest("123/12002183.json")
+    assert result.incomplete == 1
+    assert scene is not None
+    assert scene.skin_id == "12002183"
+    assert any(item.code == "scene_build_failed" for item in scene.diagnostics)
+
+
 def test_generates_scenes_only_when_inputs_ready_and_reports_progress(tmp_path, monkeypatch):
     calls = []
     roots = [type("Root", (), {"skin_id": "1"})(), type("Root", (), {"skin_id": "2"})()]
@@ -21,7 +48,7 @@ def test_generates_scenes_only_when_inputs_ready_and_reports_progress(tmp_path, 
         "prefab_container": "container/2.prefab",
     })()]
     monkeypatch.setattr("app.features.preview.portrait_config.import_service.load_portrait_roots", lambda *_: roots)
-    monkeypatch.setattr("app.features.preview.portrait_config.import_service.AssetIndex.from_catalog", lambda *_: _EmptyIndex())
+    monkeypatch.setattr("app.features.preview.portrait_config.import_service.AssetIndex.from_catalog", lambda *_, **_kwargs: _EmptyIndex())
     def fake_build(_version, selected_roots, _index, **_kwargs):
         calls.append(selected_roots)
         return [scenes[int(selected_roots[0].skin_id) - 1]]
@@ -58,7 +85,7 @@ def test_accepts_assetstudio_raw_array_catalog_without_embedded_version(tmp_path
         "parts": (), "prefab_container": "assets/cardspine/hero.prefab",
     })()
     monkeypatch.setattr("app.features.preview.portrait_config.import_service.load_portrait_roots", lambda *_: roots)
-    monkeypatch.setattr("app.features.preview.portrait_config.import_service.AssetIndex.from_catalog", lambda *_: _EmptyIndex())
+    monkeypatch.setattr("app.features.preview.portrait_config.import_service.AssetIndex.from_catalog", lambda *_, **_kwargs: _EmptyIndex())
     monkeypatch.setattr("app.features.preview.portrait_config.import_service.build_portrait_scenes",
                         lambda *_args, **_kwargs: [scene])
     data_root = tmp_path / "data"
@@ -113,7 +140,7 @@ def test_cancellation_after_one_skin_reports_partial_work_and_stops_next_skin(tm
     )
     monkeypatch.setattr(
         "app.features.preview.portrait_config.import_service.AssetIndex.from_catalog",
-        lambda *_: _EmptyIndex(),
+        lambda *_, **_kwargs: _EmptyIndex(),
     )
 
     def build(_version, selected_roots, _index, **_kwargs):
@@ -171,7 +198,7 @@ def test_incomplete_scene_is_persisted_for_catalog_diagnostics(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         "app.features.preview.portrait_config.import_service.AssetIndex.from_catalog",
-        lambda *_: _EmptyIndex(),
+        lambda *_, **_kwargs: _EmptyIndex(),
     )
     monkeypatch.setattr(
         "app.features.preview.portrait_config.import_service.build_portrait_scenes",

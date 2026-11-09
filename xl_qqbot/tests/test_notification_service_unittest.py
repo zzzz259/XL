@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -273,6 +274,139 @@ class NotificationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status, 503)
         self.assertFalse((await response.json())["ready"])
+
+
+class LocalMultipartNotificationTests(unittest.IsolatedAsyncioTestCase):
+    """portrait_ready 走强制 multipart：消息只带 media_path 与 expected_sha256。"""
+
+    PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.temp_dir.name) / "notification-data"
+        self.outbox = ProactiveOutbox(self.data_dir)
+        self.service = NotificationService(
+            instance_id="test",
+            allowed_groups={DEBUG_GROUP, TEST_GROUP},
+            outbox=self.outbox,
+        )
+        self.sender = FakeSender()
+
+    async def asyncSetUp(self):
+        self.app = build_notification_app(
+            self.service, bearer_token=TOKEN, sender=self.sender
+        )
+        self.client = TestClient(TestServer(self.app))
+        await self.client.start_server()
+
+    async def asyncTearDown(self):
+        await self.client.close()
+        self.temp_dir.cleanup()
+
+    def make_image(self, tag: str) -> tuple[Path, str]:
+        body = self.PNG_MAGIC + tag.encode("utf-8")
+        path = Path(self.temp_dir.name) / f"{tag}.png"
+        path.write_bytes(body)
+        return path, hashlib.sha256(body).hexdigest()
+
+    def portrait_payload(self, path: Path, sha256: str, **message_extra):
+        message = {
+            "recipient": TEST_GROUP,
+            "ordinal": 0,
+            "kind": "image",
+            "media_path": str(path),
+            "text": "【星落】雾铃 立绘（1）",
+            "image_delivery_mode": "local_multipart",
+            "expected_sha256": sha256,
+        }
+        message.update(message_extra)
+        return {
+            "event_key": "game-portrait:1:10000224:1000022402:abc123",
+            "instance_id": "test",
+            "messages": [message],
+        }
+
+    async def post(self, payload):
+        return await self.client.post(
+            "/notifications",
+            json=payload,
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+    async def test_local_multipart_message_is_queued_with_mode(self):
+        path, sha256 = self.make_image("portrait-ok")
+
+        response = await self.post(self.portrait_payload(path, sha256))
+
+        self.assertEqual(response.status, 200)
+        message = self.outbox.get((await response.json())["queued"][0]["sequence"])
+        self.assertEqual(message.kind, "image")
+        self.assertEqual(message.image_delivery_mode, "local_multipart")
+        self.assertEqual(message.media_sha256, sha256)
+        self.assertEqual((self.data_dir / message.media_path).read_bytes(), path.read_bytes())
+
+    async def test_local_multipart_rejects_sha_mismatch_and_bad_png(self):
+        path, _ = self.make_image("portrait-bad")
+        mismatch = await self.post(self.portrait_payload(path, "ff" * 32))
+        not_png = Path(self.temp_dir.name) / "not-png.png"
+        not_png.write_bytes(b"plain bytes")
+        bad_magic = await self.post(
+            self.portrait_payload(not_png, hashlib.sha256(b"plain bytes").hexdigest())
+        )
+
+        self.assertEqual(mismatch.status, 400)
+        self.assertEqual(bad_magic.status, 400)
+        self.assertEqual(self.outbox.count(), 0)
+
+    async def test_local_multipart_requires_expected_sha256(self):
+        path, _ = self.make_image("portrait-nosha")
+        payload = self.portrait_payload(path, "0" * 64)
+        del payload["messages"][0]["expected_sha256"]
+
+        response = await self.post(payload)
+
+        self.assertEqual(response.status, 400)
+        self.assertEqual(self.outbox.count(), 0)
+
+    async def test_legacy_image_rejects_expected_sha256(self):
+        path, sha256 = self.make_image("portrait-legacy")
+        payload = self.portrait_payload(path, sha256)
+        payload["messages"][0]["image_delivery_mode"] = "legacy"
+
+        response = await self.post(payload)
+
+        self.assertEqual(response.status, 400)
+        self.assertEqual(self.outbox.count(), 0)
+
+    async def test_text_message_rejects_image_delivery_mode(self):
+        response = await self.post(
+            {
+                "event_key": "game-portrait:1:x",
+                "instance_id": "test",
+                "messages": [
+                    {
+                        "recipient": TEST_GROUP,
+                        "ordinal": 0,
+                        "kind": "text",
+                        "text": "你好",
+                        "image_delivery_mode": "local_multipart",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(response.status, 400)
+        self.assertEqual(self.outbox.count(), 0)
+
+    async def test_unknown_image_delivery_mode_is_rejected(self):
+        path, sha256 = self.make_image("portrait-mode")
+        payload = self.portrait_payload(path, sha256)
+        payload["messages"][0]["image_delivery_mode"] = "public_url"
+
+        response = await self.post(payload)
+
+        self.assertEqual(response.status, 400)
+        self.assertEqual(self.outbox.count(), 0)
 
 
 class NotificationConfigTests(unittest.TestCase):

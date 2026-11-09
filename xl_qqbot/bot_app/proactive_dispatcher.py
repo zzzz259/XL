@@ -7,7 +7,13 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from .proactive_outbox import OutboxMessage, ProactiveOutbox
+from .proactive_outbox import (
+    IMAGE_DELIVERY_LEGACY,
+    IMAGE_DELIVERY_LOCAL_MULTIPART,
+    OutboxMessage,
+    ProactiveOutbox,
+    validate_local_png,
+)
 
 _logger = logging.getLogger(__name__)
 _QUIET_TIMEZONE = ZoneInfo("Asia/Shanghai")
@@ -87,7 +93,25 @@ class ProactiveDispatcher:
             if not message.media_path:
                 raise RuntimeError("queued image is missing its durable spool path")
             media_path = self.outbox.data_dir / message.media_path
-            results = await self.sender.send_image(
+            if message.image_delivery_mode == IMAGE_DELIVERY_LOCAL_MULTIPART:
+                if not message.media_sha256:
+                    raise RuntimeError(
+                        "local multipart image is missing its content hash"
+                    )
+                # 发送前复查 spool 内容：损坏即失败走既有退避重试，绝不发错图。
+                validate_local_png(media_path, message.media_sha256)
+                # 本地立绘强制 multipart：优先 send_local_image，回退既有
+                # send_schedule_image，两者都不允许把本地路径拼成公网 URL。
+                send = getattr(self.sender, "send_local_image", None)
+                if send is None:
+                    send = self.sender.send_schedule_image
+            elif message.image_delivery_mode == IMAGE_DELIVERY_LEGACY:
+                send = self.sender.send_image
+            else:
+                raise RuntimeError(
+                    f"unsupported image delivery mode: {message.image_delivery_mode}"
+                )
+            results = await send(
                 str(media_path), message.text or "", [message.recipient]
             )
             return isinstance(results, dict) and results.get(message.recipient) is True

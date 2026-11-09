@@ -257,6 +257,13 @@ def test_repeat_build_uses_cache_without_reparsing_and_versions_are_isolated(tmp
 
 
 def test_builder_resolves_component_pointers_by_source_field_identity(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from app.features.preview.portrait_config import unity_scene
+
+    monkeypatch.setattr(unity_scene, "_load_environment", lambda path: SimpleNamespace(objects=[
+        SimpleNamespace(path_id=20, type=SimpleNamespace(name="MonoBehaviour"),
+                        assets_file=SimpleNamespace(name=f"CAB-{path.name}")),
+    ]))
     parsed = _parsed_scene()
     part = replace(
         parsed.parts[0], skeleton_ref=None, skeleton_json_ref=None, atlas_refs=(),

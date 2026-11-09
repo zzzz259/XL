@@ -2,10 +2,10 @@
 
 from .model import (
     AssetRef, InteractionEvent, PortraitScene, RendererState, SceneDiagnostic,
-    ScenePart, SpineState, SpriteState,
+    ScenePart, SpineState, SpriteState, ParticleState,
 )
 
 __all__ = [
     "AssetRef", "InteractionEvent", "PortraitScene", "RendererState",
-    "SceneDiagnostic", "ScenePart", "SpineState", "SpriteState",
+    "SceneDiagnostic", "ScenePart", "SpineState", "SpriteState", "ParticleState",
 ]

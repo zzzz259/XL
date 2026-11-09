@@ -15,6 +15,7 @@ from aiohttp import web
 
 from .config import Config, load_config
 from .matcher import CharacterMatcher
+from .portrait_querier import PortraitQuerier
 from .query_handler import QueryHandler
 from .querier import CharacterQuerier
 from .rerun_schedule_querier import RerunScheduleQuerier
@@ -37,6 +38,12 @@ def QQSender(config, instance_id=None):
 def build_app(config: Config, instance_id: str | None = None) -> web.Application:
     """Assemble an instance worker that sends through the shared Gateway."""
     sender = QQSender(config) if instance_id is None else QQSender(config, instance_id)
+    # 立绘查询按本实例 [watch] 数据根装配；功能由 [portraits] enabled 开关控制
+    portrait_querier = None
+    if config.portraits.enabled:
+        portrait_querier = PortraitQuerier(
+            config.watch.character_data, config.watch.versions_dir
+        )
     handler = QueryHandler(
         CharacterQuerier(config.watch.character_data, config.watch.versions_dir),
         CharacterMatcher(config.watch.character_data, config.watch.data_dir),
@@ -44,6 +51,7 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
         sender,
         bot_openid=config.bot.openid,
         rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
+        portrait_querier=portrait_querier,
     )
 
     async def on_startup(app: web.Application) -> None:

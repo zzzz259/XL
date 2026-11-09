@@ -29,6 +29,13 @@ versions_dir = "/home/admin/xl_updata_server/data/versions"
 # outbox_dir = "/home/admin/xl_updata_server-test/data/outbox"
 # minimum_tier = "test"
 
+[portraits]
+# 角色名+末尾数字查询立绘（如"@机器人 菲尼斯2"）。
+# 数据复用上方 [watch] character_data/versions_dir 指向的 updater 数据根：
+# 读 current_version.json 与 <versions_dir>/<当前版本>/portraits/manifest.json。
+# 默认关闭；各实例按自己的 [watch] 路径独立装配，无级别禁用差异。
+enabled = false
+
 [target]
 # 目标群 openid 列表（可选覆盖）。
 # 留空（默认）= 发给所有已知的机器人所在群（已学习列表 + 后续事件学习）。

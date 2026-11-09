@@ -8,6 +8,8 @@ import os
 import shutil
 import signal
 import sqlite3
+import subprocess
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +47,8 @@ def healthcheck(config_path: str, expected_environment: str | None = None) -> in
         renderer_modules = config.config_path.parent / "renderer" / "node_modules"
         if not renderer_modules.is_dir() or not _executable_available(config.node_bin):
             raise RuntimeError("configured card renderer dependencies are unavailable")
+    if getattr(config, "portrait_enabled", False):
+        _portrait_healthcheck(config)
     database = config.data_dir / "state.sqlite"
     if database.is_file():
         try:
@@ -62,6 +66,73 @@ def _executable_available(value: str) -> bool:
     if path.is_absolute() or path.parent != Path("."):
         return path.is_file() and os.access(path, os.X_OK)
     return shutil.which(value) is not None
+
+
+def _portrait_healthcheck(config) -> None:
+    """Validate the portrait staging configuration without rendering.
+
+    Checks are strictly read-only: configured tool paths must be readable
+    files, the Tool source tree must contain the headless entry, and the
+    configured render interpreter must be able to import the headless entry
+    and its basic third-party dependencies. No render, CDN access or data
+    write happens here.
+    """
+    tool_dir = config.portrait_tool_dir or (Path(__file__).resolve().parents[1] / "xl_updata_tool")
+    if not tool_dir.is_dir():
+        raise RuntimeError("configured portrait tool directory is missing")
+    if not (tool_dir / "app" / "features" / "preview" / "portrait_headless.py").is_file():
+        raise RuntimeError("portrait tool directory is missing the headless entry")
+    required = (
+        ("portraits.dotnet_path", config.portrait_dotnet_path),
+        ("portraits.scene_cli_path", config.portrait_scene_cli_path),
+        ("portraits.assetstudio_cli", config.portrait_assetstudio_cli),
+    )
+    optional = (
+        ("portraits.query_cli_path", config.portrait_query_cli_path),
+        ("portraits.xvfb_run_path", config.portrait_xvfb_run_path),
+        ("portraits.assetstudio_dotnet", config.portrait_assetstudio_dotnet),
+    )
+    for label, path in required:
+        if path is None:
+            raise RuntimeError(f"{label} is required when portraits.enabled is true")
+        _require_readable_file(label, path)
+    for label, path in optional:
+        if path is not None:
+            _require_readable_file(label, path)
+    for label, path in (("portraits.work_dir", config.portrait_work_dir),
+                        ("portraits.outbox_dir", config.portrait_outbox_dir)):
+        if path is not None and path.exists() and not path.is_dir():
+            raise RuntimeError(f"configured {label} is not a directory: {path}")
+    _portrait_dependency_probe(config, tool_dir)
+
+
+def _require_readable_file(label: str, path: Path) -> None:
+    if not path.is_file() or not os.access(path, os.R_OK):
+        raise RuntimeError(f"configured {label} is not a readable file: {path}")
+
+
+def _portrait_dependency_probe(config, tool_dir: Path) -> None:
+    python_bin = config.portrait_python_bin or sys.executable
+    env = dict(os.environ)
+    python_path = str(tool_dir)
+    if env.get("PYTHONPATH"):
+        python_path = python_path + os.pathsep + env["PYTHONPATH"]
+    env["PYTHONPATH"] = python_path
+    try:
+        probe = subprocess.run(
+            [python_bin, "-B", "-c",
+             "import app.features.preview.portrait_headless, PIL, UnityPy"],
+            check=False, cwd=str(tool_dir), env=env, capture_output=True,
+            text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"portrait render python is not usable: {python_bin}: {exc}") from exc
+    if probe.returncode != 0:
+        tail = (probe.stderr or "").strip()[-300:]
+        raise RuntimeError(
+            "portrait render python cannot import the headless entry or basic "
+            f"dependencies (PIL, UnityPy): {tail}"
+        )
 
 
 def main() -> int:

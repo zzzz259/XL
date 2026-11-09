@@ -69,11 +69,29 @@ class NoticeStateStore:
 
 @dataclass(frozen=True)
 class UpdateEvent:
-    event: str  # "start" | "finish"
-    version: int
-    new_characters: int = 0
-    error: str | None = None
+    """更新事件：保留原始 payload 透传，字段不再只覆盖 start/finish。"""
+
+    event: str  # "start" | "portrait_ready" | "finish" | 其它（未知事件由 watcher 停止消费）
+    payload: dict
     line_number: int = 0
+
+    @property
+    def version(self) -> int | str:
+        # start/finish 由服务端写为整数版本号；portrait_ready 写为字符串版本键。
+        return self.payload.get("version")
+
+    @property
+    def new_characters(self) -> int:
+        return int(self.payload.get("new_characters") or 0)
+
+    @property
+    def error(self):
+        return self.payload.get("error")
+
+    @property
+    def portraits(self) -> dict | None:
+        """finish 事件的立绘汇总 {success, failed, skipped}；未运行时无此字段。"""
+        return self.payload.get("portraits")
 
 
 def read_new_events(path: str | Path, offset: int) -> tuple[list[UpdateEvent], int]:
@@ -93,9 +111,7 @@ def read_new_events(path: str | Path, offset: int) -> tuple[list[UpdateEvent], i
         events.append(
             UpdateEvent(
                 event=str(payload["event"]),
-                version=int(payload.get("version", 0)),
-                new_characters=int(payload.get("new_characters", 0)),
-                error=payload.get("error"),
+                payload=payload,
                 line_number=line_number,
             )
         )

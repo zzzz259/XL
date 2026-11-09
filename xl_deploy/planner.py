@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from xl_deploy.config import DeploymentInventory
+from xl_deploy.runner import is_tool_runtime_path
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,10 @@ class DeploymentTarget:
             for root in ("xl_qqbot", "xl_gacha_web")
             for path in normalized_paths
         )
-        backend_changed = any(_is_runtime_path(path, "xl_updata_server") for path in normalized_paths)
+        backend_changed = any(
+            _is_runtime_path(path, "xl_updata_server") or is_tool_runtime_path(path)
+            for path in normalized_paths
+        )
 
         if branch == "test":
             units: list[str] = []
@@ -124,7 +128,8 @@ def configured_target(branch, paths, inventory):
         return DeploymentTarget((), (), ())
     bot = (any(_is_runtime_path(p, 'xl_qqbot') for p in paths)
            or any(_is_runtime_path(p, 'xl_gacha_web') for p in paths))
-    backend = any(_is_runtime_path(p, 'xl_updata_server') for p in paths)
+    backend = any(_is_runtime_path(p, 'xl_updata_server') for p in paths) or any(
+        is_tool_runtime_path(p) for p in paths)
     gateway = inventory.gateway.watch_ref == branch and any(
         p in {*(f'xl_qqbot/bot_app/{name}.py' for name in
                 ('gateway', 'config', 'deploy_control', 'groups', 'sender', 'tiers', 'updater')),

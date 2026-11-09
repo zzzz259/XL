@@ -27,6 +27,8 @@ def _make_release_tree(root: Path) -> ToolLocator:
     (tools / "lua" / "opmap").write_bytes(b"placeholder")
     (tools / "SpineViewer").mkdir()
     (tools / "SpineViewer" / "SpineViewerCLI.exe").write_bytes(b"placeholder")
+    (tools / "SpineViewer" / "PortraitSceneCLI.dll").write_bytes(b"placeholder")
+    (tools / "SpineViewer" / "PortraitSceneCLI.runtimeconfig.json").write_bytes(b"placeholder")
     (tools / "SpineViewer" / "ffmpeg.exe").write_bytes(b"placeholder")
     (root / "runtimes" / "java" / "bin").mkdir(parents=True)
     (root / "runtimes" / "java" / "bin" / "java.exe").write_bytes(b"placeholder")

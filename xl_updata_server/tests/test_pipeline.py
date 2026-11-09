@@ -59,3 +59,30 @@ def test_pipeline_mirrors_character_data_to_data_root(tmp_path):
     mirror = tmp_path / "character_data" / "current.json"
     assert mirror.is_file()
     assert '"characters"' in mirror.read_text(encoding="utf-8")
+
+
+def test_pipeline_publishes_portrait_manifest_and_artifacts(tmp_path):
+    def processor_with_portraits(staging_dir):
+        portraits = staging_dir / "portraits"
+        portraits.mkdir(parents=True)
+        (portraits / "10001").mkdir()
+        (portraits / "10001" / "1000101.png").write_bytes(b"png")
+        (portraits / "manifest.json").write_text(
+            '{"schema_version": 1, "version": "123", "skins": []}', encoding="utf-8"
+        )
+        return ProcessResult(
+            version_timestamp=123,
+            processed=True,
+            portrait_success_count=1,
+            portrait_failure_count=0,
+            portrait_skip_count=2,
+        )
+
+    result = UpdatePipeline(tmp_path, processor=processor_with_portraits).run_once()
+
+    assert result.processed is True
+    published = tmp_path / "versions" / "123" / "portraits"
+    assert (published / "manifest.json").is_file()
+    assert (published / "10001" / "1000101.png").is_file()
+    assert result.portrait_success_count == 1
+    assert result.portrait_skip_count == 2
