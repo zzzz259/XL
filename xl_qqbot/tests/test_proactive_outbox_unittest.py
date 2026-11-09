@@ -1,3 +1,5 @@
+import hashlib
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -156,6 +158,174 @@ class ProactiveOutboxTests(unittest.TestCase):
             self.outbox.enqueue_image(
                 "character:1", "group-a", 0, source, content="new caption"
             )
+
+
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+class LocalMultipartOutboxTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.temp_dir.name) / "persistent-data"
+        self.outbox = ProactiveOutbox(self.data_dir)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def make_png(self, tag: str) -> tuple[Path, str]:
+        body = PNG_MAGIC + tag.encode("utf-8")
+        path = Path(self.temp_dir.name) / f"{tag}.png"
+        path.write_bytes(body)
+        return path, hashlib.sha256(body).hexdigest()
+
+    def test_local_multipart_row_stores_mode_and_expected_hash(self):
+        source, sha256 = self.make_png("portrait-1")
+
+        row_id = self.outbox.enqueue_image(
+            "game-portrait:1:a", "group-a", 0, source,
+            content="caption", image_delivery_mode="local_multipart",
+            expected_sha256=sha256,
+        )
+        message = self.outbox.get(row_id)
+
+        self.assertEqual(message.image_delivery_mode, "local_multipart")
+        self.assertEqual(message.media_sha256, sha256)
+        self.assertEqual((self.data_dir / message.media_path).read_bytes(), PNG_MAGIC + b"portrait-1")
+
+    def test_local_multipart_rejects_bad_magic_or_sha_mismatch(self):
+        source, _ = self.make_png("portrait-2")
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:b", "group-a", 0, source,
+                image_delivery_mode="local_multipart", expected_sha256="ff" * 32,
+            )
+        not_png = Path(self.temp_dir.name) / "fake.png"
+        not_png.write_bytes(b"not a png")
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:b", "group-a", 0, not_png,
+                image_delivery_mode="local_multipart",
+                expected_sha256=hashlib.sha256(b"not a png").hexdigest(),
+            )
+        self.assertEqual(self.outbox.count(), 0)
+
+    def test_local_multipart_requires_sha_and_rejects_malformed_or_legacy_mix(self):
+        source, sha256 = self.make_png("portrait-3")
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:c", "group-a", 0, source,
+                image_delivery_mode="local_multipart",
+            )
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:c", "group-a", 0, source,
+                image_delivery_mode="local_multipart", expected_sha256="xyz",
+            )
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:c", "group-a", 0, source,
+                image_delivery_mode="boom", expected_sha256=sha256,
+            )
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:c", "group-a", 0, source,
+                expected_sha256=sha256,
+            )
+
+    def test_local_multipart_idempotent_replay_and_content_change_rejected(self):
+        source, sha256 = self.make_png("portrait-4")
+        row_id = self.outbox.enqueue_image(
+            "game-portrait:1:d", "group-a", 0, source,
+            image_delivery_mode="local_multipart", expected_sha256=sha256,
+        )
+        replay = self.outbox.enqueue_image(
+            "game-portrait:1:d", "group-a", 0, source,
+            image_delivery_mode="local_multipart", expected_sha256=sha256,
+        )
+        self.assertEqual(replay, row_id)
+        self.assertEqual(self.outbox.count(), 1)
+        other, other_sha = self.make_png("portrait-4b")
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:d", "group-a", 0, other,
+                image_delivery_mode="local_multipart", expected_sha256=other_sha,
+            )
+        legacy_png, _ = self.make_png("portrait-4c")
+        with self.assertRaises(ValueError):
+            self.outbox.enqueue_image(
+                "game-portrait:1:d", "group-a", 0, legacy_png,
+            )
+
+    def test_database_without_mode_column_migrates_and_old_rows_default_legacy(self):
+        legacy_dir = Path(self.temp_dir.name) / "legacy-data"
+        legacy_dir.mkdir()
+        database_path = legacy_dir / "proactive_outbox.sqlite3"
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                """
+                CREATE TABLE messages (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_key TEXT NOT NULL,
+                    recipient TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+                    kind TEXT NOT NULL CHECK (kind IN ('text', 'image')),
+                    text TEXT,
+                    media_path TEXT,
+                    media_sha256 TEXT,
+                    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+                    next_attempt_at REAL NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    sent_at REAL,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'sent')),
+                    UNIQUE (event_key, recipient, ordinal),
+                    CHECK (
+                        (kind = 'text' AND text IS NOT NULL AND media_path IS NULL)
+                        OR
+                        (kind = 'image' AND media_path IS NOT NULL)
+                    )
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO messages (event_key, recipient, ordinal, kind, text, created_at) "
+                "VALUES ('legacy:event', 'group-a', 0, 'text', '旧公告', 1.0)"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        (legacy_dir / "proactive_outbox_media").mkdir(exist_ok=True)
+
+        reopened = ProactiveOutbox(legacy_dir)
+
+        legacy = reopened.find_by_key("legacy:event", "group-a", 0)
+        self.assertIsNotNone(legacy)
+        self.assertEqual(legacy.image_delivery_mode, "legacy")
+        self.assertEqual(legacy.text, "旧公告")
+        source, sha256 = self.make_png("portrait-migrated")
+        row_id = reopened.enqueue_image(
+            "game-portrait:1:m", "group-a", 0, source,
+            image_delivery_mode="local_multipart", expected_sha256=sha256,
+        )
+        self.assertEqual(reopened.get(row_id).image_delivery_mode, "local_multipart")
+        # 迁移后旧行仍可走既有 legacy 发送语义
+        legacy_png, _ = self.make_png("portrait-migrated-legacy")
+        legacy_row = reopened.enqueue_image(
+            "legacy:image", "group-a", 0, legacy_png,
+        )
+        self.assertEqual(reopened.get(legacy_row).image_delivery_mode, "legacy")
+
+    def test_mode_survives_reopen(self):
+        source, sha256 = self.make_png("portrait-5")
+        row_id = self.outbox.enqueue_image(
+            "game-portrait:1:e", "group-a", 0, source,
+            image_delivery_mode="local_multipart", expected_sha256=sha256,
+        )
+
+        reopened = ProactiveOutbox(self.data_dir)
+
+        self.assertEqual(reopened.get(row_id).image_delivery_mode, "local_multipart")
 
 
 if __name__ == "__main__":

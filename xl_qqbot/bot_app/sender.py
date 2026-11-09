@@ -79,6 +79,18 @@ class QQSender:
             )
         return results
 
+    async def send_local_image(
+        self,
+        file_path: str,
+        content: str,
+        group_openids: List[str],
+        reply_to: str = "",
+    ) -> Dict[str, bool]:
+        """发送本地立绘：强制 multipart，即使配置了 file_base_url 也不拼公网 URL。"""
+        return await self.send_schedule_image(
+            file_path, content, group_openids, reply_to
+        )
+
     async def _send_to_group(
         self,
         file_path: str,

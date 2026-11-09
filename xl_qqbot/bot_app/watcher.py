@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .config import Config, UpdateSourceConfig
 from .groups import GroupStore
@@ -12,7 +12,11 @@ from .outbox import (
     VersionBatch,
     list_version_batches,
 )
-from .proactive_outbox import ProactiveOutbox
+from .proactive_outbox import (
+    IMAGE_DELIVERY_LOCAL_MULTIPART,
+    ProactiveOutbox,
+    validate_local_png,
+)
 from .sender import QQSender
 from .tiers import GroupTier
 from .updater import NoticeStateStore, ServiceMute, read_new_events
@@ -20,6 +24,8 @@ from .updater import NoticeStateStore, ServiceMute, read_new_events
 _logger = logging.getLogger(__name__)
 
 UPDATE_START_TEXT = "检测到新版本，正在自动更新，期间将暂停服务"
+
+_PORTRAIT_OUTBOX_PREFIX = "portrait_outbox"
 
 
 class Watcher:
@@ -90,6 +96,14 @@ class Watcher:
                 await self._enqueue_update_event(event)
                 self.mute.muted = True
                 _logger.info("已将更新开始通知写入发件箱 version=%s", event.version)
+            elif event.event == "portrait_ready":
+                await self._enqueue_portrait(event)
+                _logger.info(
+                    "已将立绘通知写入发件箱 version=%s character=%s skin=%s",
+                    event.version,
+                    event.payload.get("character_id"),
+                    event.payload.get("skin_id"),
+                )
             elif event.event == "finish":
                 batch = batches.pop(str(event.version), None)
                 if batch is not None:
@@ -131,6 +145,13 @@ class Watcher:
             text = "版本更新失败，服务已恢复，将等待下次自动重试"
         else:
             text = f"版本更新结束，一共有{event.new_characters}个新角色"
+            portraits = event.portraits
+            if portraits:
+                text += (
+                    f"；新立绘 成功{int(portraits.get('success', 0))}"
+                    f" 失败{int(portraits.get('failed', 0))}"
+                    f" 跳过{int(portraits.get('skipped', 0))}"
+                )
         event_key = self._update_event_key(event)
         if self.notification_client is not None:
             await self.notification_client.enqueue(
@@ -153,6 +174,106 @@ class Watcher:
             self.proactive_outbox.enqueue_text(
                 event_key, group_openid, 0, text
             )
+
+    async def _enqueue_portrait(self, event) -> None:
+        """一套立绘落盘后立即逐群入队；附件复制进 spool 后才允许推进游标。"""
+        sha256 = str(event.payload.get("sha256") or "")
+        if len(sha256) != 64:
+            raise ValueError(
+                f"立绘事件缺少有效 SHA256 line={event.line_number}"
+            )
+        media_path = self._portrait_media_path(event)
+        # 入队前完成 PNG/哈希校验：校验失败抛错，_tick 不会推进游标。
+        validate_local_png(media_path, sha256)
+
+        version = str(event.version)
+        character_id = str(event.payload.get("character_id") or "")
+        skin_id = str(event.payload.get("skin_id") or "")
+        ordinal = int(event.payload.get("ordinal") or 0)
+        name = str(event.payload.get("name") or "")
+        file_name = media_path.name
+        text = f"【星落】{name} 立绘（{ordinal}）"
+        event_key = (
+            f"{self._source_prefix}game-portrait:{version}:"
+            f"{character_id}:{skin_id}:{sha256[:12]}"
+        )
+
+        group_openids = self._eligible_groups()
+        if not group_openids:
+            _logger.warning(
+                "没有配置目标群 openid，跳过立绘 version=%s skin=%s",
+                version,
+                skin_id,
+            )
+            return
+        if self.notification_client is not None:
+            recipients = [
+                group_openid
+                for group_openid in group_openids
+                if not self.store.is_sent_to_group(version, file_name, group_openid)
+            ]
+            if recipients:
+                # 本地立绘强制 multipart：只传本地路径与哈希，不拼公网 URL。
+                await self.notification_client.enqueue(
+                    event_key=event_key,
+                    instance_id=self.config.instance.instance_id,
+                    messages=[
+                        {
+                            "recipient": group_openid,
+                            "ordinal": 0,
+                            "kind": "image",
+                            "media_path": str(media_path),
+                            "text": text,
+                            "image_delivery_mode": IMAGE_DELIVERY_LOCAL_MULTIPART,
+                            "expected_sha256": sha256,
+                        }
+                        for group_openid in recipients
+                    ],
+                )
+            return
+        if self.proactive_outbox is None:
+            raise RuntimeError("update watcher has no notification sink")
+        for group_openid in group_openids:
+            if self.store.is_sent_to_group(version, file_name, group_openid):
+                continue
+            self.proactive_outbox.enqueue_image(
+                event_key,
+                group_openid,
+                ordinal=0,
+                source_path=media_path,
+                content=text,
+                image_delivery_mode=IMAGE_DELIVERY_LOCAL_MULTIPART,
+                expected_sha256=sha256,
+            )
+
+    def _portrait_media_path(self, event) -> Path:
+        """把事件里的相对路径解析到本来源数据根内，拒绝越界路径。"""
+        raw_path = str(event.payload.get("path") or "")
+        relative = PurePosixPath(raw_path)
+        parts = relative.parts
+        if (
+            not raw_path
+            or relative.is_absolute()
+            or len(parts) != 3
+            or parts[0] != _PORTRAIT_OUTBOX_PREFIX
+            or ".." in parts
+        ):
+            raise ValueError(
+                f"非法立绘相对路径 line={event.line_number} path={raw_path!r}"
+            )
+        character_id = str(event.payload.get("character_id") or "")
+        skin_id = str(event.payload.get("skin_id") or "")
+        sha256 = str(event.payload.get("sha256") or "")
+        expected_name = f"{character_id}_{skin_id}_{sha256[:12]}.png"
+        if parts[2] != expected_name:
+            raise ValueError(
+                f"立绘文件名与事件字段不一致 line={event.line_number} path={raw_path!r}"
+            )
+        data_root = Path(self.source.outbox_dir).parent
+        media_path = data_root.joinpath(*parts)
+        if not media_path.is_file():
+            raise FileNotFoundError(media_path)
+        return media_path
 
     async def _process_batch(self, batch: VersionBatch) -> None:
         manifest = self._read_manifest(batch.version_dir)
