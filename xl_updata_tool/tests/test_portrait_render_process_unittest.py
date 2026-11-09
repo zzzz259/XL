@@ -55,6 +55,15 @@ class SystemdScopeCommandTest(unittest.TestCase):
         self.assertLess(argv.index('--'), len(argv) - 2)
         self.assertEqual(argv[argv.index('--') + 1:], ['/bin/render', 'job.json'])
 
+    def test_scope_command_sets_runtime_max_sec(self):
+        """systemd 单元自身必须有兜底超时：即使内层 Python 被杀，
+        原生单元也会在 timeout+60s 后由 systemd 自动终止。"""
+        limits = RenderProcessLimits(timeout_seconds=600)
+        argv = systemd_scope_command(['/bin/render'], 'unit-t', limits)
+        self.assertIn('RuntimeMaxSec=660', ' '.join(argv))
+        default_argv = systemd_scope_command(['/bin/render'], 'unit-d', RenderProcessLimits())
+        self.assertIn(f'RuntimeMaxSec={900 + 60}', ' '.join(default_argv))
+
     def test_scope_command_user_manager_flag(self):
         limits = RenderProcessLimits()
         user_argv = systemd_scope_command(['/bin/render'], 'unit-u', limits, user=True)

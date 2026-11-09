@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from bot_app import portrait_querier
 from bot_app.portrait_querier import PortraitQueryResult, PortraitQuerier
 
 CHARACTERS = {
@@ -244,6 +245,25 @@ def test_missing_png_file_rejected(tmp_path):
 
     _patch_manifest(tmp_path, delete)
     assert querier.find("10000224", 1).status == "unavailable"
+
+
+# ---------- QQ 图片 20MiB 硬限 ----------
+
+def test_oversized_image_is_unavailable_with_actionable_error(tmp_path, monkeypatch):
+    """超过 QQ 20MiB 硬限（测试用小阈值）的立绘：unavailable + 可行动错误，不交给 Gateway。"""
+    querier = make_querier(tmp_path)
+    monkeypatch.setattr(portrait_querier, "MAX_PORTRAIT_IMAGE_BYTES", 32)
+    result = querier.find("10000224", 1)
+    assert result.status == "unavailable"
+    assert result.image_path is None
+    assert "32" in result.error  # 可行动：指明上限与超限方向
+    assert str(len(PNG_2X3)) in result.error  # stat 先行：报错里的字节数来自 stat
+
+    # 阈值放宽到文件大小以上 → 恢复正常命中，真实样本不受影响
+    monkeypatch.setattr(portrait_querier, "MAX_PORTRAIT_IMAGE_BYTES", 1024)
+    ok = querier.find("10000224", 1)
+    assert ok.status == "found"
+    assert ok.image_path is not None
 
 
 # ---------- 备用发送入口 ----------

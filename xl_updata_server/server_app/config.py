@@ -209,6 +209,12 @@ def load_config(path: str | Path) -> ServerConfig:
     portrait_rows = portraits.get("png_working_rows", 128)
     if type(portrait_rows) is not int or not 0 <= portrait_rows <= 1024:
         raise ValueError("portraits.png_working_rows must be an integer in 0..1024")
+    portrait_timeout_seconds = _read_int(portraits, "timeout_seconds", 900)
+    portrait_job_timeout_seconds = _read_int(portraits, "job_timeout_seconds", 3600)
+    if portrait_job_timeout_seconds <= portrait_timeout_seconds:
+        raise ValueError(
+            "portraits.job_timeout_seconds must be greater than portraits.timeout_seconds"
+        )
 
     def _portrait_path(key: str) -> Path | None:
         value = str(portraits.get(key, "")).strip()
@@ -258,8 +264,8 @@ def load_config(path: str | Path) -> ServerConfig:
         portrait_memory_max_bytes=portrait_memory_max,
         portrait_memory_high_bytes=portrait_memory_high,
         portrait_cpu_affinity=tuple(portrait_affinity),
-        portrait_timeout_seconds=_read_int(portraits, "timeout_seconds", 900),
-        portrait_job_timeout_seconds=_read_int(portraits, "job_timeout_seconds", 3600),
+        portrait_timeout_seconds=portrait_timeout_seconds,
+        portrait_job_timeout_seconds=portrait_job_timeout_seconds,
         portrait_map_timeout_seconds=_read_int(portraits, "map_timeout_seconds", 900),
         portrait_png_working_rows=portrait_rows,
         instance_id=instance_id,

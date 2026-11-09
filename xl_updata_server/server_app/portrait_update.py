@@ -15,6 +15,11 @@ character_cards、manifest.json）不可变。processor 在
 已发布 manifest 只在完整一轮全部结束后原子写一次，恢复中任何中断都保留
 原有完整已发布 manifest。恢复门控同时读 work manifest 与已发布 manifest，
 work 前缀缺失的已完成项由已发布 manifest 播种，不重渲、不重复发事件。
+
+新渲染写入顺序固定为：PNG 完成并校验 → 原子写版本暂存产物与持久 outbox →
+持久化 work manifest(event_emitted=False) → 追加 portrait_ready → 标
+event_emitted=True 并再次持久化 work manifest。事件前崩溃恢复直接 emit 补发、
+不重渲；事件后崩溃产生的重复事件由 Bot 幂等键去重。
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -43,6 +49,8 @@ LOGGER = logging.getLogger(__name__)
 
 MANIFEST_SCHEMA_VERSION = 1
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# QQ 图片硬限（20MiB）：发布/事件/查询任何送达 Gateway 的立绘前必须守住。
+MAX_PORTRAIT_IMAGE_BYTES = 20 * 1024 * 1024
 # 与 Tool Importer 的 AssetStudio map 命令保持一致，不另造 AB 解析。
 _AS_MAP_ARGS = ("--game", "UnityCN", "--key_index", "23", "--map_op", "Both", "--map_type", "JSON")
 # 工作 manifest 里的控制字段，写入版本产物前剥掉。
@@ -51,6 +59,42 @@ _CONTROL_FIELDS = ("event_emitted", "staged")
 
 class PortraitUpdateError(RuntimeError):
     """共享输入不可用，立绘步骤整体无法计划；不影响主数据流程。"""
+
+
+def _ensure_png_within_limit(path: Path, *, limit: int | None = None) -> None:
+    """stat 先行：超过 QQ 图片上限即抛可行动错误，不把大文件读进内存。"""
+    if limit is None:
+        limit = MAX_PORTRAIT_IMAGE_BYTES
+    size = Path(path).stat().st_size
+    if size > limit:
+        raise ValueError(
+            f"立绘 PNG {size} 字节超过 QQ 图片 {limit} 字节上限"
+            f"（需降低单图体积后重渲）: {path}"
+        )
+
+
+def _job_start_new_session() -> bool:
+    """POSIX 上把渲染子进程放进独立进程组，超时后整组收割。"""
+    return os.name == "posix"
+
+
+# signal.SIGKILL 在 POSIX 上恒为 9；Windows 的 signal 模块没有该属性。
+_SIGKILL = getattr(signal, "SIGKILL", 9)
+
+
+def _terminate_job_process(process) -> None:
+    """超时后收割外层渲染子进程：POSIX 杀整个进程组，其余平台只杀直接子进程。"""
+    if _job_start_new_session():
+        try:
+            os.killpg(os.getpgid(process.pid), _SIGKILL)
+        except OSError:
+            process.kill()
+    else:
+        process.kill()
+    try:
+        process.wait(timeout=15)  # 收割，避免僵尸
+    except subprocess.TimeoutExpired:
+        pass
 
 
 @dataclass(frozen=True)
@@ -273,7 +317,16 @@ class PortraitUpdateRunner:
             manifest_entries.append(entry)
             # 逐套持久化只写 work manifest；staging/已发布 manifest 在整轮结束后
             # 一次性写，恢复中任何中断都不截断当前已发布 manifest。
-            self._persist_work_manifest(work_dir / "manifest.json", version_key, manifest_entries)
+            work_manifest_path = work_dir / "manifest.json"
+            self._persist_work_manifest(work_manifest_path, version_key, manifest_entries)
+            # portrait_ready 必须落在 work manifest(event_emitted=False) 之后：
+            # 事件前崩溃 → 恢复走 emit 直接补发，不重渲；事件后崩溃 → 重复事件
+            # 由 Bot 幂等键去重。继承/已完成条目不补发。
+            if (entry.get("state") == "published" and not entry.get("event_emitted")
+                    and str(entry.get("source_version")) == version_key):
+                self._append_ready_event(entry)
+                entry["event_emitted"] = True
+                self._persist_work_manifest(work_manifest_path, version_key, manifest_entries)
 
         if manifest_entries:
             self._write_staging_manifest(staging_portraits, version_key, manifest_entries)
@@ -760,17 +813,29 @@ class PortraitUpdateRunner:
             str(result_path),
         ]
         try:
-            process = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 cwd=str(tool_dir),
                 env=env,
-                capture_output=True,
-                timeout=self.config.portrait_job_timeout_seconds,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=_job_start_new_session(),
             )
+        except OSError as error:
+            raise ValueError(f"渲染入口子进程无法启动: {error}") from error
+        try:
+            _stdout, stderr = process.communicate(timeout=self.config.portrait_job_timeout_seconds)
         except subprocess.TimeoutExpired as error:
-            raise ValueError(f"渲染入口子进程超时 ({self.config.portrait_job_timeout_seconds}s)") from error
+            _terminate_job_process(process)
+            partial_stderr = getattr(error, "stderr", None)
+            detail = ""
+            if isinstance(partial_stderr, bytes) and partial_stderr:
+                detail = "；stderr 尾部: " + partial_stderr.decode("utf-8", errors="replace").strip()[-300:]
+            raise ValueError(
+                f"渲染入口子进程超时 ({self.config.portrait_job_timeout_seconds}s)" + detail
+            ) from error
         if not result_path.is_file():
-            detail = process.stderr.decode("utf-8", errors="replace")[:300] if process.stderr else ""
+            detail = stderr.decode("utf-8", errors="replace")[:300] if stderr else ""
             raise ValueError(f"渲染入口未写出结果 (exit {process.returncode}): {detail}")
         try:
             result = json.loads(result_path.read_text(encoding="utf-8-sig"))
@@ -788,6 +853,7 @@ class PortraitUpdateRunner:
         artifact = Path(str(result.get("artifact_path") or ""))
         if not artifact.is_file():
             raise ValueError(f"渲染结果缺少产物文件: {artifact}")
+        _ensure_png_within_limit(artifact)  # stat 先行：超限即拒，不把大文件读进内存
         data = artifact.read_bytes()
         if not data.startswith(PNG_SIGNATURE) or len(data) < 33:
             raise ValueError("渲染产物不是有效 PNG")
@@ -821,6 +887,9 @@ class PortraitUpdateRunner:
 
     def _publish_rendered(self, task: _SkinTask, artifact: Path, evidence: dict,
                           staging_portraits: Path, artifacts_dir: Path) -> dict:
+        """PNG/staging/outbox 落盘并构造 published 条目；事件由 run 循环在
+        work manifest(event_emitted=False) 持久化之后再追加。"""
+        _ensure_png_within_limit(artifact)
         relative = f"{task.character_id}/{task.skin_id}.png"
         _copy_atomic(artifact, staging_portraits / relative)
         _copy_atomic(artifact, artifacts_dir / f"{task.character_id}_{task.skin_id}.png")
@@ -835,8 +904,6 @@ class PortraitUpdateRunner:
             height=evidence["height"],
             staged=True,
         )
-        self._append_ready_event(entry)
-        entry["event_emitted"] = True
         return entry
 
     def _stage_inherited(self, task: _SkinTask, staging_portraits: Path, artifacts_dir: Path) -> dict:
@@ -887,6 +954,7 @@ class PortraitUpdateRunner:
     def _emit_pending_event(self, task: _SkinTask, staging_portraits: Path, artifacts_dir: Path) -> dict:
         work_entry = dict(task.work_entry or {})
         artifact = self._resume_artifact(work_entry, artifacts_dir)
+        _ensure_png_within_limit(artifact)  # 补发事件前同样守 QQ 20MiB 上限
         _copy_atomic(artifact, staging_portraits / str(work_entry.get("artifact_path")))
         self._write_outbox(task, str(work_entry.get("artifact_sha256")), artifact)
         self._append_ready_event(work_entry)

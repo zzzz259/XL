@@ -260,6 +260,34 @@ png_working_rows = 64
     assert config.portrait_png_working_rows == 64
 
 
+def test_portraits_job_timeout_must_exceed_render_timeout(tmp_path):
+    for snippet in (
+        "timeout_seconds = 900\njob_timeout_seconds = 900\n",  # 相等也不行
+        "timeout_seconds = 900\njob_timeout_seconds = 899\n",
+        "job_timeout_seconds = 900\n",  # 默认渲染超时 900：job 相等须拒绝
+    ):
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            _PORTRAIT_MINIMAL + "[portraits]\nenabled = true\n" + snippet,
+            encoding="utf-8",
+        )
+        try:
+            load_config(config_path)
+        except ValueError as error:
+            assert "job_timeout_seconds" in str(error)
+            assert "timeout_seconds" in str(error)
+        else:
+            raise AssertionError(f"job_timeout <= timeout accepted: {snippet!r}")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        _PORTRAIT_MINIMAL
+        + "[portraits]\nenabled = true\ntimeout_seconds = 600\njob_timeout_seconds = 1800\n",
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    assert config.portrait_job_timeout_seconds == 1800
+
+
 def test_portraits_rejects_invalid_limits(tmp_path):
     for snippet in (
         "cpu_affinity = []\n",

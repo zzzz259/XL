@@ -55,7 +55,7 @@ enabled = false
 # memory_high_bytes = 402653184
 # cpu_affinity = [0]
 # timeout_seconds = 900        # 单套原生渲染超时
-# job_timeout_seconds = 3600   # 单套渲染入口子进程总超时
+# job_timeout_seconds = 3600   # 单套渲染入口子进程总超时（必须大于 timeout_seconds，否则配置校验拒绝）
 # map_timeout_seconds = 900    # AssetStudio map 生成超时
 # png_working_rows = 128
 

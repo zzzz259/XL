@@ -1,6 +1,8 @@
 """角色立绘查询：读当前版本 portraits/manifest.json，按角色 ordinal 定位 PNG。
 
 只依赖 stdlib：版本指针与 manifest 解析、SHA-256、PNG 头（IHDR）尺寸校验。
+超过 QQ 20MiB 硬限（MAX_PORTRAIT_IMAGE_BYTES）的图片按 unavailable 处理，
+绝不交给 Gateway；尺寸 stat 先行，超限即拒，不把大文件读进内存。
 状态语义（与 server portrait manifest schema 1 对应）：
 - published：正常发图；source_version 与当前版本不一致时按旧图提示；
 - stale：随版本发布的旧图，可发但必须提示来源旧版本/本轮未更新；
@@ -20,6 +22,8 @@ _logger = logging.getLogger(__name__)
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MANIFEST_SCHEMA_VERSION = 1
+# QQ 图片硬限（20MiB）：超限立绘绝不交给 Gateway，直接按 unavailable 处理。
+MAX_PORTRAIT_IMAGE_BYTES = 20 * 1024 * 1024
 STATES_WITH_IMAGE = ("published", "stale")
 NOTICE_STATES = ("not_generated", "failed")
 
@@ -144,8 +148,10 @@ class PortraitQuerier:
             _logger.warning("stage=portrait_query status=unknown_state state=%s skin=%s",
                             state, base["skin_id"])
             return PortraitQueryResult(status="unavailable", **base)
-        image = self._validated_image(entry)
+        image, image_error = self._validated_image(entry)
         if image is None:
+            if image_error:
+                base["error"] = image_error
             return PortraitQueryResult(status="unavailable", **base)
         source_version = str(entry.get("source_version") or "")
         active_version = str(self._cache_key[0]) if self._cache_key else ""
@@ -161,8 +167,12 @@ class PortraitQuerier:
 
     # ---------- 校验 ----------
 
-    def _validated_image(self, entry: dict) -> Path | None:
-        """路径防逃逸 + 文件存在 + SHA-256 + PNG 签名 + IHDR 尺寸交叉校验。"""
+    def _validated_image(self, entry: dict) -> tuple[Path | None, str]:
+        """路径防逃逸 + 文件存在 + 20MiB 上限 + SHA-256 + PNG 头 + IHDR 尺寸交叉校验。
+
+        返回 (image, "")；任何校验失败返回 (None, 可行动错误原因)。
+        尺寸用 stat 先行，超限即拒，不把大文件读进内存。
+        """
         try:
             relative = Path(str(entry.get("artifact_path") or ""))
             if relative.is_absolute() or ".." in relative.parts or not relative.parts:
@@ -171,6 +181,12 @@ class PortraitQuerier:
             image = (root / relative).resolve()
             if not image.is_relative_to(root) or not image.is_file():
                 raise ValueError("artifact missing or outside portraits directory")
+            size = image.stat().st_size
+            if size > MAX_PORTRAIT_IMAGE_BYTES:
+                raise ValueError(
+                    f"portrait image {size} bytes exceeds QQ image limit"
+                    f" {MAX_PORTRAIT_IMAGE_BYTES} bytes (not sendable)"
+                )
             data = image.read_bytes()
             expected_sha = str(entry.get("artifact_sha256") or "")
             if expected_sha and hashlib.sha256(data).hexdigest() != expected_sha:
@@ -184,8 +200,8 @@ class PortraitQuerier:
         except (OSError, ValueError, TypeError) as error:
             _logger.warning("stage=portrait_query status=invalid_artifact skin=%s reason=%s",
                             entry.get("skin_id"), error)
-            return None
-        return image
+            return None, str(error)
+        return image, ""
 
     @staticmethod
     def _png_size(data: bytes) -> tuple[int | None, int | None]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
+import subprocess
 import zlib
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -236,7 +237,8 @@ class PortraitEnv:
         monkeypatch.setattr(CdnClient, "download_category_catalog", fake_download_category_catalog)
 
     def run(self, version: int, *, basefashion: str = BASE_FASHION,
-            catalog: CatalogIndex = CATALOG, characters=None, failures: set[str] = frozenset()):
+            catalog: CatalogIndex = CATALOG, characters=None, failures: set[str] = frozenset(),
+            render_impl=None):
         self.run_index += 1
         decoded = self.tmp / f"decoded-{self.run_index}"
         decoded.mkdir(parents=True)
@@ -245,6 +247,10 @@ class PortraitEnv:
         staging.mkdir()
         self.monkeypatch.setattr(portrait_update, "read_catalog", lambda _path, _key: catalog)
         _install_runner_fakes(self.monkeypatch, self.calls, failures)
+        if render_impl is not None:
+            self.monkeypatch.setattr(
+                portrait_update.PortraitUpdateRunner, "_run_render_job", render_impl
+            )
         summary = portrait_update.run_portrait_update(
             config=self.config,
             client=self.client,
@@ -586,11 +592,11 @@ def test_event_fields_follow_plan_contract(tmp_path, monkeypatch):
     assert event["version"] == "2"
 
 
-def test_render_request_passes_task2_entry_validation(tmp_path, monkeypatch):
-    """runner 构造的请求必须通过 Task 2 受控入口的真实校验（防契约漂移）。"""
-    import subprocess
-
+def _render_job_runner(tmp_path, **config_overrides):
+    """构造可独立调用 _run_render_job 的 runner/task/workspace（与真实流程同形状）。"""
     config = _config(tmp_path / "data", tmp_path, enabled=True)
+    if config_overrides:
+        config = replace(config, **config_overrides)
     runner = portrait_update.PortraitUpdateRunner(
         config, CdnClient("https://example.com"), tmp_path / "catalogs"
     )
@@ -598,7 +604,7 @@ def test_render_request_passes_task2_entry_validation(tmp_path, monkeypatch):
     runner._lua_store = tmp_path / "lua-store"
     runner._lua_store.mkdir(parents=True)
     (runner._lua_store / "BaseFashion.lua").write_text(BASE_FASHION, encoding="utf-8")
-    runner._load_lua_config()  # 真实流程先装载 Tool 解析器（会把 Tool 根加入 sys.path）
+    runner._load_lua_config()  # 与真实流程一致：先装载 Tool 解析器
 
     base = tmp_path / "skin-work"
     input_root = base / "workspace"
@@ -612,18 +618,67 @@ def test_render_request_passes_task2_entry_validation(tmp_path, monkeypatch):
         skin_id="12001513", character_id="10000151", ordinal=1, name="篝火",
         prefab_name="cardspine_10051_3", bundle_hashes=(), fingerprint="fp", action="render",
     )
+    return runner, base, task
+
+
+def _install_job_popen_fake(monkeypatch, captured: dict, outcome: dict) -> None:
+    """把 _run_render_job 的 subprocess.Popen 换成记录型假实现。"""
+
+    class _FakeProcess:
+        def __init__(self, command, **kwargs):
+            captured["command"] = [str(part) for part in command]
+            captured["popen_kwargs"] = kwargs
+            self.pid = 4321
+            self.returncode = None
+
+        def communicate(self, timeout=None):
+            captured["communicate_timeout"] = timeout
+            if outcome.get("timeout"):
+                raise subprocess.TimeoutExpired(
+                    cmd=captured["command"], timeout=timeout,
+                    output=b"", stderr=outcome.get("stderr", b""),
+                )
+            self.returncode = outcome.get("returncode", 0)
+            return outcome.get("stdout", b""), outcome.get("stderr", b"")
+
+        def wait(self, timeout=None):
+            captured.setdefault("waits", []).append(timeout)
+            return self.returncode
+
+        def kill(self):
+            captured["killed"] = True
+
+    monkeypatch.setattr(portrait_update.subprocess, "Popen", _FakeProcess)
+
+
+def test_render_request_passes_task2_entry_validation(tmp_path, monkeypatch):
+    """runner 构造的请求必须通过 Task 2 受控入口的真实校验（防契约漂移）。"""
+    runner, base, task = _render_job_runner(tmp_path)
 
     validated: dict = {}
 
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         from app.features.preview import portrait_headless
 
         request_path = Path(command[command.index("--request") + 1])
         request = json.loads(request_path.read_text(encoding="utf-8"))
         validated["request"] = portrait_headless.validate_request(request)
-        return subprocess.CompletedProcess(command, returncode=1, stderr=b"renderer missing")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+        class _Proc:
+            returncode = 1
+
+            def communicate(self, timeout=None):
+                return b"", b"renderer missing"
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+            def kill(self):
+                return None
+
+        return _Proc()
+
+    monkeypatch.setattr(portrait_update.subprocess, "Popen", fake_popen)
     with pytest.raises(ValueError, match="未写出结果"):
         runner._run_render_job(task, base)
 
@@ -1341,3 +1396,282 @@ def test_saved_basefashion_write_and_identical_rerun(tmp_path, monkeypatch):
     source.write_text(BASE_FASHION_POS_CHANGED, encoding="utf-8")
     runner._save_basefashion(source, staging_portraits)
     assert saved.read_text(encoding="utf-8") == BASE_FASHION_POS_CHANGED
+
+
+# ---- 渲染入口受控进程（Popen + 进程组收割） -------------------------------------
+
+
+def test_render_job_returns_parsed_result_after_success(tmp_path, monkeypatch):
+    runner, base, task = _render_job_runner(tmp_path)
+    result_path = base / "work" / "result.json"
+    result_path.write_text(json.dumps({"status": "success", "artifact": 1}), encoding="utf-8")
+    captured: dict = {}
+    _install_job_popen_fake(monkeypatch, captured, {"returncode": 0, "stderr": b""})
+
+    result = runner._run_render_job(task, base)
+
+    assert result["status"] == "success"
+    assert captured["communicate_timeout"] == 3600  # 有限超时来自 job_timeout_seconds
+
+
+def test_render_job_reaps_whole_process_group_on_timeout_posix(tmp_path, monkeypatch):
+    """POSIX 超时必须 killpg 整个外层进程组并收割，不能只杀直接子进程。"""
+    runner, base, task = _render_job_runner(tmp_path, portrait_job_timeout_seconds=11)
+    captured: dict = {}
+    _install_job_popen_fake(monkeypatch, captured, {"timeout": True, "stderr": b"stuck halfway"})
+    killpg_calls: list = []
+    monkeypatch.setattr(portrait_update, "_job_start_new_session", lambda: True)
+    monkeypatch.setattr(portrait_update.os, "getpgid", lambda pid: 100 + pid, raising=False)
+    monkeypatch.setattr(
+        portrait_update.os, "killpg",
+        lambda pgid, sig: killpg_calls.append((pgid, sig)), raising=False,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        runner._run_render_job(task, base)
+
+    message = str(excinfo.value)
+    assert "超时" in message and "11" in message and "stuck halfway" in message
+    assert captured["popen_kwargs"]["start_new_session"] is True
+    assert captured["communicate_timeout"] == 11
+    assert killpg_calls == [(100 + 4321, portrait_update._SIGKILL)]
+    assert captured.get("killed") is not True  # POSIX 走 killpg，不直接杀子进程
+    assert captured["waits"]  # 收割，避免僵尸
+
+
+def test_render_job_kills_direct_child_on_timeout_non_posix(tmp_path, monkeypatch):
+    runner, base, task = _render_job_runner(tmp_path, portrait_job_timeout_seconds=7)
+    captured: dict = {}
+    _install_job_popen_fake(monkeypatch, captured, {"timeout": True})
+    killpg_calls: list = []
+    monkeypatch.setattr(portrait_update, "_job_start_new_session", lambda: False)
+    monkeypatch.setattr(
+        portrait_update.os, "killpg", lambda *args: killpg_calls.append(args), raising=False
+    )
+
+    with pytest.raises(ValueError, match="超时"):
+        runner._run_render_job(task, base)
+
+    assert captured["popen_kwargs"]["start_new_session"] is False
+    assert captured.get("killed") is True
+    assert killpg_calls == []
+    assert captured["waits"]
+
+
+# ---- QQ 图片 20MiB 硬限（发布/事件前 stat 检查） ----------------------------------
+
+
+def test_png_size_guard_stats_before_reading(tmp_path, monkeypatch):
+    target = tmp_path / "big.png"
+    target.write_bytes(b"\0" * 1024)
+    monkeypatch.setattr(portrait_update, "MAX_PORTRAIT_IMAGE_BYTES", 64)
+    reads: list = []
+    monkeypatch.setattr(
+        portrait_update.Path, "read_bytes", lambda self: reads.append(self) or b""
+    )
+    with pytest.raises(ValueError) as excinfo:
+        portrait_update._ensure_png_within_limit(target)
+    assert not reads  # stat 先行：超限即拒，不把大文件读进内存
+    assert "64" in str(excinfo.value) and "big.png" in str(excinfo.value)
+    monkeypatch.setattr(portrait_update, "MAX_PORTRAIT_IMAGE_BYTES", 2048)
+    portrait_update._ensure_png_within_limit(target)  # 阈值内不抛
+
+
+def test_oversized_render_fails_set_without_outbox_or_event_and_continues(tmp_path, monkeypatch):
+    """>上限（测试用小阈值）的渲染 PNG：该套 failed 且绝不写 outbox/ready 事件。"""
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    monkeypatch.setattr(portrait_update, "MAX_PORTRAIT_IMAGE_BYTES", 200)
+
+    def oversized_render(_runner, task, workspace):
+        env.calls.setdefault("rendered", []).append(task.skin_id)
+        big = _png_bytes(30 + task.ordinal, 22, seed=task.ordinal) + b"\0" * 400
+        output = Path(workspace) / "output"
+        output.mkdir(parents=True, exist_ok=True)
+        artifact = output / f"{task.character_id}_{task.skin_id}.png"
+        artifact.write_bytes(big)
+        return {
+            "schema_version": 2, "job_id": "job", "status": "success",
+            "artifact_path": str(artifact), "width": 30 + task.ordinal, "height": 22,
+            "sha256": hashlib.sha256(big).hexdigest(),
+        }
+
+    summary, staging = env.run(
+        2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER,
+        render_impl=oversized_render,
+    )
+
+    assert summary.failed == 2 and summary.success == 0
+    skins = _skins_by_id(env.manifest(staging))
+    for skin_id in ("14001520", "14001521"):
+        assert skins[skin_id]["state"] == "failed"
+        assert "200" in skins[skin_id]["error"]  # 可行动：报错含上限与处置方向
+    # 绝不写 outbox / ready 事件 / 版本产物
+    assert not (env.data_dir / "portrait_outbox" / "2").exists()
+    assert env.ready_events(2) == []
+    assert not list((staging / "portraits").rglob("*.png"))
+
+
+def test_emit_pending_event_rejects_oversized_artifact(tmp_path, monkeypatch):
+    """恢复补发事件前同样守 20MiB 上限：超限时抛错，绝不写 outbox/事件。"""
+    config = _config(tmp_path / "data", tmp_path, enabled=True)
+    runner = portrait_update.PortraitUpdateRunner(
+        config, CdnClient("https://example.com"), tmp_path / "catalogs"
+    )
+    runner._version_key = "2"
+    monkeypatch.setattr(portrait_update, "MAX_PORTRAIT_IMAGE_BYTES", 64)
+    staging_portraits = tmp_path / "staging" / "portraits"
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir(parents=True)
+    big = _png_bytes(4, 4) + b"\0" * 256
+    (artifacts_dir / "10000151_12001513.png").write_bytes(big)
+    task = portrait_update._SkinTask(
+        skin_id="12001513", character_id="10000151", ordinal=1, name="篝火",
+        prefab_name="p", bundle_hashes=(), fingerprint="fp", action="emit",
+        work_entry={
+            "skin_id": "12001513", "character_id": "10000151", "ordinal": 1, "name": "篝火",
+            "state": "published", "artifact_path": "10000151/12001513.png",
+            "artifact_sha256": hashlib.sha256(big).hexdigest(), "source_version": 2,
+            "input_fingerprint": "fp", "event_emitted": False, "staged": True,
+        },
+    )
+
+    with pytest.raises(ValueError, match="64"):
+        runner._emit_pending_event(task, staging_portraits, artifacts_dir)
+    assert not (config.data_dir / "update_events.jsonl").exists()
+    assert not (config.data_dir / "portrait_outbox").exists()
+    assert not list(staging_portraits.rglob("*.png"))
+
+
+def test_realistic_portrait_png_size_passes_default_limit(tmp_path, monkeypatch):
+    """真实样本 ~4-5MB 远低于 20MiB 默认上限：正常发布并发事件。"""
+    import os as os_module
+
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+
+    def realistic_render(_runner, task, workspace):
+        env.calls.setdefault("rendered", []).append(task.skin_id)
+        png = _png_bytes(30 + task.ordinal, 22, seed=task.ordinal) + os_module.urandom(5 * 1024 * 1024)
+        output = Path(workspace) / "output"
+        output.mkdir(parents=True, exist_ok=True)
+        artifact = output / f"{task.character_id}_{task.skin_id}.png"
+        artifact.write_bytes(png)
+        return {
+            "schema_version": 2, "job_id": "job", "status": "success",
+            "artifact_path": str(artifact), "width": 30 + task.ordinal, "height": 22,
+            "sha256": hashlib.sha256(png).hexdigest(),
+        }
+
+    summary, staging = env.run(
+        2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER,
+        render_impl=realistic_render,
+    )
+
+    assert summary.success == 2 and summary.failed == 0
+    assert len(env.ready_events(2)) == 2
+    assert len(list((env.data_dir / "portrait_outbox" / "2").glob("*.png"))) == 2
+    skins = _skins_by_id(env.manifest(staging))
+    assert all(skins[sid]["state"] == "published" for sid in ("14001520", "14001521"))
+
+
+# ---- 新渲染事件顺序：work manifest 先于 portrait_ready -----------------------------
+
+
+def test_render_persists_work_manifest_before_ready_event(tmp_path, monkeypatch):
+    """顺序锁定：persist(event_emitted=False) → append portrait_ready → persist(True)。"""
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    real_persist = runner_cls._persist_work_manifest
+    real_append = runner_cls._append_ready_event
+    log: list = []
+
+    def spy_persist(self, path, version_key, entries):
+        log.append(("persist", tuple((e["skin_id"], bool(e.get("event_emitted"))) for e in entries)))
+        return real_persist(self, path, version_key, entries)
+
+    def spy_append(self, entry):
+        log.append(("event", entry["skin_id"]))
+        return real_append(self, entry)
+
+    monkeypatch.setattr(runner_cls, "_persist_work_manifest", spy_persist)
+    monkeypatch.setattr(runner_cls, "_append_ready_event", spy_append)
+    env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+
+    for skin_id in ("14001520", "14001521"):
+        event_index = next(i for i, item in enumerate(log) if item == ("event", skin_id))
+        assert any(
+            item[0] == "persist" and (skin_id, False) in item[1] for item in log[:event_index]
+        ), f"{skin_id}: work manifest 必须先于事件持久化(event_emitted=False)"
+        assert any(
+            item[0] == "persist" and (skin_id, True) in item[1] for item in log[event_index + 1:]
+        ), f"{skin_id}: 事件后必须持久化 event_emitted=True"
+
+
+def test_crash_before_ready_event_resumes_emit_without_rerender(tmp_path, monkeypatch):
+    """事件 append 前崩溃：work manifest 已是 published+event_emitted=False，
+    恢复直接 emit 补发事件，绝不重渲崩溃的那套。"""
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    real_append = runner_cls._append_ready_event
+    state = {"crash": True}
+
+    def crashing_append(self, entry):
+        if state["crash"]:
+            raise RuntimeError("模拟崩溃：事件 append 之前")
+        return real_append(self, entry)
+
+    monkeypatch.setattr(runner_cls, "_append_ready_event", crashing_append)
+    with pytest.raises(RuntimeError, match="模拟崩溃"):
+        env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+    # 崩溃后：产物与 outbox 已写、work manifest 已持久化(event_emitted=False)、事件未写
+    assert env.ready_events(2) == []
+    assert len(list((env.data_dir / "portrait_outbox" / "2").glob("*.png"))) == 1
+
+    state["crash"] = False
+    env.calls["rendered"] = []
+    summary, staging = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+
+    assert env.calls["rendered"] == ["14001521"]  # 14001520 只补发事件，不重渲
+    assert summary.success == 2 and summary.failed == 0
+    ready = env.ready_events(2)
+    assert sorted(e["skin_id"] for e in ready) == ["14001520", "14001521"]
+    assert len([e for e in ready if e["skin_id"] == "14001520"]) == 1  # 恰好一次事件
+    skins = _skins_by_id(env.manifest(staging))
+    assert skins["14001520"]["state"] == "published"
+    assert skins["14001521"]["state"] == "published"
+
+
+def test_crash_after_ready_event_resumes_without_rerender(tmp_path, monkeypatch):
+    """事件 append 之后、flag 持久化之前崩溃：恢复补发一次事件（重复事件由
+    Bot 幂等键去重），但绝不重渲。"""
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    real_persist = runner_cls._persist_work_manifest
+    state = {"crash": True}
+
+    def crashing_persist(self, path, version_key, entries):
+        if state["crash"] and any(e.get("event_emitted") for e in entries):
+            raise RuntimeError("模拟崩溃：事件之后、flag 持久化之前")
+        return real_persist(self, path, version_key, entries)
+
+    monkeypatch.setattr(runner_cls, "_persist_work_manifest", crashing_persist)
+    with pytest.raises(RuntimeError, match="模拟崩溃"):
+        env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+    # 事件已 append，但 work manifest 仍记 event_emitted=False
+    assert [e["skin_id"] for e in env.ready_events(2)] == ["14001520"]
+
+    state["crash"] = False
+    env.calls["rendered"] = []
+    summary, staging = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+
+    assert env.calls["rendered"] == ["14001521"]  # 14001520 只补发事件，不重渲
+    assert summary.success == 2 and summary.failed == 0
+    skins = _skins_by_id(env.manifest(staging))
+    assert skins["14001520"]["state"] == "published"
+    assert skins["14001521"]["state"] == "published"
+    # 恢复补发造成一次重复事件；送达侧由 Bot 幂等键去重
+    assert len([e for e in env.ready_events(2) if e["skin_id"] == "14001520"]) == 2

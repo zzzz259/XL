@@ -77,6 +77,8 @@ def systemd_scope_command(command, unit, limits, *, user=False, setenv=()):
         '-p', f'MemoryHigh={limits.memory_high_bytes}',
         '-p', 'MemorySwapMax=0',
         '-p', f'CPUAffinity={affinity}',
+        # 兜底：即使内层 Python 已被杀掉，原生单元自身也必须在渲染超时后不久终止。
+        '-p', f'RuntimeMaxSec={int(limits.timeout_seconds) + 60}',
         '-p', 'LimitCORE=0',
         '-p', 'NoNewPrivileges=yes',
         '--',
