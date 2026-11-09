@@ -78,6 +78,16 @@ class PortraitHeadlessTest(unittest.TestCase):
         request = api.validate_request(dict(self.request, png_working_rows=0))
         self.assertEqual(request['png_working_rows'], 0)
 
+    def test_explicit_native_library_path_precedes_release_defaults(self):
+        api = self.api()
+        release = self.root / 'release'
+        native = release / 'runtimes' / 'linux-x64' / 'native'
+        native.mkdir(parents=True)
+        entries = api._native_library_entries(release, '/opt/al8/native:/opt/other')
+        self.assertEqual(entries[0], '/opt/al8/native')
+        self.assertIn(str(native), entries)
+        self.assertIn(str(release), entries)
+
     def test_roots_must_not_overlap_each_other(self):
         api = self.api()
         nested = self.root / 'workspace/inner'

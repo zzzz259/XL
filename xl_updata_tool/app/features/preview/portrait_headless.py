@@ -334,6 +334,15 @@ def validate_png(path, job, completion):
             'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()}
 
 
+def _native_library_entries(cli_dir, current):
+    entries = [entry for entry in current.split(':') if entry]
+    native_dir = cli_dir / 'runtimes' / 'linux-x64' / 'native'
+    if native_dir.is_dir():
+        entries.append(str(native_dir))
+    entries.append(str(cli_dir))
+    return list(dict.fromkeys(entries))
+
+
 def _native_env(request):
     env = dict(os.environ)
     for key in ('DOTNET_ADDITIONAL_DEPS', 'DOTNET_SHARED_STORE',
@@ -346,15 +355,8 @@ def _native_env(request):
                DOTNET_CLI_TELEMETRY_OPTOUT='1', DOTNET_SYSTEM_GLOBALIZATION_INVARIANT='1')
     if os.name == 'posix':
         env.update(LIBGL_ALWAYS_SOFTWARE='1', GALLIUM_DRIVER='llvmpipe', LP_NUM_THREADS='1')
-        entries = []
-        native_dir = cli_dir / 'runtimes' / 'linux-x64' / 'native'
-        if native_dir.is_dir():
-            entries.append(str(native_dir))
-        entries.append(str(cli_dir))
-        for entry in env.get('LD_LIBRARY_PATH', '').split(':'):
-            if entry and entry not in entries:
-                entries.append(entry)
-        env['LD_LIBRARY_PATH'] = ':'.join(entries)
+        env['LD_LIBRARY_PATH'] = ':'.join(_native_library_entries(
+            cli_dir, env.get('LD_LIBRARY_PATH', '')))
     return env
 
 
