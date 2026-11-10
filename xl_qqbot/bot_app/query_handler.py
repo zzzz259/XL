@@ -291,7 +291,7 @@ class QueryHandler:
 
     async def _send_portrait(self, group_openid: str, match, ordinal: int,
                              reply_to: str = "") -> None:
-        """按当前版本 manifest 发立绘；未生成/失败只提示，不触发渲染。"""
+        """按当前版本 manifest 发立绘；未生成/失败/不适用只提示，不触发渲染。"""
         result = self._portrait_querier.find(match.character_id, ordinal)
         if result.status == "found":
             content = ""
@@ -324,6 +324,10 @@ class QueryHandler:
         elif result.status == "not_generated":
             await self._sender.send_text(
                 group_openid, f"《{match.name}》的第 {ordinal} 套立绘尚未生成，请稍后再试", reply_to
+            )
+        elif result.status == "not_applicable":
+            await self._sender.send_text(
+                group_openid, f"《{match.name}》的第 {ordinal} 套立绘当前版本不适用", reply_to
             )
         elif result.status == "failed":
             await self._sender.send_text(

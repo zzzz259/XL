@@ -33,7 +33,11 @@ from .rerun_schedule import (
     publish_schedule_snapshot,
     render_schedule_png,
 )
-from .selector import bundle_hashes_for_assets, select_lua_assets
+from .selector import (
+    bundle_hashes_for_assets,
+    select_lua_assets,
+    select_portrait_callback_lua_assets,
+)
 from .versioning import read_current_pointer
 
 LOGGER = logging.getLogger(__name__)
@@ -441,6 +445,8 @@ class ProductionUpdateProcessor:
         catalog = read_catalog(local_catalog, self.config.assetbundle_key)
 
         data_assets = select_lua_assets(catalog)
+        if self.config.portrait_enabled:
+            data_assets += select_portrait_callback_lua_assets(catalog)
         lua_hashes = bundle_hashes_for_assets(catalog, data_assets)
         if not lua_hashes:
             raise ValueError("未找到角色 Lua Bundle")

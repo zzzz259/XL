@@ -3,8 +3,23 @@ from server_app.selector import (
     LUA_NAMES,
     bundle_hashes_for_assets,
     select_lua_assets,
+    select_portrait_callback_lua_assets,
     select_portrait_prefab_assets,
 )
+
+
+def test_portrait_callback_scripts_are_selected_separately_from_card_lua():
+    names = tuple(
+        f"touch_cardspine_{name}_3.lua.bytes"
+        for name in ("10016", "10098", "10102", "10103", "10111", "10119", "10120")
+    )
+    index = CatalogIndex(
+        bundles=(BundleRef("callbacks.bundle", "callbacks", 100, ()),),
+        assets=tuple(AssetRef(name, 0, "Assets/Lua") for name in names)
+        + (AssetRef("touch_other.lua.bytes", 0, "Assets/Lua"),),
+    )
+    assert tuple(asset.name for asset in select_portrait_callback_lua_assets(index)) == names
+    assert select_lua_assets(index) == ()
 
 
 def test_lua_whitelist_has_gacha_tables_and_no_handbook():

@@ -238,11 +238,13 @@ class PortraitEnv:
 
     def run(self, version: int, *, basefashion: str = BASE_FASHION,
             catalog: CatalogIndex = CATALOG, characters=None, failures: set[str] = frozenset(),
-            render_impl=None):
+            render_impl=None, callback_lua=None):
         self.run_index += 1
         decoded = self.tmp / f"decoded-{self.run_index}"
         decoded.mkdir(parents=True)
         (decoded / "BaseFashion.lua").write_text(basefashion, encoding="utf-8")
+        for name, content in (callback_lua or {}).items():
+            (decoded / name).write_text(content, encoding="utf-8")
         staging = self.tmp / f"staging-{self.run_index}"
         staging.mkdir()
         self.monkeypatch.setattr(portrait_update, "read_catalog", lambda _path, _key: catalog)
@@ -1396,6 +1398,57 @@ def test_saved_basefashion_write_and_identical_rerun(tmp_path, monkeypatch):
     source.write_text(BASE_FASHION_POS_CHANGED, encoding="utf-8")
     runner._save_basefashion(source, staging_portraits)
     assert saved.read_text(encoding="utf-8") == BASE_FASHION_POS_CHANGED
+
+
+def test_callback_lua_is_saved_with_version(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    content = 'return { OnClick = function() end }\n'
+    _, staging = env.run(1, callback_lua={"touch_cardspine_10016_3.lua": content})
+    assert (staging / "portraits" / "touch_cardspine_10016_3.lua").read_text(
+        encoding="utf-8") == content
+
+
+def test_missing_character_and_prefab_is_not_applicable(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    basefashion = '''return {
+      [12020001] = { id = 12020001, show_spine = "cardspine_10099_5" },
+    }
+    '''
+    summary, staging = env.run(1, basefashion=basefashion,
+        catalog=CatalogIndex(bundles=(), assets=()), characters={})
+    assert summary.success == 0 and summary.failed == 0 and summary.skipped == 1
+    assert env.calls["rendered"] == []
+    entry = env.manifest(staging)["skins"][0]
+    assert entry["state"] == "not_applicable"
+    assert entry["artifact_path"] is None
+
+
+def test_not_applicable_render_diagnostic_is_not_failed(tmp_path):
+    config = _config(tmp_path / "data", tmp_path, enabled=True)
+    runner = portrait_update.PortraitUpdateRunner(config, None, tmp_path / "catalogs")
+    runner._previous_version = None
+    task = portrait_update._SkinTask("12001991", "10000199", 1, "雪拉",
+        "cardspine_10099_1", (), "fp", "render")
+    entry = runner._failed_entry(task,
+        "ValueError: full scene cannot be exported: not_applicable: ",
+        tmp_path / "staging", tmp_path / "artifacts")
+    assert entry["state"] == "not_applicable"
+    assert entry["error"] == "当前版本不适用"
+    assert entry["artifact_path"] is None
+
+
+def test_not_applicable_summary_counts_as_skipped(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+
+    def not_applicable_result(_runner, _task, _workspace):
+        return {"status": "error", "diagnostics": [
+            "full scene cannot be exported: not_applicable: "]}
+
+    summary, staging = env.run(2, basefashion=BASE_FASHION_POS_CHANGED,
+        render_impl=not_applicable_result)
+    assert summary.success == 0 and summary.failed == 0 and summary.skipped == 3
+    assert _skins_by_id(env.manifest(staging))["12001514"]["state"] == "not_applicable"
 
 
 # ---- 渲染入口受控进程（Popen + 进程组收割） -------------------------------------

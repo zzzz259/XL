@@ -31,6 +31,20 @@ def select_lua_assets(index: CatalogIndex) -> tuple[AssetRef, ...]:
     )
 
 
+PORTRAIT_CALLBACK_LUA_NAMES = frozenset(
+    f"touch_cardspine_{name}_3.lua.bytes"
+    for name in ("10016", "10098", "10102", "10103", "10111", "10119", "10120")
+)
+
+
+def select_portrait_callback_lua_assets(index: CatalogIndex) -> tuple[AssetRef, ...]:
+    return tuple(
+        asset
+        for asset in index.assets
+        if asset.name.lower() in PORTRAIT_CALLBACK_LUA_NAMES and asset.bundle_index >= 0
+    )
+
+
 def _prefab_stem(value: str) -> str:
     stem = str(value).replace("\\", "/").rsplit("/", 1)[-1].strip().casefold()
     return stem[: -len(".prefab")] if stem.endswith(".prefab") else stem

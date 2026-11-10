@@ -228,6 +228,17 @@ async def test_query_digit_not_generated_only_notice(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_query_digit_not_applicable_only_notice(tmp_path):
+    SKINS[1]["state"] = "not_applicable"
+    try:
+        handler, sender, _ = make_handler(tmp_path)
+        await handler._answer_query("g1", "菲尼斯2", "u1")
+        assert sender.calls == [("text", "g1", "《菲尼斯》的第 2 套立绘当前版本不适用")]
+    finally:
+        SKINS[1]["state"] = "not_generated"
+
+
+@pytest.mark.asyncio
 async def test_query_digit_out_of_range_shows_available(tmp_path):
     handler, sender, _ = make_handler(tmp_path)
     await handler._answer_query("g1", "菲尼斯5", "u1")

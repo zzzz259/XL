@@ -37,6 +37,11 @@ def test_is_lua_asset_name_accepts_unity_object_name_without_payload_suffix():
     assert is_lua_asset_name("BaseMonsterPart1120.lua") is False
 
 
+def test_portrait_callback_lua_is_extracted():
+    assert is_lua_asset_name("touch_cardspine_10016_3.lua.bytes") is True
+    assert is_lua_asset_name("touch_other.lua.bytes") is False
+
+
 def test_script_bytes_preserves_surrogateescaped_binary_content():
     class Asset:
         m_Script = "Lua\udc93"

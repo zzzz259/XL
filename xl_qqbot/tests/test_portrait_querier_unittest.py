@@ -138,6 +138,16 @@ def test_failed_only_notice(tmp_path):
     assert result.error == "render boom"
 
 
+def test_not_applicable_only_notice(tmp_path):
+    querier = make_querier(tmp_path)
+    _patch_manifest(tmp_path, lambda payload: payload["skins"][2].update(
+        state="not_applicable", error="当前版本不适用"))
+    result = querier.find("10000224", 3)
+    assert result.status == "not_applicable"
+    assert result.image_path is None
+    assert result.error == "当前版本不适用"
+
+
 def test_stale_returns_old_image(tmp_path):
     querier = make_querier(tmp_path)
     result = querier.find("10000224", 4)

@@ -113,7 +113,7 @@ class _SkinTask:
     prefab_name: str
     bundle_hashes: tuple[str, ...]
     fingerprint: str
-    action: str  # render | inherit | skip
+    action: str  # render | inherit | skip | not_applicable | done | emit
     previous: dict | None = None
     work_entry: dict | None = field(default=None, repr=False)
 
@@ -258,10 +258,13 @@ class PortraitUpdateRunner:
         basefashion = self._resolve_decoded_file(Path(decoded_lua), "basefashion.lua")
         if basefashion is None:
             raise PortraitUpdateError(f"decoded Lua 缺少 BaseFashion.lua: {decoded_lua}")
+        callback_lua = tuple(sorted(Path(decoded_lua).glob("touch_cardspine_*.lua")))
         lua_config = self._load_lua_config()
         lua_store = work_dir / "lua" / version_key
         lua_store.mkdir(parents=True, exist_ok=True)
         shutil.copy2(basefashion, lua_store / "BaseFashion.lua")
+        for callback in callback_lua:
+            shutil.copy2(callback, lua_store / callback.name)
         self._lua_store = lua_store
         # 有效配置皮肤 = 配置了 show_spine 的展示皮肤；战斗小人等无 show_spine 条目排除。
         roots = [
@@ -284,6 +287,8 @@ class PortraitUpdateRunner:
 
         staging_portraits = Path(staging) / "portraits"
         self._save_basefashion(basefashion, staging_portraits)
+        for callback in callback_lua:
+            _copy_atomic(callback, staging_portraits / callback.name)
         manifest_entries: list[dict] = []
         counts = {"success": 0, "failed": 0, "skipped": 0}
         for task in tasks:  # 保持 roots 的配置处理顺序，不按 ordinal 全局重排
@@ -303,17 +308,25 @@ class PortraitUpdateRunner:
                 elif task.action == "emit":
                     entry = self._emit_pending_event(task, staging_portraits, artifacts_dir)
                     counts["success"] += 1
-                else:  # skip
+                else:  # skip / not_applicable
                     entry = self._skipped_entry(task)
                     counts["skipped"] += 1
             except Exception as error:  # 单套失败不拖垮角色主流程
-                LOGGER.exception(
-                    "stage=portrait_render version=%s skin=%s status=failed",
-                    version_key,
-                    task.skin_id,
-                )
                 entry = self._failed_entry(task, f"{type(error).__name__}: {error}", staging_portraits, artifacts_dir)
-                counts["failed"] += 1
+                if entry.get("state") == "not_applicable":
+                    counts["skipped"] += 1
+                    LOGGER.info(
+                        "stage=portrait_render version=%s skin=%s status=not_applicable",
+                        version_key,
+                        task.skin_id,
+                    )
+                else:
+                    counts["failed"] += 1
+                    LOGGER.exception(
+                        "stage=portrait_render version=%s skin=%s status=failed",
+                        version_key,
+                        task.skin_id,
+                    )
             manifest_entries.append(entry)
             # 逐套持久化只写 work manifest；staging/已发布 manifest 在整轮结束后
             # 一次性写，恢复中任何中断都不截断当前已发布 manifest。
@@ -478,7 +491,9 @@ class PortraitUpdateRunner:
                 {"v": 1, "config": config_fp, "resources": sorted(bundle_hashes)}
             )
             prev = prev_skins.get(str(root.skin_id))
-            if previous is None:
+            if character is None and not matches:
+                action = "not_applicable"
+            elif previous is None:
                 # 首次无基线：只记录当前指纹，不自动渲染历史
                 action = "skip"
             elif prev is None or prev.get("input_fingerprint") != fingerprint:
@@ -964,7 +979,11 @@ class PortraitUpdateRunner:
 
     def _skipped_entry(self, task: _SkinTask) -> dict:
         entry = self._base_entry(task)
-        entry["state"] = "not_generated"
+        if task.action == "not_applicable":
+            entry["state"] = "not_applicable"
+            entry["error"] = "当前版本没有角色数据或对应 Prefab 资源"
+        else:
+            entry["state"] = "not_generated"
         return entry
 
     def _failed_entry(self, task: _SkinTask, message: str,
@@ -976,6 +995,10 @@ class PortraitUpdateRunner:
             else None
         )
         entry = self._base_entry(task)
+        if "full scene cannot be exported: not_applicable" in str(message):
+            entry["state"] = "not_applicable"
+            entry["error"] = "当前版本不适用"
+            return entry
         entry["error"] = str(message)[:300]
         if source is not None:
             # 旧图保留并标旧：输入已变化或本轮渲染失败，均随版本发布旧产物

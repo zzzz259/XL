@@ -6,7 +6,7 @@
 状态语义（与 server portrait manifest schema 1 对应）：
 - published：正常发图；source_version 与当前版本不一致时按旧图提示；
 - stale：随版本发布的旧图，可发但必须提示来源旧版本/本轮未更新；
-- not_generated / failed：只提示，不触发渲染，不做历史回填；
+- not_generated / failed / not_applicable：只提示，不触发渲染，不做历史回填；
 - 越界 ordinal：返回该角色可用序号范围。
 """
 
@@ -25,12 +25,12 @@ MANIFEST_SCHEMA_VERSION = 1
 # QQ 图片硬限（20MiB）：超限立绘绝不交给 Gateway，直接按 unavailable 处理。
 MAX_PORTRAIT_IMAGE_BYTES = 20 * 1024 * 1024
 STATES_WITH_IMAGE = ("published", "stale")
-NOTICE_STATES = ("not_generated", "failed")
+NOTICE_STATES = ("not_generated", "failed", "not_applicable")
 
 
 @dataclass(frozen=True)
 class PortraitQueryResult:
-    status: str  # "found" | "not_generated" | "failed" | "out_of_range" | "not_found" | "unavailable"
+    status: str  # "found" | "not_generated" | "failed" | "not_applicable" | "out_of_range" | "not_found" | "unavailable"
     character_id: str = ""
     skin_id: str = ""
     name: str = ""  # 皮肤名（manifest entry 的 name）
