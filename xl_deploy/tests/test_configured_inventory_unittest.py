@@ -524,5 +524,60 @@ class ConfiguredInventoryTests(unittest.TestCase):
                     self.assertEqual(router.events, [])
                     self.root = previous
 
+    def test_remote_instance_keeps_routes_without_granting_local_unit_access(self):
+        values = mapping()
+        values['instances'][1]['managed'] = False
+        inv = self.inventory(values)
+
+        self.assertEqual(inv.group_routes, {'g-a': 'test-a', 'g-b': 'test-b'})
+        self.assertEqual(inv.allowed_units, frozenset({'xl-gateway.service', 'xl-test-a.service'}))
+        self.assertEqual(inv.units_for_ref('test'), ('xl-test-a.service',))
+        plan = plan_deployment('test', SHA, ['xl_qqbot/bot_app/service.py'], inventory=inv)
+        self.assertEqual(plan.impacted_units, ('xl-test-a.service',))
+        gateway_plan = plan_deployment('main', SHA, ['xl_qqbot/bot_app/gateway.py'], inventory=inv)
+        self.assertEqual(gateway_plan.impacted_units, ('xl-gateway.service',))
+        self.assertEqual(gateway_plan.impacted_tiers, ('test-a', 'test-b'))
+
+    def test_remote_instance_config_is_not_read_and_its_units_cannot_be_forced_in(self):
+        values = mapping()
+        values['instances'][1]['managed'] = False
+        inv = self.inventory(values)
+        inv.instances[1].config_path.unlink()
+        inv.validate_runtime_configs()
+        tx, runner, router = self.transaction(inv)
+        forged = SimpleNamespace(
+            branch='test', sha=SHA, changed_paths=('xl_qqbot/bot_app/service.py',),
+            impacted_units=('xl-test-a.service', 'xl-test-b.service'),
+            impacted_tiers=('test-a', 'test-b'), announcement_scope=('test-a', 'test-b'),
+        )
+        with self.assertRaises(ValueError):
+            tx.execute(forged)
+        self.assertEqual(runner.events, [])
+        self.assertEqual(router.events, [])
+        with self.assertRaises(ValueError):
+            CommandRunner(inventory=inv).health_check(('xl-test-b.service',))
+
+    def test_remote_gateway_needs_no_local_secret_config_and_cannot_be_restarted(self):
+        values = mapping()
+        values['gateway']['managed'] = False
+        inv = self.inventory(values)
+        inv.gateway.config_path.unlink()
+        inv.validate_runtime_configs()
+        self.assertNotIn('xl-gateway.service', inv.allowed_units)
+        self.assertEqual(inv.units_for_ref('main'), ())
+        plan = plan_deployment('main', SHA, ['xl_qqbot/bot_app/gateway.py'], inventory=inv)
+        self.assertEqual(plan.impacted_units, ())
+        with self.assertRaises(ValueError):
+            CommandRunner(inventory=inv).stop(('xl-gateway.service',))
+
+    def test_managed_flags_must_be_boolean(self):
+        for owner in ('instance', 'gateway'):
+            with self.subTest(owner=owner):
+                values = mapping()
+                target = values['instances'][0] if owner == 'instance' else values['gateway']
+                target['managed'] = 'false'
+                with self.assertRaisesRegex(ValueError, 'managed'):
+                    config.DeploymentInventory.from_mapping(values, base_dir=self.root)
+
 
 if __name__ == '__main__': unittest.main()

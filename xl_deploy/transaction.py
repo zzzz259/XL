@@ -164,7 +164,7 @@ class DeploymentTransaction:
                 self.runner.preflight(plan, candidate, self.paths.config_path, self.paths.data_path)
             else:
                 selected = [i for i in self.inventory.instances
-                            if i.enabled and any(u in units for u in i.units.values())]
+                            if i.enabled and i.managed and any(u in units for u in i.units.values())]
                 for instance in selected:
                     for data in instance.data_roots:
                         self.runner.preflight(plan, candidate, instance.config_path, data)

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from xl_deploy.poller import BranchPoller, PollCursorStore
+from xl_deploy.poller import BranchPoller, PollCursorStore, PollResult
 from xl_deploy.runner import CommandRunner
 
 OLD_SHA = "1" * 40
@@ -320,3 +320,24 @@ def test_active_remote_tip_does_not_advance_cursor_until_exact_sha_ci_succeeds(t
     assert github.ci_calls == [("debug", NEW_SHA)]
     assert runner.diff_calls == []
     assert store.get_cursor("debug") == OLD_SHA
+
+
+def test_poll_all_defaults_to_all_branches_and_supports_an_explicit_subset(tmp_path):
+    poller = BranchPoller(None, None, None, PollCursorStore(tmp_path / "state.json"))
+    calls = []
+    poller.poll_branch = lambda branch: calls.append(branch) or PollResult(branch, "up_to_date")
+    assert tuple(result.branch for result in poller.poll_all()) == ("debug", "test", "main")
+
+    subset = BranchPoller(
+        None, None, None, PollCursorStore(tmp_path / "subset.json"), branches=("debug", "main"),
+    )
+    calls.clear()
+    subset.poll_branch = lambda branch: calls.append(branch) or PollResult(branch, "up_to_date")
+    assert tuple(result.branch for result in subset.poll_all()) == ("debug", "main")
+    assert calls == ["debug", "main"]
+
+
+@pytest.mark.parametrize("branches", [(), ("test", "test"), ("unknown",), "test"])
+def test_poller_rejects_invalid_branch_subsets(tmp_path, branches):
+    with pytest.raises(ValueError, match="branch"):
+        BranchPoller(None, None, None, PollCursorStore(tmp_path / "state.json"), branches=branches)

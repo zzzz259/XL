@@ -15,7 +15,7 @@ import tomllib
 
 from xl_deploy.config import DeploymentInventory, GitHubConfig
 from xl_deploy.github import GitHubClient
-from xl_deploy.poller import BranchPoller, PollCursorStore
+from xl_deploy.poller import BranchPoller, PollCursorStore, branch_subset
 from xl_deploy.release_storage import ReleaseStorage
 from xl_deploy.router_client import RouterControlClient, validate_loopback_url
 from xl_deploy.runner import ALLOWED_UNITS, CommandRunner
@@ -41,6 +41,7 @@ class PollerRuntimeConfig:
     router_base_url: str
     router_token_file: Path
     inventory: DeploymentInventory | None = None
+    branches: tuple[str, ...] = ("debug", "test", "main")
 
 
 def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
@@ -69,6 +70,7 @@ def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
             router_token_file=_path(config_file, router["token_file"]),
             inventory=(DeploymentInventory.from_mapping(values["inventory"], base_dir=config_file.parent)
                        if "inventory" in values else None),
+            branches=branch_subset(deployment.get("branches", ["debug", "test", "main"])),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("deployment configuration is incomplete or invalid") from exc
@@ -155,6 +157,7 @@ def build_poller(config_path: str | Path) -> BranchPoller:
         transaction_for,
         PollCursorStore(runtime.state_dir / "poll-cursors.json"),
         inventory=runtime.inventory,
+        branches=runtime.branches,
     )
 
 
@@ -211,7 +214,7 @@ def render_inventory_dry_run(inventory: DeploymentInventory) -> str:
     lines.append(
         f"gateway unit={inventory.gateway.unit} watch_ref={inventory.gateway.watch_ref} "
         f"port={inventory.gateway.listen_port} groups={len(inventory.group_routes)} "
-        f"data_roots={len(inventory.gateway.data_roots)}"
+        f"data_roots={len(inventory.gateway.data_roots)} managed={str(inventory.gateway.managed).lower()}"
     )
     for instance in inventory.instances:
         if not instance.enabled:
@@ -222,7 +225,7 @@ def render_inventory_dry_run(inventory: DeploymentInventory) -> str:
         lines.append(
             f"instance_id={instance.instance_id} watch_ref={instance.watch_ref} "
             f"units={units} ports={ports} groups={len(instance.groups)} "
-            f"data_roots={len(instance.data_roots)}"
+            f"data_roots={len(instance.data_roots)} managed={str(instance.managed).lower()}"
         )
     lines.append("No service, pointer, external config, or data was changed.")
     return "\n".join(lines)

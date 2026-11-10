@@ -33,6 +33,25 @@ def test_runtime_config_resolves_all_paths_relative_to_config_file(tmp_path):
     assert config.test_backend_config == (tmp_path / "test" / "backend.toml").resolve()
     assert config.test_backend_data == (tmp_path / "test" / "data").resolve()
     assert config.router_base_url == "http://127.0.0.1:8784"
+    assert config.branches == ("debug", "test", "main")
+
+
+def test_runtime_config_loads_explicit_branch_subset(tmp_path):
+    path = write_config(tmp_path)
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        '[deployment]\n', '[deployment]\nbranches=["test"]\n',
+    ), encoding="utf-8")
+    assert load_runtime_config(path).branches == ("test",)
+
+
+@pytest.mark.parametrize("branches", ['[]', '["test", "test"]', '["unknown"]', '"test"'])
+def test_runtime_config_rejects_invalid_branch_subsets(tmp_path, branches):
+    path = write_config(tmp_path)
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        '[deployment]\n', f'[deployment]\nbranches={branches}\n',
+    ), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="incomplete or invalid"):
+        load_runtime_config(path)
 
 
 def test_cleanup_cli_defaults_dry_run_without_github_or_router_secrets(tmp_path, monkeypatch, capsys):
