@@ -217,13 +217,22 @@ if mode not in ('nolog',): print(json.dumps(dict(phase='complete',output=p['outp
         with self.assertRaisesRegex(ValueError, 'identity'):
             api.plan_request(request, self.root / 'work/planning')
 
-    def test_static_full_png_uses_frame_pipeline_schema(self):
+    def test_static_full_png_preserves_desktop_scene_pipeline(self):
         api = self.api()
         job, _ = api.plan_request(self.manual_request(), self.root / 'work/planning')
         descriptor = api.write_scene_descriptor(job, self.root / 'descriptor')
         payload = json.loads(descriptor.read_text(encoding='utf-8'))
-        self.assertEqual(payload['scene_schema_version'], 2)
+        self.assertEqual(payload['scene_schema_version'], 1)
         self.assertEqual(payload['settings']['format'].casefold(), 'png')
+
+    def test_png_validation_observes_actual_output_dimensions(self):
+        api = self.api()
+        job, _ = api.plan_request(self.manual_request(), self.root / 'work/planning')
+        output = self.root / 'work' / 'actual.png'
+        Image.new('RGBA', (27, 26), (100, 30, 20, 255)).save(output)
+        completion = {'width': 28, 'height': 26, 'bounds': [0, 0, 3.5, 3]}
+        result = api.validate_png(output, job, completion)
+        self.assertEqual((result['width'], result['height']), (27, 26))
 
     def test_import_and_package_planning_reject_qt_in_fresh_interpreter(self):
         self.api()

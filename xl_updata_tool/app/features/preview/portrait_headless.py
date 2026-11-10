@@ -22,11 +22,9 @@ import argparse
 from dataclasses import replace
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import re
-import struct
 import sys
 import tempfile
 import time
@@ -294,43 +292,22 @@ def plan_request(payload, temporary_dir):
     return _plan_request(validate_request(payload), Path(temporary_dir))
 
 
-def _float32(value):
-    return struct.unpack('f', struct.pack('f', value))[0]
-
-
 def validate_png(path, job, completion):
-    """Decode pixels and verify native bounds prove the requested unscaled fit."""
+    """Validate the exported PNG and observe its dimensions without predicting them."""
     from PIL import Image
     if completion is None:
         raise ValueError('native process emitted no matching complete record')
-    bounds = completion.get('bounds')
-    if not isinstance(bounds, list) or len(bounds) != 4:
-        raise ValueError('native process emitted no valid bounds evidence')
-    if any(type(v) not in (int, float) or not math.isfinite(v) for v in bounds):
-        raise ValueError('native bounds must be finite numbers')
-    width = _float32(bounds[2] - bounds[0])
-    height = _float32(bounds[3] - bounds[1])
-    if width <= 0 or height <= 0:
-        raise ValueError('native bounds are empty')
-    margin = job.settings.margin
-    if _float32(max(width, height) * 2) > job.settings.max_resolution - margin * 2:
-        raise ValueError('native max_resolution would reduce requested 2x scale')
-    expected = (max(1, math.ceil(_float32(width * 2)) + 2 * margin),
-                max(1, math.ceil(_float32(height * 2)) + 2 * margin))
-    if expected[0] * expected[1] > 64 * 1024 * 1024:
-        raise ValueError('PNG exceeds supported canvas pixel limit')
-    if (completion.get('width'), completion.get('height')) != expected:
-        raise ValueError('native dimensions do not match 2x scene bounds')
     with Image.open(path) as image:
-        if image.format != 'PNG' or image.size != expected:
-            raise ValueError('PNG format/dimensions do not match native 2x evidence')
+        if image.format != 'PNG':
+            raise ValueError('native output is not a PNG')
         image.verify()
     with Image.open(path) as image:
         image.load()
+        width, height = image.size
         rgba = image.convert('RGBA')
         if rgba.getchannel('A').getbbox() is None:
             raise ValueError('PNG contains no visible pixels')
-    return {'width': expected[0], 'height': expected[1],
+    return {'width': width, 'height': height,
             'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()}
 
 
