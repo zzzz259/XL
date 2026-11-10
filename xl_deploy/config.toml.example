@@ -7,6 +7,9 @@ repo = "YOUR_REPOSITORY"
 
 [deployment]
 root = "/home/admin/xl_deploy"
+# Default: ["debug", "test", "main"]. Each host must explicitly select only
+# the branches whose local releases and units it owns.
+branches = ["debug", "test", "main"]
 # Set to an operator-verified local Git checkout; do not assume an old service tree.
 repository = "/home/admin/REPLACE_WITH_REVIEWED_REPOSITORY_CHECKOUT"
 state_dir = "/home/admin/xl_deploy/state"
@@ -29,7 +32,12 @@ base_url = "http://127.0.0.1:8784"
 # Create separately, enter the matching router bearer value, chmod 600.
 token_file = "/home/admin/.config/xl_deploy/router.token"
 
-# Branches are fixed in code: debug, test, main. The timer invokes one poll pass.
+# managed=true is the default for the Gateway and every instance. On a host
+# that does not own the corresponding services, set managed=false instead:
+# remote instances remain in Gateway routes but their configs are not read and
+# their units cannot be preflighted, stopped, started, or health-checked locally.
+# An unmanaged Gateway is reached only through its authenticated loopback
+# tunnel endpoint; do not copy its QQ credentials or start a second Gateway.
 
 # Optional hand-maintained inventory. Without this section the legacy fixed
 # test/main unit mapping remains available for existing installations.

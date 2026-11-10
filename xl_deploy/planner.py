@@ -136,7 +136,7 @@ def configured_target(branch, paths, inventory):
                'xl_qqbot/requirements.txt'} for p in paths)
     units, ids = [], []
     for instance in inventory.instances:
-        if not instance.enabled or instance.watch_ref != branch: continue
+        if not instance.enabled or not instance.managed or instance.watch_ref != branch: continue
         selected = [unit for role, unit in instance.units.items()
                     if (backend if role == 'backend' else bot)]
         if selected:
@@ -144,6 +144,7 @@ def configured_target(branch, paths, inventory):
             if 'bot' in instance.units:
                 ids.append(instance.instance_id)
     if gateway:
-        units.append(inventory.gateway.unit)
+        if inventory.gateway.managed:
+            units.append(inventory.gateway.unit)
         ids = list(dict.fromkeys([*ids, *(i.instance_id for i in inventory.instances if i.enabled and 'bot' in i.units)]))
     return DeploymentTarget(tuple(units), tuple(ids), instance_announcement_scope(inventory, ids))
