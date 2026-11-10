@@ -17,7 +17,7 @@ def write_scene_descriptor(job, temporary_dir):
     purpose = dict(job.scene.config_metadata).get('runtime_purpose', '')
     entrance = purpose in {'entrance_only', 'entrance_stage'}
     payload = {
-        'scene_schema_version': 2 if job.particle_sources or any(s.tracks for s in job.sources) else 1,
+        'scene_schema_version': 2 if job.settings.format.casefold() == 'png' or job.particle_sources or any(s.tracks for s in job.sources) else 1,
         'projection': 'unity_ui_orthographic_xy',
         'scene_id': job.scene.skin_id,
         'output': str((directory / ('render-' + uuid.uuid4().hex + job.output_path.suffix)).resolve()),

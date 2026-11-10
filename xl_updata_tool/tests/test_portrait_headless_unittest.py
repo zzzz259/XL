@@ -217,6 +217,14 @@ if mode not in ('nolog',): print(json.dumps(dict(phase='complete',output=p['outp
         with self.assertRaisesRegex(ValueError, 'identity'):
             api.plan_request(request, self.root / 'work/planning')
 
+    def test_static_full_png_uses_frame_pipeline_schema(self):
+        api = self.api()
+        job, _ = api.plan_request(self.manual_request(), self.root / 'work/planning')
+        descriptor = api.write_scene_descriptor(job, self.root / 'descriptor')
+        payload = json.loads(descriptor.read_text(encoding='utf-8'))
+        self.assertEqual(payload['scene_schema_version'], 2)
+        self.assertEqual(payload['settings']['format'].casefold(), 'png')
+
     def test_import_and_package_planning_reject_qt_in_fresh_interpreter(self):
         self.api()
         request = self.manual_request()
