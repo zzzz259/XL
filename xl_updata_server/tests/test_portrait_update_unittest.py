@@ -1454,6 +1454,18 @@ def test_not_applicable_summary_counts_as_skipped(tmp_path, monkeypatch):
 # ---- 渲染入口受控进程（Popen + 进程组收割） -------------------------------------
 
 
+def test_render_workspace_contains_callback_lua(tmp_path):
+    runner, _base, task = _render_job_runner(tmp_path)
+    content = 'return { OnClick = function() end }\n'
+    (runner._lua_store / "touch_cardspine_10016_3.lua").write_text(content, encoding="utf-8")
+    pool = tmp_path / "pool"
+    (pool / "bundles").mkdir(parents=True)
+    (pool / "assets_map.json").write_text("{}", encoding="utf-8")
+    base = runner._assemble_workspace(task, pool, tmp_path / "skins")
+    copied = base / "workspace" / "lua" / "77" / "touch_cardspine_10016_3.lua"
+    assert copied.read_text(encoding="utf-8") == content
+
+
 def test_render_job_returns_parsed_result_after_success(tmp_path, monkeypatch):
     runner, base, task = _render_job_runner(tmp_path)
     result_path = base / "work" / "result.json"

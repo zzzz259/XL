@@ -761,6 +761,8 @@ class PortraitUpdateRunner:
         lua_dir = workspace / "lua" / self._version_key
         lua_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self._lua_store / "BaseFashion.lua", lua_dir / "BaseFashion.lua")
+        for callback in self._lua_store.glob("touch_cardspine_*.lua"):
+            shutil.copy2(callback, lua_dir / callback.name)
         bundles_dir = workspace / "bundles" / self._version_key
         bundles_dir.mkdir(parents=True, exist_ok=True)
         for bundle_hash in task.bundle_hashes:
