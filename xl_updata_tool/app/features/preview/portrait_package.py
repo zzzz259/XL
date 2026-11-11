@@ -215,6 +215,8 @@ def _publish_one(scene, index, material_root, staging, provider, cancel_check):
     for part in scene.parts:
         if part.renderer is not None and not part.renderer.enabled:
             continue
+        if part.particle is not None and part.particle.profile == 'noop':
+            continue
         if part.spine is None and part.sprite is None and part.particle is None:
             continue
         _check_cancel(cancel_check)
@@ -448,7 +450,8 @@ def _load_portrait_package(path) -> PortraitPackage:
     scene = PortraitScene.from_dict(manifest['scene'])
     scene_parts = {part.part_id: part for part in scene.parts}
     expected_parts = {p.part_id for p in scene.parts
-                      if (p.renderer is None or p.renderer.enabled) and (p.spine or p.sprite or p.particle)}
+                      if (p.renderer is None or p.renderer.enabled)
+                      and (p.spine or p.sprite or (p.particle and p.particle.profile != 'noop'))}
     actual_parts = [p['part_id'] for p in manifest['parts']]
     if len(set(actual_parts)) != len(actual_parts) or set(actual_parts) != expected_parts:
         raise ValueError('portrait package part coverage does not match saved scene')

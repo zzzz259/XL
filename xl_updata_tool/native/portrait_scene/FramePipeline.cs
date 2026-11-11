@@ -80,7 +80,8 @@ static class FramePipeline {
             Advance(parts,(float)initial,s.fps,token);
             float left=float.PositiveInfinity,top=float.PositiveInfinity,right=float.NegativeInfinity,bottom=float.NegativeInfinity;
             void Bounds(){foreach(var p in parts)p.IncludeBounds(ref left,ref top,ref right,ref bottom);}
-            Bounds(); foreach(var p in particles.Values)p.IncludeBounds(ref left,ref top,ref right,ref bottom);
+            if(!still&&particles.Values.Any(p=>p.Spec.particle!.system.noise!=null||p.Spec.particle.system.orbital_z!=null))throw new ArgumentException("Noise and orbital velocity are supported only for static frames");
+            Bounds(); foreach(var p in particles.Values)p.IncludeBounds(ref left,ref top,ref right,ref bottom,snapshot);
             if(!still)for(double t=0;t<duration*s.speed;) {float dt=(float)Math.Min(Math.Min(1f/60,s.speed/s.fps),duration*s.speed-t);Advance(parts,dt,s.fps,token);t+=dt;Bounds();}
             if(!float.IsFinite(left)||right<=left||bottom<=top)throw new ArgumentException("Empty scene bounds");
             float fit=Math.Min(s.scale,(s.max_resolution-s.margin*2)/Math.Max(right-left,bottom-top));

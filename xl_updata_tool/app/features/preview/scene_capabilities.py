@@ -28,7 +28,7 @@ def portrait_scene_capabilities(scene) -> SceneCapabilities:
     if dict(scene.config_metadata).get('export_status') == 'not_applicable':
         return SceneCapabilities('not_applicable', '当前版本不适用')
     active = tuple(p for p in scene.parts if p.renderer is None or p.renderer.enabled)
-    particles = tuple(p for p in active if getattr(p, 'particle', None) is not None)
+    particles = tuple(p for p in active if getattr(p, 'particle', None) is not None and p.particle.profile != 'noop')
     base = tuple(p for p in active if p.spine or p.sprite)
     notes = scene_render_diagnostics(scene)
     errors = tuple(n for n in notes if n.severity == 'error')
@@ -55,7 +55,7 @@ def portrait_scene_capabilities(scene) -> SceneCapabilities:
     if base_errors or not basic:
         reason = '；'.join(n.message for n in base_errors[:3]) or '缺少可用的场景基础资源'
         return SceneCapabilities('missing', '缺少资源', reason, **common)
-    unsupported = tuple(p for p in particles if p.particle.profile not in {'additive_v1', 'additive_alpha_v1', 'alpha_tint_v1'})
+    unsupported = tuple(p for p in particles if p.particle.profile not in {'additive_v1', 'additive_alpha_v1', 'alpha_tint_v1', 'alpha_blend_v1'})
     if errors or unsupported:
         reason = '；'.join(n.message for n in errors[:3]) or '场景含暂不支持的特效材质'
         return SceneCapabilities('partial', '特效暂不支持', reason, **common)

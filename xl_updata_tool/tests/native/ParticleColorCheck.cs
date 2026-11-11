@@ -159,9 +159,9 @@ static class ParticleColorCheck {
         invalid.particle!.system.color_over_time = new ColorOverTime {
             mode = "gradient", color_times = new[]{0f,1f},
             colors = new[]{new[]{1f,1f,1f},new[]{0f,0f,0f}},
-            alpha_times = new[]{0f,.5f}, alpha = new[]{1f,0f},
+            alpha_times = new[]{0f,.5f,1f}, alpha = new[]{1f,0f},
         };
-        Reject(invalid, "gradient without alpha endpoint");
+        Reject(invalid, "gradient alpha times and values differ");
         invalid = MakePart();
         invalid.particle!.system.color_over_time = new ColorOverTime {mode = "fixed"};
         Reject(invalid, "unknown gradient mode");

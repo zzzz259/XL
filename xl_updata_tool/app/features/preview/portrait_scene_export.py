@@ -264,11 +264,16 @@ def build_portrait_scene_export_job(
         )
         if part.particle is not None:
             particle = part.particle
-            if particle.texture is None or particle.profile not in {'additive_v1', 'additive_alpha_v1', 'alpha_tint_v1'}:
+            if particle.profile == 'noop':
+                continue
+            particle_config = json.loads(particle.config_json)
+            if particle.texture is None or particle.profile not in {'additive_v1', 'additive_alpha_v1', 'alpha_tint_v1', 'alpha_blend_v1'}:
                 raise ValueError(f'unsupported or missing particle material: {part.part_id}')
+            if particle_config['system'].get('render_mode') == 4 and 'mesh' not in particle_config:
+                raise ValueError(f'particle Mesh config is missing: {part.part_id}')
             particle_sources.append(ParticleSource(
                 part.part_id, _resolve_asset_path(asset_index, Path(material_root), particle.texture),
-                particle.profile, json.loads(particle.config_json),
+                particle.profile, particle_config,
                 part_affine(part.transform_chain, 1.0, origin=origin), unity_order,
                 particle.system, particle.material, particle.texture,
                 tuple(renderer.color) if renderer else (1., 1., 1., 1.),

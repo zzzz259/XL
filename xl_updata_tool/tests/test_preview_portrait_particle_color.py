@@ -198,6 +198,10 @@ class ParticleColorMetadataTests(unittest.TestCase):
         material = normalize_material(_material(1), 'Hym/Particles/hym_Dissolution_Nois_04', -4015514059479912215)
         validate_config(json.dumps({'version': 1, 'system': normalized, 'material': material}), 'additive_alpha_v1')
         tree['ShapeModule']['radiusThickness'] = 0.5
+        normalized = normalize_system(tree, _renderer(), 7, [_transform()])
+        self.assertEqual(normalized['circle_thickness'], 0.5)
+        validate_config(json.dumps({'version': 1, 'system': normalized, 'material': material}), 'additive_alpha_v1')
+        tree['ShapeModule']['radiusThickness'] = 1.01
         with self.assertRaisesRegex(ValueError, 'radiusThickness'):
             normalize_system(tree, _renderer(), 7, [_transform()])
 
@@ -238,7 +242,7 @@ class ParticleColorMetadataTests(unittest.TestCase):
         config = {'version': 1, 'system': system, 'material': material}
         validated = validate_config(json.dumps(config), 'additive_alpha_v1')
         self.assertEqual(validated['system']['render_alignment'], 2)
-        config['system']['color_over_time']['alpha_times'] = [0, 0.5]
+        config['system']['color_over_time']['alpha_times'] = [0, 0.5, 1]
         with self.assertRaisesRegex(ValueError, 'alpha'):
             validate_config(json.dumps(config), 'additive_alpha_v1')
 

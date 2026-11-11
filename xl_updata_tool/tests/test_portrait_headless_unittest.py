@@ -133,7 +133,7 @@ class PortraitHeadlessTest(unittest.TestCase):
 
     # ---- render lifecycle with a fake native CLI ----------------------------
 
-    def package(self):
+    def package(self, with_noop=False):
         from app.features.preview.portrait_package import publish_portrait_packages
         from app.features.preview.portrait_config.asset_index import AssetIndex, IndexedAsset
         from app.features.preview.portrait_config.model import (
@@ -154,6 +154,13 @@ class PortraitHeadlessTest(unittest.TestCase):
             ('bundle',), (part,), tuple(refs),
             asset_dependencies=(AssetDependency(refs[1], 'texture', refs[2]),),
             prefab_container='assets/cardspine/source.prefab')
+        if with_noop:
+            from dataclasses import replace
+            from app.features.preview.portrait_config.model import ParticleState
+            noop = ScenePart('noop', AssetRef('bundle', 99), 'noop', particle=ParticleState(
+                AssetRef('bundle', 99), profile='noop',
+                config_json=json.dumps({'version': 1, 'system': {'noop': True}})))
+            scene = replace(scene, parts=(*scene.parts, noop))
         def metadata(*args):
             return dict(internal_skins=['default', 'motion_stander'], animations={'idle': 2.5}, query_ok=True)
         summary = publish_portrait_packages((scene,), AssetIndex(123, assets), material.parent,
@@ -162,6 +169,11 @@ class PortraitHeadlessTest(unittest.TestCase):
         moved = self.root / 'input/package'
         shutil.move(str(summary.manifest_paths[0].parent), moved)
         return moved
+
+    def test_noop_particle_does_not_require_a_texture(self):
+        package = self.package(with_noop=True)
+        manifest = json.loads((package / 'skin.json').read_text())
+        self.assertEqual([part['part_id'] for part in manifest['parts']], ['body'])
 
     def native(self, mode, schema=2, capability='valid'):
         from app.features.preview.scene_export_adapter import write_scene_descriptor

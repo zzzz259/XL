@@ -12,6 +12,7 @@ sealed class ParticleConfig {
     public int version { get; set; }
     public ParticleSystemConfig system { get; set; } = new();
     public ParticleMaterial material { get; set; } = new();
+    public MeshConfig? mesh { get; set; }
 }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 sealed class ParticleBurst {
@@ -29,8 +30,13 @@ sealed class ColorOverTime {
     public float[][] colors { get; set; } = Array.Empty<float[]>();
     public float[] alpha_times { get; set; } = Array.Empty<float>();
     public float[] alpha { get; set; } = Array.Empty<float>();
-    static float Weight(float[] times, float time, out int index) {
+    internal static float Weight(float[] times, float time, out int index) {
         index = 0;
+        if (time <= times[0]) return 0;
+        if (time >= times[^1]) {
+            index = times.Length - 2;
+            return 1;
+        }
         while (index < times.Length - 2 && time > times[index + 1]) index++;
         return (time - times[index]) / (times[index + 1] - times[index]);
     }
@@ -67,6 +73,7 @@ sealed class ParticleSystemConfig {
     public float[] shape_position { get; set; } = Array.Empty<float>();
     public float circle_radius { get; set; }
     public float circle_arc_radians { get; set; }
+    public float circle_thickness { get; set; }
     public float[] velocity_min { get; set; } = Array.Empty<float>();
     public float[] velocity_max { get; set; } = Array.Empty<float>();
     public int[] tiles { get; set; } = Array.Empty<int>();
@@ -80,6 +87,17 @@ sealed class ParticleSystemConfig {
     public ColorOverTime? color_over_time { get; set; }
     public int render_alignment { get; set; }
     public int scaling_mode { get; set; }
+    public int render_mode { get; set; }
+    public StartColor? start_color { get; set; }
+    public MinMaxCurve? size_over_time { get; set; }
+    public MinMaxCurve? rotation_over_time { get; set; }
+    public Dictionary<string,MinMaxCurve>? velocity_curves { get; set; }
+    public string uv_row { get; set; } = "custom";
+    public int row_index { get; set; }
+    public string frame_mode { get; set; } = "curve";
+    public float[] frame_range { get; set; } = Array.Empty<float>();
+    public NoiseConfig? noise { get; set; }
+    public MinMaxCurve? orbital_z { get; set; }
 }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 sealed class ParticleMaterial {
@@ -162,11 +180,13 @@ sealed class ParticleLayer {
     readonly ParticleMaterial m;
     readonly byte[] texture;
     readonly int tw, th;
+    readonly NoiseField? noiseField;
     public float Natural => s.simulation_speed == 0 ? 0 : s.duration / s.simulation_speed;
     public ParticleLayer(Part spec) {
         Spec = spec; s = spec.particle!.system; m = spec.particle.material;
         using var image = new Image(spec.texture);
         tw = (int)image.Size.X; th = (int)image.Size.Y; texture = image.Pixels;
+        noiseField = s.noise == null ? null : new NoiseField(s.seed);
     }
     public static void Validate(Part p) {
         void Check(bool b, string reason) { if (!b) throw new ArgumentException($"Part {p.id}: unsupported particle config: {reason}"); }
@@ -182,15 +202,30 @@ sealed class ParticleLayer {
         Array(s.color,4); Array(m.tint,4); Array(m.dark_color,4);
         foreach (var v in new[] {s.shape_size,s.shape_position,s.velocity_min,s.velocity_max}) Array(v,3);
         Check(float.IsFinite(s.circle_radius) && float.IsFinite(s.circle_arc_radians) && ((s.circle_radius == 0 && s.circle_arc_radians == 0) || (s.circle_radius > 0 && s.circle_arc_radians > 0 && s.circle_arc_radians <= MathF.PI * 2)), "circle shape");
+        Check(float.IsFinite(s.circle_thickness) && s.circle_thickness >= 0 && s.circle_thickness <= 1 && (s.circle_radius > 0 || s.circle_thickness == 0), "circle thickness");
+        s.noise?.Validate();
+        s.orbital_z?.Validate();
+        Check(s.noise == null || Math.Ceiling(s.lifetime[1] * 120) <= 100000 && Math.Ceiling(s.lifetime[1] * 120) * s.max_particles <= 10000000, "Noise static-frame work limit");
         Check(s.duration > 0 && s.duration <= 3600 && s.simulation_speed >= 0 && s.rate >= 0 && s.rate <= 100000 && s.max_particles > 0 && s.max_particles <= 100000, "emitter limits");
         Check(s.lifetime[0] > 0 && s.lifetime[1] <= 3600 && s.size[0] > 0, "lifetime/size");
         Check(Enumerable.Range(0,3).All(i => s.velocity_max[i] >= s.velocity_min[i]), "shape/velocity");
         Check(s.color.All(v => v >= 0 && v <= 1) && m.tint.All(v => v >= 0) && m.dark_color.All(v => v >= 0), "color");
         Check(s.tiles.Length == 2 && s.tiles.All(v => v > 0 && v <= 256), "tiles");
         Check(s.cycles > 0 && s.uv_frame_end >= 0 && s.uv_frame_end <= 1, "UV curve");
-        Check(m.profile is "additive_v1" or "additive_alpha_v1" or "alpha_tint_v1", "unknown material profile");
+        Check(m.profile is "additive_v1" or "additive_alpha_v1" or "alpha_tint_v1" or "alpha_blend_v1", "unknown material profile");
         Check(m.factor == (m.profile == "additive_v1" ? 2 : 1) && m.blend_amount == 0 && m.main_power >= 0 && m.alpha >= 0 && m.alpha_ratio >= 0 && m.dead_strength >= 0, "material variant");
         Check(s.render_alignment is 0 or 2 && s.scaling_mode is 0 or 1, "render alignment/scaling mode");
+        Check(s.render_mode is 0 or 4, "render mode");
+        s.start_color?.Validate();
+        s.size_over_time?.Validate();
+        s.rotation_over_time?.Validate();
+        if (s.velocity_curves != null) foreach (var curve in s.velocity_curves.Values) curve.Validate();
+        Check(s.uv_row is "custom" or "random", "UV row mode");
+        Check(s.row_index >= 0 && s.row_index < s.tiles[1], "UV row index");
+        Check(s.frame_mode is "curve" or "random_constant", "UV frame mode");
+        if (s.frame_mode == "random_constant") Check(s.frame_range.Length == 2 && s.frame_range.All(v => float.IsFinite(v) && v >= 0 && v <= 1) && s.frame_range[1] >= s.frame_range[0], "UV frame range");
+        Check((s.render_mode == 4) == (p.particle.mesh != null), "Mesh must be present exactly for Mesh render mode");
+        p.particle.mesh?.Validate();
         var over = s.color_over_time;
         if (over != null) {
             Check(over.mode is "constant" or "gradient", "color-over-time mode");
@@ -202,37 +237,46 @@ sealed class ParticleLayer {
                 Check(over.color_times != null && over.colors != null && over.color_times.Length >= 2 && over.color_times.Length <= 8 && over.colors.Length == over.color_times.Length, "color gradient length");
                 Check(over.alpha_times != null && over.alpha != null && over.alpha_times.Length >= 2 && over.alpha_times.Length <= 8 && over.alpha.Length == over.alpha_times.Length, "alpha gradient length");
                 foreach (var times in new[]{over.color_times!,over.alpha_times!})
-                    Check(times.All(float.IsFinite) && times[0] == 0 && times[^1] == 1 && Enumerable.Range(0,times.Length-1).All(i => times[i] < times[i+1]), "gradient times");
+                    Check(times.All(v => float.IsFinite(v) && v >= 0 && v <= 1) && Enumerable.Range(0,times.Length-1).All(i => times[i] < times[i+1]), "gradient times");
                 Check(over.colors!.All(key => key != null && key.Length == 3 && key.All(v => float.IsFinite(v) && v >= 0 && v <= 1)), "gradient colors");
                 Check(over.alpha!.All(v => float.IsFinite(v) && v >= 0 && v <= 1), "gradient alpha");
             }
         }
     }
-    static float Random(long id, uint seed, uint lane) {
+    internal static float Random(long id, uint seed, uint lane) {
         ulong x = unchecked((ulong)id * 0x9e3779b97f4a7c15UL + seed + lane * 0x85ebca6bUL);
         x ^= x >> 30; x *= 0xbf58476d1ce4e5b9UL; x ^= x >> 27; x *= 0x94d049bb133111ebUL; x ^= x >> 31;
         return (x >> 40) / 16777216f;
     }
     float R(long id, uint lane, float lo, float hi) => lo + (hi-lo) * Random(id,s.seed,lane);
-    public void IncludeBounds(ref float left, ref float top, ref float right, ref float bottom) {
-        // Conservative full-lifetime envelope, including prewarm, motion, rotation, parent shear/scale.
-        float radius = s.size_y.Length == 2
-            ? MathF.Sqrt(s.size[1] * s.size[1] + s.size_y[1] * s.size_y[1]) * .5f
-            : s.size[1] * .7071068f;
-        float[] lo = new float[2], hi = new float[2];
-        for (int axis = 0; axis < 2; axis++) {
-            float gravityTravel=.5f*s.gravity[axis]*s.gravity_modifier*s.lifetime[1]*s.lifetime[1];
-            float shapeExtent=s.circle_radius>0?s.circle_radius*Math.Abs(s.shape_size[axis]):Math.Abs(s.shape_size[axis])/2;
-            lo[axis] = s.shape_position[axis] - shapeExtent + Math.Min(0,s.velocity_min[axis]*s.lifetime[1]) - radius + Math.Min(0,gravityTravel);
-            hi[axis] = s.shape_position[axis] + shapeExtent + Math.Max(0,s.velocity_max[axis]*s.lifetime[1]) + radius + Math.Max(0,gravityTravel);
+    static float CurveMax(MinMaxCurve curve) {
+        float maximum = curve.scalar;
+        if (curve.mode == 1 || curve.mode == 2) {
+            maximum = float.NegativeInfinity;
+            foreach (var data in curve.mode == 1 ? new[]{curve.max!} : new[]{curve.min!, curve.max!}) {
+                var range = data.Extrema();
+                maximum = Math.Max(maximum, Math.Max(range.min * curve.scalar, range.max * curve.scalar));
+            }
         }
-        var a = Spec.affine;
-        foreach (float x in new[] {lo[0],hi[0]}) foreach (float y in new[] {lo[1],hi[1]}) {
-            float px=a[0]*x+a[1]*y+a[4], py=-(a[2]*x+a[3]*y+a[5]);
-            left=Math.Min(left,px); right=Math.Max(right,px); top=Math.Min(top,py); bottom=Math.Max(bottom,py);
-        }
+        return maximum;
     }
-    public void Draw(FloatCanvas canvas, double time, float fit, float centerX, float centerY, CancellationToken token) {
+    float CurveDisplacement(int axis) {
+        if (s.velocity_curves == null || !s.velocity_curves.TryGetValue("xyz"[axis].ToString(), out var curve)) return 0;
+        float min = 0, max = 0;
+        void Include(float lo, float hi, float multiplier) {
+            float first = lo * multiplier, second = hi * multiplier;
+            min = Math.Min(min, Math.Min(first, second));
+            max = Math.Max(max, Math.Max(first, second));
+        }
+        if (curve.mode == 1) Include(curve.max!.IntegralExtrema().min, curve.max.IntegralExtrema().max, curve.scalar);
+        else if (curve.mode == 2) {
+            Include(curve.min!.IntegralExtrema().min, curve.min.IntegralExtrema().max, curve.scalar);
+            Include(curve.max!.IntegralExtrema().min, curve.max.IntegralExtrema().max, curve.scalar);
+        } else if (curve.mode == 3) Include(curve.min_scalar, curve.scalar, 1);
+        else Include(curve.scalar, curve.scalar, 1);
+        return Math.Max(Math.Abs(min), Math.Abs(max)) * s.lifetime[1];
+    }
+    List<(long id,double age,float life)> LiveParticles(double time, CancellationToken token) {
         double t=time*s.simulation_speed + (s.prewarm && s.loop ? s.duration : 0);
         double end=s.loop ? t : Math.Min(t,s.duration);
         var births=new List<(double time,long id)>();
@@ -266,27 +310,115 @@ sealed class ParticleLayer {
             double dies=birth.time+life;deaths.Enqueue(dies,dies);
             double age=t-birth.time;if(age>=0&&age<life)live.Add((birth.id,age,life));
         }
+        return live;
+    }
+    internal static float CircleRadius(long id, uint seed, float radius, float thickness) {
+        float inner = 1 - thickness;
+        return radius * MathF.Sqrt(inner * inner + (1 - inner * inner) * Random(id, seed, 12));
+    }
+    float VelocityDisplacement(int axis, long id, uint lane, float age, float life) {
+        if (s.velocity_curves != null && s.velocity_curves.TryGetValue("xyz"[axis].ToString(), out var curve))
+            return curve.EvaluateIntegral(age / life, id, s.seed, 30 + (lane - 3) / 2) * life;
+        return R(id, lane, s.velocity_min[axis], s.velocity_max[axis]) * age;
+    }
+    (float x,float y) BaseDisplacement(long id, float age, float life) => (
+        VelocityDisplacement(0, id, 3, age, life) + .5f * s.gravity[0] * s.gravity_modifier * age * age,
+        VelocityDisplacement(1, id, 5, age, life) + .5f * s.gravity[1] * s.gravity_modifier * age * age);
+    void InitialPosition(long id, out float x, out float y) {
+        float shapeAngle=s.circle_radius>0?R(id,9,0,s.circle_arc_radians):0;
+        float radius=s.circle_radius>0?CircleRadius(id,s.seed,s.circle_radius,s.circle_thickness):0;
+        float shapeX=s.circle_radius>0?MathF.Cos(shapeAngle)*radius*s.shape_size[0]:R(id,2,-Math.Abs(s.shape_size[0])/2,Math.Abs(s.shape_size[0])/2);
+        float shapeY=s.circle_radius>0?MathF.Sin(shapeAngle)*radius*s.shape_size[1]:R(id,4,-Math.Abs(s.shape_size[1])/2,Math.Abs(s.shape_size[1])/2);
+        x=shapeX+s.shape_position[0]; y=shapeY+s.shape_position[1];
+    }
+    (float x,float y) BasePosition(long id, float age, float life, float initialX, float initialY) {
+        float angle=s.orbital_z?.EvaluateIntegral(age/life,id,s.seed,22)*life??0;
+        float co=MathF.Cos(angle),si=MathF.Sin(angle);
+        var motion=BaseDisplacement(id,age,life);
+        return (initialX*co-initialY*si+motion.x,initialX*si+initialY*co+motion.y);
+    }
+    void Position(long id, float age, float life, out float x, out float y) {
+        InitialPosition(id,out float initialX,out float initialY);
+        var position=BasePosition(id,age,life,initialX,initialY);
+        x=position.x; y=position.y;
+        if (noiseField != null) {
+            var displacement=noiseField.Integrate(x,y,age,s.noise!,sampleAge=>BasePosition(id,sampleAge,life,initialX,initialY));
+            x+=displacement.x; y+=displacement.y;
+        }
+    }
+    static void IncludePoint(Part spec, ref float left, ref float top, ref float right, ref float bottom, float x, float y) {
+        var a=spec.affine;
+        float px=a[0]*x+a[1]*y+a[4],py=-(a[2]*x+a[3]*y+a[5]);
+        left=Math.Min(left,px);right=Math.Max(right,px);top=Math.Min(top,py);bottom=Math.Max(bottom,py);
+    }
+    public void IncludeBounds(ref float left, ref float top, ref float right, ref float bottom, double? time = null) {
+        if (s.noise != null || s.orbital_z != null) {
+            if (!time.HasValue) throw new ArgumentException("Noise and orbital bounds require a static-frame time");
+            foreach (var item in LiveParticles(time.Value,CancellationToken.None)) {
+                long id=item.id;float age=(float)item.age,life=item.life;
+                Position(id,age,life,out float x,out float y);
+                float multiplier=s.size_over_time?.Evaluate(age/life,id,s.seed,20)??1;
+                float sizeX=R(id,6,s.size[0],s.size[1])*multiplier;
+                float sizeY=s.size_y.Length==2?R(id,8,s.size_y[0],s.size_y[1])*multiplier:sizeX;
+                float particleRadius=MathF.Sqrt(sizeX*sizeX+sizeY*sizeY)*.5f;
+                if (s.render_mode==4) particleRadius*=2;
+                IncludePoint(Spec,ref left,ref top,ref right,ref bottom,x-particleRadius,y-particleRadius);
+                IncludePoint(Spec,ref left,ref top,ref right,ref bottom,x-particleRadius,y+particleRadius);
+                IncludePoint(Spec,ref left,ref top,ref right,ref bottom,x+particleRadius,y-particleRadius);
+                IncludePoint(Spec,ref left,ref top,ref right,ref bottom,x+particleRadius,y+particleRadius);
+            }
+            return;
+        }
+        float radius = s.size_y.Length == 2
+            ? MathF.Sqrt(s.size[1] * s.size[1] + s.size_y[1] * s.size_y[1]) * .5f
+            : s.size[1] * .7071068f;
+        if (s.size_over_time != null) radius *= Math.Max(0, CurveMax(s.size_over_time));
+        if (s.render_mode == 4) radius *= 2;
+        float[] lo = new float[2], hi = new float[2];
+        for (int axis = 0; axis < 2; axis++) {
+            float gravityTravel=.5f*s.gravity[axis]*s.gravity_modifier*s.lifetime[1]*s.lifetime[1];
+            float shapeExtent=s.circle_radius>0?s.circle_radius*Math.Abs(s.shape_size[axis]):Math.Abs(s.shape_size[axis])/2;
+            if (s.velocity_curves != null && s.velocity_curves.ContainsKey("xyz"[axis].ToString())) {
+                float travel = CurveDisplacement(axis);
+                lo[axis] = s.shape_position[axis] - shapeExtent - travel - radius + Math.Min(0,gravityTravel);
+                hi[axis] = s.shape_position[axis] + shapeExtent + travel + radius + Math.Max(0,gravityTravel);
+            } else {
+                lo[axis] = s.shape_position[axis] - shapeExtent + Math.Min(0,s.velocity_min[axis]*s.lifetime[1]) - radius + Math.Min(0,gravityTravel);
+                hi[axis] = s.shape_position[axis] + shapeExtent + Math.Max(0,s.velocity_max[axis]*s.lifetime[1]) + radius + Math.Max(0,gravityTravel);
+            }
+        }
+        foreach (float x in new[] {lo[0],hi[0]}) foreach (float y in new[] {lo[1],hi[1]})
+            IncludePoint(Spec,ref left,ref top,ref right,ref bottom,x,y);
+    }
+    public void Draw(FloatCanvas canvas, double time, float fit, float centerX, float centerY, CancellationToken token) {
+        var live=LiveParticles(time,token);
         void DrawRows(int rowStart,int rowEnd) {
         foreach(var item in live) {
             long id=item.id;float age=(float)item.age,life=item.life;
-            float shapeAngle=s.circle_radius>0?R(id,9,0,s.circle_arc_radians):0;
-            float shapeX=s.circle_radius>0?MathF.Cos(shapeAngle)*s.circle_radius*s.shape_size[0]:R(id,2,-Math.Abs(s.shape_size[0])/2,Math.Abs(s.shape_size[0])/2);
-            float shapeY=s.circle_radius>0?MathF.Sin(shapeAngle)*s.circle_radius*s.shape_size[1]:R(id,4,-Math.Abs(s.shape_size[1])/2,Math.Abs(s.shape_size[1])/2);
-            float x=shapeX+s.shape_position[0]+R(id,3,s.velocity_min[0],s.velocity_max[0])*age+.5f*s.gravity[0]*s.gravity_modifier*age*age;
-            float y=shapeY+s.shape_position[1]+R(id,5,s.velocity_min[1],s.velocity_max[1])*age+.5f*s.gravity[1]*s.gravity_modifier*age*age;
-            float sizeX=R(id,6,s.size[0],s.size[1]), angle=R(id,7,s.rotation_radians[0],s.rotation_radians[1]);
-            float sizeY=s.size_y.Length==2?R(id,8,s.size_y[0],s.size_y[1]):sizeX;
+            Position(id,age,life,out float x,out float y);
+            float curveTime=age/life;
+            float sizeMultiplier=s.size_over_time?.Evaluate(curveTime,id,s.seed,20)??1;
+            float sizeX=R(id,6,s.size[0],s.size[1])*sizeMultiplier;
+            float angle=R(id,7,s.rotation_radians[0],s.rotation_radians[1])+(s.rotation_over_time?.EvaluateIntegral(curveTime,id,s.seed,21)*life??0);
+            float sizeY=s.size_y.Length==2?R(id,8,s.size_y[0],s.size_y[1])*sizeMultiplier:sizeX;
             int frame=Math.Min(s.tiles[0]*s.tiles[1]-1,(int)(Math.Min(1,(age/life*s.cycles)%1*s.uv_frame_end)*s.tiles[0]*s.tiles[1]));
-            Stamp(canvas,x,y,sizeX,sizeY,angle,frame,age/life,fit,centerX,centerY,token,rowStart,rowEnd);
+            if (s.frame_mode == "random_constant") {
+                int rowIndex=s.uv_row=="random"?(int)(R(id,13,0,s.tiles[1])):s.row_index;
+                frame=rowIndex*s.tiles[0]+(int)(R(id,14,s.frame_range[0],s.frame_range[1])*s.tiles[0]);
+            }
+            Stamp(canvas,x,y,sizeX,sizeY,angle,frame,id,age/life,fit,centerX,centerY,token,rowStart,rowEnd);
         }
         }
         canvas.ForEachWindow(DrawRows,token);
     }
-    void Stamp(FloatCanvas canvas,float x,float y,float sizeX,float sizeY,float angle,int frame,float progress,float fit,float cx,float cy,CancellationToken token,int rowStart,int rowEnd) {
+    void Stamp(FloatCanvas canvas,float x,float y,float sizeX,float sizeY,float angle,int frame,long id,float progress,float fit,float cx,float cy,CancellationToken token,int rowStart,int rowEnd) {
         var a=Spec.affine; float co=MathF.Cos(angle),si=MathF.Sin(angle);
-        float[] color=s.color_over_time?.Multiply(s.color,progress)??s.color;
-        float aa=(a[0]*co+a[1]*si)*sizeX*fit, bb=(-a[0]*si+a[1]*co)*sizeY*fit;
-        float cc=-(a[2]*co+a[3]*si)*sizeX*fit, dd=-(-a[2]*si+a[3]*co)*sizeY*fit;
+        float[] initial=s.start_color?.Evaluate(id,s.seed)??s.color;
+        float[] color=s.color_over_time?.Multiply(initial,progress)??initial;
+        float meshScaleX=s.render_mode==4?Spec.particle!.mesh!.positions.Max(p=>p[0])-Spec.particle.mesh.positions.Min(p=>p[0]):1;
+        float meshScaleY=s.render_mode==4?Spec.particle!.mesh!.positions.Max(p=>p[1])-Spec.particle.mesh.positions.Min(p=>p[1]):1;
+        float aa=(a[0]*co+a[1]*si)*sizeX*fit*meshScaleX, bb=(-a[0]*si+a[1]*co)*sizeY*fit*meshScaleY;
+        float cc=-(a[2]*co+a[3]*si)*sizeX*fit*meshScaleX, dd=-(-a[2]*si+a[3]*co)*sizeY*fit*meshScaleY;
         float px=(a[0]*x+a[1]*y+a[4]-cx)*fit+canvas.Width/2f, py=(-(a[2]*x+a[3]*y+a[5])-cy)*fit+canvas.Height/2f;
         float det=aa*dd-bb*cc;
         float rx=(Math.Abs(aa)+Math.Abs(bb))/2,ry=(Math.Abs(cc)+Math.Abs(dd))/2;
@@ -301,8 +433,9 @@ sealed class ParticleLayer {
             token.ThrowIfCancellationRequested();
             for (int ix=x0; ix<x1; ix++) {
                 float dx=ix+.5f-px,dy=iy+.5f-py;
-                float u=(dd*dx-bb*dy)/det+.5f,v=.5f-(aa*dy-cc*dx)/det;
-                if (u<0 || u>=1 || v<0 || v>=1) continue;
+                float localU=(dd*dx-bb*dy)/det+.5f,v=.5f-(aa*dy-cc*dx)/det;
+                if (localU<0 || localU>=1 || v<0 || v>=1) continue;
+                float u=s.render_mode==4?1-localU:localU;
                 float sx=exact?u*cw-.5f:col*fw+u*fw-.5f,sy=exact?v*ch-.5f:row*fh+v*fh-.5f;
                 int tx=(int)MathF.Floor(sx),ty=(int)MathF.Floor(sy);
                 float fx=sx-tx,fy=sy-ty;

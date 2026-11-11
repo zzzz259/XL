@@ -418,7 +418,7 @@ class PortraitScene:
                         validate_config(part.particle.config_json, part.particle.profile)
                     except (ValueError, KeyError, TypeError, OverflowError) as error:
                         found.append(SceneDiagnostic("invalid_particle_config", str(error), part_id=part.part_id, source=part.object_ref))
-                if part.particle.texture is None:
+                if part.particle.texture is None and part.particle.profile != "noop":
                     found.append(SceneDiagnostic("missing_particle_texture", "Particle has no verified main texture", part_id=part.part_id, source=part.object_ref))
             if part.sprite:
                 refs.extend(x for x in (part.sprite.sprite, part.sprite.texture) if x)
