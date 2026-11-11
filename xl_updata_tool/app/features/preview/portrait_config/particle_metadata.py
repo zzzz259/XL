@@ -36,24 +36,123 @@ def _vec(value, keys="xyz", default=0):
     return [_number((value or {}).get(k, default)) for k in keys]
 
 
-def normalize_system(tree, renderer, seed):
-    supported = {"InitialModule", "ShapeModule", "EmissionModule", "VelocityModule", "UVModule"}
+def _color_over_time(module):
+    if not isinstance(module, dict) or not module.get('enabled'):
+        return None
+    gradient = module.get('gradient') or {}
+    mode = int(gradient.get('minMaxState', 0))
+    if mode == 0:
+        color = _vec(gradient.get('maxColor'), 'rgba', 1)
+        if any(value < 0 or value > 1 for value in color):
+            raise ValueError('ColorModule: constant color is outside 0..1')
+        return {'mode': 'constant', 'color': color}
+    if mode != 1:
+        raise ValueError(f'ColorModule: unsupported color mode {mode}')
+    tree = gradient.get('maxGradient')
+    if not isinstance(tree, dict):
+        raise ValueError('ColorModule: maxGradient is missing')
+    if int(tree.get('m_Mode', 0)) != 0:
+        raise ValueError('ColorModule: fixed-step gradients are unsupported')
+
+    def keys(kind):
+        count = int(tree.get('m_NumColorKeys' if kind == 'color' else 'm_NumAlphaKeys', 0))
+        if not 2 <= count <= 8:
+            raise ValueError(f'ColorModule: invalid {kind} key count {count}')
+        prefix = 'ctime' if kind == 'color' else 'atime'
+        times, values = [], []
+        for index in range(count):
+            key = tree.get(f'key{index}')
+            if not isinstance(key, dict):
+                raise ValueError(f'ColorModule: missing {kind} key {index}')
+            value = _vec(key, 'rgb', 1) if kind == 'color' else _number(key.get('a', 1))
+            if any(component < 0 or component > 1 for component in value) if kind == 'color' else not 0 <= value <= 1:
+                raise ValueError(f'ColorModule: {kind} key {index} is outside 0..1')
+            times.append(_number(tree.get(f'{prefix}{index}')) / 65535)
+            values.append(value)
+        if times[0] != 0 or times[-1] != 1 or any(b <= a for a, b in zip(times, times[1:])):
+            raise ValueError(f'ColorModule: {kind} key times must be strictly ordered from 0 to 1')
+        return times, values
+
+    color_times, colors = keys('color')
+    alpha_times, alpha = keys('alpha')
+    return {
+        'mode': 'gradient',
+        'color_times': color_times,
+        'colors': colors,
+        'alpha_times': alpha_times,
+        'alpha': alpha,
+    }
+
+
+def _validate_color_over_time(value):
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise ValueError('invalid color_over_time')
+    mode = value.get('mode')
+    if mode == 'constant':
+        if set(value) != {'mode', 'color'}:
+            raise ValueError('invalid constant color_over_time fields')
+        color = value['color']
+        if not isinstance(color, list) or len(color) != 4:
+            raise ValueError('invalid constant color_over_time')
+        if any(not 0 <= _number(component) <= 1 for component in color):
+            raise ValueError('constant color_over_time is outside 0..1')
+        return
+    if mode != 'gradient' or set(value) != {'mode', 'color_times', 'colors', 'alpha_times', 'alpha'}:
+        raise ValueError('invalid gradient color_over_time fields')
+    for kind in ('color', 'alpha'):
+        times = value[f'{kind}_times']
+        items = value[f'{kind}s' if kind == 'color' else 'alpha']
+        if not isinstance(times, list) or not isinstance(items, list) or len(times) != len(items) or not 2 <= len(times) <= 8:
+            raise ValueError(f'invalid {kind} gradient length')
+        if times[0] != 0 or times[-1] != 1 or any(b <= a for a, b in zip(times, times[1:])):
+            raise ValueError(f'invalid {kind} gradient times')
+        for item in items:
+            components = item if kind == 'color' else [item]
+            if kind == 'color' and (not isinstance(item, list) or len(item) != 3):
+                raise ValueError(f'invalid {kind} gradient key')
+            if any(not 0 <= _number(component) <= 1 for component in components):
+                raise ValueError(f'invalid {kind} gradient value')
+
+
+def normalize_system(tree, renderer, seed, transform_chain=()):
+    supported = {'InitialModule', 'ShapeModule', 'EmissionModule', 'VelocityModule', 'UVModule', 'ColorModule'}
     for name, module in tree.items():
-        if isinstance(module, dict) and module.get("enabled") and name not in supported:
-            raise ValueError(f"unsupported active module {name}")
-    for key, default in [("m_RenderMode", 0), ("m_RenderAlignment", 0), ("m_MaskInteraction", 0)]:
-        if int(renderer.get(key, default)) != default:
-            raise ValueError(f"unsupported renderer {key}")
-    if renderer.get("m_UseCustomVertexStreams"):
-        raise ValueError("unsupported custom vertex streams")
-    for field in ("ringBufferMode", "moveWithTransform", "scalingMode"):
+        if isinstance(module, dict) and module.get('enabled') and name not in supported:
+            raise ValueError(f'unsupported active module {name}')
+    alignment = int(renderer.get('m_RenderAlignment', 0))
+    if alignment not in (0, 2):
+        raise ValueError('unsupported renderer m_RenderAlignment')
+    if int(renderer.get('m_RenderMode', 0)) != 0:
+        raise ValueError('unsupported renderer m_RenderMode')
+    if int(renderer.get('m_MaskInteraction', 0)) != 0:
+        raise ValueError('unsupported renderer m_MaskInteraction')
+    if renderer.get('m_UseCustomVertexStreams'):
+        raise ValueError('unsupported custom vertex streams')
+    for field in ('ringBufferMode', 'moveWithTransform'):
         if int(tree.get(field, 0)) != 0:
-            raise ValueError(f"unsupported {field}")
+            raise ValueError(f'unsupported {field}')
+    scaling = int(tree.get('scalingMode', 0))
+    if scaling not in (0, 1):
+        raise ValueError('unsupported scalingMode')
+    if scaling == 1:
+        if not transform_chain:
+            raise ValueError('scalingMode requires a transform chain')
+        if any(tuple(node.local_scale) != (1, 1, 1) for node in transform_chain):
+            raise ValueError('unsupported scalingMode with nonidentity scales')
     if _constant(tree.get("startDelay"), "startDelay") != 0:
         raise ValueError("unsupported startDelay")
     initial = tree.get("InitialModule", {})
-    if initial.get("size3D") or initial.get("rotation3D"):
-        raise ValueError("unsupported initial 3D size/rotation")
+    if initial.get("rotation3D"):
+        raise ValueError("unsupported initial rotation3D")
+    size_y = None
+    if initial.get("size3D"):
+        if not isinstance(initial.get("startSizeY"), dict) or not isinstance(initial.get("startSizeZ"), dict):
+            raise ValueError("size3D requires explicit startSizeY/startSizeZ")
+        size_y = _range(initial["startSizeY"], "startSizeY", 1)
+        if _constant(initial["startSizeZ"], "startSizeZ", 1) != 1:
+            raise ValueError("unsupported billboard startSizeZ")
     if _constant(initial.get("startSpeed"), "startSpeed") != 0:
         raise ValueError("unsupported nonzero startSpeed")
     if _number(initial.get("randomizeRotationDirection", 0)) != 0:
@@ -78,8 +177,24 @@ def normalize_system(tree, renderer, seed):
             raise ValueError("unsupported burst (only evidenced time-zero single particle)")
         bursts.append(item)
     shape = tree.get("ShapeModule", {})
-    if shape.get("enabled") and int(shape.get("type", -1)) != 5:
-        raise ValueError("unsupported shape (requires box)")
+    shape_type = int(shape.get("type", -1)) if shape.get("enabled") else -1
+    if shape_type not in {-1, 5, 10}:
+        raise ValueError("unsupported shape (requires box or evidenced circle)")
+    circle_radius = circle_arc = None
+    if shape_type == 10:
+        radius, arc = shape.get("radius"), shape.get("arc")
+        if not isinstance(radius, dict) or not isinstance(arc, dict):
+            raise ValueError("Circle radius/arc is missing")
+        if _number(shape.get("radiusThickness", 1)) != 0:
+            raise ValueError("unsupported Circle radiusThickness")
+        if shape.get("alignToDirection") or _vec(shape.get("m_Scale"), "xyz", 1)[2] != 1:
+            raise ValueError("unsupported Circle direction/Z scale")
+        if any(int(item.get("mode", -1)) != 0 or _number(item.get("spread", 0)) != 0 for item in (radius, arc)):
+            raise ValueError("unsupported Circle radius/arc mode")
+        circle_radius = _number(radius.get("value"))
+        circle_arc = math.radians(_number(arc.get("value")))
+        if circle_radius <= 0 or not 0 < circle_arc <= math.tau:
+            raise ValueError("invalid Circle radius/arc")
     if any(_vec(shape.get("m_Rotation"))) or any(
         _number(shape.get(k, 0)) != 0
         for k in ("randomDirectionAmount", "sphericalDirectionAmount", "randomPositionAmount")
@@ -145,7 +260,15 @@ def normalize_system(tree, renderer, seed):
         gravity=[0, -9.81, 0],
         gravity_source="unity_default_assumption" if gravity else "unused",
         bursts=bursts,
+        color_over_time=_color_over_time(tree.get("ColorModule")),
+        render_alignment=alignment,
+        scaling_mode=scaling,
     )
+    if size_y is not None:
+        result["size_y"] = size_y
+    if circle_radius is not None:
+        result["circle_radius"] = circle_radius
+        result["circle_arc_radians"] = circle_arc
     if (
         result["duration"] <= 0
         or result["simulation_speed"] <= 0
@@ -153,6 +276,7 @@ def normalize_system(tree, renderer, seed):
         or not 0 < result["max_particles"] <= 100000
         or result["lifetime"][0] <= 0
         or result["size"][0] < 0
+        or (size_y is not None and size_y[0] < 0)
     ):
         raise ValueError("invalid particle bounds/lifetime/rate")
     return result
@@ -185,7 +309,7 @@ def normalize_material(tree, shader_name, shader_path_id):
     ):
         if (
             floats.get("_SrcBlend") == 5
-            and floats.get("_DstBlend") == 10
+            and floats.get("_DstBlend") in {1, 10}
             and floats.get("_MainPow_Min") == 0
             and floats.get("_MainPow_Max") == 1
             and all(
@@ -200,7 +324,7 @@ def normalize_material(tree, shader_name, shader_path_id):
                 )
             )
         ):
-            profile = "alpha_tint_v1"
+            profile = "additive_alpha_v1" if floats["_DstBlend"] == 1 else "alpha_tint_v1"
     if profile == "unsupported":
         raise ValueError(f"unsupported particle shader/variant: {shader_name}")
     main = dict(props.get("m_TexEnvs", ())).get("_MainTex")
@@ -275,7 +399,7 @@ def enrich_particle(part, index):
 def validate_config(config_json, profile):
     """Validate imported/relocated engineering data independently of parser trust."""
     data = json.loads(config_json)
-    if data.get("version") != 1 or profile not in {"additive_v1", "alpha_tint_v1"}:
+    if data.get("version") != 1 or profile not in {"additive_v1", "additive_alpha_v1", "alpha_tint_v1"}:
         raise ValueError("unsupported particle config version/profile")
     system, material = data["system"], data["material"]
     if material["profile"] != profile:
@@ -314,7 +438,11 @@ def validate_config(config_json, profile):
     if not system_fields <= system.keys() or not material_fields <= material.keys():
         raise ValueError("particle config fields are incomplete")
     if (
-        set(system) - system_fields - {"gravity_modifier", "gravity", "gravity_source", "bursts"}
+        set(system) - system_fields - {
+            "gravity_modifier", "gravity", "gravity_source", "bursts",
+            "color_over_time", "render_alignment", "scaling_mode", "size_y",
+            "circle_radius", "circle_arc_radians",
+        }
         or set(material) - material_fields
         or set(data) - {"version", "system", "material"}
     ):
@@ -331,6 +459,14 @@ def validate_config(config_json, profile):
             _number(value)
 
     finite(data)
+    _validate_color_over_time(system.get("color_over_time"))
+    for name, allowed in (("render_alignment", {0, 2}), ("scaling_mode", {0, 1})):
+        if name in system and (type(system[name]) is not int or system[name] not in allowed):
+            raise ValueError(f"invalid particle {name}")
+    circle_radius = _number(system.get("circle_radius", 0))
+    circle_arc = _number(system.get("circle_arc_radians", 0))
+    if not ((circle_radius == 0 and circle_arc == 0) or (circle_radius > 0 and 0 < circle_arc <= math.tau)):
+        raise ValueError("invalid particle Circle radius/arc")
     for name, length in [
         ("lifetime", 2),
         ("size", 2),
@@ -346,6 +482,14 @@ def validate_config(config_json, profile):
             raise ValueError(f"invalid particle {name}")
         for value in system[name]:
             _number(value)
+    if "size_y" in system:
+        size_y = system["size_y"]
+        if not isinstance(size_y, list) or len(size_y) != 2:
+            raise ValueError("invalid particle size_y")
+        for value in size_y:
+            _number(value)
+        if size_y[0] < 0 or size_y[1] < size_y[0]:
+            raise ValueError("invalid particle size_y bounds")
     for name in ("tint", "dark_color"):
         if not isinstance(material[name], list) or len(material[name]) != 4:
             raise ValueError(f"invalid particle material {name}")

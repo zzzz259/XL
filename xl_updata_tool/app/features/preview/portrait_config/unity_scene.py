@@ -680,7 +680,9 @@ def _parse_environment(env, bundle_hash, version_timestamp):
                 try:
                     if len(systems) != 1:
                         raise ValueError("ParticleSystemRenderer requires exactly one ParticleSystem")
-                    config["system"] = normalize_system(trees[systems[0]], renderer_tree, abs(systems[0]))
+                    config["system"] = normalize_system(
+                        trees[systems[0]], renderer_tree, abs(systems[0]), transform_chain=transform_chain,
+                    )
                 except (ValueError, TypeError, KeyError) as exc:
                     diagnostics.append(SceneDiagnostic("unsupported_particle_system", str(exc), source=AssetRef(str(bundle_hash), component_id)))
                 particle = ParticleState(system_ref, config_json=json.dumps(config, sort_keys=True, separators=(",", ":")))

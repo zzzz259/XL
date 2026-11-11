@@ -55,7 +55,7 @@ def portrait_scene_capabilities(scene) -> SceneCapabilities:
     if base_errors or not basic:
         reason = '；'.join(n.message for n in base_errors[:3]) or '缺少可用的场景基础资源'
         return SceneCapabilities('missing', '缺少资源', reason, **common)
-    unsupported = tuple(p for p in particles if p.particle.profile not in {'additive_v1', 'alpha_tint_v1'})
+    unsupported = tuple(p for p in particles if p.particle.profile not in {'additive_v1', 'additive_alpha_v1', 'alpha_tint_v1'})
     if errors or unsupported:
         reason = '；'.join(n.message for n in errors[:3]) or '场景含暂不支持的特效材质'
         return SceneCapabilities('partial', '特效暂不支持', reason, **common)

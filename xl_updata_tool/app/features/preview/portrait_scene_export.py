@@ -264,7 +264,7 @@ def build_portrait_scene_export_job(
         )
         if part.particle is not None:
             particle = part.particle
-            if particle.texture is None or particle.profile not in {'additive_v1', 'alpha_tint_v1'}:
+            if particle.texture is None or particle.profile not in {'additive_v1', 'additive_alpha_v1', 'alpha_tint_v1'}:
                 raise ValueError(f'unsupported or missing particle material: {part.part_id}')
             particle_sources.append(ParticleSource(
                 part.part_id, _resolve_asset_path(asset_index, Path(material_root), particle.texture),
