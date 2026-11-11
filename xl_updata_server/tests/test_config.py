@@ -216,6 +216,21 @@ def test_portraits_disabled_by_default(tmp_path):
     assert config.portrait_png_working_rows == 128
 
 
+def test_basic_fallback_defaults_and_strict_bool(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_PORTRAIT_MINIMAL, encoding="utf-8")
+    assert load_config(config_path).portrait_basic_fallback is False
+    config_path.write_text(_PORTRAIT_MINIMAL + "[portraits]\nbasic_fallback = true\n", encoding="utf-8")
+    assert load_config(config_path).portrait_basic_fallback is True
+    config_path.write_text(_PORTRAIT_MINIMAL + "[portraits]\nbasic_fallback = 1\n", encoding="utf-8")
+    try:
+        load_config(config_path)
+    except ValueError as error:
+        assert "basic_fallback" in str(error)
+    else:
+        raise AssertionError("non-boolean basic_fallback was accepted")
+
+
 def test_portraits_section_parses_paths_and_limits(tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text(

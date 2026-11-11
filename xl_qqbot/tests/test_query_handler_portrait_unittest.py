@@ -109,6 +109,8 @@ def make_handler(tmp_path, aliases=None, mute=None, sender=None):
             "width": None,
             "height": None,
             "error": None,
+            "render_scope": skin.get("render_scope", "full"),
+            "render_notice": skin.get("render_notice"),
         }
         if skin["state"] == "published":
             item["artifact_path"] = f"{skin['character_id']}/{skin['skin_id']}.png"
@@ -176,6 +178,21 @@ async def test_query_with_digit_sends_portrait(tmp_path):
     assert Path(path).parent.name == "10000224"
     assert Path(path).name == "1000022401.png"
     assert content == ""  # 当前版本立绘不配旧版提示
+
+
+@pytest.mark.asyncio
+async def test_query_basic_returns_normal_image_without_scope_notice(tmp_path):
+    SKINS[2]["render_scope"] = "basic"
+    SKINS[2]["render_notice"] = "unsupported particles"
+    try:
+        handler, sender, _ = make_handler(tmp_path)
+        await handler._answer_query("g1", "雾铃1", "u1")
+        assert [call[0] for call in sender.calls] == ["schedule_image"]
+        assert sender.calls[0][3] == ""
+        assert handler._portrait_querier.find("10000224", 1).render_scope == "basic"
+    finally:
+        SKINS[2]["render_scope"] = "full"
+        SKINS[2]["render_notice"] = None
 
 
 @pytest.mark.asyncio

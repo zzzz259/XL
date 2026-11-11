@@ -102,6 +102,7 @@ class PortraitSummary:
     success: int = 0
     failed: int = 0
     skipped: int = 0
+    basic: int = 0
 
 
 @dataclass
@@ -290,7 +291,7 @@ class PortraitUpdateRunner:
         for callback in callback_lua:
             _copy_atomic(callback, staging_portraits / callback.name)
         manifest_entries: list[dict] = []
-        counts = {"success": 0, "failed": 0, "skipped": 0}
+        counts = {"success": 0, "failed": 0, "skipped": 0, "basic": 0}
         for task in tasks:  # 保持 roots 的配置处理顺序，不按 ordinal 全局重排
             try:
                 if task.action == "render" and tool_error is not None:
@@ -327,6 +328,8 @@ class PortraitUpdateRunner:
                         version_key,
                         task.skin_id,
                     )
+            if entry.get("state") == "published" and entry.get("render_scope") == "basic":
+                counts["basic"] += 1
             manifest_entries.append(entry)
             # 逐套持久化只写 work manifest；staging/已发布 manifest 在整轮结束后
             # 一次性写，恢复中任何中断都不截断当前已发布 manifest。
@@ -345,15 +348,17 @@ class PortraitUpdateRunner:
             self._write_staging_manifest(staging_portraits, version_key, manifest_entries)
         shutil.rmtree(skins_root, ignore_errors=True)
         LOGGER.info(
-            "stage=portraits version=%s elapsed=%.2fs success=%d failed=%d skipped=%d",
+            "stage=portraits version=%s elapsed=%.2fs success=%d failed=%d skipped=%d basic=%d",
             version_key,
             time.perf_counter() - started,
             counts["success"],
             counts["failed"],
             counts["skipped"],
+            counts["basic"],
         )
         return PortraitSummary(
-            success=counts["success"], failed=counts["failed"], skipped=counts["skipped"]
+            success=counts["success"], failed=counts["failed"], skipped=counts["skipped"],
+            basic=counts["basic"],
         )
 
     # ---- 计划 ---------------------------------------------------------------
@@ -806,6 +811,8 @@ class PortraitUpdateRunner:
                 "timeout_seconds": self.config.portrait_timeout_seconds,
             },
         }
+        if self.config.portrait_basic_fallback:
+            request["fallback"] = "basic"
         if self.config.portrait_query_cli_path is not None:
             request["query_cli_path"] = str(self.config.portrait_query_cli_path)
         if self.config.portrait_xvfb_run_path is not None:
@@ -884,7 +891,19 @@ class PortraitUpdateRunner:
         sha256 = hashlib.sha256(data).hexdigest()
         if sha256 != result.get("sha256"):
             raise ValueError("PNG 哈希与渲染证据不一致")
-        return {"sha256": sha256, "width": width, "height": height}
+        scope = str(result.get("render_scope") or "full")
+        if scope not in {"full", "basic"}:
+            raise ValueError(f"未知立绘渲染范围: {scope}")
+        notice = str(result.get("render_notice") or "")
+        if scope == "basic" and not notice:
+            raise ValueError("basic 立绘缺少降级原因")
+        return {
+            "sha256": sha256,
+            "width": width,
+            "height": height,
+            "render_scope": scope,
+            "render_notice": notice,
+        }
 
     # ---- 产物与事件 -----------------------------------------------------------
 
@@ -906,6 +925,12 @@ class PortraitUpdateRunner:
                           staging_portraits: Path, artifacts_dir: Path) -> dict:
         """PNG/staging/outbox 落盘并构造 published 条目；事件由 run 循环在
         work manifest(event_emitted=False) 持久化之后再追加。"""
+        scope = str(evidence.get("render_scope") or "full")
+        if scope == "basic":
+            previous = task.previous or {}
+            if (previous.get("render_scope", "full") == "full" and self._previous_version
+                    and self._previous_artifact(previous, self._previous_version) is not None):
+                raise ValueError("不能用 basic 覆盖已有完整立绘")
         _ensure_png_within_limit(artifact)
         relative = f"{task.character_id}/{task.skin_id}.png"
         _copy_atomic(artifact, staging_portraits / relative)
@@ -920,6 +945,8 @@ class PortraitUpdateRunner:
             width=evidence["width"],
             height=evidence["height"],
             staged=True,
+            render_scope=scope,
+            render_notice=str(evidence.get("render_notice") or "") or None,
         )
         return entry
 
@@ -940,6 +967,8 @@ class PortraitUpdateRunner:
             width=previous.get("width"),
             height=previous.get("height"),
             staged=True,
+            render_scope=str(previous.get("render_scope") or "full"),
+            render_notice=previous.get("render_notice"),
         )
         return entry
 
@@ -1015,6 +1044,8 @@ class PortraitUpdateRunner:
                 width=previous.get("width"),
                 height=previous.get("height"),
                 staged=True,
+                render_scope=str(previous.get("render_scope") or "full"),
+                render_notice=previous.get("render_notice"),
             )
         else:
             entry["state"] = "failed"
@@ -1036,6 +1067,8 @@ class PortraitUpdateRunner:
             "width": None,
             "height": None,
             "error": None,
+            "render_scope": "full",
+            "render_notice": None,
             "event_emitted": False,
             "staged": False,
         }
@@ -1058,6 +1091,8 @@ class PortraitUpdateRunner:
             "sha256": sha256,
             "width": entry.get("width"),
             "height": entry.get("height"),
+            "render_scope": str(entry.get("render_scope") or "full"),
+            "render_notice": entry.get("render_notice"),
             "at": datetime.now().astimezone().isoformat(),
         }
         self.events_path.parent.mkdir(parents=True, exist_ok=True)

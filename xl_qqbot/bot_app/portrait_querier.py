@@ -42,6 +42,8 @@ class PortraitQueryResult:
     height: int = 0
     available_range: tuple[int, int] | None = None
     error: str = ""
+    render_scope: str = "full"
+    render_notice: str = ""
 
 
 class PortraitQuerier:
@@ -141,6 +143,8 @@ class PortraitQuerier:
             ordinal=self._safe_ordinal(entry),
             available_range=available,
             error=str(entry.get("error") or ""),
+            render_scope=str(entry.get("render_scope") or "full"),
+            render_notice=str(entry.get("render_notice") or ""),
         )
         if state in NOTICE_STATES:
             return PortraitQueryResult(status=state, **base)

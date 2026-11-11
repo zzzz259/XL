@@ -589,6 +589,7 @@ def test_event_fields_follow_plan_contract(tmp_path, monkeypatch):
     assert set(event) == {
         "event", "version", "character_id", "skin_id",
         "ordinal", "name", "path", "sha256", "width", "height", "at",
+        "render_scope", "render_notice",
     }
     assert event["event"] == "portrait_ready"
     assert event["version"] == "2"
@@ -1449,6 +1450,81 @@ def test_not_applicable_summary_counts_as_skipped(tmp_path, monkeypatch):
         render_impl=not_applicable_result)
     assert summary.success == 0 and summary.failed == 0 and summary.skipped == 3
     assert _skins_by_id(env.manifest(staging))["12001514"]["state"] == "not_applicable"
+
+
+def _basic_render_result(_runner, task, workspace):
+    data = _png_bytes(31, 22)
+    output = Path(workspace) / "output"
+    output.mkdir(parents=True, exist_ok=True)
+    artifact = output / f"{task.character_id}_{task.skin_id}.png"
+    artifact.write_bytes(data)
+    return {
+        "status": "success",
+        "artifact_path": str(artifact),
+        "width": 31,
+        "height": 22,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "render_scope": "basic",
+        "render_notice": "unsupported particles",
+    }
+
+
+def test_basic_scope_summary_manifest_and_ready_event(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    summary, staging = env.run(2, basefashion=BASE_FASHION_POS_CHANGED,
+        render_impl=_basic_render_result)
+    assert summary.success == 1 and summary.basic == 1
+    assert summary.failed == 0 and summary.skipped == 2
+    entry = _skins_by_id(env.manifest(staging))["12001514"]
+    assert entry["render_scope"] == "basic"
+    assert entry["render_notice"] == "unsupported particles"
+    event = env.ready_events(2)[0]
+    assert event["render_scope"] == "basic"
+    assert event["render_notice"] == "unsupported particles"
+
+
+def test_render_job_passes_basic_fallback_when_enabled(tmp_path, monkeypatch):
+    runner, base, task = _render_job_runner(tmp_path, portrait_basic_fallback=True)
+    (base / "work" / "result.json").write_text(
+        json.dumps({"status": "success", "artifact": 1}), encoding="utf-8")
+    _install_job_popen_fake(monkeypatch, {}, {"returncode": 0, "stderr": b""})
+    runner._run_render_job(task, base)
+    request = json.loads((base / "request.json").read_text(encoding="utf-8"))
+    assert request["fallback"] == "basic"
+
+
+def test_basic_cannot_replace_existing_full_artifact(tmp_path):
+    runner, base, task = _render_job_runner(tmp_path)
+    runner._previous_version = "122"
+    previous_data = _png_bytes(30, 22)
+    previous_path = runner.versions_dir / "122" / "portraits" / "full.png"
+    previous_path.parent.mkdir(parents=True)
+    previous_path.write_bytes(previous_data)
+    task.previous = {
+        "state": "published",
+        "artifact_path": "full.png",
+        "artifact_sha256": hashlib.sha256(previous_data).hexdigest(),
+        "source_version": 122,
+        "width": 30,
+        "height": 22,
+        "render_scope": "full",
+    }
+    new_data = _png_bytes(40, 22)
+    artifact = base / "output" / "basic.png"
+    artifact.write_bytes(new_data)
+    evidence = {
+        "sha256": hashlib.sha256(new_data).hexdigest(),
+        "width": 40,
+        "height": 22,
+        "render_scope": "basic",
+        "render_notice": "unsupported particles",
+    }
+    with pytest.raises(ValueError, match="完整"):
+        runner._publish_rendered(task, artifact, evidence,
+                                 tmp_path / "staging", tmp_path / "artifacts")
+    assert previous_path.read_bytes() == previous_data
+    assert not (tmp_path / "staging" / "10000151" / "12001513.png").exists()
 
 
 # ---- 渲染入口受控进程（Popen + 进程组收割） -------------------------------------

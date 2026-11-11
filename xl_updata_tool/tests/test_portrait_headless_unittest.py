@@ -194,12 +194,77 @@ if mode not in ('nolog',): print(json.dumps(dict(phase='complete',output=p['outp
             return [sys.executable, str(script), str(descriptor), mode]
         return command
 
-    def manual_request(self):
-        package = self.package()
+    def manual_request(self, package=None):
+        package = package or self.package()
         request = dict(self.request, input_root=str(self.root / 'input'),
                        package_path=str(package / 'skin.json'))
         request.pop('workspace_root')
         return request
+
+    def package_with_unsupported_particle(self):
+        package = self.package()
+        manifest_path = package / 'skin.json'
+        data = json.loads(manifest_path.read_text(encoding='utf-8'))
+        scene = data['scene']
+        part = dict(scene['parts'][0])
+        part['part_id'] = 'unsupported-particle'
+        part['object_ref'] = {'bundle_hash': 'bundle', 'path_id': 99}
+        part['renderer'] = dict(part['renderer'], kind='ParticleSystem')
+        part['spine'] = None
+        part['particle'] = {
+            'system': {'bundle_hash': 'bundle', 'path_id': 99},
+            'material': None,
+            'texture': scene['parts'][0]['spine']['texture'],
+            'profile': 'unsupported',
+            'config_json': '{}',
+        }
+        scene['parts'].append(part)
+        scene['available_assets'].append({'bundle_hash': 'bundle', 'path_id': 99})
+        data['parts'].append({
+            'part_id': 'unsupported-particle',
+            'directory': data['parts'][0]['directory'],
+            'kind': 'particle',
+            'profile': 'unsupported',
+            'particle': {},
+            'system': {'bundle_hash': 'bundle', 'path_id': 99},
+            'material': None,
+        })
+        manifest_path.write_text(json.dumps(data), encoding='utf-8')
+        return package
+
+    def test_basic_fallback_preserves_base_scene_and_marks_result(self):
+        api = self.api()
+        request = self.manual_request(self.package_with_unsupported_particle())
+        with self.assertRaisesRegex(ValueError, 'full scene cannot be exported'):
+            api.plan_request(request, self.root / 'work/full-only')
+        request['fallback'] = 'basic'
+        job, _ = api.plan_request(request, self.root / 'work/basic-planning')
+        self.assertEqual(job.render_scope, 'basic')
+        self.assertEqual(job.settings.scale, 2)
+        self.assertTrue(job.sources)
+        self.assertFalse(job.particle_sources)
+        self.assertTrue(all(source.source_kind != 'particle' for source in job.sources))
+        with (patch.object(api, 'build_scene_command', self.native('bounded')),
+              patch('app.platform.portrait_render_process.resolve_systemd_run', return_value=None)):
+            result = api.run_request(request)
+        self.assertEqual(result['status'], 'success', result)
+        self.assertEqual(result['render_scope'], 'basic')
+        self.assertTrue(result['render_notice'])
+
+    def test_basic_fallback_rejects_unknown_values_and_native_failures(self):
+        api = self.api()
+        with self.assertRaisesRegex(ValueError, 'fallback'):
+            api.validate_request(dict(self.request, fallback='unsupported-value'))
+        request = self.manual_request(self.package_with_unsupported_particle())
+        request['fallback'] = 'basic'
+        target = self.root / 'output/role_game-skin.png'
+        target.write_bytes(b'previous')
+        with (patch.object(api, 'build_scene_command', self.native('failure')),
+              patch('app.platform.portrait_render_process.resolve_systemd_run', return_value=None)):
+            result = api.run_request(request)
+        self.assertEqual(result['status'], 'error', result)
+        self.assertEqual(target.read_bytes(), b'previous')
+        self.assertNotIn('sha256', result)
 
     def test_manual_plan_builds_exactly_one_builtin_full_png_at_2x(self):
         api = self.api()

@@ -104,6 +104,17 @@ def test_published_current_ordinal(tmp_path):
     assert result.source_version == "123"
 
 
+def test_basic_query_found_keeps_scope_and_normal_image(tmp_path):
+    querier = make_querier(tmp_path)
+    _patch_manifest(tmp_path, lambda payload: payload["skins"][0].update(
+        render_scope="basic", render_notice="unsupported particles"))
+    result = querier.find("10000224", 1)
+    assert result.status == "found"
+    assert result.render_scope == "basic"
+    assert result.render_notice == "unsupported particles"
+    assert result.image_path is not None and result.image_path.is_file()
+
+
 def test_ordinal_is_per_character(tmp_path):
     querier = make_querier(tmp_path)
     result = querier.find("10000101", 2)

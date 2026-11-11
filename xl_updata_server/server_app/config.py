@@ -50,6 +50,7 @@ class ServerConfig:
     rerun_schedule_forecast_limit: int = 20
     rerun_schedule_overrides: tuple[dict, ...] = ()
     portrait_enabled: bool = False
+    portrait_basic_fallback: bool = False
     portrait_tool_dir: Path | None = None
     portrait_python_bin: str = ""
     portrait_dotnet_path: Path | None = None
@@ -195,6 +196,7 @@ def load_config(path: str | Path) -> ServerConfig:
 
     portraits = dict(raw.get("portraits", {}))
     portrait_enabled = _read_bool(portraits, "enabled", False)
+    portrait_basic_fallback = _read_bool(portraits, "basic_fallback", False)
     portrait_memory_max = _read_int(portraits, "memory_max_bytes", 512 * 1024 * 1024)
     portrait_memory_high = _read_int(portraits, "memory_high_bytes", 384 * 1024 * 1024)
     if portrait_memory_high > portrait_memory_max:
@@ -251,6 +253,7 @@ def load_config(path: str | Path) -> ServerConfig:
         rerun_schedule_forecast_limit=_read_int(rerun, "forecast_limit", 20),
         rerun_schedule_overrides=tuple(parsed_overrides),
         portrait_enabled=portrait_enabled,
+        portrait_basic_fallback=portrait_basic_fallback,
         portrait_tool_dir=_portrait_path("tool_dir"),
         portrait_python_bin=str(portraits.get("python_bin", "")).strip(),
         portrait_dotnet_path=_portrait_path("dotnet_path"),

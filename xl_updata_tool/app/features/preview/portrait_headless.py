@@ -94,6 +94,8 @@ def validate_request(payload):
         raise ValueError('unsupported schema_version')
     if payload.get('profile') != PROFILE or type(payload['profile'].get('scale')) is not int:
         raise ValueError('only full 2x PNG profile is supported')
+    if payload.get('fallback') is not None and payload['fallback'] != 'basic':
+        raise ValueError('fallback must be basic when specified')
     rows = payload.get('png_working_rows', 128)
     if type(rows) is not int or not 0 <= rows <= 1024:
         raise ValueError('png_working_rows must be an integer in 0..1024')
@@ -185,10 +187,20 @@ def _check_scene_identity(scene, request):
         raise ValueError('configured scene identity does not match request')
 
 
+def _scene_export_capabilities(scene, fallback):
+    from .scene_capabilities import portrait_scene_capabilities
+
+    capabilities = portrait_scene_capabilities(scene)
+    if capabilities.can_export or (
+        fallback == 'basic' and capabilities.state == 'partial' and capabilities.can_export_basic
+    ):
+        return capabilities
+    raise ValueError(f'full scene cannot be exported: {capabilities.state}: {capabilities.reason}')
+
+
 def _build_workspace_scene(request):
     from .portrait_config.asset_index import AssetIndex
     from .portrait_config.builder import build_portrait_scenes
-    from .scene_capabilities import portrait_scene_capabilities
 
     catalog, lua_root, bundle_root = _workspace_inputs(request)
     index = AssetIndex.from_catalog(
@@ -200,24 +212,29 @@ def _build_workspace_scene(request):
         raise ValueError(f'expected exactly one configured scene for skin {request["skin_id"]}, got {len(scenes)}')
     scene = scenes[0]
     _check_scene_identity(scene, request)
-    capabilities = portrait_scene_capabilities(scene)
-    if not capabilities.can_export:
-        raise ValueError(f'full scene cannot be exported: {capabilities.state}: {capabilities.reason}')
+    _scene_export_capabilities(scene, request.get('fallback'))
     return scene, index, bundle_root
 
 
-def _plan_package_job(scene, manifest_path, work):
+def _plan_package_job(scene, manifest_path, work, fallback=None):
     from .portrait_package import build_packaged_portrait_jobs
     from .portrait_scene_export import prepare_portrait_scene_export_job, scene_resource_family
 
     if scene_resource_family(scene) != 'cardspine':
         raise ValueError('only cardspine character scenes are supported')
+    capabilities = _scene_export_capabilities(scene, fallback)
+    scope = 'full' if capabilities.can_export else 'basic'
     jobs = build_packaged_portrait_jobs(scene, manifest_path, work / 'render-output',
-        settings=None, options={'include_effects': True, 'include_interactions': False, 'allow_basic': False})
+        settings=None,
+        options={
+            'include_effects': scope == 'full',
+            'include_interactions': False,
+            'allow_basic': scope == 'basic',
+        })
     png = tuple(job for job in jobs if job.settings.format.casefold() == 'png'
-        and job.render_scope == 'full' and not job.interaction_id and job.export_mode == 'builtin')
+        and job.render_scope == scope and not job.interaction_id and job.export_mode == 'builtin')
     if len(png) != 1:
-        raise ValueError('expected exactly one builtin full PNG job')
+        raise ValueError(f'expected exactly one builtin {scope} PNG job')
     job = replace(png[0], settings=replace(png[0].settings, scale=2))
     return prepare_portrait_scene_export_job(job, work / 'prepared')
 
@@ -258,7 +275,6 @@ def _metadata_provider(request, env):
 
 def _plan_request(request, work):
     from .portrait_package import load_portrait_package
-    from .scene_capabilities import portrait_scene_capabilities
 
     work = _inside(work, Path(request['work_root']), 'temporary_dir')
     work.mkdir(parents=True, exist_ok=True)
@@ -266,10 +282,8 @@ def _plan_request(request, work):
         package = load_portrait_package(request['package_path'])
         scene = package.scene
         _check_scene_identity(scene, request)
-        capabilities = portrait_scene_capabilities(scene)
-        if not capabilities.can_export:
-            raise ValueError(f'full scene cannot be exported: {capabilities.state}: {capabilities.reason}')
-        return _plan_package_job(scene, package.manifest_path, work), 0
+        _scene_export_capabilities(scene, request.get('fallback'))
+        return _plan_package_job(scene, package.manifest_path, work, request.get('fallback')), 0
     scene, index, bundle_root = _build_workspace_scene(request)
     from .portrait_import import refresh_portrait_packages
     material_root = work / 'materials'
@@ -281,7 +295,7 @@ def _plan_request(request, work):
     if summary.published != 1 or summary.failures:
         detail = '; '.join(f"{failure.get('skin_id')}: {failure.get('error')}" for failure in summary.failures)
         raise ValueError(f'portrait package preparation failed: {detail or "no package published"}')
-    return _plan_package_job(scene, summary.manifest_paths[0], work), summary.metadata_incomplete
+    return _plan_package_job(scene, summary.manifest_paths[0], work, request.get('fallback')), summary.metadata_incomplete
 
 
 def plan_request(payload, temporary_dir):
@@ -367,6 +381,10 @@ def run_request(payload):
         result['work_directory'] = str(work)
         job, metadata_incomplete = _plan_request(request, work)
         result['metadata_incomplete'] = bool(metadata_incomplete)
+        from .scene_capabilities import portrait_scene_capabilities
+        capabilities = portrait_scene_capabilities(job.scene)
+        result['render_scope'] = job.render_scope
+        result['render_notice'] = capabilities.reason if job.render_scope == 'basic' else ''
 
         command = build_scene_command(job, request, work)
         descriptors = tuple(work.glob('scene-*.json'))
