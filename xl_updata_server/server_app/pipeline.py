@@ -10,8 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .versioning import VersionWorkspace, publish_version, read_current_pointer, write_current_pointer
 from .gacha_catalog import publish_catalog, read_published_catalog
+from .versioning import VersionWorkspace, publish_version, read_current_pointer, write_current_pointer
 
 LOGGER = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .gacha_adapter import parse_lua_table
@@ -345,7 +345,7 @@ def publish_catalog(catalog: dict, directory: Path | str) -> dict:
             "file": filename,
             "sha256": hashlib.sha256(raw).hexdigest(),
             "size": len(raw),
-            "published_at": datetime.now(timezone.utc).isoformat(),
+            "published_at": datetime.now(UTC).isoformat(),
         }
         temporary = _write_temporary(directory, _json_bytes(manifest))
         try:
