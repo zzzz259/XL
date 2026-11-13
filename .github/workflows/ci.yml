@@ -12,6 +12,125 @@ permissions:
   contents: read
 
 jobs:
+  gacha-shared:
+    if: github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xl_gacha_web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test Android shared analysis, archives and catalog contract
+        run: |
+          for pattern in test_analysis.py test_archive.py test_catalog_contract.py test_catalog_updates.py test_core.py; do
+            python -B -m unittest discover -s tests -p "$pattern" -v
+          done
+      - name: Lint client and producer
+        run: |
+          python -m pip install ruff==0.17.1
+          python -m ruff check . ../xl_updata_server/server_app/gacha_catalog.py ../xl_updata_server/tests/test_gacha_catalog_unittest.py ../xl_updata_server/tests/test_gacha_catalog_pipeline_unittest.py --target-version py311 --no-cache
+      - name: JavaScript tests and syntax
+        run: |
+          node --test tests/image-export.test.cjs
+          for file in static/*.js; do node --check "$file"; done
+
+  gacha-android:
+    if: github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xl_gacha_android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Prepare official SDK layout
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Test engine and SDK resolver
+        run: |
+          python -m pip install Pillow==12.2.0
+          node --test tests/*.test.cjs
+          for file in web/*.js; do node --check "$file"; done
+          python -B -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile all native sources, execute WireTest and prepare real JSON tests
+        run: python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output "$RUNNER_TEMP/native"
+      - name: Build isolated QQ share/session regression APK
+        run: python -B scripts/build_login_return_test.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output "$RUNNER_TEMP/login-return"
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run catalog contract with Android org.json
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          disable-animations: true
+          script: |
+            adb shell mkdir -p /data/local/tmp/xl-catalog-ci
+            adb push "$RUNNER_TEMP/native/catalog-tests.jar" /data/local/tmp/xl-catalog-ci/catalog-tests.jar
+            adb push "$GITHUB_WORKSPACE/xl_gacha_web/tests/fixtures/catalog-contract.json" /data/local/tmp/xl-catalog-ci/contract.json
+            adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.CatalogUpdatesTest /data/local/tmp/xl-catalog-ci/state /data/local/tmp/xl-catalog-ci/contract.json'
+            adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.LoginLinksTest'
+            adb shell 'CLASSPATH=/data/local/tmp/xl-catalog-ci/catalog-tests.jar app_process /system/bin cn.starfall.gacha.local.LoginReturnTest'
+            adb install "$RUNNER_TEMP/login-return/login-return-qa.apk"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration | tee "$RUNNER_TEMP/login-return/separate.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/separate.txt').read_text(); assert 'PASS 12 isolated Android' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w -e separateTask false cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginReturnIntegration | tee "$RUNNER_TEMP/login-return/same.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/same.txt').read_text(); assert 'PASS 12 isolated Android' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.ImageExportIntegration | tee "$RUNNER_TEMP/login-return/images.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/images.txt').read_text(); assert 'PASS 20 image album/share checks' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.LoginFreshIntegration | tee "$RUNNER_TEMP/login-return/fresh.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/fresh.txt').read_text(); assert 'PASS 8 fresh-login WebView checks' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration | tee "$RUNNER_TEMP/login-return/tap.txt"
+            adb logcat -d -s AndroidRuntime:E
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/tap.txt').read_text(); assert 'PASS 16 TapTap App WebView/handoff checks' in s and 'tap_policy_checks=21' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w -e mobile true cn.starfall.gacha.returnqa/cn.starfall.gacha.local.TapAppIntegration | tee "$RUNNER_TEMP/login-return/tap-mobile.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/tap-mobile.txt').read_text(); assert 'PASS 20 TapTap App WebView/handoff checks' in s and 'layout=phone' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.VisualAssetsIntegration | tee "$RUNNER_TEMP/login-return/visual-assets.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/visual-assets.txt').read_text(); assert 'PASS 41 offline visual asset checks' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.CredentialsIntegration | tee "$RUNNER_TEMP/login-return/credentials.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/credentials.txt').read_text(); assert 'PASS 29 credential storage checks' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell cmd overlay enable --user 0 com.android.internal.systemui.navbar.threebutton
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.MobileUiIntegration | tee "$RUNNER_TEMP/login-return/mobile-ui.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/mobile-ui.txt').read_text(); assert 'PASS ' in s and 'mobile UI checks' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb shell am instrument -w cn.starfall.gacha.returnqa/cn.starfall.gacha.local.NativeInsetsIntegration | tee "$RUNNER_TEMP/login-return/native-insets.txt"
+            python -c "from pathlib import Path; s=Path('$RUNNER_TEMP/login-return/native-insets.txt').read_text(); assert 'native inset ownership checks' in s and 'PASS ' in s and 'INSTRUMENTATION_CODE: -1' in s, s"
+            adb uninstall cn.starfall.gacha.returnqa
+
+  gacha-https-config:
+    if: github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate both Nginx templates with disposable test certificate
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nginx openssl
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem"
+          for name in nginx-bootstrap nginx-https; do
+            sed -e 's/user nginx;/user www-data;/' -e "s|/etc/letsencrypt/live/xl-gacha-ip/fullchain.pem|$RUNNER_TEMP/cert.pem|" -e "s|/etc/letsencrypt/live/xl-gacha-ip/privkey.pem|$RUNNER_TEMP/key.pem|" "xl_updata_server/deploy/https/$name.conf" > "$RUNNER_TEMP/$name.conf"
+            sudo nginx -t -c "$RUNNER_TEMP/$name.conf"
+          done
+
   branch-flow:
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
@@ -134,6 +253,8 @@ jobs:
 
   qq-bot:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}/xl_qqbot:${{ github.workspace }}/xl_gacha_web
     defaults:
       run:
         working-directory: xl_qqbot
@@ -172,7 +293,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install test and lint tools
-        run: python -m pip install pytest ruff
+        run: python -m pip install pytest ruff==0.17.1
 
       - name: Compile deployment controller sources
         run: python -B -c "import pathlib; files=list(pathlib.Path('xl_deploy').rglob('*.py')); [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in files]; print(f'Compiled {len(files)} files')"
@@ -181,4 +302,4 @@ jobs:
         run: python -m pytest -q xl_deploy/tests --basetemp=${{ runner.temp }}/xl-deploy-pytest -p no:cacheprovider
 
       - name: Lint deployment controller
-        run: python -m ruff check xl_deploy
+        run: python -m ruff check xl_deploy --target-version py311

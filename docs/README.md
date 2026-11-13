@@ -13,6 +13,17 @@
 
 ## 子项目
 
+### 抽卡手记
+
+- [用户指南](gacha-user-guide.md)：安装、登录、账号、导入导出、更新、隐私与帮助。
+- [0.4.2 更新公告](releases/gacha-v0.4.2.md)：平均 UP 与保底标记修正、本机加密凭据和更新内容展示。
+- [0.4.1 更新公告](releases/gacha-v0.4.1.md)：角标修复、数字与标签调整、十连多金分组及长图评价排版。
+- [0.4 更新公告](releases/gacha-v0.4.md)：Android 信息与 UI 重构、长图、素材与统计改进。
+- [0.3.6 更新公告](releases/gacha-v0.3.6.md)：0.3.4 之后的渠道登录与查询改进、电脑端停止维护说明。
+- [构建与测试](gacha-development.md)：Android 环境、共享代码 CI、原生验证与签名升级；电脑端已停止维护。
+- [数据与配置协议](gacha-architecture.md)：架构、存储、统计、schema1 与失败回退。
+- [公共 HTTPS 运维](../xl_updata_server/docs/gacha-config-hosting.md)：IP证书、目录权限、测试/正式分离、续期与恢复。
+
 ### 更新工具
 
 - [README](../xl_updata_tool/README.md)：用户快速开始、使用流程、源码环境和构建入口。

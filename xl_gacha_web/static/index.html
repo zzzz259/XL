@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="星落抽卡记录查询：自行在官方门户登录，提交凭据后查看中文抽卡明细与统计。">
+  <title>星落 · 抽卡手记</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/theme.css">
+  <link rel="stylesheet" href="/local.css">
+  <script src="/app.js" defer></script>
+  <script src="/image-export.js" defer></script>
+  <script src="/local.js" defer></script>
+  <script src="/login.js" defer></script>
+  <script src="/environment.js" defer></script>
+  <script src="/catalog-ui.js" defer></script>
+</head>
+<body>
+  <header class="site-header shell">
+    <a class="brand" href="/" aria-label="星落抽卡手记首页"><span class="brand-icon">✦</span><span>星落<span class="brand-divider">/</span><strong>抽卡手记</strong></span></a>
+    <nav aria-label="主要导航"><button id="toggle-query" class="text-button" aria-expanded="false">重新查询</button><button class="text-button guide-open">获取凭据 <span>↗</span></button><a class="official-link" href="https://i.haoplay.com.cn/?appid=2070021&amp;l=cn" target="_blank" rel="noopener noreferrer">前往官网 <span>↗</span></a></nav>
+  </header>
+
+  <main class="shell">
+    <section class="library-panel" aria-label="本地账号存档">
+      <div class="library-main"><label for="account-select">本地存档 <span id="account-count">0 个账号</span></label><select id="account-select"><option value="">选择一个账号存档</option></select></div>
+      <div class="library-actions"><button id="rename-account" class="outline-button" disabled>改名</button><button id="delete-account" class="text-button" disabled>删除存档</button><button id="import-open" class="outline-button">↑ 导入记录</button><button id="backup-all" class="outline-button">↓ 备份全部</button></div>
+      <details class="storage-note"><summary>记录保存在这台电脑 · 查看位置与说明</summary><p id="storage-path"></p><p>记录保存在程序旁的 user-data 文件夹，更换浏览器不影响存档。更新时保留这个文件夹，迁移电脑可使用 JSON 备份。不保存登录凭据。</p></details>
+      <details id="catalog-panel" class="storage-note"><summary>游戏配置 <span id="catalog-version">读取中…</span></summary>
+        <p id="catalog-status" role="status">正在读取本地配置状态。</p>
+        <button id="catalog-check" class="outline-button" type="button">检查配置更新</button>
+        <details class="catalog-source-options"><summary>配置下载地址</summary><p>填写部署者提供的 HTTPS 配置清单地址，以 /current.json 结尾。这里只下载公共角色与卡池配置，不发送登录凭据或抽卡记录。</p>
+          <label for="catalog-source">配置清单 URL</label><input id="catalog-source" type="url" spellcheck="false" autocomplete="off" placeholder="https://你的域名/gacha/current.json">
+          <button id="catalog-source-save" type="button" class="outline-button">保存地址并检查</button>
+        </details>
+      </details>
+    </section>
+    <div id="global-status" class="status" role="status" aria-live="polite" hidden></div>
+    <section class="hero">
+      <div class="eyebrow"><span></span> YOUR WISHES, IN ONE PLACE</div>
+      <h1>招募档案<span class="hero-star">✦</span></h1>
+      <div class="hero-bottom"><p>整理你的抽卡记录，回顾每一次相遇。</p><span class="read-only"><span class="small-shield">◇</span> 仅查询历史，不会进行抽卡</span></div>
+    </section>
+
+    <section class="query-layout" aria-label="导入登录凭据">
+      <div class="query-card">
+        <div class="section-title"><div><span class="step-tag">01 / 开始查询</span><h2>官网登录，自动整理记录</h2></div><span class="card-symbol">↗</span></div>
+        <p class="muted intro">打开专用的官方登录窗口，正常完成短信或 TapTap 登录，程序会自动获取凭据并查询，无需 F12 或复制粘贴。</p>
+        <div class="portal-login">
+          <label class="consent"><input id="remember-login" type="checkbox"><span>在本机记住官网登录状态（可选）</span></label>
+          <div id="login-profile-options" hidden><label for="login-profile">使用登录会话</label><select id="login-profile"><option value="">添加新的登录会话</option></select><button id="forget-login" class="text-button" type="button" disabled>删除所选登录会话</button></div>
+          <p class="field-help">默认使用临时浏览器配置，结束后清理。开启记住登录会在本机保存浏览器会话，与抽卡存档独立。</p>
+          <button id="portal-start" class="primary-button" type="button"><span>官网登录并查询</span><span>↗</span></button>
+          <div id="portal-progress" class="status" role="status" hidden></div><button id="portal-cancel" class="text-button" type="button" hidden>取消登录</button>
+        </div>
+        <details id="browser-environment" class="manual-login">
+          <summary>浏览器与环境检查</summary>
+          <p class="field-help">自动查找 Edge、Chrome；启动失败会尝试其他可用浏览器。也可指定兼容 Chromium 的浏览器。Firefox 等浏览器可用下方手动凭据方式查询。</p>
+          <label for="browser-path">自定义浏览器 exe 完整路径（可选）</label>
+          <input id="browser-path" type="text" spellcheck="false" autocomplete="off" placeholder="例如 D:\Apps\Chrome\chrome.exe">
+          <div class="library-actions"><button id="browser-path-save" type="button" class="outline-button">保存路径</button><button id="environment-check" type="button" class="outline-button">重新自检</button></div>
+          <p id="environment-status" class="field-help" role="status"></p><ul id="environment-results"></ul>
+          <p class="field-help">诊断日志只保存本机启动和连接状态，不含凭据。<span id="diagnostic-path"></span></p>
+        </details>
+        <details class="manual-login"><summary>手动粘贴凭据（备用方式）</summary>
+        <p class="muted intro">复制官网 <code>jwt</code> 或 <code>HP_2070021</code> / <code>HP_2070023</code> 的完整值。</p>
+        <form id="query-form" novalidate>
+          <div class="field-label"><label for="credential">登录凭据</label><button type="button" id="visibility" class="text-button" aria-pressed="false">显示内容</button></div>
+          <textarea id="credential" class="masked" rows="4" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="65536" placeholder="粘贴 JWT 字符串或对应 HP 条目的 JSON 内容" aria-describedby="credential-help" required></textarea>
+          <p id="credential-help" class="field-help">无需手机号、密码或短信验证码。提交后会清空输入框。</p>
+          <label class="consent"><input id="consent" type="checkbox" required><span>这是我本人的账号，我同意使用此凭据查询抽卡历史。</span></label>
+          <button class="primary-button" id="submit" type="submit"><span id="submit-label">查询我的抽卡记录</span><span id="submit-arrow">↗</span></button>
+            <div id="status" hidden></div>
+        </form>
+        </details>
+        <div class="privacy-line"><span>◎</span><p>凭据仅用于当前查询，不写入日志或数据库。<br>它是账号登录凭据，请不要公开分享。</p></div>
+      </div>
+
+      <aside class="guide-card">
+        <span class="step-tag">FIRST TIME HERE?</span><h2>凭据在哪里？<br>跟着这几步就好。</h2>
+        <ol class="mini-steps"><li><span>1</span><p>在<strong>官方充值门户</strong>登录账号</p></li><li><span>2</span><p>按 <kbd>F12</kbd>，打开 <strong>Application</strong></p></li><li><span>3</span><p>进入 <strong>Local Storage</strong>，复制凭据</p></li></ol>
+        <div class="mini-devtools" aria-hidden="true"><div class="devtools-top"><i></i><i></i><i></i><span>Application</span></div><div class="mini-grid"><span>Key</span><span>Value</span><strong>jwt</strong><code>eyJhbGciOi…</code><span>provider</span><span>sms</span></div><span class="copy-tip">复制 Value，不是 Key ↖</span></div>
+        <button class="guide-open guide-button">查看完整图解教程 <span>→</span></button><p class="guide-footnote">电脑端 Chrome / Edge 浏览器操作更方便</p>
+      </aside>
+    </section>
+
+    <section id="empty-state" class="empty-state">
+      <div class="ticket-art" aria-hidden="true"><span class="ticket-back"></span><span class="ticket-front"><i>✦</i><b>YOUR NEXT CHAPTER</b><em>STARFALL / RECORDS</em></span><span class="orbit-star">✧</span></div>
+      <h2>让那些闪光的时刻，重新相遇。</h2><p>提交凭据后，这里会呈现你的抽卡统计与完整返回明细。</p><button id="demo" class="text-button">先看看演示效果 <span>→</span></button>
+    </section>
+
+    <section id="results" class="results" aria-label="抽卡查询结果" hidden>
+      <div class="results-heading"><div><span class="step-tag">02 / 你的抽卡手记</span><h2><span id="account-title">招募记录</span><span id="demo-label" class="demo-label" hidden>演示数据</span></h2><p id="result-time" class="muted"></p></div><div class="export-buttons"><button id="export-image" class="outline-button">↓ 长图</button><button id="export-csv" class="outline-button">↓ CSV</button><button id="export-json" class="outline-button">↓ JSON</button><button id="clear-results" class="text-button">收起结果</button></div></div>
+      <div id="partial-warning" class="notice" hidden>部分查询未成功，以下只展示成功返回的记录。建议稍后重新查询。</div>
+      <div class="stats-grid"><article class="stat-card"><span>累计返回抽数</span><strong id="stat-pulls">0</strong><p id="stat-records">0 条记录</p><i>↗</i></article><article class="stat-card stat-gold"><span>五星角色</span><strong id="stat-five">0<span>✦</span></strong><p id="stat-rate">返回样本占比 0%</p></article><article class="stat-card"><span>涉及卡池</span><strong id="stat-pools">0</strong><p id="stat-dates">等待查询</p><i>◌</i></article></div>
+      <section id="career-panel" class="career-panel" aria-label="抽卡生涯统计">
+        <div class="career-title"><div><span>CAREER ARCHIVE</span><h3>我的抽卡生涯</h3></div><span class="career-scope">基于本机已保存记录</span></div>
+        <div id="career-categories" class="career-categories"></div><div id="extra-categories" class="extra-categories"></div>
+        <p class="career-disclaimer">三类卡池独立统计。累计数不等于账号全部生涯；未确认的保底状态会明确标注。</p>
+      </section>
+      <section class="pool-history" aria-labelledby="pool-history-title">
+        <div class="pool-history-heading"><div><span class="step-tag">BANNER STORIES</span><h3 id="pool-history-title">卡池记录</h3></div><div id="category-tabs" class="category-tabs" aria-label="按卡池类型筛选"></div></div>
+        <div class="timeline-legend"><span><i class="legend-dot green"></i>1–30 抽</span><span><i class="legend-dot gold"></i>31–60 抽</span><span><i class="legend-dot red"></i>61 抽及以上</span><span><i class="legend-dot uncertain"></i>前序未知</span><span>条形长度按 70 抽比例 · 五星间隔</span></div>
+        <details class="timeline-method"><summary>统计说明：平均抽数、跨池累计与不完整记录</summary><p>平均抽数＝可见总抽数÷五星数量，包含首个五星及当前垫抽。条形长度按70抽比例；按同一保底组跨池累计，记录序号80→1视为连续。首个可见五星及真正断档后的间隔显示“≥”；十连内按服务端返回顺序统计。</p></details>
+        <div id="pool-timeline" class="pool-timeline"></div>
+      </section>
+      <details class="distribution-details"><summary>查看星级与卡池分布 <span>＋</span></summary><div class="analysis-grid"><article class="analysis-card"><h3>星级分布 <span>RARITY</span></h3><div id="rarity-bars" class="rarity-bars"></div></article><article class="analysis-card"><h3>卡池分布 <span>POOLS</span></h3><div id="pool-bars" class="pool-bars"></div></article></div></details>
+      <details class="raw-details"><summary>查看原始掉落明细 <span>搜索、筛选与逐项核对</span></summary>
+      <div class="history-card"><div class="history-heading"><h3>抽卡明细 <span id="filtered-count"></span></h3><div class="filters"><label class="sr-only" for="search">搜索角色名称</label><input id="search" type="search" placeholder="搜索角色名称…"><label class="sr-only" for="pool-filter">筛选卡池</label><select id="pool-filter"><option value="">全部卡池</option></select><label class="sr-only" for="rarity-filter">筛选星级</label><select id="rarity-filter"><option value="">全部星级</option><option value="5">5 星</option><option value="4">4 星</option><option value="3">3 星</option><option value="2">2 星</option><option value="1">1 星</option></select></div></div>
+        <div class="table-scroll"><table><thead><tr><th>时间 / 北京时间</th><th>卡池</th><th>角色</th><th>初始星级</th><th>数量</th></tr></thead><tbody id="history-body"></tbody></table></div>
+        <div class="pagination"><p id="page-description"></p><div><button id="prev-page" class="page-button" aria-label="上一页">←</button><span id="page-number"></span><button id="next-page" class="page-button" aria-label="下一页">→</button></div></div>
+      </div>
+      </details>
+      <p class="coverage">ⓘ 展示本机已累计保存的可见历史，不保证覆盖账号全部生涯。大小保底为连续可见记录推断，不代表官方实时状态；占比不代表未来概率。</p>
+    </section>
+  </main>
+
+  <footer class="shell site-footer"><span>✦ 星落 · 抽卡手记</span><p>玩家查询工具 · 非官方服务</p><button class="text-button guide-open">获取凭据帮助 ↗</button></footer>
+
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <div class="dialog-heading"><h2 id="import-title">导入本地记录</h2><button id="import-close" class="text-button" aria-label="关闭导入窗口">✕</button></div>
+    <form id="import-form" class="local-dialog-body">
+      <label for="import-file">CSV / JSON 文件（最多 30 MB）</label><input id="import-file" type="file" accept=".csv,.json" required>
+      <label for="import-target">记录归属</label><select id="import-target"><option value="">自动识别账号；无身份时新建存档</option></select>
+      <p class="muted">新格式会识别账号并合并去重。旧 CSV / JSON 无账号身份，默认新建存档；确认是同一账号后，才选择合并到已有存档。全部备份请使用自动识别。</p>
+      <label for="import-label">新存档名称（可选）</label><input id="import-label" maxlength="60" placeholder="例如：主号、小号、旧记录">
+      <p id="import-error" class="status error" hidden role="alert"></p>
+      <button id="import-submit" class="primary-button" type="submit">读取并保存到本机</button>
+    </form>
+  </dialog>
+  <dialog id="image-dialog" aria-labelledby="image-title"><div class="dialog-heading"><h2 id="image-title">导出抽卡长图</h2><button id="image-close" class="text-button" aria-label="关闭长图窗口">✕</button></div><div class="local-dialog-body"><p>导出当前卡池分类。长记录会自动分张，内容按最新在前排列。</p><p id="image-status" role="status"></p><button id="image-zip" class="primary-button" hidden>下载全部图片 ZIP</button><div id="image-previews"></div></div></dialog>
+
+  <dialog id="guide-dialog" aria-labelledby="guide-title">
+    <div class="dialog-heading"><div><span class="step-tag">GETTING STARTED</span><h2 id="guide-title">如何获取登录凭据</h2></div><button id="close-guide" class="close-button" aria-label="关闭教程">×</button></div>
+    <p class="muted">在电脑端 Chrome 或 Edge 中操作。全程在官网完成登录，无需把短信验证码提供给本工具。</p>
+    <ol class="full-guide">
+      <li><span class="guide-number">01</span><div><h3>打开官网，登录你的账号</h3><p>点击下方链接，确认地址是 <code>i.haoplay.com.cn</code>，然后自行完成短信或官网提供的登录流程。登录完成后，保持这个标签页打开。</p><a class="official-link" href="https://i.haoplay.com.cn/?appid=2070021&amp;l=cn" target="_blank" rel="noopener noreferrer">打开星落官方门户 ↗</a><p>TapTap 账号也可使用 <a href="https://i.haoplay.com.cn/?appid=2070023&amp;l=cn" target="_blank" rel="noopener noreferrer">TapTap 官网入口 ↗</a>。复制本次登录产生的值即可，不要修改 JWT 内容或应用 ID。</p></div></li>
+      <li><span class="guide-number">02</span><div><h3>按 F12，打开开发者工具</h3><p>在官网页面按 <kbd>F12</kbd>（部分键盘需要 <kbd>Fn</kbd> + <kbd>F12</kbd>），或右键页面选择“检查”。也可以按 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>；Mac 使用 <kbd>⌘</kbd> + <kbd>⌥</kbd> + <kbd>I</kbd>。</p></div></li>
+      <li><span class="guide-number">03</span><div><h3>找到 Application（应用）面板</h3><p>在开发者工具顶部选择 <strong>Application</strong>（中文界面可能显示“应用”或“应用程序”）。如果没看到，点击顶部的 <strong>»</strong>，从隐藏面板中选择它。</p><div class="tutorial-tabs" aria-label="开发者工具面板示意"><span>Elements</span><span>Console</span><span>Network</span><strong>Application</strong><span>»</span></div></div></li>
+      <li><span class="guide-number">04</span><div><h3>展开 Local Storage，选择官网地址</h3><p>在左侧找到 <strong>Storage（存储）→ Local Storage（本地存储）</strong>，点击左侧小箭头展开，再选择 <code>https://i.haoplay.com.cn</code>。</p><div class="storage-tree"><span>▾ Storage</span><strong>　▾ Local Storage</strong><mark>　　 https://i.haoplay.com.cn</mark></div></div></li>
+      <li><span class="guide-number">05</span><div><h3>复制 jwt 的 Value（值）</h3><p>在右侧表格的 <strong>Key（键）</strong> 列找到 <code>jwt</code>，复制同一行 <strong>Value（值）</strong> 列的完整内容。优先右键该行，选择“Copy value / 复制值”；如果没有该选项，可双击值，再全选复制。不要只复制键名或截断的一部分。</p><div class="tutorial-values"><div><b>Key</b><b>Value</b></div><div class="selected"><code>jwt</code><code>eyJ…完整的登录凭据…</code></div><div><code>HP_2070021</code><code>{ "jwt": "eyJ…", … }</code></div></div><p>也可复制 <code>HP_2070021</code> 或 TapTap 对应的 <code>HP_2070023</code> 的完整 JSON 值。本工具支持这两种格式，不需要复制其他条目或整张表格。</p></div></li>
+      <li><span class="guide-number">06</span><div><h3>回到本页，粘贴并查询</h3><p>将内容粘贴到“登录凭据”输入框，确认这是本人的账号，再点击“查询我的抽卡记录”。提交后输入框会清空；成功后可筛选记录或导出 CSV、JSON。</p></div></li>
+    </ol>
+    <div class="guide-faq"><h3>没有找到 jwt？</h3><p>先确认官网已经登录成功，选择的是 <strong>Local Storage</strong> 而不是 Cookies / Session Storage，并且域名完全一致。必要时刷新官网页面后重新查看。若提示凭据失效，请在官网重新登录后复制新的值。</p><h3>可以在手机上获取吗？</h3><p>这份教程适用于电脑端开发者工具。手机浏览器通常没有相同的 F12 面板，建议先在电脑上操作。</p></div>
+    <div class="tutorial-privacy">登录凭据包含账号访问权限，并非抽卡专用密钥。不要发到群聊、截图或公开分享，也不要复制手机号和短信验证码。</div>
+    <button id="guide-done" class="primary-button">明白了，返回查询 <span>→</span></button>
+  </dialog>
+</body>
+</html>

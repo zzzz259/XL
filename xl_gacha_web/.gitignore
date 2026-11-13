@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+config.toml
+*.log
+output/
+user-data/
+dist/
+build/
+*.spec

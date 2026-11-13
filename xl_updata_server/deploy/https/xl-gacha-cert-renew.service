@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew XL gacha public IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/opt/xl-gacha-certbot/bin/certbot renew --cert-name xl-gacha-ip --quiet --deploy-hook "/usr/sbin/nginx -t && /usr/bin/systemctl reload nginx"

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check XL gacha IP certificate renewal every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00
+RandomizedDelaySec=15m
+AccuracySec=1m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

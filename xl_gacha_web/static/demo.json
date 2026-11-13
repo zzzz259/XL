@@ -1,0 +1,3769 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-21T16:35:22.901870+08:00",
+  "configuration_version": "134359843258232660",
+  "coverage": "完全虚构的演示数据，不对应任何游戏账号。",
+  "summary": {
+    "record_count": 49,
+    "pull_count": 464,
+    "rarity_counts": {
+      "3": 454,
+      "4": 1,
+      "5": 9
+    },
+    "pool_pull_counts": {
+      "启程招募": 30,
+      "常驻招募": 115,
+      "寻梦者": 60,
+      "离笼之鸟": 96,
+      "往昔之约": 72,
+      "精灵族王女": 35,
+      "约定之弦": 56
+    },
+    "unknown_item_count": 0
+  },
+  "queries": [
+    {
+      "selector": 24000001,
+      "ret_code": 0,
+      "record_count": 3
+    },
+    {
+      "selector": 24000002,
+      "ret_code": 0,
+      "record_count": 12
+    },
+    {
+      "selector": 1,
+      "ret_code": 0,
+      "record_count": 22
+    },
+    {
+      "selector": 2,
+      "ret_code": 0,
+      "record_count": 12
+    }
+  ],
+  "records": [
+    {
+      "pool_id": 24000001,
+      "pool_name": "启程招募",
+      "timestamp": 1774972800,
+      "time_beijing": "2026-04-01 00:00:00",
+      "index": 1,
+      "record_id": 24000001,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000109,
+          "name": "烈风",
+          "rarity": 4,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000001,
+      "pool_name": "启程招募",
+      "timestamp": 1774972860,
+      "time_beijing": "2026-04-01 00:01:00",
+      "index": 2,
+      "record_id": 24000001,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000001,
+      "pool_name": "启程招募",
+      "timestamp": 1774972920,
+      "time_beijing": "2026-04-01 00:02:00",
+      "index": 3,
+      "record_id": 24000001,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776268980,
+      "time_beijing": "2026-04-16 00:03:00",
+      "index": 1,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269040,
+      "time_beijing": "2026-04-16 00:04:00",
+      "index": 2,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269100,
+      "time_beijing": "2026-04-16 00:05:00",
+      "index": 3,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269160,
+      "time_beijing": "2026-04-16 00:06:00",
+      "index": 4,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000115,
+          "name": "炎狼",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269220,
+      "time_beijing": "2026-04-16 00:07:00",
+      "index": 5,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269280,
+      "time_beijing": "2026-04-16 00:08:00",
+      "index": 6,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269340,
+      "time_beijing": "2026-04-16 00:09:00",
+      "index": 7,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269400,
+      "time_beijing": "2026-04-16 00:10:00",
+      "index": 8,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269460,
+      "time_beijing": "2026-04-16 00:11:00",
+      "index": 9,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269520,
+      "time_beijing": "2026-04-16 00:12:00",
+      "index": 10,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000116,
+          "name": "薇",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269580,
+      "time_beijing": "2026-04-16 00:13:00",
+      "index": 11,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000002,
+      "pool_name": "常驻招募",
+      "timestamp": 1776269640,
+      "time_beijing": "2026-04-16 00:14:00",
+      "index": 12,
+      "record_id": 24000002,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000003,
+      "pool_name": "寻梦者",
+      "timestamp": 1777565700,
+      "time_beijing": "2026-05-01 00:15:00",
+      "index": 1,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000003,
+      "pool_name": "寻梦者",
+      "timestamp": 1777565760,
+      "time_beijing": "2026-05-01 00:16:00",
+      "index": 2,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000003,
+      "pool_name": "寻梦者",
+      "timestamp": 1777565820,
+      "time_beijing": "2026-05-01 00:17:00",
+      "index": 3,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000003,
+      "pool_name": "寻梦者",
+      "timestamp": 1777565880,
+      "time_beijing": "2026-05-01 00:18:00",
+      "index": 4,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000003,
+      "pool_name": "寻梦者",
+      "timestamp": 1777565940,
+      "time_beijing": "2026-05-01 00:19:00",
+      "index": 5,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000003,
+      "pool_name": "寻梦者",
+      "timestamp": 1777566000,
+      "time_beijing": "2026-05-01 00:20:00",
+      "index": 6,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000115,
+          "name": "炎狼",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862060,
+      "time_beijing": "2026-05-16 00:21:00",
+      "index": 7,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862120,
+      "time_beijing": "2026-05-16 00:22:00",
+      "index": 8,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000149,
+          "name": "缇米",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862180,
+      "time_beijing": "2026-05-16 00:23:00",
+      "index": 9,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862240,
+      "time_beijing": "2026-05-16 00:24:00",
+      "index": 10,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862300,
+      "time_beijing": "2026-05-16 00:25:00",
+      "index": 11,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862360,
+      "time_beijing": "2026-05-16 00:26:00",
+      "index": 12,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862420,
+      "time_beijing": "2026-05-16 00:27:00",
+      "index": 13,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862480,
+      "time_beijing": "2026-05-16 00:28:00",
+      "index": 14,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000115,
+          "name": "炎狼",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862540,
+      "time_beijing": "2026-05-16 00:29:00",
+      "index": 15,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000149,
+          "name": "缇米",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000004,
+      "pool_name": "离笼之鸟",
+      "timestamp": 1778862600,
+      "time_beijing": "2026-05-16 00:30:00",
+      "index": 16,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780158660,
+      "time_beijing": "2026-05-31 00:31:00",
+      "index": 1,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780158720,
+      "time_beijing": "2026-05-31 00:32:00",
+      "index": 2,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780158780,
+      "time_beijing": "2026-05-31 00:33:00",
+      "index": 3,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780158840,
+      "time_beijing": "2026-05-31 00:34:00",
+      "index": 4,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780158900,
+      "time_beijing": "2026-05-31 00:35:00",
+      "index": 5,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780158960,
+      "time_beijing": "2026-05-31 00:36:00",
+      "index": 6,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780159020,
+      "time_beijing": "2026-05-31 00:37:00",
+      "index": 7,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000115,
+          "name": "炎狼",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000013,
+      "pool_name": "往昔之约",
+      "timestamp": 1780159080,
+      "time_beijing": "2026-05-31 00:38:00",
+      "index": 8,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000021,
+      "pool_name": "精灵族王女",
+      "timestamp": 1781455140,
+      "time_beijing": "2026-06-15 00:39:00",
+      "index": 9,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000021,
+      "pool_name": "精灵族王女",
+      "timestamp": 1781455200,
+      "time_beijing": "2026-06-15 00:40:00",
+      "index": 10,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000199,
+          "name": "雪拉シェラ",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000021,
+      "pool_name": "精灵族王女",
+      "timestamp": 1781455260,
+      "time_beijing": "2026-06-15 00:41:00",
+      "index": 11,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000021,
+      "pool_name": "精灵族王女",
+      "timestamp": 1781455320,
+      "time_beijing": "2026-06-15 00:42:00",
+      "index": 12,
+      "record_id": 2,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000005,
+      "pool_name": "约定之弦",
+      "timestamp": 1782751380,
+      "time_beijing": "2026-06-30 00:43:00",
+      "index": 17,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000005,
+      "pool_name": "约定之弦",
+      "timestamp": 1782751440,
+      "time_beijing": "2026-06-30 00:44:00",
+      "index": 18,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000005,
+      "pool_name": "约定之弦",
+      "timestamp": 1782751500,
+      "time_beijing": "2026-06-30 00:45:00",
+      "index": 19,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000005,
+      "pool_name": "约定之弦",
+      "timestamp": 1782751560,
+      "time_beijing": "2026-06-30 00:46:00",
+      "index": 20,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000005,
+      "pool_name": "约定之弦",
+      "timestamp": 1782751620,
+      "time_beijing": "2026-06-30 00:47:00",
+      "index": 21,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000170,
+          "name": "伊涅利丝",
+          "rarity": 5,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "pool_id": 24000005,
+      "pool_name": "约定之弦",
+      "timestamp": 1782751680,
+      "time_beijing": "2026-06-30 00:48:00",
+      "index": 22,
+      "record_id": 1,
+      "drops": [
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        },
+        {
+          "item_id": 10000105,
+          "name": "慈悲者",
+          "rarity": 3,
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "analysis": {
+    "version": 2,
+    "categories": {
+      "normal": {
+        "name": "普通池",
+        "pull_count": 115,
+        "five_count": 2,
+        "up_count": 0,
+        "off_count": 0,
+        "guaranteed_count": 0,
+        "average_five_interval": 57.5,
+        "since_five": 17,
+        "since_five_exact": true,
+        "next_guaranteed": null,
+        "hard_pity": 70
+      },
+      "limited": {
+        "name": "限定池",
+        "pull_count": 212,
+        "five_count": 5,
+        "up_count": 3,
+        "off_count": 2,
+        "guaranteed_count": 2,
+        "average_five_interval": 42.4,
+        "since_five": 15,
+        "since_five_exact": true,
+        "next_guaranteed": false,
+        "hard_pity": 70
+      },
+      "collection": {
+        "name": "典藏池",
+        "pull_count": 107,
+        "five_count": 2,
+        "up_count": 1,
+        "off_count": 1,
+        "guaranteed_count": 1,
+        "average_five_interval": 53.5,
+        "since_five": 20,
+        "since_five_exact": true,
+        "next_guaranteed": false,
+        "hard_pity": 70
+      },
+      "beginner": {
+        "name": "启程池",
+        "pull_count": 30,
+        "five_count": 0,
+        "up_count": 0,
+        "off_count": 0,
+        "guaranteed_count": 0,
+        "average_five_interval": null,
+        "since_five": 30,
+        "since_five_exact": false,
+        "next_guaranteed": null,
+        "hard_pity": null
+      },
+      "unknown": {
+        "name": "未分类",
+        "pull_count": 0,
+        "five_count": 0,
+        "up_count": 0,
+        "off_count": 0,
+        "guaranteed_count": 0,
+        "average_five_interval": null,
+        "since_five": 0,
+        "since_five_exact": false,
+        "next_guaranteed": null,
+        "hard_pity": null
+      }
+    },
+    "pools": [
+      {
+        "pool_id": 24000005,
+        "pool_name": "约定之弦",
+        "category": "limited",
+        "category_name": "限定池",
+        "hard_pity": 70,
+        "featured_names": [
+          "伊涅利丝"
+        ],
+        "pull_count": 56,
+        "five_count": 1,
+        "record_count": 6,
+        "first_date": "2026-06-30",
+        "last_date": "2026-06-30",
+        "latest_timestamp": 1782751680,
+        "events": [
+          {
+            "name": "伊涅利丝",
+            "item_id": 10000170,
+            "pulls_since_five": 49,
+            "interval_exact": true,
+            "outcome": "up",
+            "guaranteed": false,
+            "guarantee_conflict": false,
+            "carried_pulls": 8,
+            "in_pool_pull": 41,
+            "timestamp": 1782751620,
+            "time_beijing": "2026-06-30 00:47:00"
+          }
+        ],
+        "characters": [
+          {
+            "item_id": 10000170,
+            "name": "伊涅利丝",
+            "rarity": 5,
+            "count": 1
+          },
+          {
+            "item_id": 10000105,
+            "name": "慈悲者",
+            "rarity": 3,
+            "count": 55
+          }
+        ],
+        "tail_since_five": 15,
+        "tail_exact": true,
+        "next_guaranteed": false
+      },
+      {
+        "pool_id": 24000021,
+        "pool_name": "精灵族王女",
+        "category": "collection",
+        "category_name": "典藏池",
+        "hard_pity": 70,
+        "featured_names": [
+          "雪拉シェラ"
+        ],
+        "pull_count": 35,
+        "five_count": 1,
+        "record_count": 4,
+        "first_date": "2026-06-15",
+        "last_date": "2026-06-15",
+        "latest_timestamp": 1781455320,
+        "events": [
+          {
+            "name": "雪拉シェラ",
+            "item_id": 10000199,
+            "pulls_since_five": 20,
+            "interval_exact": true,
+            "outcome": "up",
+            "guaranteed": true,
+            "guarantee_conflict": false,
+            "carried_pulls": 5,
+            "in_pool_pull": 15,
+            "timestamp": 1781455200,
+            "time_beijing": "2026-06-15 00:40:00"
+          }
+        ],
+        "characters": [
+          {
+            "item_id": 10000199,
+            "name": "雪拉シェラ",
+            "rarity": 5,
+            "count": 1
+          },
+          {
+            "item_id": 10000105,
+            "name": "慈悲者",
+            "rarity": 3,
+            "count": 34
+          }
+        ],
+        "tail_since_five": 20,
+        "tail_exact": true,
+        "next_guaranteed": false
+      },
+      {
+        "pool_id": 24000013,
+        "pool_name": "往昔之约",
+        "category": "collection",
+        "category_name": "典藏池",
+        "hard_pity": 70,
+        "featured_names": [
+          "列蒂西雅"
+        ],
+        "pull_count": 72,
+        "five_count": 1,
+        "record_count": 8,
+        "first_date": "2026-05-31",
+        "last_date": "2026-05-31",
+        "latest_timestamp": 1780159080,
+        "events": [
+          {
+            "name": "炎狼",
+            "item_id": 10000115,
+            "pulls_since_five": 67,
+            "interval_exact": false,
+            "outcome": "off",
+            "guaranteed": false,
+            "guarantee_conflict": false,
+            "carried_pulls": 0,
+            "in_pool_pull": 67,
+            "timestamp": 1780159020,
+            "time_beijing": "2026-05-31 00:37:00"
+          }
+        ],
+        "characters": [
+          {
+            "item_id": 10000115,
+            "name": "炎狼",
+            "rarity": 5,
+            "count": 1
+          },
+          {
+            "item_id": 10000105,
+            "name": "慈悲者",
+            "rarity": 3,
+            "count": 71
+          }
+        ],
+        "tail_since_five": 5,
+        "tail_exact": true,
+        "next_guaranteed": true
+      },
+      {
+        "pool_id": 24000004,
+        "pool_name": "离笼之鸟",
+        "category": "limited",
+        "category_name": "限定池",
+        "hard_pity": 70,
+        "featured_names": [
+          "缇米"
+        ],
+        "pull_count": 96,
+        "five_count": 3,
+        "record_count": 10,
+        "first_date": "2026-05-16",
+        "last_date": "2026-05-16",
+        "latest_timestamp": 1778862600,
+        "events": [
+          {
+            "name": "缇米",
+            "item_id": 10000149,
+            "pulls_since_five": 21,
+            "interval_exact": true,
+            "outcome": "up",
+            "guaranteed": true,
+            "guarantee_conflict": false,
+            "carried_pulls": 7,
+            "in_pool_pull": 14,
+            "timestamp": 1778862120,
+            "time_beijing": "2026-05-16 00:22:00"
+          },
+          {
+            "name": "炎狼",
+            "item_id": 10000115,
+            "pulls_since_five": 62,
+            "interval_exact": true,
+            "outcome": "off",
+            "guaranteed": false,
+            "guarantee_conflict": false,
+            "carried_pulls": 0,
+            "in_pool_pull": 76,
+            "timestamp": 1778862480,
+            "time_beijing": "2026-05-16 00:28:00"
+          },
+          {
+            "name": "缇米",
+            "item_id": 10000149,
+            "pulls_since_five": 12,
+            "interval_exact": true,
+            "outcome": "up",
+            "guaranteed": true,
+            "guarantee_conflict": false,
+            "carried_pulls": 0,
+            "in_pool_pull": 88,
+            "timestamp": 1778862540,
+            "time_beijing": "2026-05-16 00:29:00"
+          }
+        ],
+        "characters": [
+          {
+            "item_id": 10000149,
+            "name": "缇米",
+            "rarity": 5,
+            "count": 2
+          },
+          {
+            "item_id": 10000115,
+            "name": "炎狼",
+            "rarity": 5,
+            "count": 1
+          },
+          {
+            "item_id": 10000105,
+            "name": "慈悲者",
+            "rarity": 3,
+            "count": 93
+          }
+        ],
+        "tail_since_five": 8,
+        "tail_exact": true,
+        "next_guaranteed": false
+      },
+      {
+        "pool_id": 24000003,
+        "pool_name": "寻梦者",
+        "category": "limited",
+        "category_name": "限定池",
+        "hard_pity": 70,
+        "featured_names": [
+          "薇"
+        ],
+        "pull_count": 60,
+        "five_count": 1,
+        "record_count": 6,
+        "first_date": "2026-05-01",
+        "last_date": "2026-05-01",
+        "latest_timestamp": 1777566000,
+        "events": [
+          {
+            "name": "炎狼",
+            "item_id": 10000115,
+            "pulls_since_five": 53,
+            "interval_exact": false,
+            "outcome": "off",
+            "guaranteed": false,
+            "guarantee_conflict": false,
+            "carried_pulls": 0,
+            "in_pool_pull": 53,
+            "timestamp": 1777566000,
+            "time_beijing": "2026-05-01 00:20:00"
+          }
+        ],
+        "characters": [
+          {
+            "item_id": 10000115,
+            "name": "炎狼",
+            "rarity": 5,
+            "count": 1
+          },
+          {
+            "item_id": 10000105,
+            "name": "慈悲者",
+            "rarity": 3,
+            "count": 59
+          }
+        ],
+        "tail_since_five": 7,
+        "tail_exact": true,
+        "next_guaranteed": true
+      },
+      {
+        "pool_id": 24000002,
+        "pool_name": "常驻招募",
+        "category": "normal",
+        "category_name": "普通池",
+        "hard_pity": 70,
+        "featured_names": [],
+        "pull_count": 115,
+        "five_count": 2,
+        "record_count": 12,
+        "first_date": "2026-04-16",
+        "last_date": "2026-04-16",
+        "latest_timestamp": 1776269640,
+        "events": [
+          {
+            "name": "炎狼",
+            "item_id": 10000115,
+            "pulls_since_five": 33,
+            "interval_exact": false,
+            "outcome": "normal",
+            "guaranteed": null,
+            "guarantee_conflict": false,
+            "carried_pulls": 0,
+            "in_pool_pull": 33,
+            "timestamp": 1776269160,
+            "time_beijing": "2026-04-16 00:06:00"
+          },
+          {
+            "name": "薇",
+            "item_id": 10000116,
+            "pulls_since_five": 65,
+            "interval_exact": true,
+            "outcome": "normal",
+            "guaranteed": null,
+            "guarantee_conflict": false,
+            "carried_pulls": 0,
+            "in_pool_pull": 98,
+            "timestamp": 1776269520,
+            "time_beijing": "2026-04-16 00:12:00"
+          }
+        ],
+        "characters": [
+          {
+            "item_id": 10000115,
+            "name": "炎狼",
+            "rarity": 5,
+            "count": 1
+          },
+          {
+            "item_id": 10000116,
+            "name": "薇",
+            "rarity": 5,
+            "count": 1
+          },
+          {
+            "item_id": 10000105,
+            "name": "慈悲者",
+            "rarity": 3,
+            "count": 113
+          }
+        ],
+        "tail_since_five": 17,
+        "tail_exact": true,
+        "next_guaranteed": null
+      },
+      {
+        "pool_id": 24000001,
+        "pool_name": "启程招募",
+        "category": "beginner",
+        "category_name": "启程池",
+        "hard_pity": null,
+        "featured_names": [],
+        "pull_count": 30,
+        "five_count": 0,
+        "record_count": 3,
+        "first_date": "2026-04-01",
+        "last_date": "2026-04-01",
+        "latest_timestamp": 1774972920,
+        "events": [],
+        "characters": [
+          {
+            "item_id": 10000109,
+            "name": "烈风",
+            "rarity": 4,
+            "count": 1
+          },
+          {
+            "item_id": 10000105,
+            "name": "慈悲者",
+            "rarity": 3,
+            "count": 29
+          }
+        ],
+        "tail_since_five": 30,
+        "tail_exact": false,
+        "next_guaranteed": null
+      }
+    ],
+    "method": "按记录时间、序号和服务端掉落顺序展开；首次可见五星与断档后的间隔为下界。大保底仅根据连续可见记录推断。",
+    "order_note": "十连内按服务端返回顺序计算；未独立核验真实逐抽顺序。",
+    "rules_source": "本地游戏配置：BaseGacha / BaseGachaBottomUp / BaseGachaBottomPool；BaseWord 80614053/55/63/65。"
+  },
+  "demo": true,
+  "partial": false
+}
