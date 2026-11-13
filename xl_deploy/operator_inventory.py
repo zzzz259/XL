@@ -44,9 +44,8 @@ if __name__ == "__main__":
 
 def load_inventory(path):
     """Load an operator-authored TOML inventory; never infer live services."""
-    from pathlib import Path
-
     import tomllib
+    from pathlib import Path
 
     from xl_deploy.config import DeploymentInventory
     source = Path(path).resolve()
