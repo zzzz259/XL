@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 
 from .matcher import CharacterMatcher, render_candidates_message
 from .portrait_querier import PortraitQuerier
@@ -27,6 +28,8 @@ _MENTION_RE = re.compile(r"<@[A-Za-z0-9]+>")
 # 角色名后的立绘序号：仅当整个查询以数字结尾、且序号前存在非数字名字时剥离；
 # 纯数字消息（候选选择协议）、纯数字 ID、名字中间夹数字（如"觉醒2世"）都不剥离
 _PORTRAIT_ORDINAL_RE = re.compile(r"^(?P<name>.*?[^0-9\s])[ \u3000]*(?P<ordinal>[0-9]+)$")
+# 右端历史后缀：单独的 -（全部版本）或 -N（第 N 个历史，N>=1）；先识别它再剥立绘序号
+_HISTORY_SUFFIX_RE = re.compile(r"^(?P<body>.+?)[ \u3000]*-(?:[ \u3000]*(?P<offset>[0-9]+))?$")
 
 
 def _split_portrait_ordinal(query: str) -> tuple[str, int | None]:
@@ -35,6 +38,37 @@ def _split_portrait_ordinal(query: str) -> tuple[str, int | None]:
     if not match:
         return query, None
     return match.group("name").strip(), int(match.group("ordinal"))
+
+
+@dataclass(frozen=True)
+class QuerySpec:
+    """统一右端语法解析结果：角色名 [立绘序号] [- [历史序号]]。"""
+
+    name: str
+    portrait_ordinal: int | None = None
+    history_offset: int | None = None  # None 表示无历史后缀
+    history_all: bool = False  # 末尾单独 -：含当前的全部版本
+    valid: bool = True  # -0/残缺后缀为 False，handler 走正常查询错误，不静默改意图
+
+
+def _parse_query_spec(query: str) -> QuerySpec:
+    """先识别右端 - / -N，再按现有规则识别立绘序号；角色-1 进入图鉴历史而非立绘 1。"""
+    query = (query or "").strip(" \u3000")
+    match = _HISTORY_SUFFIX_RE.match(query)
+    if match:
+        body = match.group("body").strip(" \u3000")
+        offset_text = match.group("offset")
+        if offset_text is None:
+            name, ordinal = _split_portrait_ordinal(body)
+            return QuerySpec(name=name, portrait_ordinal=ordinal, history_all=True)
+        if int(offset_text) < 1:
+            return QuerySpec(name=query, valid=False)
+        name, ordinal = _split_portrait_ordinal(body)
+        return QuerySpec(
+            name=name, portrait_ordinal=ordinal, history_offset=int(offset_text)
+        )
+    name, ordinal = _split_portrait_ordinal(query)
+    return QuerySpec(name=name, portrait_ordinal=ordinal, valid=True)
 
 
 def _is_mentioned(content: str, mentions, bot_openid: str) -> bool:
@@ -210,6 +244,17 @@ class QueryHandler:
             # 同一用户发起新查询即覆盖旧待选择
             self._selection.clear(group_openid, member_openid)
 
+        spec = _parse_query_spec(query)
+        if not spec.valid:
+            # -0/残缺后缀：正常查询错误，不静默改变意图（也不进模糊匹配）
+            await self._sender.send_text(group_openid, f"未找到角色：{query}", reply_to)
+            return
+        if spec.history_offset is not None or spec.history_all:
+            await self._answer_history_query(
+                group_openid, spec, query, member_openid, reply_to
+            )
+            return
+
         name_query, portrait_ordinal = _split_portrait_ordinal(query)
         if portrait_ordinal is not None and self._portrait_querier is not None:
             await self._answer_portrait_query(
@@ -289,6 +334,118 @@ class QueryHandler:
             return
         await self._sender.send_text(group_openid, f"未找到角色：{original_query}", reply_to)
 
+    # ---------- 内容历史查询（-N / -，可带立绘序号） ----------
+
+    async def _answer_history_query(self, group_openid: str, spec: QuerySpec,
+                                    original_query: str, member_openid: str = "",
+                                    reply_to: str = "") -> None:
+        """角色名 [-N]/[-] 的内容历史；候选/guess 与图鉴查询同一套协议，只是意图带上历史。"""
+        outcome = self._matcher.match(spec.name)
+        if outcome.kind == "candidates":
+            await self._sender.send_text(group_openid, render_candidates_message(list(outcome.candidates)), reply_to)
+            if member_openid:
+                self._selection.set(
+                    group_openid, member_openid,
+                    self._matcher.clean(spec.name), list(outcome.candidates),
+                    intent="portrait" if spec.portrait_ordinal is not None else "card",
+                    portrait_ordinal=spec.portrait_ordinal,
+                    history_offset=spec.history_offset,
+                    history_all=spec.history_all,
+                )
+            _logger.info(
+                "候选等待(历史) group=%s user=%s options=%s ordinal=%s offset=%s all=%s",
+                group_openid, member_openid, [m.name for m in outcome.candidates],
+                spec.portrait_ordinal, spec.history_offset, spec.history_all,
+            )
+            return
+        if outcome.kind in ("direct", "guess"):
+            if outcome.kind == "guess":
+                await self._sender.send_text(group_openid, f"已为你匹配到：{outcome.match.name}", reply_to)
+            await self._send_history(group_openid, outcome.match, spec, reply_to)
+            return
+        await self._sender.send_text(group_openid, f"未找到角色：{original_query}", reply_to)
+
+    async def _send_history(self, group_openid, match, spec: QuerySpec,
+                            reply_to: str = "") -> None:
+        """按内容历史结果发图；单历史和全部版本都逐张只发图片（content=""）。"""
+        if spec.portrait_ordinal is not None:
+            if self._portrait_querier is None:
+                await self._sender.send_text(group_openid, "立绘历史数据暂不可用，请稍后再试", reply_to)
+                return
+            if spec.history_all:
+                entries = self._portrait_querier.find_all_versions(match.character_id, spec.portrait_ordinal)
+            else:
+                entries = [self._portrait_querier.find_history(
+                    match.character_id, spec.portrait_ordinal,
+                    offset=spec.history_offset or 0,
+                )]
+        else:
+            if spec.history_all:
+                entries = self._querier.find_all_versions(match.character_id)
+            else:
+                entries = [self._querier.find_history(
+                    match.character_id, offset=spec.history_offset or 0
+                )]
+        await self._dispatch_history_entries(group_openid, match, entries, spec, reply_to)
+
+    async def _dispatch_history_entries(self, group_openid, match, entries,
+                                        spec: QuerySpec, reply_to: str = "") -> None:
+        """新到旧逐张 await 本地 multipart；任一张失败/不可用即停止，只给一条错误提示。"""
+        first = entries[0]
+        if first.status == "not_found":
+            if spec.portrait_ordinal is not None:
+                await self._sender.send_text(group_openid, f"《{match.name}》暂无立绘历史图片", reply_to)
+            else:
+                await self._sender.send_text(
+                    group_openid, f"角色《{match.name}》的图鉴图片暂未生成", reply_to
+                )
+            return
+        send_schedule = getattr(self._sender, "send_schedule_image", None)
+        if send_schedule is None:
+            _logger.error("stage=history_send status=failed reason=local_upload_unavailable")
+            await self._sender.send_text(group_openid, "历史图片发送暂不可用，请稍后再试", reply_to)
+            return
+        is_portrait = spec.portrait_ordinal is not None
+        for entry in entries:
+            if entry.status == "out_of_range":
+                scope = f"第 {spec.portrait_ordinal} 套立绘" if is_portrait else "图鉴"
+                await self._sender.send_text(
+                    group_openid,
+                    f"《{match.name}》的{scope}只有 {entry.total} 个内容版本，"
+                    f"没有第 {entry.offset} 个历史",
+                    reply_to,
+                )
+                return
+            if entry.status != "found" or entry.image_path is None:
+                reason = entry.error or entry.status
+                _logger.warning("stage=history_send status=invalid reason=%s", reason)
+                await self._sender.send_text(
+                    group_openid, f"历史图片暂不可用（{reason}），已停止发送", reply_to
+                )
+                return
+            sent = await send_schedule(str(entry.image_path), "", [group_openid], reply_to)
+            succeeded = sent.get(group_openid, False) if isinstance(sent, dict) else bool(sent)
+            _logger.info(
+                "角色历史命中 query=%s -> %s 版本[%s,%s] offset=%s/%s 发图=%s",
+                match.name, entry.artifact_sha256[:8] if entry.artifact_sha256 else "",
+                entry.first_seen_version, entry.last_seen_version,
+                entry.offset, entry.total, succeeded,
+            )
+            if not succeeded:
+                await self._sender.send_text(group_openid, "历史图片发送失败，已停止发送", reply_to)
+                return
+
+    async def _send_pending_history(self, group_openid, match, pending,
+                                    reply_to: str = "") -> None:
+        """候选选择恢复完整历史意图（含立绘序号、历史序号或 all 标记）。"""
+        spec = QuerySpec(
+            name=pending.query,
+            portrait_ordinal=pending.portrait_ordinal,
+            history_offset=pending.history_offset,
+            history_all=pending.history_all,
+        )
+        await self._send_history(group_openid, match, spec, reply_to)
+
     async def _send_portrait(self, group_openid: str, match, ordinal: int,
                              reply_to: str = "") -> None:
         """按当前版本 manifest 发立绘；未生成/失败/不适用只提示，不触发渲染。"""
@@ -364,10 +521,16 @@ class QueryHandler:
         if status == "picked":
             match = payload
             _logger.info("候选选择 group=%s user=%s -> %s", group_openid, member_openid, match.name)
+            has_history = pending.history_offset is not None or pending.history_all
             if pending.intent == "portrait" and self._portrait_querier is not None:
-                await self._send_portrait(
-                    group_openid, match, pending.portrait_ordinal or 1, reply_to
-                )
+                if has_history:
+                    await self._send_pending_history(group_openid, match, pending, reply_to)
+                else:
+                    await self._send_portrait(
+                        group_openid, match, pending.portrait_ordinal or 1, reply_to
+                    )
+            elif has_history:
+                await self._send_pending_history(group_openid, match, pending, reply_to)
             else:
                 await self._send_character(group_openid, match, pending.query, reply_to)
             record = self._matcher.record_selection(pending.query, match.character_id, member_openid)

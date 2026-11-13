@@ -18,6 +18,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import history
+
 _logger = logging.getLogger(__name__)
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -168,6 +170,170 @@ class PortraitQuerier:
             height=self._safe_int(entry.get("height")),
             **base,
         )
+
+    # ---------- 内容历史（先把当前 ordinal 固定到 skin_id，再跨版本追踪同一 skin_id） ----------
+
+    def find_history(self, character_id: str, ordinal: int | None = None,
+                     offset: int = 0) -> history.ContentHistoryResult:
+        """第 offset 个不同立绘内容（0=当前有效内容），按固定 skin_id 跨版本聚合。"""
+        try:
+            offset = max(int(offset), 0)
+        except (TypeError, ValueError):
+            offset = 0
+        target, error_result = self._history_target(character_id, ordinal)
+        if error_result is not None:
+            return error_result
+        cells = self._skin_cells(target["skin_id"])
+        runs = history.fold_revision_runs(cells)
+        base = self._history_base(target)
+        total = len(runs)
+        if total == 0:
+            return history.ContentHistoryResult(status="not_found", offset=offset, total=0, **base)
+        if offset >= total:
+            return history.ContentHistoryResult(status="out_of_range", offset=offset, total=total, **base)
+        current_version = str(self._cache_key[0]) if self._cache_key else ""
+        return self._history_result(runs[offset], offset, total, current_version, base)
+
+    def find_all_versions(self, character_id: str,
+                          ordinal: int | None = None) -> list[history.ContentHistoryResult]:
+        """该序号立绘的当前及全部内容版本，新到旧。"""
+        target, error_result = self._history_target(character_id, ordinal)
+        if error_result is not None:
+            return [error_result]
+        cells = self._skin_cells(target["skin_id"])
+        runs = history.fold_revision_runs(cells)
+        base = self._history_base(target)
+        if not runs:
+            return [history.ContentHistoryResult(status="not_found", total=0, **base)]
+        current_version = str(self._cache_key[0]) if self._cache_key else ""
+        return [
+            self._history_result(run, index, len(runs), current_version, base)
+            for index, run in enumerate(runs)
+        ]
+
+    def _history_target(self, character_id, ordinal):
+        """解析当前版本 manifest：ordinal → skin_id。返回 (target, 错误结果)。"""
+        grouped = self._load()
+        if grouped is None:
+            return None, history.ContentHistoryResult(status="unavailable", ordinal=ordinal)
+        cid = str(character_id)
+        skins = grouped.get(cid)
+        if not skins:
+            return None, history.ContentHistoryResult(
+                status="not_found", character_id=cid, ordinal=ordinal)
+        ordinals = sorted(self._safe_ordinal(skin) for skin in skins)
+        available = (ordinals[0], ordinals[-1])
+        wanted = self._safe_ordinal({"ordinal": ordinal}) if ordinal is not None else 1
+        if wanted < available[0] or wanted > available[1]:
+            return None, history.ContentHistoryResult(
+                status="out_of_range", character_id=cid, ordinal=wanted,
+                available_range=available,
+            )
+        entry = next((skin for skin in skins if self._safe_ordinal(skin) == wanted), None)
+        if entry is None:
+            return None, history.ContentHistoryResult(
+                status="not_found", character_id=cid, ordinal=wanted,
+                available_range=available,
+            )
+        return {
+            "character_id": cid,
+            "wanted": wanted,
+            "available": available,
+            "entry": entry,
+            "skin_id": str(entry.get("skin_id") or ""),
+        }, None
+
+    @staticmethod
+    def _history_base(target) -> dict:
+        entry = target["entry"]
+        return {
+            "character_id": target["character_id"],
+            "name": str(entry.get("name") or ""),
+            "skin_id": target["skin_id"],
+            "ordinal": target["wanted"],
+            "available_range": target["available"],
+        }
+
+    def _skin_cells(self, skin_id: str):
+        """逐版本格子 [(version, key, payload)]（旧到新），只追同一 skin_id。"""
+        return [
+            self._skin_cell(skin_id, version)
+            for version in history.numeric_versions(self._versions_dir)
+        ]
+
+    @staticmethod
+    def _invalid_skin_cell(version: str, error: str):
+        """占住该版本位的不可用修订（唯一 key 不折叠），payload 携带错误。"""
+        return (version, ("invalid", version), {"error": error})
+
+    def _skin_cell(self, skin_id: str, version: str):
+        """schema 必须 1；损坏/不可读 manifest 是 unavailable 修订，不是普通间断。"""
+        manifest_path = self._versions_dir / version / "portraits" / "manifest.json"
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise TypeError("manifest 不是对象")
+            if int(payload.get("schema_version")) != 1:
+                raise ValueError(f"不支持的 schema_version: {payload.get('schema_version')!r}")
+            skins = payload.get("skins")
+            if not isinstance(skins, list):
+                raise TypeError("skins 不是列表")
+        except (OSError, ValueError, TypeError) as error:
+            _logger.warning(
+                "stage=portrait_history status=invalid_manifest version=%s reason=%s",
+                version, error,
+            )
+            return self._invalid_skin_cell(version, f"portraits manifest 损坏或不可读: {error}")
+        for entry in skins:
+            if not isinstance(entry, dict) or str(entry.get("skin_id")) != skin_id:
+                continue
+            if str(entry.get("state") or "") not in STATES_WITH_IMAGE:
+                return (version, None, None)
+            artifact_sha = str(entry.get("artifact_sha256") or "")
+            if not artifact_sha:
+                return self._invalid_skin_cell(version, "artifact_sha256 为空，无法校验历史图片")
+            artifact_path = str(entry.get("artifact_path") or "")
+            if not artifact_path:
+                return self._invalid_skin_cell(version, "artifact_path 为空")
+            return (version, artifact_sha, {"entry": entry, "version": version})
+        return (version, None, None)
+
+    def _history_result(self, run, offset, total, current_version, base):
+        payload = run["payload"]
+        common = dict(
+            **base,
+            first_seen_version=run["first_seen_version"],
+            last_seen_version=run["last_seen_version"],
+            offset=offset,
+            total=total,
+            stale=run["last_seen_version"] != current_version,
+        )
+        if payload.get("error"):
+            return history.ContentHistoryResult(
+                status="unavailable", error=str(payload["error"]), **common
+            )
+        entry = payload["entry"]
+        artifact_sha = str(entry.get("artifact_sha256") or "")
+        width = self._safe_int(entry.get("width"))
+        height = self._safe_int(entry.get("height"))
+        image, error = history.validate_image(
+            self._versions_dir / payload["version"] / "portraits",
+            str(entry.get("artifact_path") or ""),
+            artifact_sha,
+            width,
+            height,
+        )
+        common.update(
+            artifact_sha256=artifact_sha,
+            source_version=str(entry.get("source_version") or run["first_seen_version"]),
+            render_scope=str(entry.get("render_scope") or "full"),
+            render_notice=str(entry.get("render_notice") or ""),
+            width=width,
+            height=height,
+        )
+        if image is None:
+            return history.ContentHistoryResult(status="unavailable", error=error, **common)
+        return history.ContentHistoryResult(status="found", image_path=image, **common)
 
     # ---------- 校验 ----------
 
