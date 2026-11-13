@@ -105,7 +105,11 @@ def write_card_manifest(
             })
             continue
         failure = failures.get(character_id)
-        if failure is not None and previous is not None:
+        if (
+            failure is not None
+            and previous is not None
+            and previous.get("data_sha256") != data_sha
+        ):
             entries.append({
                 "character_id": character_id,
                 "state": "stale",

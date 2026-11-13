@@ -131,15 +131,20 @@ def run_portrait_update(
     characters: dict,
     arts_category,
     backfill: bool = False,
+    only_character_ids: Sequence[str] | None = None,
     only_skin_ids: Sequence[str] | None = None,
+    forced_previous: tuple[dict | None, str | None] | None = None,
 ) -> PortraitSummary | None:
     """功能关闭时返回 None；共享输入失败抛 PortraitUpdateError；单套失败只记录。
 
     ``backfill=True`` 为历史回填专用策略：无上一版 manifest 时也真实渲染
     （首个历史基线），并全程关闭 portrait_ready 事件与持久 outbox。
     正常更新必须保持默认 False：首次只记录指纹、发事件、写 outbox。
-    ``only_skin_ids`` 为样本过滤（历史回填用）：不在集合内的皮肤记为
-    not_applicable，避免“只过滤角色却渲染其全部皮肤”的隐含行为。
+    ``only_character_ids`` / ``only_skin_ids`` 为样本过滤（历史回填用）：
+    不在集合内的任务记为 not_applicable，避免“只过滤角色却渲染其全部
+    皮肤”的隐含行为。``forced_previous`` 仅供历史回填显式指定上一版
+    （含明确的无上一版），使其只以已完成回填的版本为基座；缺省时按
+    versions_dir 自动探测（正常更新路径）。
     """
     if not getattr(config, "portrait_enabled", False):
         return None
@@ -150,7 +155,9 @@ def run_portrait_update(
         characters=characters,
         arts_category=arts_category,
         backfill=backfill,
+        only_character_ids=only_character_ids,
         only_skin_ids=only_skin_ids,
+        forced_previous=forced_previous,
     )
 
 
@@ -259,7 +266,9 @@ class PortraitUpdateRunner:
         characters: dict,
         arts_category,
         backfill: bool = False,
+        only_character_ids: Sequence[str] | None = None,
         only_skin_ids: Sequence[str] | None = None,
+        forced_previous: tuple[dict | None, str | None] | None = None,
     ) -> PortraitSummary:
         started = time.perf_counter()
         self._backfill = backfill
@@ -292,17 +301,31 @@ class PortraitUpdateRunner:
         ]
 
         catalog = self._load_arts_catalog(arts_category)
-        previous, previous_version = self._load_previous_manifest(version_key)
+        if forced_previous is not None:
+            # 历史回填显式指定上一版（含明确的无上一版）：只以已完成回填的
+            # 版本为基座，失败版留下的 manifest 不得误导继承。
+            previous, previous_version = forced_previous
+        else:
+            previous, previous_version = self._load_previous_manifest(version_key)
         self._previous_manifest = previous
         self._previous_version = previous_version
         tasks = self._plan_tasks(roots, catalog, characters, previous)
         tasks = self._merge_resume(tasks, self._load_work_entries(work_dir / "manifest.json"), artifacts_dir)
-        if only_skin_ids is not None:
-            # 显式皮肤样本过滤：集合外记 not_applicable（进 manifest 留痕），
+        if only_character_ids is not None or only_skin_ids is not None:
+            # 显式样本过滤（历史回填）：集合外记 not_applicable（进 manifest
+            # 留痕）。角色与皮肤集合同时给出时取交集语义——任一集合外即排除，
             # 避免只过滤角色却隐含渲染该角色全部皮肤。
-            wanted_skins = {str(skin_id) for skin_id in only_skin_ids}
+            wanted_characters = (
+                {str(cid) for cid in only_character_ids} if only_character_ids is not None else None
+            )
+            wanted_skins = (
+                {str(sid) for sid in only_skin_ids} if only_skin_ids is not None else None
+            )
             for task in tasks:
-                if task.skin_id not in wanted_skins:
+                if (
+                    (wanted_characters is not None and task.character_id not in wanted_characters)
+                    or (wanted_skins is not None and task.skin_id not in wanted_skins)
+                ):
                     task.action = "not_applicable"
 
         render_tasks = [task for task in tasks if task.action == "render"]
@@ -447,13 +470,16 @@ class PortraitUpdateRunner:
             raise PortraitUpdateError(f"Arts 分类清单读取失败: {error}") from error
 
     def _load_previous_manifest(self, version_key: str) -> tuple[dict | None, str | None]:
-        if not self.versions_dir.is_dir():
+        if not self.versions_dir.is_dir() or not str(version_key).isdigit():
             return None, None
+        current = int(str(version_key))
         candidates = []
         for directory in self.versions_dir.iterdir():
-            if not directory.is_dir() or directory.name == version_key:
+            if not directory.is_dir() or not directory.name.isdigit():
                 continue
-            if not directory.name.isdigit():
+            # 只从更早的版本继承：失败旧版本重跑时工作根可能已有未来版本，
+            # 绝不能从未来版本取产物或 source_version。
+            if int(directory.name) >= current:
                 continue
             if (directory / "portraits" / "manifest.json").is_file():
                 candidates.append(int(directory.name))

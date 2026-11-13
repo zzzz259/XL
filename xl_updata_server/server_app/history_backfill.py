@@ -318,12 +318,32 @@ def _numeric_version_dirs(versions_dir: Path) -> list[Path]:
     )
 
 
+def _is_completed_backfill(version_dir: Path) -> bool:
+    progress = _read_progress(version_dir)
+    return progress is not None and progress.get("status") == "completed"
+
+
+def _load_portraits_manifest(version_dir: Path) -> dict | None:
+    """读取版本的立绘 manifest（skins 必须为列表），缺失/损坏返回 None。"""
+    try:
+        payload = json.loads((Path(version_dir) / "portraits" / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) and isinstance(payload.get("skins"), list) else None
+
+
 def _find_previous_backfilled(work_root: Path, version: int) -> tuple[Path | None, dict | None]:
-    """工作根内当前版本之前、已有 card manifest 的版本（新到旧取第一个）。"""
+    """工作根内当前版本之前、已完成回填且有 card manifest 的版本（新到旧取第一个）。
+
+    失败版本留下的 card manifest 不得作为基座（其角色数据/图鉴可能不完整），
+    必须要求 backfill.json status=completed。
+    """
     candidates = [
         d
         for d in _numeric_version_dirs(work_root / "versions")
-        if int(d.name) < version and load_card_manifest(d / "character_cards") is not None
+        if int(d.name) < version
+        and _is_completed_backfill(d)
+        and load_card_manifest(d / "character_cards") is not None
     ]
     if not candidates:
         return None, None
@@ -454,7 +474,12 @@ def _process_version(
             characters=characters,
             arts_category=arts_category,
             backfill=True,
+            only_character_ids=only_character_ids,
             only_skin_ids=only_skin_ids,
+            forced_previous=(
+                _load_portraits_manifest(previous_dir) if previous_dir is not None else None,
+                str(previous_dir.name) if previous_dir is not None else None,
+            ),
         )
         if not (version_dir / "portraits" / "manifest.json").is_file():
             # 有效配置皮肤为零时 runner 不留 manifest；发布校验要求它存在。

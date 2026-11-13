@@ -279,8 +279,11 @@ class _FakeClient:
         return destination
 
 
-def _install_render_fakes(monkeypatch, calls: dict, failures: set[str] = frozenset()) -> None:
-    """把立绘渲染打到进程/下载边界以下：真实计划、继承、manifest、事件逻辑全部执行。"""
+def _install_render_fakes(monkeypatch, calls: dict, failures: set[str]) -> None:
+    """把立绘渲染打到进程/下载边界以下：真实计划、继承、manifest、事件逻辑全部执行。
+
+    ``failures`` 是可变集合，运行期读取：包含的皮肤渲染报错（用于失败/恢复场景）。
+    """
 
     def fake_download(_runner, bundle_hash, destination):
         destination = Path(destination)
@@ -348,7 +351,9 @@ class _BackfillEnv:
             {"characters": CHARACTERS_V2, "basefashion": BASE_FASHION_V2},
         ]
         self.config = _config(self.data_dir, tmp_path)
-        _install_render_fakes(monkeypatch, self.calls, failures)
+        # 可变失败集合：同环境可在多次运行间切换渲染失败（失败→修复→重跑）
+        self.failures: set[str] = set(failures)
+        _install_render_fakes(monkeypatch, self.calls, self.failures)
         monkeypatch.setattr(portrait_update, "read_catalog", _catalog_by_filename)
         try:
             module = _history_backfill()
@@ -1026,3 +1031,100 @@ def test_publish_merge_rebuild_prefers_declared_output_on_rename(tmp_path):
     (entry,) = merged_manifest["characters"]
     assert entry["artifact_path"] == "character_cards/10000151_新名_角色档案_长图.png"
     assert entry["artifact_sha256"] == hashlib.sha256(b"legacy-new").hexdigest()
+
+
+# ---- 独立审查缺口回归 ----------------------------------------------------------
+
+
+def test_rerun_failed_old_version_never_inherits_from_future_versions(tmp_path, monkeypatch):
+    env = _BackfillEnv(tmp_path, monkeypatch, failures={"12001514"})
+    first = env.run(execute=True, versions=[100])
+    assert [(item.version, item.status) for item in first.versions] == [(100, "failed")]
+
+    env.failures.clear()
+    second = env.run(execute=True, versions=[200])
+    assert [(item.version, item.status) for item in second.versions] == [(200, "completed")]
+
+    # 修复后重跑失败的 100：不得从未来版本 200 继承产物/source_version。
+    # 重跑只重试失败项（12001514），已成功项走同版本恢复（done/emit）不重渲。
+    renders_before_third = list(env.calls["rendered"])
+    third = env.run(execute=True, versions=[100])
+    assert [(item.version, item.status) for item in third.versions] == [(100, "completed")]
+    rerun_renders = env.calls["rendered"][len(renders_before_third):]
+    assert rerun_renders == ["12001514"]
+    manifest = _version_manifest(env.work_root, 100, "portraits/manifest.json")
+    for entry in manifest["skins"]:
+        assert entry["state"] == "published"
+        assert entry["source_version"] == 100  # 未来版本 200 的产物/source 不得混入
+        artifact = env.work_root / "versions" / "100" / "portraits" / entry["artifact_path"]
+        assert artifact.is_file()
+        assert entry["artifact_sha256"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+
+def test_next_version_ignores_failed_version_card_manifest_as_base(tmp_path, monkeypatch):
+    env = _BackfillEnv(tmp_path, monkeypatch, failures={"12001514"})
+    failed = env.run(execute=True, versions=[100])
+    assert [(item.version, item.status) for item in failed.versions] == [(100, "failed")]
+    assert _progress(env.work_root, 100)["status"] == "failed"
+
+    env.failures.clear()
+    # 只处理 200：失败版 100 的 card manifest 不得作为基座，200 必须自建完整基线
+    renders_before_second = list(env.calls["rendered"])
+    second = env.run(execute=True, versions=[200])
+    assert [(item.version, item.status) for item in second.versions] == [(200, "completed")]
+    renders_for_200 = env.calls["rendered"][len(renders_before_second):]
+    assert renders_for_200 == ["12001513", "12001514", "12001515", "14001520", "14001521"]
+    cards = _version_manifest(env.work_root, 200, "character_cards/manifest.json")
+    for entry in cards["characters"]:
+        assert entry["state"] == "published"
+        assert entry["source_version"] == "200"
+
+
+def test_character_sample_filter_excludes_other_characters_skins(tmp_path, monkeypatch):
+    env = _BackfillEnv(tmp_path, monkeypatch)
+
+    report = env.run(execute=True, versions=[100], only_character_ids=["10000224"])
+
+    assert [(item.version, item.status) for item in report.versions] == [(100, "completed")]
+    # 只渲染样本角色 10000224 的皮肤；10000151 的两套不得渲染
+    assert env.calls["rendered"] == ["12001515"]
+    skins = {entry["skin_id"]: entry for entry in _version_manifest(env.work_root, 100, "portraits/manifest.json")["skins"]}
+    assert skins["12001515"]["state"] == "published"
+    assert skins["12001513"]["state"] == "not_applicable"
+    assert skins["12001514"]["state"] == "not_applicable"
+
+
+def test_character_and_skin_sample_filters_combine(tmp_path, monkeypatch):
+    env = _BackfillEnv(tmp_path, monkeypatch)
+
+    env.run(execute=True, versions=[100], only_character_ids=["10000224"], only_skin_ids=["12001513", "12001515"])
+
+    # 两个集合同时生效：只渲染交集中的皮肤（12001513 属于 10000151，被角色集合排除）
+    assert env.calls["rendered"] == ["12001515"]
+    progress = _progress(env.work_root, 100)
+    assert progress["scope"] == {"characters": ["10000224"], "skins": ["12001513", "12001515"]}
+    assert progress["full_scope"] is False
+
+
+def test_load_previous_manifest_never_selects_future_versions(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    config = _config(data_dir, tmp_path)
+    runner = portrait_update.PortraitUpdateRunner(
+        config, _FakeClient(DB_ROWS), data_dir / "catalogs"
+    )
+    versions = data_dir / "versions"
+    for version in (100, 200):
+        portraits = versions / str(version) / "portraits"
+        portraits.mkdir(parents=True)
+        (portraits / "manifest.json").write_text(
+            json.dumps({"schema_version": 1, "version": str(version), "skins": []}), encoding="utf-8"
+        )
+
+    # 失败版本 100 重跑时：未来版本 200 已存在也不得被选为上一版
+    previous, previous_version = runner._load_previous_manifest("100")
+    assert previous is None
+    assert previous_version is None
+
+    previous, previous_version = runner._load_previous_manifest("200")
+    assert previous_version == "100"
+    assert previous["version"] == "100"

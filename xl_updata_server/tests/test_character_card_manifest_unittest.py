@@ -420,3 +420,31 @@ def test_legacy_manifest_single_candidate_still_matches(tmp_path):
     (entry,) = manifest["characters"]
     assert entry["artifact_path"] == "character_cards/10001_阿尔法_角色档案_长图.png"
     assert entry["data_sha256"] == _data_sha({"name": "阿尔法"})
+
+
+def test_unchanged_character_listed_in_failures_stays_published(tmp_path):
+    from server_app.character_card_manifest import write_card_manifest
+
+    cards_dir = tmp_path / "character_cards"
+    data = {"name": "阿尔法/Alpha", "description": "未变化"}
+    card = _write_card(cards_dir, "10001_阿尔法_角色档案_长图.png", b"png-a")
+    previous = write_card_manifest(
+        cards_dir, version=100, characters={"10001": data},
+        card_report=_report({"10001": card}), previous_manifest=None,
+    )
+    previous_entry = _entries_by_id(previous)["10001"]
+
+    # 内容未变化但渲染器报了失败（批量任务误报/防御性记录）：不得降级为 stale
+    payload = write_card_manifest(
+        cards_dir, version=101, characters={"10001": data},
+        card_report=_report(failures={"10001": "spurious batch error"}),
+        previous_manifest=previous,
+    )
+
+    entry = _entries_by_id(payload)["10001"]
+    assert entry["state"] == "published"
+    assert entry["artifact_path"] == previous_entry["artifact_path"]
+    assert entry["artifact_sha256"] == previous_entry["artifact_sha256"]
+    assert entry["data_sha256"] == previous_entry["data_sha256"]
+    assert entry["source_version"] == "100"
+    assert entry["error"] is None
