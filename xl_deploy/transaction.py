@@ -336,6 +336,19 @@ class DeploymentTransaction:
                 "aborted", journal.sha, "Candidate was not activated"
             )
 
+    def _release_note_scope(self, journal: Journal) -> tuple[str, ...]:
+        """Narrow feature delivery within the persisted affected scope."""
+        if self.inventory is not None:
+            allowed = {
+                instance.instance_id for instance in self.inventory.instances
+                if instance.enabled and instance.watch_ref == journal.branch
+            }
+        else:
+            allowed = {
+                "main": {"main"}, "test": {"debug", "test"}, "debug": {"debug"},
+            }.get(journal.branch, set())
+        return tuple(instance for instance in journal.announcement_scope if instance in allowed)
+
     def _deliver_announcements(self, journal: Journal) -> DeploymentResult:
         scope = journal.announcement_scope
         if scope and not journal.completion_notice_sent:
@@ -374,7 +387,11 @@ class DeploymentTransaction:
                 )
             journal = self._update(journal, completion_notice_sent=True, error=None)
 
-        if scope and journal.release_note and not journal.release_note_sent:
+        feature_scope = self._release_note_scope(journal)
+        if journal.release_note and not journal.release_note_sent and not feature_scope:
+            # No eligible recipients is a resolved delivery, not a retryable failure.
+            journal = self._update(journal, release_note_sent=True, error=None)
+        if feature_scope and journal.release_note and not journal.release_note_sent:
             journal = self._update(
                 journal,
                 phase="release_note_pending",
@@ -382,9 +399,9 @@ class DeploymentTransaction:
                 error=None,
             )
             try:
-                self.events.append(("release_note", journal.release_note, *scope))
+                self.events.append(("release_note", journal.release_note, *feature_scope))
                 delivered = self.router.announce_release_note(
-                    scope,
+                    feature_scope,
                     journal.release_note,
                     notification_id=f"{journal.transaction_id}:release-note",
                 )
