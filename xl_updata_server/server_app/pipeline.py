@@ -10,8 +10,19 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .versioning import VersionWorkspace, publish_version, read_current_pointer, write_current_pointer
+from .character_card_manifest import (
+    copy_manifest_artifacts,
+    legacy_manifest_from_version,
+    load_card_manifest,
+    save_card_manifest,
+)
 from .gacha_catalog import publish_catalog, read_published_catalog
+from .versioning import (
+    VersionWorkspace,
+    publish_version,
+    read_current_pointer,
+    write_current_pointer,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,21 +92,37 @@ class UpdatePipeline:
                 shutil.rmtree(workspace.root, ignore_errors=True)
 
     def _carry_forward_cards(self, version_timestamp: int) -> None:
-        """把最近一个旧版本的图鉴长图继承进新版本目录，保证角色库不断档。
+        """保证当版每个有效角色的图鉴长图都在版本目录中，并维护 card manifest。
 
-        每个版本只渲染新增角色，若不继承，@机器人 查询老角色会因找不到图片而断供。
+        以当版 ``character_cards/manifest.json`` 为准（processor 在 staging 写入、
+        随版本发布）：清单引用的长图缺失时按 ``artifact_sha256`` 从旧版本目录
+        补齐（改名后旧文件不会被带入，已删除角色也不会复活）。清单缺失的旧
+        格式版本按实际 PNG + 角色数据补建基线清单；两者都没有时退回按文件名
+        继承的历史行为。
         """
-        current_dir = self.versions_dir / str(version_timestamp) / "character_cards"
+        version_dir = self.versions_dir / str(version_timestamp)
+        current_dir = version_dir / "character_cards"
         current_dir.mkdir(parents=True, exist_ok=True)
-        existing = {p.name for p in current_dir.glob("*.png")}
         previous = sorted(
             (
                 d for d in self.versions_dir.iterdir()
                 if d.is_dir() and d.name != str(version_timestamp) and not d.name.startswith(".")
             ),
-            key=lambda d: d.name,
+            key=lambda d: int(d.name) if d.name.isdigit() else 0,
             reverse=True,
         )
+        manifest = load_card_manifest(current_dir)
+        if manifest is None:
+            manifest = legacy_manifest_from_version(version_dir, version_timestamp)
+            if manifest is not None:
+                save_card_manifest(current_dir, manifest)
+                LOGGER.info("版本 %s 无 card manifest，按实际产物补建 %d 条", version_timestamp, len(manifest["characters"]))
+        if manifest is not None:
+            copied = copy_manifest_artifacts(manifest, current_dir, previous)
+            if copied:
+                LOGGER.info("从旧版本继承 %d 张图鉴长图: %s", len(copied), ", ".join(copied))
+            return
+        existing = {p.name for p in current_dir.glob("*.png")}
         for prev in previous:
             prev_cards = prev / "character_cards"
             if not prev_cards.is_dir():

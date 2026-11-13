@@ -14,6 +14,11 @@ from .catalog import read_catalog
 from .cdn import CdnClient
 from .character_adapter import parse_character_snapshot
 from .character_card_exporter import CardExportReport, export_character_cards
+from .character_card_manifest import (
+    legacy_manifest_from_version,
+    load_card_manifest,
+    write_card_manifest,
+)
 from .config import ServerConfig
 from .extractor import extract_lua_files
 from .gacha_adapter import load_character_names, load_gacha_tables
@@ -149,6 +154,18 @@ def _load_current(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _load_previous_card_manifest(data_dir: Path) -> dict | None:
+    """当前发布版本的 card manifest；旧版本缺失时按实际产物补建。"""
+    previous = read_current_pointer(data_dir)
+    if previous is None:
+        return None
+    version_dir = data_dir / "versions" / str(previous)
+    manifest = load_card_manifest(version_dir / "character_cards")
+    if manifest is not None:
+        return manifest
+    return legacy_manifest_from_version(version_dir, previous)
 
 
 def _canonical_character(data) -> str:
@@ -527,6 +544,16 @@ class ProductionUpdateProcessor:
                 outputs=(), warnings=(), failures=(),
             )
             LOGGER.info("stage=export_character_cards skipped reason=cards.enabled=false")
+
+        if self.config.render_cards:
+            previous_card_manifest = _load_previous_card_manifest(self.config.data_dir)
+            write_card_manifest(
+                staging / "character_cards",
+                version=update_info.timestamp,
+                characters=parsed_characters,
+                card_report=card_report,
+                previous_manifest=previous_card_manifest,
+            )
 
         if new_character_ids and not is_baseline:
             _write_outbox(
