@@ -34,6 +34,7 @@ import struct
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -129,8 +130,17 @@ def run_portrait_update(
     staging: Path,
     characters: dict,
     arts_category,
+    backfill: bool = False,
+    only_skin_ids: Sequence[str] | None = None,
 ) -> PortraitSummary | None:
-    """功能关闭时返回 None；共享输入失败抛 PortraitUpdateError；单套失败只记录。"""
+    """功能关闭时返回 None；共享输入失败抛 PortraitUpdateError；单套失败只记录。
+
+    ``backfill=True`` 为历史回填专用策略：无上一版 manifest 时也真实渲染
+    （首个历史基线），并全程关闭 portrait_ready 事件与持久 outbox。
+    正常更新必须保持默认 False：首次只记录指纹、发事件、写 outbox。
+    ``only_skin_ids`` 为样本过滤（历史回填用）：不在集合内的皮肤记为
+    not_applicable，避免“只过滤角色却渲染其全部皮肤”的隐含行为。
+    """
     if not getattr(config, "portrait_enabled", False):
         return None
     return PortraitUpdateRunner(config, client, catalog_dir).run(
@@ -139,6 +149,8 @@ def run_portrait_update(
         staging=staging,
         characters=characters,
         arts_category=arts_category,
+        backfill=backfill,
+        only_skin_ids=only_skin_ids,
     )
 
 
@@ -233,6 +245,8 @@ class PortraitUpdateRunner:
         self.versions_dir = self.data_dir / "versions"
         self.events_path = self.data_dir / "update_events.jsonl"
         self._version_key = ""
+        # 回填专用策略（run 时按参数重置）：首个历史基线真实渲染，且关闭事件/outbox。
+        self._backfill = False
 
     # ---- 主流程 -------------------------------------------------------------
 
@@ -244,8 +258,11 @@ class PortraitUpdateRunner:
         staging: Path,
         characters: dict,
         arts_category,
+        backfill: bool = False,
+        only_skin_ids: Sequence[str] | None = None,
     ) -> PortraitSummary:
         started = time.perf_counter()
+        self._backfill = backfill
         self._version_key = str(version)
         version_key = self._version_key
         work_dir = self.work_root / version_key
@@ -280,6 +297,13 @@ class PortraitUpdateRunner:
         self._previous_version = previous_version
         tasks = self._plan_tasks(roots, catalog, characters, previous)
         tasks = self._merge_resume(tasks, self._load_work_entries(work_dir / "manifest.json"), artifacts_dir)
+        if only_skin_ids is not None:
+            # 显式皮肤样本过滤：集合外记 not_applicable（进 manifest 留痕），
+            # 避免只过滤角色却隐含渲染该角色全部皮肤。
+            wanted_skins = {str(skin_id) for skin_id in only_skin_ids}
+            for task in tasks:
+                if task.skin_id not in wanted_skins:
+                    task.action = "not_applicable"
 
         render_tasks = [task for task in tasks if task.action == "render"]
         tool_error = self._preflight_error() if render_tasks else None
@@ -337,8 +361,9 @@ class PortraitUpdateRunner:
             self._persist_work_manifest(work_manifest_path, version_key, manifest_entries)
             # portrait_ready 必须落在 work manifest(event_emitted=False) 之后：
             # 事件前崩溃 → 恢复走 emit 直接补发，不重渲；事件后崩溃 → 重复事件
-            # 由 Bot 幂等键去重。继承/已完成条目不补发。
-            if (entry.get("state") == "published" and not entry.get("event_emitted")
+            # 由 Bot 幂等键去重。继承/已完成条目不补发。回填全程不发事件。
+            if (not self._backfill and entry.get("state") == "published"
+                    and not entry.get("event_emitted")
                     and str(entry.get("source_version")) == version_key):
                 self._append_ready_event(entry)
                 entry["event_emitted"] = True
@@ -499,8 +524,9 @@ class PortraitUpdateRunner:
             if character is None and not matches:
                 action = "not_applicable"
             elif previous is None:
-                # 首次无基线：只记录当前指纹，不自动渲染历史
-                action = "skip"
+                # 首次无基线：正常更新只记录当前指纹，不自动渲染历史；
+                # 回填专用策略则真实渲染首个历史基线。
+                action = "render" if self._backfill else "skip"
             elif prev is None or prev.get("input_fingerprint") != fingerprint:
                 action = "render"  # 新角色全部皮肤 / 老角色新增皮肤 / 输入变化
             elif str(prev.get("state")) == "published":
@@ -935,7 +961,8 @@ class PortraitUpdateRunner:
         relative = f"{task.character_id}/{task.skin_id}.png"
         _copy_atomic(artifact, staging_portraits / relative)
         _copy_atomic(artifact, artifacts_dir / f"{task.character_id}_{task.skin_id}.png")
-        self._write_outbox(task, evidence["sha256"], artifact)
+        if not self._backfill:
+            self._write_outbox(task, evidence["sha256"], artifact)
         entry = self._base_entry(task)
         entry.update(
             state="published",
@@ -1002,8 +1029,9 @@ class PortraitUpdateRunner:
         artifact = self._resume_artifact(work_entry, artifacts_dir)
         _ensure_png_within_limit(artifact)  # 补发事件前同样守 QQ 20MiB 上限
         _copy_atomic(artifact, staging_portraits / str(work_entry.get("artifact_path")))
-        self._write_outbox(task, str(work_entry.get("artifact_sha256")), artifact)
-        self._append_ready_event(work_entry)
+        if not self._backfill:
+            self._write_outbox(task, str(work_entry.get("artifact_sha256")), artifact)
+            self._append_ready_event(work_entry)
         work_entry["event_emitted"] = True
         work_entry["staged"] = True
         return work_entry
