@@ -109,6 +109,17 @@ class PollCursorStore:
             raise
 
 
+def branch_subset(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError("deployment branch subset must be a nonempty array")
+    branches = tuple(value)
+    if any(not isinstance(branch, str) for branch in branches):
+        raise ValueError("deployment branch subset must contain only branch names")
+    if len(set(branches)) != len(branches) or any(branch not in _BRANCHES for branch in branches):
+        raise ValueError("deployment branch subset contains a duplicate or invalid branch")
+    return branches
+
+
 class BranchPoller:
     """Inspect and deploy one branch without adopting uninitialized live paths."""
 
@@ -121,17 +132,19 @@ class BranchPoller:
         *,
         announcement_selector: AnnouncementSelector | None = None,
         inventory=None,
+        branches: tuple[str, ...] | None = None,
     ):
         self.inventory = inventory
         self.github = github
         self.runner = runner
         self.transaction_for_branch = transaction_for_branch
         self.cursors = cursors
+        self.branches = _BRANCHES if branches is None else branch_subset(branches)
         self.announcement_selector = announcement_selector or AnnouncementSelector()
 
     def poll_all(self) -> tuple[PollResult, ...]:
         results = []
-        for branch in _BRANCHES:
+        for branch in self.branches:
             try:
                 results.append(self.poll_branch(branch))
             except Exception as exc:  # noqa: BLE001 - isolate branches but expose no secrets.

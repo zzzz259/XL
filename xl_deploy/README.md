@@ -4,7 +4,9 @@ The controller is a one-shot user service, invoked every 60 seconds by
 `xl-deploy-poll.timer` using the venv at
 `current/main/.venvs/xl-deploy-poll.service`. The poller is not in any deployment
 stop list, so a pass already running can finish on its started release while a
-main pointer changes. It checks `debug`, `test`, and `main`; a commit is
+main pointer changes. By default it checks `debug`, `test`, and `main`; the
+optional `[deployment].branches` array selects a nonempty, unique subset so two
+hosts never manage the same branch. A commit is
 deployable only after GitHub Actions workflow **XL CI** succeeds for that exact
 branch and 40-character SHA. Pending/failed CI does not advance the saved
 cursor. Changes outside a branch's service mapping are recorded as no-ops.
@@ -49,6 +51,18 @@ must load the corresponding external config and `current/<watch_ref>` release.
 Each routed Bot instance must have a distinct transport token in both the
 Gateway config and its Bot config; the dry-run checks token IDs and matching
 values without printing them.
+
+For a split-host deployment, `[deployment].branches` partitions branch ownership
+(for example `['debug', 'main']` on the Gateway host and `['test']` on the test
+host). Set `managed = false` on an instance that remains in the Gateway's group
+routes but runs on another host. Its units are excluded from the local
+allowlist, preflight, start/stop, and health checks; its external runtime config
+is not read locally. Set `managed = false` on the Gateway on a host that only
+consumes it through an authenticated SSH tunnel bound to loopback. Such a host
+must not hold a second QQ Gateway or restart the remote Gateway unit. The
+unmanaged Gateway's `config_path`/`data_roots` remain inventory identifiers, not
+copies of its QQ secret configuration. A managed Gateway still validates all
+enabled local and remote routes and tokens against its actual local config.
 
 Validate a prepared inventory without loading GitHub/router bearer tokens or
 changing services, pointers, configs, or data. It reads the referenced runtime
