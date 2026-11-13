@@ -353,7 +353,7 @@ def test_history_path_traversal_rejected(tmp_path):
 
 
 def test_history_absolute_path_rejected(tmp_path):
-    root = _two_version_corrupt_root(tmp_path, artifact_path="/etc/passwd")
+    root = _two_version_corrupt_root(tmp_path, artifact_path="/etc/passwd", write=False)
     querier = make_querier(root)
     result = querier.find_history(CID)
     assert result.status == "unavailable"
