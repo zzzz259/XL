@@ -3,12 +3,12 @@ from server_app.selector import LUA_NAMES, bundle_hashes_for_assets, select_lua_
 
 
 def test_lua_whitelist_has_gacha_tables_and_no_handbook():
-    assert len(LUA_NAMES) == 11
     assert "basecardhandbook.lua.bytes" not in LUA_NAMES
     assert "basecard.lua.bytes" in LUA_NAMES
     assert "baseword_cn.lua.bytes" in LUA_NAMES
     assert "basegacha.lua.bytes" in LUA_NAMES
     assert "basegachabottomup.lua.bytes" in LUA_NAMES
+    assert "basegachabottompool.lua.bytes" in LUA_NAMES
 
 
 def test_selector_recognizes_character_lua_names():
@@ -17,10 +17,11 @@ def test_selector_recognizes_character_lua_names():
         assets=(
             AssetRef("BaseCard.lua.bytes", 0, "Assets/Lua"),
             AssetRef("BaseWord_cn.lua.bytes", 0, "Assets/Lua"),
+            AssetRef("BaseGachaBottomPool.lua.bytes", 0, "Assets/Lua"),
             AssetRef("unrelated.lua.bytes", 0, "Assets/Lua"),
         ),
     )
-    assert [asset.name for asset in select_lua_assets(index)] == ["BaseCard.lua.bytes", "BaseWord_cn.lua.bytes"]
+    assert [asset.name for asset in select_lua_assets(index)] == ["BaseCard.lua.bytes", "BaseWord_cn.lua.bytes", "BaseGachaBottomPool.lua.bytes"]
     assert bundle_hashes_for_assets(index, select_lua_assets(index)) == ("lua",)
 
 

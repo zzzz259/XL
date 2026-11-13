@@ -17,6 +17,7 @@ from .character_card_exporter import CardExportReport, export_character_cards
 from .config import ServerConfig
 from .extractor import extract_lua_files
 from .gacha_adapter import load_character_names, load_gacha_tables
+from .gacha_catalog import stage_gacha_catalog
 from .gacha_history import rebuild_gacha_history
 from .lua_decoder import decode_lua_directory
 from .pipeline import ProcessResult
@@ -370,6 +371,7 @@ class ProductionUpdateProcessor:
             characters,
             self.config,
         )
+        catalog_warnings = stage_gacha_catalog(decoded_lua, staging, str(update_info.timestamp))
 
         is_baseline = current is None
         current_ids = set(current.get("characters", {}).keys()) if current else set()
@@ -476,7 +478,7 @@ class ProductionUpdateProcessor:
             card_failure_count=card_report.failed,
             new_character_count=len(new_character_ids),
             updated_character_count=len(updated_character_ids),
-            warnings=schedule_warnings,
+            warnings=tuple((*schedule_warnings, *catalog_warnings)),
             schedule_enabled=getattr(self.config, "rerun_schedule_enabled", True),
         )
 

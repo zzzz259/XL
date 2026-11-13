@@ -33,6 +33,7 @@ def test_repair_bundle_header_rejects_non_bundle(tmp_path):
 def test_is_lua_asset_name_accepts_unity_object_name_without_payload_suffix():
     assert is_lua_asset_name("BaseCard.lua") is True
     assert is_lua_asset_name("BaseCard.lua.bytes") is True
+    assert is_lua_asset_name("BaseGachaBottomPool.lua.bytes") is True
     assert is_lua_asset_name("BaseMonsterPart1120.lua") is False
 
 
