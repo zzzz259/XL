@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -146,6 +146,147 @@ def project_schedule(
         "period_state": period_state,
         "generated_at": datetime.now(TIMEZONE).isoformat(),
         "render": render,
+    }
+
+
+def project_calendar(
+    calendar: dict[str, Any],
+    *,
+    now: datetime,
+    forecast_limit: int = 20,
+) -> dict[str, Any]:
+    """Project known periods and first normal reruns from one complete lifecycle.
+
+    Wall time filters display entries only. It never fulfills a queued rerun or
+    moves its predicted dates; only observed normal pool identities do that.
+    """
+    from .gacha_history import rebuild_gacha_history
+    from .rerun_calendar import (
+        DEFAULT_CYCLE_ANCHOR,
+        _pool_reason,
+        _valid_cycle,
+        pool_window,
+    )
+
+    moment = _parse_aware(now, "now")
+    if forecast_limit <= 0:
+        raise ValueError("forecast_limit must be positive")
+    version = str(calendar.get("source_version", "")).strip()
+    if not version:
+        raise ValueError("calendar.source_version must be non-empty")
+    anchor = date.fromisoformat(calendar.get("cycle_anchor_date", DEFAULT_CYCLE_ANCHOR.isoformat()))
+    bottomups = calendar.get("bottomups", {})
+    names = calendar.get("names", {})
+    archived = {str(identifier) for identifier in calendar.get("archived_pool_ids", [])}
+    overrides = calendar.get("overrides", [])
+    override_by_id = {str(item.get("gacha_id")): item for item in overrides}
+    history_pools: list[dict[str, Any]] = []
+    dated: dict[str, dict[str, Any]] = {}
+    diagnostics = [dict(item) for item in calendar.get("diagnostics", [])]
+    for pool in calendar.get("pools", {}).values():
+        key = str(pool.get("id"))
+        if key in archived:
+            reason = _pool_reason(pool, bottomups, override_by_id.get(key))
+            if reason:
+                diagnostics.append({"gacha_id": pool.get("id"), "reason": "invalid_calendar_pool",
+                                    "detail": reason, "correction_action": "excluded_from_projection"})
+                continue
+            history_pools.append(pool)
+            continue
+        try:
+            cycle = _valid_cycle(pool["cycle_start"], anchor)
+            start, end = pool_window(cycle)
+            if not all(isinstance(pool.get(field), (str, datetime)) for field in ("start_at", "end_at")):
+                raise ValueError("pool dates must be timezone-aware datetimes")
+            if (_parse_aware(pool["start_at"], "pool.start_at") != start
+                    or _parse_aware(pool["end_at"], "pool.end_at") != end):
+                raise ValueError("pool dates disagree with its resource cycle")
+            reason = _pool_reason(pool, bottomups, override_by_id.get(key))
+            if reason:
+                raise ValueError(reason)
+        except (KeyError, ValueError, TypeError) as exc:
+            diagnostics.append({"gacha_id": pool.get("id"), "reason": "invalid_calendar_pool",
+                                "detail": str(exc), "correction_action": "excluded_from_projection"})
+            continue
+        history_pools.append(pool)
+        dated[key] = {**pool, "start_at": start.isoformat(), "end_at": end.isoformat()}
+
+    history = rebuild_gacha_history(history_pools, bottomups, names, overrides=overrides)
+    events = history["events"]
+    queue = [{**item, "name": _name(names, item["character_id"], item["name"])} for item in history["queue"]]
+    groups: dict[str, dict[str, Any]] = {}
+    normal_cycles: list[date] = []
+    known: list[dict[str, Any]] = []
+    labels = {"debut": "新角色", "first_rerun": "首复刻", "later_rerun": "再次复刻", "special": "特殊池"}
+    for event in events:
+        pool = dated.get(str(event["gacha_id"]))
+        if pool is None or event["pool_kind"] not in {"normal", "special"}:
+            continue
+        cycle = date.fromisoformat(pool["cycle_start"])
+        if event["pool_kind"] == "normal":
+            normal_cycles.append(cycle)
+        character_ids = event.get("character_ids", [event["character_id"]] if "character_id" in event else [])
+        entry = {**event, "character_ids": character_ids,
+                 "names": [_name(names, identifier) for identifier in character_ids],
+                 "cycle_start": pool["cycle_start"], "start_at": pool["start_at"], "end_at": pool["end_at"],
+                 "status": "known", "label": labels[event["event_kind"]]}
+        entry["name"] = " / ".join(entry["names"])
+        known.append(entry)
+        if _parse_aware(pool["end_at"], "pool.end_at") <= moment:
+            continue
+        group = groups.setdefault(pool["cycle_start"], {
+            "badge": "已知", "cycle_start": pool["cycle_start"],
+            "startsAt": _parse_aware(pool["start_at"], "pool.start_at").strftime("%Y.%m.%d %H:%M"),
+            "endsAt": _parse_aware(pool["end_at"], "pool.end_at").strftime("%Y.%m.%d %H:%M"), "pools": [],
+        })
+        group["pools"].append(entry)
+
+    base = max(normal_cycles) if normal_cycles else None
+    if base is None:
+        reliable_cycles = []
+        if calendar.get("last_reliable_cycle_start"):
+            reliable_cycles.append(_valid_cycle(calendar["last_reliable_cycle_start"], anchor))
+        pools_by_id = {str(pool.get("id")): pool for pool in history_pools}
+        for event in events:
+            key = str(event["gacha_id"])
+            if key not in archived or event["pool_kind"] != "normal":
+                continue
+            pool = pools_by_id[key]
+            mapping = calendar.get("versions", {}).get(str(pool.get("first_seen_version")), {})
+            cycle_value = pool.get("cycle_start") or mapping.get("cycle_start")
+            if cycle_value:
+                try:
+                    reliable_cycles.append(_valid_cycle(cycle_value, anchor))
+                except (TypeError, ValueError) as exc:
+                    diagnostics.append({"gacha_id": event["gacha_id"], "reason": "invalid_historical_cycle",
+                                        "detail": str(exc)})
+        base = max(reliable_cycles) if reliable_cycles else None
+    forecasts = []
+    if base is not None:
+        for index, item in enumerate(queue, 1):
+            cycle = base + timedelta(days=CYCLE_DAYS * index)
+            start, end = pool_window(cycle)
+            forecasts.append({**item, "period_index": index, "cycle_start": cycle.isoformat(),
+                              "start_at": start.isoformat(), "end_at": end.isoformat(), "status": "predicted"})
+    visible_forecasts = [item for item in forecasts if _parse_aware(item["end_at"], "forecast.end_at") > moment]
+    next_item = visible_forecasts[0] if visible_forecasts else None
+    render = {
+        "known": [groups[key] for key in sorted(groups)],
+        "anchorDate": pool_window(base)[0].strftime("%Y.%m.%d") if base else "待定",
+        "periodDays": CYCLE_DAYS,
+        "next": {"name": next_item["name"],
+                 "startsAt": _parse_aware(next_item["start_at"], "forecast.start_at").strftime("%m.%d %H:%M"),
+                 "endsAt": _parse_aware(next_item["end_at"], "forecast.end_at").strftime("%m.%d %H:%M")}
+                if next_item else {"name": "暂无待预测角色", "startsAt": "待定", "endsAt": "待定"},
+        "firstReruns": [{"name": item["name"], "date": _parse_aware(item["start_at"], "forecast.start_at").strftime("%Y.%m.%d")}
+                        for item in visible_forecasts[:forecast_limit]],
+    }
+    return {
+        "schema_version": 2, "source_version": version, "timezone": "Asia/Shanghai", "cycle_days": CYCLE_DAYS,
+        "cycle_anchor_date": anchor.isoformat(), "forecast_base_cycle_start": base.isoformat() if base else None,
+        "queue": queue, "forecasts": forecasts, "known": known, "events": events,
+        "history": history, "anomalies": history["anomalies"], "diagnostics": diagnostics,
+        "period_state": "calendar_snapshot", "generated_at": moment.isoformat(), "render": render,
     }
 
 

@@ -71,13 +71,24 @@ function validateSchedule(schedule) {
   if (!Number.isInteger(schedule.periodDays) || schedule.periodDays <= 0) {
     throw new TypeError("periodDays 必须是正整数");
   }
-  for (const key of ["current", "next"]) {
+  for (const key of ["next"]) {
     if (!schedule[key] || typeof schedule[key] !== "object" || Array.isArray(schedule[key])) {
       throw new TypeError(`${key} 必须是对象`);
     }
   }
-  for (const key of ["newName", "rerunName", "startsAt", "endsAt"]) {
-    requireString(schedule.current[key], `current.${key}`);
+  if (schedule.known !== undefined) {
+    if (!Array.isArray(schedule.known)) throw new TypeError("known 必须是数组");
+    schedule.known.forEach((group, index) => {
+      if (!group || typeof group !== "object") throw new TypeError(`known[${index}] 必须是对象`);
+      for (const key of ["startsAt", "endsAt"]) requireString(group[key], `known[${index}].${key}`);
+      if (!Array.isArray(group.pools) || !group.pools.length) throw new TypeError(`known[${index}].pools 必须是非空数组`);
+      group.pools.forEach((pool, poolIndex) => requireString(pool && pool.name, `known[${index}].pools[${poolIndex}].name`));
+    });
+  } else {
+    if (!schedule.current || typeof schedule.current !== "object") throw new TypeError("current 必须是对象");
+    for (const key of ["newName", "rerunName", "startsAt", "endsAt"]) {
+      requireString(schedule.current[key], `current.${key}`);
+    }
   }
   for (const key of ["name", "startsAt", "endsAt"]) {
     requireString(schedule.next[key], `next.${key}`);
@@ -132,26 +143,33 @@ function drawHeader(ctx, schedule) {
   );
 }
 
-function drawCurrentCard(ctx, current) {
-  roundedRect(ctx, 53, 260, 813, 160, 24, "#f8f8f8", COLORS.border);
-  roundedRect(ctx, 74, 276, 154, 46, 16, "#2d6583");
-  const badge = current.badge || "当前已确认";
+function drawKnownCard(ctx, group, top) {
+  const extraHeight = (Math.ceil(group.pools.length / 2) - 1) * 56;
+  roundedRect(ctx, 53, top, 813, 160 + extraHeight, 24, "#f8f8f8", COLORS.border);
+  roundedRect(ctx, 74, top + 16, 154, 46, 16, "#2d6583");
+  const badge = group.badge || "已知";
   const badgeSize = fitFontSize(ctx, badge, 136, 26, 15);
-  drawText(ctx, badge, 151, 307, badgeSize, COLORS.white, "bold", "center", 136);
-
-  const confirmed = current.mode !== "predicted";
-  const leftLabel = confirmed ? `${current.newName} / 新` : `${current.newName} / 预计`;
-  const rightLabel = confirmed ? `${current.rerunName} / 复刻` : "非官方排期";
-  drawText(ctx, leftLabel, 79, 365, 40, COLORS.accent, "bold", "left", 321);
-  drawText(ctx, rightLabel, 478, 365, 38, COLORS.gold, "bold", "left", 352);
-  drawText(ctx, `${current.startsAt}  —  ${current.endsAt}`, 79, 410, 24, COLORS.muted, "normal", "left", 541);
+  drawText(ctx, badge, 151, top + 47, badgeSize, COLORS.white, "bold", "center", 136);
+  group.pools.forEach((pool, index) => {
+    const x = index % 2 ? 478 : 79;
+    const label = `${pool.name} / ${pool.label || "UP"}`;
+    const size = fitFontSize(ctx, label, 352, 38, 22);
+    drawText(ctx, label, x, top + 105 + Math.floor(index / 2) * 56, size,
+      index % 2 ? COLORS.gold : COLORS.accent, "bold", "left", 352);
+  });
+  drawText(ctx, `${group.startsAt}  —  ${group.endsAt}`, 79, top + 150 + extraHeight,
+    24, COLORS.muted, "normal", "left", 745);
 }
 
-function drawNextCard(ctx, next) {
+function drawNextCard(ctx, next, offset = 0) {
+  ctx.save();
+  ctx.translate(0, offset);
   roundedRect(ctx, 53, 451, 813, 117, 23, COLORS.forecast, COLORS.border);
   drawText(ctx, "下一期预测", 80, 495, 28, "#4d7392", "bold");
-  drawText(ctx, next.name, 79, 542, 38, COLORS.ink, "bold", "left", 156);
+  const nameSize = fitFontSize(ctx, next.name, 180, 38, 18);
+  drawText(ctx, next.name, 79, 542, nameSize, COLORS.ink, "bold", "left", 180);
   drawText(ctx, `${next.startsAt}  —  ${next.endsAt}`, 274, 539, 26, "#3a627f", "normal", "left", 376);
+  ctx.restore();
 }
 
 function fitFontSize(ctx, text, maxWidth, startSize, minSize = 12) {
@@ -191,7 +209,9 @@ function drawRowMarkers(ctx, marks, y) {
   });
 }
 
-function drawScheduleTable(ctx, schedule) {
+function drawScheduleTable(ctx, schedule, offset = 0) {
+  ctx.save();
+  ctx.translate(0, offset);
   drawText(ctx, "普通首次复刻顺序", 55, 658, 48, COLORS.ink, "bold");
   roundedRect(ctx, 665, 614, 118, 44, 15, "#d2dde5");
   drawText(ctx, "理论档期", 684, 643, 22, "#53697d", "bold");
@@ -228,9 +248,10 @@ function drawScheduleTable(ctx, schedule) {
   ctx.strokeStyle = "#c2d0d9";
   ctx.stroke();
 
-  drawText(ctx, "日期为固定 21 天间隔的理论排期，不代表官方已确认。", 55, footerY + 47, 23, COLORS.muted);
+  drawText(ctx, "预测日期按 21 天间隔推算，不代表官方已确认。", 55, footerY + 47, 23, COLORS.muted);
   drawText(ctx, "特殊限定池若占用普通周期，后续时间可能整体顺延。", 55, footerY + 89, 23, COLORS.muted);
-  drawText(ctx, "展示无需角色头像；名称、日期、备注及队列均可由数据生成。", 55, footerY + 147, 23, "#8499aa");
+  drawText(ctx, "已知来自已解析卡池；预测仅包含普通角色首次复刻。", 55, footerY + 147, 23, "#8499aa");
+  ctx.restore();
 }
 
 /**
@@ -243,16 +264,29 @@ function drawScheduleTable(ctx, schedule) {
 function renderRerunSchedule(schedule) {
   validateSchedule(schedule);
 
-  const height = HEIGHT_BASE + (ROW_HEIGHT + ROW_GAP) * schedule.firstReruns.length;
+  const known = schedule.known === undefined ? [{
+    ...schedule.current,
+    pools: [
+      { name: schedule.current.newName, label: "新" },
+      { name: schedule.current.rerunName, label: "复刻" },
+    ],
+  }] : schedule.known;
+  const knownHeight = known.reduce((total, group) => total + 191 + (Math.ceil(group.pools.length / 2) - 1) * 56, 0);
+  const offset = knownHeight - 191;
+  const height = HEIGHT_BASE + offset + (ROW_HEIGHT + ROW_GAP) * schedule.firstReruns.length;
   const canvas = createCanvas(WIDTH, height);
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = COLORS.background;
   ctx.fillRect(0, 0, WIDTH, height);
 
   drawHeader(ctx, schedule);
-  drawCurrentCard(ctx, schedule.current);
-  drawNextCard(ctx, schedule.next);
-  drawScheduleTable(ctx, schedule);
+  let top = 260;
+  for (const group of known) {
+    drawKnownCard(ctx, group, top);
+    top += 191 + (Math.ceil(group.pools.length / 2) - 1) * 56;
+  }
+  drawNextCard(ctx, schedule.next, offset);
+  drawScheduleTable(ctx, schedule, offset);
   return canvas;
 }
 
