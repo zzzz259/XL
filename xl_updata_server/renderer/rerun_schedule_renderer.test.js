@@ -90,6 +90,63 @@ function referenceSchedule() {
   };
 }
 
+function knownSchedule(count = 1, poolCount = 2) {
+  const schedule = referenceSchedule();
+  delete schedule.current;
+  schedule.known = Array.from({ length: count }, (_, index) => ({
+    badge: '已知',
+    startsAt: index ? '2026.11.24 10:00' : '2026.11.03 10:00',
+    endsAt: index ? '2026.12.15 05:00' : '2026.11.24 05:00',
+    pools: Array.from({ length: poolCount }, (_, poolIndex) => ({
+      name: poolIndex ? '鎺' : '菲欧',
+      label: poolIndex ? '复刻' : '新',
+    })),
+  }));
+  return schedule;
+}
+
+test('known-only model keeps the original single-period layout', () => {
+  const canvas = renderRerunSchedule(knownSchedule());
+  assert.equal(canvas.width, 920);
+  assert.equal(canvas.height, 1600);
+});
+
+test('multiple known periods move the forecast below all known cards', () => {
+  for (const count of [2, 4]) {
+    const canvas = renderRerunSchedule(knownSchedule(count));
+    assert.equal(canvas.height, 1600 + (count - 1) * 191);
+    const nextTop = 451 + (count - 1) * 191;
+    const pixel = canvas.getContext('2d').getImageData(100, nextTop + 15, 1, 1).data;
+    assert.deepEqual([...pixel].slice(0, 3), [215, 229, 239]);
+  }
+});
+
+test('three pools share one period card and wrap onto a second line', () => {
+  const canvas = renderRerunSchedule(knownSchedule(1, 3));
+  assert.equal(canvas.height, 1656);
+});
+
+test('no known period leaves a readable prediction-only chart', () => {
+  const canvas = renderRerunSchedule(knownSchedule(0));
+  assert.equal(canvas.width, 920);
+  assert.equal(canvas.height, 1409);
+});
+
+test('explicit empty known list wins over an old current card', () => {
+  const schedule = referenceSchedule();
+  schedule.known = [];
+  assert.equal(renderRerunSchedule(schedule).height, 1409);
+});
+
+test('known periods reject missing pool names and missing date strings', () => {
+  const schedule = knownSchedule();
+  delete schedule.known[0].pools[0].name;
+  assert.throws(() => renderRerunSchedule(schedule), /known\[0\].pools\[0\].name/);
+  const missingDate = knownSchedule();
+  delete missingDate.known[0].endsAt;
+  assert.throws(() => renderRerunSchedule(missingDate), /known\[0\].endsAt/);
+});
+
 test('renders the reference schedule at 920 by 1600 pixels', () => {
   const canvas = renderRerunSchedule(referenceSchedule());
   assert.equal(canvas.width, 920);

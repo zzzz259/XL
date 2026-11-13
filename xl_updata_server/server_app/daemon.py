@@ -41,4 +41,5 @@ class UpdateDaemon:
         while not stop_event.is_set():
             now = self.clock()
             self.coordinator.run_scheduled_if_due(now)
+            self.coordinator.run_rerun_refresh_if_due(now)
             self.sleeper(1.0)

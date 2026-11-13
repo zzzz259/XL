@@ -5,9 +5,10 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
+from .rerun_calendar import DEFAULT_CYCLE_ANCHOR, cycle_for_date
 from .rerun_schedule import DEFAULT_ANCHOR
 
 try:
@@ -18,6 +19,12 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
 
 DEFAULT_CATEGORIES = ("Arts", "Data")
 DEFAULT_BURST_ANCHOR = "2026-10-09T10:00:00+08:00"
+DEFAULT_BOOTSTRAP_CYCLES = (
+    {'gacha_ids': [24000088, 24000089], 'cycle_start': '2026-10-09',
+     'source_version': '134359843258232660', 'source': 'previous_user_confirmed_anchor'},
+    {'gacha_ids': [24000090, 24000091], 'cycle_start': '2026-10-30',
+     'source_version': '134378035139437790', 'source': 'retained_version_and_update_events'},
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,9 @@ class ServerConfig:
     portrait_job_timeout_seconds: int = 3600
     portrait_map_timeout_seconds: int = 900
     portrait_png_working_rows: int = 128
+
+    rerun_schedule_cycle_anchor_date: str = DEFAULT_CYCLE_ANCHOR.isoformat()
+    rerun_schedule_bootstrap_cycles: tuple[dict, ...] = field(default_factory=lambda: tuple(dict(item) for item in DEFAULT_BOOTSTRAP_CYCLES))
     instance_id: str = "default"
 
 
@@ -143,6 +153,28 @@ def load_config(path: str | Path) -> ServerConfig:
     render_cards = bool(cards.get("enabled", True))
 
     rerun = dict(raw.get("rerun_schedule", {}))
+    cycle_anchor = date.fromisoformat(str(rerun.get('cycle_anchor_date', DEFAULT_CYCLE_ANCHOR.isoformat())))
+    cycle_for_date(cycle_anchor, cycle_anchor)
+    bootstrap_cycles = rerun.get('bootstrap_cycles', DEFAULT_BOOTSTRAP_CYCLES)
+    if not isinstance(bootstrap_cycles, (list, tuple)):
+        raise TypeError('rerun_schedule.bootstrap_cycles must be an array of tables')
+    parsed_cycles = []
+    bootstrap_ids = set()
+    for item in bootstrap_cycles:
+        if not isinstance(item, dict):
+            raise TypeError('bootstrap cycle must be a table')
+        start = date.fromisoformat(str(item.get('cycle_start', '')))
+        if cycle_for_date(start, cycle_anchor)[0] != start:
+            raise ValueError('bootstrap cycle must match resource cycle anchor')
+        ids = item.get('gacha_ids')
+        if not isinstance(ids, list) or not ids or any(type(identifier) is not int or identifier <= 0 for identifier in ids):
+            raise ValueError('bootstrap cycle gacha_ids must be positive integers')
+        if len(set(ids)) != len(ids) or bootstrap_ids.intersection(ids):
+            raise ValueError('bootstrap cycle has duplicate gacha_ids')
+        if not str(item.get('source', '')).strip():
+            raise ValueError('bootstrap cycle requires source')
+        bootstrap_ids.update(ids)
+        parsed_cycles.append({**item, 'cycle_start': start.isoformat()})
     rerun_anchor = dict(DEFAULT_ANCHOR)
     configured_anchor = rerun.get("anchor", {})
     if not isinstance(configured_anchor, dict):
@@ -271,5 +303,8 @@ def load_config(path: str | Path) -> ServerConfig:
         portrait_job_timeout_seconds=portrait_job_timeout_seconds,
         portrait_map_timeout_seconds=_read_int(portraits, "map_timeout_seconds", 900),
         portrait_png_working_rows=portrait_rows,
+
+        rerun_schedule_cycle_anchor_date=cycle_anchor.isoformat(),
+        rerun_schedule_bootstrap_cycles=tuple(parsed_cycles),
         instance_id=instance_id,
     )

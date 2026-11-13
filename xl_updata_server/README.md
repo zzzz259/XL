@@ -35,9 +35,11 @@ cp config.toml.example config.toml
 
 - `data/current_version.json` 指向当前已发布的数据版本。
 - `data/versions/<版本>/` 保存角色数据、manifest 和图鉴卡片。
-- `data/versions/<版本>/rerun_schedule/` 保存与版本绑定的排期 JSON/PNG 不可变快照；`data/rerun_schedule/` 是当前稳定镜像。
+- `data/versions/<版本>/rerun_schedule/` 保存与版本绑定的登记表和 JSON/PNG 不可变快照；`data/rerun_schedule/` 保存最新登记表与视图，每日检查只更新此稳定目录。
 - 非首次运行且有新增角色时，`data/outbox/<版本>/` 暂存待分发卡片和 manifest；首次运行只建立基线。
 - `xl_qqbot` 在整批卡片成功分发后清理对应 outbox 版本目录。两者通过共享文件目录交接，不通过 HTTP API 通信。
 - 可选的 `[portraits]` 功能在 Lua/图鉴处理后按增量逐套生成完整 2 倍立绘：版本产物位于 `data/versions/<版本>/portraits/`，持久发送交接位于 `data/portrait_outbox/<版本>/`，每套通过 `portrait_ready` 事件立即交给 Bot。首次启用只建立指纹基线，不自动补历史；单套失败和同版本恢复由 manifest 记录。功能默认关闭，配置和资源约束见[配置与运维](docs/配置与运维.md)。
 
 服务事实以 `server_app/`、`config.toml.example` 和部署脚本为准。其他项目入口见[仓库文档地图](../docs/README.md)。
+
+复刻图展示所有尚未到期的已知卡池期次，以及其后的普通角色首次复刻预测。资源更新按北京时间周五起每21天归为一期，对应下周二10:00至三周后周二05:00的卡池周期；同周期热修不增加期次。Lua解析完成后和每天05:00都会检查，画面未变时复用PNG，不触发游戏下载。首次迁移和日期来源见[排期运维说明](docs/配置与运维.md#普通首次复刻排期)。
