@@ -93,7 +93,7 @@ code redeployment or bootstrap new units. An operator can run the validation
 locally; there is no remote discovery step.
 
 `debug` remains CI-only. The controller polls debug/test/main in the existing
-fast-forward sequence; test/main are code snapshot refs, not product tiers.
+PR-based promotion flow; test/main are code snapshot refs, not product tiers.
 Runtime instances must watch `test` or `main`; `debug` is rejected as a runtime
 watch ref so it cannot silently remain undeployed.
 
