@@ -547,7 +547,7 @@ class PortraitUpdateRunner:
                 {"v": 1, "config": config_fp, "resources": sorted(bundle_hashes)}
             )
             prev = prev_skins.get(str(root.skin_id))
-            if character is None and not matches:
+            if character is None or not matches:
                 action = "not_applicable"
             elif previous is None:
                 # 首次无基线：正常更新只记录当前指纹，不自动渲染历史；

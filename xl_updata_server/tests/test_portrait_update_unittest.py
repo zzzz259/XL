@@ -1424,6 +1424,27 @@ def test_missing_character_and_prefab_is_not_applicable(tmp_path, monkeypatch):
     assert entry["artifact_path"] is None
 
 
+@pytest.mark.parametrize(
+    ("characters", "catalog"),
+    [
+        ({"10000151": {"name": "角色存在但资源尚未发布"}}, CatalogIndex(bundles=(), assets=())),
+        ({}, CATALOG),
+    ],
+)
+def test_missing_character_or_prefab_alone_is_not_applicable(tmp_path, monkeypatch, characters, catalog):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    basefashion = '''return {
+      [12001513] = { id = 12001513, card_id = 10000151, show_spine = "cardspine_10051_3" },
+    }
+    '''
+    summary, staging = env.run(1, basefashion=basefashion, catalog=catalog, characters=characters)
+    assert summary.success == 0 and summary.failed == 0 and summary.skipped == 1
+    assert env.calls["rendered"] == []
+    entry = env.manifest(staging)["skins"][0]
+    assert entry["state"] == "not_applicable"
+    assert entry["artifact_path"] is None
+
+
 def test_not_applicable_render_diagnostic_is_not_failed(tmp_path):
     config = _config(tmp_path / "data", tmp_path, enabled=True)
     runner = portrait_update.PortraitUpdateRunner(config, None, tmp_path / "catalogs")
