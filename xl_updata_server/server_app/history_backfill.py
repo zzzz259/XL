@@ -15,7 +15,9 @@
   （``backfill.json``，含样本 scope 与 full_scope）；重复执行可恢复且幂等
   ——全量完成可跳过任何后续运行，样本完成只允许同范围幂等跳过，后续全量
   运行不会直接跳过样本版本；存在失败立绘（failed_skins>0）的版本记 failed
-  供重跑恢复。
+  供重跑恢复。跳过前必须通过 ``validate_backfill_version`` 产物校验，
+  历史遗留的 completed 但卡不全版本会自动重跑图鉴（分批导出，每批 5 个
+  角色，绕开正常 updater 单批 300s 契约），立绘由 runner 恢复机制复用。
 - ``publish_backfill`` 是单独的显式阶段：缺失的新版本必须带
   status=completed、full_scope=True、failed_skins=0 的完成记录并通过完整
   产物校验，才经同文件系统临时目录原子改名合入生产版本目录；
@@ -46,7 +48,11 @@ from typing import Any
 from .catalog import read_catalog
 from .cdn import CategoryInfo, CdnClient
 from .character_adapter import parse_character_snapshot
-from .character_card_exporter import export_character_cards
+from .character_card_exporter import (
+    CardExportFailure,
+    CardExportReport,
+    export_character_cards,
+)
 from .character_card_manifest import (
     canonical_character_sha,
     copy_manifest_artifacts,
@@ -70,6 +76,10 @@ from .selector import (
 LOGGER = logging.getLogger(__name__)
 
 PROGRESS_NAME = "backfill.json"
+
+# 单批 Node 渲染的角色数上限：真实全量 88 角色单批超过渲染 300s 契约，
+# 分批串行使每批远低于该契约；只用于历史回填，正常 updater 全局契约不变。
+DEFAULT_CARD_EXPORT_BATCH_SIZE = 5
 
 
 @dataclass(frozen=True)
@@ -360,6 +370,64 @@ def _load_characters(version_dir: Path) -> dict[str, Any]:
     return {str(k): v for k, v in characters.items()} if isinstance(characters, Mapping) else {}
 
 
+def export_character_cards_batched(
+    characters: Mapping[str | int, Mapping[str, Any]],
+    cards_dir: Path,
+    font_path: str | Path | None = None,
+    *,
+    only_character_ids: set[str] | None = None,
+    node_bin: str = "node",
+    batch_size: int = DEFAULT_CARD_EXPORT_BATCH_SIZE,
+) -> CardExportReport:
+    """按 ``batch_size`` 个角色一批串行导出图鉴长图并聚合报告。
+
+    单批 Node 调用超时/崩溃只把该批记为失败（每角色一条 CardExportFailure），
+    不影响其余批次；``only_character_ids`` 过滤在分批前生效（None=全部）。
+    所有产物仍写入当版 cards_dir。
+    """
+    wanted = {str(cid) for cid in only_character_ids} if only_character_ids is not None else None
+    selected = {
+        str(cid): data
+        for cid, data in characters.items()
+        if wanted is None or str(cid) in wanted
+    }
+    ordered = sorted(selected.items(), key=lambda item: item[0])
+    reports: list[CardExportReport] = []
+    for start in range(0, len(ordered), batch_size):
+        batch = dict(ordered[start : start + batch_size])
+        try:
+            reports.append(
+                export_character_cards(batch, cards_dir, font_path, node_bin=node_bin)
+            )
+        except Exception as error:  # 单批崩溃不拖垮其余批次
+            LOGGER.exception("stage=history_backfill status=card_batch_failed size=%d", len(batch))
+            reports.append(
+                CardExportReport(
+                    seen=len(batch),
+                    created=0,
+                    warned=0,
+                    failed=len(batch),
+                    outputs=(),
+                    warnings=(),
+                    failures=tuple(
+                        CardExportFailure(character_id, f"{type(error).__name__}: {error}"[:300])
+                        for character_id in batch
+                    ),
+                    character_outputs=(),
+                )
+            )
+    return CardExportReport(
+        seen=sum(report.seen for report in reports),
+        created=sum(report.created for report in reports),
+        warned=sum(report.warned for report in reports),
+        failed=sum(report.failed for report in reports),
+        outputs=tuple(path for report in reports for path in report.outputs),
+        warnings=tuple(item for report in reports for item in report.warnings),
+        failures=tuple(item for report in reports for item in report.failures),
+        character_outputs=tuple(item for report in reports for item in report.character_outputs),
+    )
+
+
 def _process_version(
     item: HistoryVersion,
     *,
@@ -376,12 +444,21 @@ def _process_version(
     progress = _read_progress(version_dir)
     # 完成记录绑定范围：全量完成可跳过任何后续运行；样本完成只允许同范围
     # 重复执行幂等跳过，后续全量运行（不同 scope）必须重处理。
+    # 跳过还必须通过产物校验：历史遗留的 completed 但卡不全版本会在此重跑，
+    # 图鉴重导、立绘由 runner 恢复机制复用不重渲。
     if (
         progress is not None
         and progress.get("status") == "completed"
         and (progress.get("full_scope") is True or progress.get("scope") == scope)
     ):
-        return BackfillVersionResult(version=version, status="completed")
+        problems = validate_backfill_version(version_dir)
+        if not problems:
+            return BackfillVersionResult(version=version, status="completed")
+        LOGGER.warning(
+            "stage=history_backfill version=%s status=reprocess reason=completed_but_invalid problems=%s",
+            version,
+            list(problems)[:3],
+        )
 
     cache_client = BundleCacheClient(client, work_root / "cache")
     data_category = next((c for c in item.categories if c.name == "Data"), None)
@@ -436,7 +513,7 @@ def _process_version(
         }
 
     cards_dir = version_dir / "character_cards"
-    card_report = export_character_cards(
+    card_report = export_character_cards_batched(
         characters,
         cards_dir,
         config.character_card_font,

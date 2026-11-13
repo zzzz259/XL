@@ -50,7 +50,7 @@ import pytest
 from server_app import portrait_update
 from server_app.catalog import AssetRef, BundleRef, CatalogIndex
 from server_app.cdn import CategoryInfo, VersionCatalog
-from server_app.character_card_exporter import CardExportReport
+from server_app.character_card_exporter import CardExportFailure, CardExportReport
 from server_app.config import ServerConfig
 from server_app.lua_decoder import DecodeReport
 
@@ -391,6 +391,7 @@ class _BackfillEnv:
         def fake_export(characters, output_dir, *args, **kwargs):
             only = kwargs.get("only_character_ids")
             wanted = [str(cid) for cid in (only if only is not None else characters)]
+            self.calls.setdefault("exported", []).append(tuple(sorted(wanted)))
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
             outputs = []
@@ -1128,3 +1129,129 @@ def test_load_previous_manifest_never_selects_future_versions(tmp_path, monkeypa
     previous, previous_version = runner._load_previous_manifest("200")
     assert previous_version == "100"
     assert previous["version"] == "100"
+
+
+# ---- 真实全量验收缺口：分批图鉴导出与完成有效性复核 ------------------------------
+
+def _spy_export(monkeypatch, fail_ids: set[str] = frozenset(), crash_ids: set[str] = frozenset()) -> list:
+    """记录每次导出的角色集合；可按角色制造失败或整批崩溃。"""
+    module = _history_backfill()
+    calls: list = []
+
+    def fake_export(characters, output_dir, *args, **kwargs):
+        ordered = sorted(str(cid) for cid in characters)
+        calls.append(ordered)
+        if any(cid in crash_ids for cid in ordered):
+            raise RuntimeError("node 批处理崩溃(测试)")
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        outputs = []
+        character_outputs = []
+        failures = []
+        for cid in ordered:
+            if cid in fail_ids:
+                failures.append(CardExportFailure(cid, "渲染失败(测试)"))
+                continue
+            path = output_dir / f"{cid}_测试_角色档案_长图.png"
+            path.write_bytes(f"card-{cid}".encode())
+            outputs.append(path)
+            character_outputs.append((cid, path))
+        return CardExportReport(
+            seen=len(ordered), created=len(outputs), warned=0, failed=len(failures),
+            outputs=tuple(outputs), warnings=(), failures=tuple(failures),
+            character_outputs=tuple(character_outputs),
+        )
+
+    monkeypatch.setattr(module, "export_character_cards", fake_export)
+    return calls
+
+
+def test_export_batched_chunks_five_and_aggregates_reports(tmp_path, monkeypatch):
+    module = _history_backfill()
+    calls = _spy_export(monkeypatch, fail_ids={"10005"})
+    characters = {f"100{index:02d}": {"name": f"角色{index}"} for index in range(1, 13)}
+
+    report = module.export_character_cards_batched(characters, tmp_path / "cards", None, node_bin="node")
+
+    assert [len(batch) for batch in calls] == [5, 5, 2]
+    assert report.seen == 12
+    assert report.created == 11
+    assert report.warned == 0
+    assert report.failed == 1
+    assert len(report.outputs) == 11
+    assert len(report.character_outputs) == 11
+    assert [item.character_id for item in report.failures] == ["10005"]
+    for path in report.outputs:
+        assert path.is_file()
+
+
+def test_export_batched_honors_only_character_ids_filter(tmp_path, monkeypatch):
+    module = _history_backfill()
+    calls = _spy_export(monkeypatch)
+    characters = {f"100{index:02d}": {"name": f"角色{index}"} for index in range(1, 13)}
+
+    report = module.export_character_cards_batched(
+        characters, tmp_path / "cards", None,
+        only_character_ids={"10003", "10004", "10005"}, node_bin="node",
+    )
+
+    assert calls == [["10003", "10004", "10005"]]
+    assert report.seen == 3 and report.created == 3 and report.failed == 0
+
+
+def test_export_batched_single_batch_crash_does_not_affect_other_batches(tmp_path, monkeypatch):
+    module = _history_backfill()
+    calls = _spy_export(monkeypatch, crash_ids={"10006"})
+    characters = {f"100{index:02d}": {"name": f"角色{index}"} for index in range(1, 13)}
+
+    report = module.export_character_cards_batched(characters, tmp_path / "cards", None, node_bin="node")
+
+    # 崩溃批次（含 10006 的第 2 批）整体记失败，其余批不受影响
+    assert len(calls) == 3
+    assert report.created == 7
+    assert report.failed == 5
+    assert {item.character_id for item in report.failures} == {"10006", "10007", "10008", "10009", "10010"}
+    assert len(report.outputs) == 7
+
+
+def test_export_batched_empty_selection_makes_no_calls(tmp_path, monkeypatch):
+    module = _history_backfill()
+    calls = _spy_export(monkeypatch)
+
+    report = module.export_character_cards_batched(
+        {"10001": {"name": "阿尔法"}}, tmp_path / "cards", None,
+        only_character_ids=set(), node_bin="node",
+    )
+
+    assert calls == []
+    assert report.seen == 0 and report.created == 0 and report.failed == 0
+    assert report.outputs == () and report.character_outputs == ()
+
+
+def test_completed_version_with_invalid_cards_reruns_cards_but_reuses_portraits(tmp_path, monkeypatch):
+    env = _BackfillEnv(tmp_path, monkeypatch)
+    first = env.run(execute=True, versions=[100])
+    assert [(item.version, item.status) for item in first.versions] == [(100, "completed")]
+    renders_first = list(env.calls["rendered"])
+    exports_first = len(env.calls["exported"])
+
+    # 模拟“completed 但卡不全”：删掉一张图鉴长图（产物校验将失败）
+    cards = _version_manifest(env.work_root, 100, "character_cards/manifest.json")
+    target = cards["characters"][0]["artifact_path"]
+    (env.work_root / "versions" / "100" / target).unlink()
+
+    second = env.run(execute=True, versions=[100])
+    assert [(item.version, item.status) for item in second.versions] == [(100, "completed")]
+    assert len(env.calls["exported"]) > exports_first  # 图鉴重导补齐
+    assert env.calls["rendered"] == renders_first  # 立绘经 runner 恢复机制复用，不重渲
+    restored = env.work_root / "versions" / "100" / target
+    assert restored.is_file()
+    entry = next(item for item in cards["characters"] if item["artifact_path"] == target)
+    assert entry["artifact_sha256"] == hashlib.sha256(restored.read_bytes()).hexdigest()
+
+    # 再次运行：completed 且校验通过 → 真正跳过，不重导不重渲
+    exports_second = len(env.calls["exported"])
+    third = env.run(execute=True, versions=[100])
+    assert [(item.version, item.status) for item in third.versions] == [(100, "completed")]
+    assert len(env.calls["exported"]) == exports_second
+    assert env.calls["rendered"] == renders_first
