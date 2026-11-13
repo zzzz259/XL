@@ -20,6 +20,25 @@ PNG = b"\x89PNG\r\n\x1a\nnot-a-real-image-but-a-png-signature"
 
 
 class RerunScheduleQueryTests(unittest.TestCase):
+    def test_daily_stable_view_wins_when_both_snapshots_share_an_old_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            character_data = root / 'character_data/current.json'
+            (root / 'current_version.json').write_text('{"version":124}',encoding='utf-8')
+            for schedule,content in [(root / 'versions/124/rerun_schedule',PNG+b'old'),
+                                     (root / 'rerun_schedule',PNG+b'new-daily-view')]:
+                image = schedule / 'snapshots/view/current.png'
+                image.parent.mkdir(parents=True)
+                image.write_bytes(content)
+                (schedule / 'current.json').write_text(json.dumps({
+                    'source_version':'123','artifact_path':'snapshots/view/current.png',
+                    'render_sha256':hashlib.sha256(content).hexdigest()}),encoding='utf-8')
+            result = RerunScheduleQuerier(character_data,root/'versions').find()
+            self.assertEqual(result.status,'found')
+            self.assertTrue(result.stale)
+            self.assertEqual(result.source_version,'123')
+            self.assertEqual(result.image_path.read_bytes(),PNG+b'new-daily-view')
+
     def test_intent_matches_commands_and_specific_natural_questions_only(self):
         for query in ("复刻", "复刻表", "复刻排期", "下次复刻", "卡池复刻", "复刻时间", "下一期谁复刻", "罗蕾娜什么时候复刻？"):
             with self.subTest(query=query):

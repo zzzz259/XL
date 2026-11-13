@@ -35,7 +35,12 @@ class RerunScheduleQuerier:
             version_dir = self.versions_dir / active_version / "rerun_schedule"
             stable = self._try_candidate(stable_dir)
             versioned = self._try_candidate(version_dir)
-            selected = stable if stable and stable[0].get("source_version") == active_version else versioned or stable
+            # Daily refreshes keep the original source version when newer game
+            # data lacks a usable schedule. Prefer that refreshed view over its
+            # same-source immutable predecessor, retaining the stale flag below.
+            stable_is_current = stable and stable[0].get("source_version") == active_version
+            same_source = stable and versioned and stable[0].get("source_version") == versioned[0].get("source_version")
+            selected = stable if stable_is_current or same_source else versioned or stable
             if selected is None:
                 raise FileNotFoundError("active and stable schedule snapshots are missing")
             payload, image = selected

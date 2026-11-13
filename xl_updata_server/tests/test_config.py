@@ -185,3 +185,30 @@ assetbundle_key = "yunguihaowan1234"
         assert "timezone-aware ISO datetime" in str(error)
     else:
         raise AssertionError("dynamic burst anchors must be rejected")
+
+
+def test_rerun_cycle_defaults_and_legacy_cutoff_are_only_bootstrap_inputs(tmp_path):
+    config = tmp_path / 'config.toml'
+    config.write_text('[rerun_schedule]\nhistory_through_gacha_id=24000087\n', encoding='utf-8')
+    loaded = load_config(config)
+    assert loaded.rerun_schedule_cycle_anchor_date == '2026-11-20'
+    assert [item['cycle_start'] for item in loaded.rerun_schedule_bootstrap_cycles] == ['2026-10-09', '2026-10-30']
+
+
+def test_rerun_cycle_requires_friday_and_bootstrap_cycles_on_same_grid(tmp_path):
+    config = tmp_path / 'config.toml'
+    config.write_text('[rerun_schedule]\ncycle_anchor_date="2026-11-19"\n', encoding='utf-8')
+    try:
+        load_config(config)
+    except ValueError as error:
+        assert 'Friday' in str(error)
+    else:
+        raise AssertionError('Non-Friday cycle anchor accepted')
+    config.write_text('[rerun_schedule]\n[[rerun_schedule.bootstrap_cycles]]\n'
+                      'gacha_ids=[24000088]\ncycle_start="2026-11-13"\nsource="test"\n', encoding='utf-8')
+    try:
+        load_config(config)
+    except ValueError as error:
+        assert 'cycle' in str(error)
+    else:
+        raise AssertionError('Off-grid bootstrap cycle accepted')

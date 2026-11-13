@@ -9,6 +9,7 @@ from datetime import datetime
 
 from .config import ServerConfig
 from .pipeline import ProcessResult, UpdatePipeline
+from .rerun_refresh import RerunScheduleRefresher
 from .scheduler import PollScheduler
 from .state import ScheduleState, StateStore, UpdateJobStore, _sanitize_warning
 
@@ -22,12 +23,17 @@ class UpdateCoordinator:
         *,
         job_store: UpdateJobStore | None = None,
         clock: Callable[[], datetime] | None = None,
+        rerun_refresher: RerunScheduleRefresher | None = None,
     ):
         self.config = config
         self.pipeline = pipeline
         self.state_store = state_store
         self.job_store = job_store or UpdateJobStore(state_store.path)
         self.clock = clock or (lambda: datetime.now().astimezone())
+        data_dir = getattr(config, 'data_dir', state_store.path.parent)
+        self.rerun_refresher = rerun_refresher or RerunScheduleRefresher(
+            data_dir / 'rerun_schedule', node_bin=getattr(config, 'node_bin', 'node'),
+            forecast_limit=getattr(config, 'rerun_schedule_forecast_limit', 20), bootstrap_config=config)
         self.scheduler = PollScheduler(
             config.normal_interval_seconds,
             config.burst_interval_seconds,
@@ -43,6 +49,20 @@ class UpdateCoordinator:
         self._active_source: str | None = None
         self._last_result: dict | None = None
         self.job_store.mark_incomplete_interrupted(self.clock())
+
+    def run_rerun_refresh_if_due(self, now: datetime) -> dict | None:
+        """Use the update lock and drain boundary without creating a game job."""
+        if not getattr(self.config, 'rerun_schedule_enabled', True) or not self.rerun_refresher.is_due(now):
+            return None
+        with self._metadata_lock:
+            if not self._accepting or not self._run_lock.acquire(blocking=False):
+                return {'status': 'deferred'}
+            self._idle.clear()
+            self._active_source = 'rerun_refresh'
+        try:
+            return self.rerun_refresher.refresh(now)
+        finally:
+            self._finish_run()
 
     def run_scheduled_if_due(self, now: datetime) -> ProcessResult | None:
         if not self.config.cdn_poll_enabled:
@@ -146,6 +166,7 @@ class UpdateCoordinator:
 
     def _execute_locked(self, source: str, job_id: str | None) -> ProcessResult:
         result = self.pipeline.run_once()
+        self.rerun_refresher.reload_state()
         checked_at = self.clock()
         state: ScheduleState = self.state_store.load()
         state = self.scheduler.record_check(
