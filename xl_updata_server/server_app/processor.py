@@ -18,7 +18,6 @@ from .config import ServerConfig
 from .extractor import extract_lua_files
 from .gacha_adapter import load_character_names, load_gacha_tables
 from .gacha_catalog import stage_gacha_catalog
-from .gacha_history import rebuild_gacha_history
 from .lua_decoder import decode_lua_directory
 from .pipeline import ProcessResult
 from .portrait_update import (
@@ -27,12 +26,11 @@ from .portrait_update import (
     run_portrait_update,
     unfinished_work_entries,
 )
-from .rerun_schedule import (
-    DEFAULT_ANCHOR,
-    project_schedule,
-    publish_schedule_snapshot,
-    render_schedule_png,
-)
+from .rerun_bootstrap import bootstrap_rerun_calendar as _bootstrap_rerun_calendar
+from .rerun_bootstrap import version_observed_at as _version_observed_at
+from .rerun_calendar import DEFAULT_CYCLE_ANCHOR, SHANGHAI, merge_calendar
+from .rerun_refresh import RerunScheduleRefresher
+from .rerun_schedule import _write_atomic
 from .selector import (
     bundle_hashes_for_assets,
     select_lua_assets,
@@ -57,12 +55,15 @@ def _resolve_lua_file(decoded_lua: Path, expected_name: str) -> Path | None:
     )
 
 
+
 def process_rerun_schedule(
     decoded_lua: Path,
     staging: Path,
     version: str | int,
     characters: dict,
     config: ServerConfig,
+    *,
+    now: datetime | None = None,
 ) -> dict | None:
     """Parse, rebuild, render, and stage the schedule without blocking game updates."""
     if not getattr(config, "rerun_schedule_enabled", True):
@@ -91,36 +92,29 @@ def process_rerun_schedule(
         for character_id, value in characters.items()
         if isinstance(value, dict)
     })
-    anchor = getattr(config, "rerun_schedule_anchor", None) or DEFAULT_ANCHOR
-    anchor_gacha_ids = [int(anchor[key]) for key in ("new_gacha_id", "rerun_gacha_id")]
-    history = rebuild_gacha_history(
-        pools,
-        bottomups,
-        names,
-        overrides=getattr(config, "rerun_schedule_overrides", ()),
-        through_gacha_id=getattr(
-            config,
-            "rerun_schedule_history_through_gacha_id",
-            max(anchor_gacha_ids),
-        ),
-    )
-    LOGGER.info(
-        "stage=gacha_audit game_version=%s events=%d queue_length=%d anomaly_count=%d status=success",
-        version, len(history["events"]), len(history["queue"]), len(history["anomalies"]),
-    )
-    payload = project_schedule(
-        history,
-        source_version=version,
-        anchor=anchor,
-        names=names,
-        forecast_limit=getattr(config, "rerun_schedule_forecast_limit", 20),
-    )
-
-    png_bytes = render_schedule_png(payload, node_bin=config.node_bin)
-    published = publish_schedule_snapshot(staging / "rerun_schedule", payload, png_bytes)
+    moment = now or datetime.now(SHANGHAI)
+    data_dir = Path(getattr(config, 'data_dir', staging.parent / 'data'))
+    stable = data_dir / 'rerun_schedule'
+    calendar_file = stable / 'calendar.json'
+    previous = json.loads(calendar_file.read_text(encoding='utf-8')) if calendar_file.is_file() else _bootstrap_rerun_calendar(pools, config)
+    configured_anchor = getattr(config, 'rerun_schedule_cycle_anchor_date', DEFAULT_CYCLE_ANCHOR.isoformat())
+    if previous.get('cycle_anchor_date') != configured_anchor:
+        raise ValueError('existing calendar cycle anchor differs from configuration')
+    previous['overrides'] = list(getattr(config, 'rerun_schedule_overrides', ()))
+    calendar = merge_calendar(previous, pools, bottomups, names, source_version=str(version),
+                              observed_at=_version_observed_at(data_dir, str(version), moment))
+    schedule_dir = staging / 'rerun_schedule'
+    _write_atomic(schedule_dir / 'calendar.json', json.dumps(calendar, ensure_ascii=False, indent=2).encode('utf-8'))
+    refresh = RerunScheduleRefresher(schedule_dir, node_bin=config.node_bin,
+                                    forecast_limit=getattr(config, 'rerun_schedule_forecast_limit', 20),
+                                    previous_schedule_dir=stable)
+    result = refresh.refresh(moment, force=True)
+    if result['status'] == 'failed':
+        raise RuntimeError(result['error'])
+    published = result['payload']
     LOGGER.info(
         "stage=rerun_render game_version=%s queue_length=%d anomaly_count=%d status=success elapsed_ms=%d",
-        version, len(history["queue"]), len(history["anomalies"]), int((time.perf_counter() - started) * 1000),
+        version, len(published["queue"]), len(published["anomalies"]), int((time.perf_counter() - started) * 1000),
     )
     return published
 

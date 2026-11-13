@@ -26,6 +26,41 @@ PAYLOAD = {
 
 
 class RerunPipelineTests(unittest.TestCase):
+    def test_new_calendar_is_published_even_when_last_good_png_is_carried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / 'data'
+            old_dir = data / 'versions' / '122' / 'rerun_schedule'
+            publish_schedule_snapshot(old_dir, {**PAYLOAD, 'source_version': '122'}, PNG)
+            (old_dir / 'calendar.json').write_text('{"source_version":"122"}', encoding='utf-8')
+            (data / 'current_version.json').write_text('{"version":122}', encoding='utf-8')
+
+            def processor(stage):
+                (stage / 'rerun_schedule').mkdir()
+                (stage / 'rerun_schedule' / 'calendar.json').write_text('{"source_version":"123"}', encoding='utf-8')
+                return ProcessResult(version_timestamp=123, processed=True)
+
+            result = UpdatePipeline(data, processor).run_once()
+            self.assertTrue(result.processed, result.error)
+            self.assertEqual(json.loads((data / 'rerun_schedule' / 'calendar.json').read_text())['source_version'], '123')
+            version_calendar = data / 'versions' / '123' / 'rerun_schedule' / 'calendar.json'
+            self.assertEqual(json.loads(version_calendar.read_text())['source_version'], '123')
+            self.assertEqual(json.loads((data / 'rerun_schedule' / 'current.json').read_text())['source_version'], '122')
+
+    def test_failed_core_update_never_publishes_staged_calendar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / 'data'
+            (data / 'rerun_schedule').mkdir(parents=True)
+            stable = data / 'rerun_schedule' / 'calendar.json'
+            stable.write_text('{"source_version":"122"}', encoding='utf-8')
+
+            def processor(stage):
+                (stage / 'rerun_schedule').mkdir()
+                (stage / 'rerun_schedule' / 'calendar.json').write_text('{"source_version":"123"}', encoding='utf-8')
+                raise RuntimeError('core failed')
+
+            self.assertFalse(UpdatePipeline(data, processor).run_once().processed)
+            self.assertEqual(stable.read_text(), '{"source_version":"122"}')
+
     def test_schedule_is_in_version_before_pointer_and_mirrored_to_stable_location(self):
         with tempfile.TemporaryDirectory() as directory:
             data = Path(directory) / "data"

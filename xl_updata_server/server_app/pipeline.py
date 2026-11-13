@@ -133,8 +133,13 @@ class UpdatePipeline:
             return
         try:
             from .rerun_schedule import read_current_schedule
-            read_current_schedule(previous_schedule)
-            shutil.copytree(previous_schedule, current_schedule)
+            payload, image = read_current_schedule(previous_schedule)
+            # Preserve the NEW parsed calendar even when its render failed.
+            # Only carry the last good JSON/PNG pair, never old inputs/state.
+            relative = Path(payload['artifact_path'])
+            self._atomic_copy(image, current_schedule / relative)
+            self._atomic_copy(image, current_schedule / 'current.png')
+            self._atomic_copy(previous_schedule / 'current.json', current_schedule / 'current.json')
         except (FileExistsError, OSError, ValueError, KeyError, TypeError) as error:
             LOGGER.warning(
                 "stage=rerun_publish status=skipped reason=invalid_last_known_good version=%s error=%s",
@@ -168,6 +173,11 @@ class UpdatePipeline:
         """Mirror the immutable snapshot to data/rerun_schedule for operators."""
         source = self.versions_dir / str(version_timestamp) / "rerun_schedule"
         try:
+            target = self.data_dir / "rerun_schedule"
+            # Core version is committed before these inputs become authoritative.
+            for name in ('calendar.json', 'refresh-state.json'):
+                if (source / name).is_file():
+                    self._atomic_copy(source / name, target / name)
             manifest = source / "current.json"
             payload = json.loads(manifest.read_text(encoding="utf-8"))
             relative = Path(str(payload["artifact_path"]))
@@ -179,7 +189,6 @@ class UpdatePipeline:
             digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
             if digest != payload.get("render_sha256"):
                 raise ValueError("schedule artifact digest mismatch")
-            target = self.data_dir / "rerun_schedule"
             target_snapshot = target / relative
             target_snapshot.parent.mkdir(parents=True, exist_ok=True)
             if not target_snapshot.exists():
