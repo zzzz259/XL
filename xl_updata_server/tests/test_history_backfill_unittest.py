@@ -46,7 +46,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from server_app import portrait_update
 from server_app.catalog import AssetRef, BundleRef, CatalogIndex
 from server_app.cdn import CategoryInfo, VersionCatalog
@@ -775,6 +774,10 @@ def test_publish_backfill_leaves_existing_production_manifest_untouched(tmp_path
         {"schema_version": 1, "version": "100", "characters": []}, ensure_ascii=False
     )
     (existing / "character_cards" / "manifest.json").write_text(original, encoding="utf-8")
+    (existing / "portraits").mkdir()
+    (existing / "portraits" / "manifest.json").write_text(
+        '{"schema_version": 1, "version": "100", "skins": []}', encoding="utf-8"
+    )
 
     report = _history_backfill().publish_backfill(
         work_root=work_root, production_data_dir=production, versions=[100]
@@ -1032,6 +1035,41 @@ def test_publish_merge_rebuild_prefers_declared_output_on_rename(tmp_path):
     (entry,) = merged_manifest["characters"]
     assert entry["artifact_path"] == "character_cards/10000151_新名_角色档案_长图.png"
     assert entry["artifact_sha256"] == hashlib.sha256(b"legacy-new").hexdigest()
+
+
+def test_publish_existing_version_fills_only_missing_portrait_directory(tmp_path):
+    work_root = tmp_path / "backfill-work"
+    work = _build_validated_version(work_root, 200, CHARACTERS_V2, ("14001520",))
+    production = _production_root(tmp_path)
+    existing = production / "versions" / "200"
+    legacy = existing / "character_cards" / "10000151_旧图_角色档案_长图.png"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy-png")
+    (existing / "character_data").mkdir()
+    (existing / "character_data" / "current.json").write_text(
+        json.dumps({"version": 200, "characters": CHARACTERS_V1}, ensure_ascii=False), encoding="utf-8"
+    )
+    (existing / "manifest.json").write_text('{"version": 200}', encoding="utf-8")
+    character_before = (existing / "character_data" / "current.json").read_bytes()
+
+    report = _history_backfill().publish_backfill(
+        work_root=work_root, production_data_dir=production, versions=[200]
+    )
+
+    assert 200 in report.merged
+    assert legacy.read_bytes() == b"legacy-png"
+    assert (existing / "character_data" / "current.json").read_bytes() == character_before
+    copied = existing / "portraits" / "10000151" / "14001520.png"
+    assert copied.is_file()
+    assert hashlib.sha256(copied.read_bytes()).hexdigest() == hashlib.sha256((work / "portraits" / "10000151" / "14001520.png").read_bytes()).hexdigest()
+    assert (existing / "portraits" / "manifest.json").read_bytes() != b""
+    # 已有立绘目录时不再覆盖；重复合入不重复写任何派生产物
+    portrait_before = copied.read_bytes()
+    again = _history_backfill().publish_backfill(
+        work_root=work_root, production_data_dir=production, versions=[200]
+    )
+    assert again.merged == ()
+    assert copied.read_bytes() == portrait_before
 
 
 # ---- 独立审查缺口回归 ----------------------------------------------------------
