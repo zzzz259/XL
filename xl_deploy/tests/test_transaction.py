@@ -90,7 +90,7 @@ class FakeCurrentPointer:
         self.targets[str(pointer)] = target
 
 
-def make_transaction(tmp_path, *, runner=None, router=None, drain_timeout=3):
+def make_transaction(tmp_path, *, runner=None, router=None, drain_timeout=3, inventory=None):
     root = tmp_path / "deploy"
     releases = root / "releases"
     releases.mkdir(parents=True)
@@ -124,6 +124,7 @@ def make_transaction(tmp_path, *, runner=None, router=None, drain_timeout=3):
         router or FakeRouter(),
         paths,
         drain_timeout_seconds=drain_timeout,
+        inventory=inventory,
     )
 
 
