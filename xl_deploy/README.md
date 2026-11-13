@@ -234,6 +234,15 @@ the shared control-plane package may instead be installed in the stable
 that path. This one-time controller upgrade is separate from both runtime
 release pointers; it must not move `current/main` or alter main application
 data.
+
+Later controller-only fixes must update the package actually loaded by each
+poller. A branch promotion or an `xl_deploy`-only no-op does not update a stable
+control-plane copy. For a reviewed `transaction.py`-only fix, verify the live
+source hash, keep a backup, and replace that module under the existing deployment
+lock only when the poller is idle and its journal is terminal; restore the
+timer's prior state afterwards. Do not replace other modules or move runtime
+pointers as part of that controller update.
+
 The deployment poller never creates units, runtime configs, secrets, data
 directories or initial release pointers. Test's initial `--healthcheck` may
 accept an absent data directory/state database; the service creates these
@@ -364,6 +373,22 @@ part of a Bot instance. A backend-only instance has no Bot announcement or
 Gateway maintenance scope. Only after health checks pass does it durably enqueue
 `更新完毕`; any new non-empty project announcement follows in the destination
 instance's notifier FIFO.
+
+Start, completion, and rollback-recovery notices retain the full affected
+instance scope, including remote (`managed = false`) instances affected by a
+shared Gateway change. Feature announcements use only IDs already in that
+scope whose current inventory entries are enabled and have `watch_ref` matching
+the journal's persisted deployment branch. `managed` controls local services,
+not branch membership; instance names do not select a branch. In legacy mode,
+main features go to `main`, and test features go to `debug` and `test` within
+the original scope. An empty feature audience skips the send and resolves its
+delivery marker without blocking the next deployment.
+
+The same filter applies to old pending journals and notification retries;
+notification IDs and healthy-service retry behavior stay unchanged. Inventory
+changes during a pending delivery take effect on retry, but cannot add a
+recipient outside the journal's original affected scope. This does not freeze
+historical inventory or group routing.
 
 Optional version announcements are maintained in
 `xl_deploy/announcements/<change-id>.md` in the same candidate commit as the
