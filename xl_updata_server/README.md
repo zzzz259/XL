@@ -34,7 +34,7 @@ cp config.toml.example config.toml
 ## 交付边界
 
 - `data/current_version.json` 指向当前已发布的数据版本。
-- `data/versions/<版本>/` 保存角色数据、manifest 和图鉴卡片。
+- `data/versions/<版本>/` 保存角色数据、manifest 和图鉴卡片；`character_cards/manifest.json` 明确当版每个角色的有效长图、角色数据/图片 SHA 和实际来源版本，供内容历史查询使用。
 - `data/versions/<版本>/rerun_schedule/` 保存与版本绑定的登记表和 JSON/PNG 不可变快照；`data/rerun_schedule/` 保存最新登记表与视图，每日检查只更新此稳定目录。
 - 非首次运行且有新增角色时，`data/outbox/<版本>/` 暂存待分发卡片和 manifest；首次运行只建立基线。
 - `xl_qqbot` 在整批卡片成功分发后清理对应 outbox 版本目录。两者通过共享文件目录交接，不通过 HTTP API 通信。
