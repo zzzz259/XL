@@ -408,6 +408,15 @@ class QueryHandler:
         is_portrait = spec.portrait_ordinal is not None
         for entry in entries:
             if entry.status == "out_of_range":
+                if is_portrait and entry.total == 0 and entry.offset == 0 and entry.available_range:
+                    low, high = entry.available_range
+                    await self._sender.send_text(
+                        group_openid,
+                        f"《{match.name}》的立绘序号 {spec.portrait_ordinal} 超出范围，"
+                        f"可用序号为 {low}-{high}",
+                        reply_to,
+                    )
+                    return
                 scope = f"第 {spec.portrait_ordinal} 套立绘" if is_portrait else "图鉴"
                 await self._sender.send_text(
                     group_openid,

@@ -370,6 +370,17 @@ async def test_card_history_out_of_range_shows_total(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_portrait_ordinal_out_of_range_reports_skin_range(tmp_path):
+    handler, sender, _ = make_handler(tmp_path)
+    await handler._answer_query("g1", "雾铃9-1", "u1", "m1")
+    assert len(sender.calls) == 1
+    kind, _, text, _ = sender.calls[0]
+    assert kind == "text"
+    assert "第 9 套" not in text or "只有 0 个" not in text
+    assert "立绘序号 9" in text and "1-1" in text
+
+
+@pytest.mark.asyncio
 async def test_history_zero_suffix_is_normal_query_error(tmp_path):
     handler, sender, _ = make_handler(tmp_path)
     await handler._answer_query("g1", "雾铃-0", "u1", "m1")
