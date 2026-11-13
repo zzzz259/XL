@@ -30,7 +30,7 @@ python -B -m unittest discover -s tests -p 'test_*.py' -v
 python -B scripts/test_native.py --sdk "$ANDROID_HOME" --jdk "$JAVA_HOME" --output /outside/repo/native-tests
 ```
 
-`tests/test_visual_assets.py` 使用标准库 unittest 与 Pillow 检查 108 张初始 `_1` 方图、312 个时装映射、214 项 manifest 哈希，以及 gugu 864×864 画布、逐帧时长、基线和 poster。仓库产物检查始终执行；本机存在原始素材包时再对照源图，其他环境可通过 `STARFALL_ASSET_PACK` 指定，缺失时这 7 项源图对照明确跳过。Android CI 安装与生成器一致的 Pillow 后运行同一 unittest 入口，不使用 pytest/numpy。
+`tests/test_visual_assets.py` 使用标准库 unittest 与 Pillow 检查 109 个角色、316 个时装映射、100 个账号物品映射及 532 项 manifest 文件哈希，以及 gugu 864×864 画布、逐帧时长、基线和 poster。当前素材 resource_version 为 `134377281279792758`，与内置 catalog version `134379197371350448` 分别维护。仓库产物检查始终执行；完整源图对照必须同时提供真实 `STARFALL_ASSET_PACK` 素材包和 `STARFALL_GAME_OUTPUT` 解码输出。在未附原始素材的 CI 环境中，可将 `STARFALL_ASSET_PACK` 显式设为不存在的路径，这 8 项源资料检查会明确跳过，不能据此声称原图对照通过。Android CI 安装与生成器一致的 Pillow12.2.0 后运行同一 unittest 入口，不使用 pytest/numpy。
 
 原生脚本编译所有实际 Java 源码与 CatalogUpdatesTest，执行纯 JVM WireTest，并输出 DEX 测试 JAR。`android.jar` 中 `org.json` 是编译 stub，不能据此声称运行验证；使用已启动的 API35 模拟器测试真实实现：
 
