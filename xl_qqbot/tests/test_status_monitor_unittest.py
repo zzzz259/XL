@@ -66,6 +66,9 @@ class StatusMonitorTests(unittest.IsolatedAsyncioTestCase):
             StatusSample(True, 0, False, None, True, observed_at=100.0),
             StatusSample(True, 0, False, None, True, observed_at=103.0),
             StatusSample(True, 0, False, None, True, observed_at=130.0),
+            StatusSample(True, 0, True, 1, False, observed_at=160.0),
+            StatusSample(True, 0, True, 1, False, observed_at=163.0),
+            StatusSample(True, 0, True, 1, False, observed_at=190.0),
         ])
         monitor = StatusMonitor(
             lambda: next(samples), self.history, self.outbox,
@@ -76,8 +79,30 @@ class StatusMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.delays, [3.0])
         self.assertEqual(self.outbox.count(), 2)
         self.assertEqual({row.recipient for row in self.outbox.list_pending()}, {"debug", "test"})
+        with self.subTest(status="open"):
+            self.assertEqual(
+                [row.text for row in self.outbox.list_pending()],
+                ["游戏服务器已开启", "游戏服务器已开启"],
+            )
         self.assertFalse(await monitor.observe_once())
         self.assertEqual(self.outbox.count(), 2)
+
+        self.assertTrue(await monitor.observe_once())
+        self.assertEqual(self.delays, [3.0, 3.0])
+        self.assertEqual(self.outbox.count(), 4)
+        self.assertEqual(
+            [(row.recipient, row.text) for row in self.outbox.list_pending()],
+            [
+                ("debug", "游戏服务器已开启"),
+                ("test", "游戏服务器已开启"),
+                ("debug", "游戏服务器已关闭"),
+                ("test", "游戏服务器已关闭"),
+            ],
+        )
+        self.assertEqual(monitor.confirmed_state, Status.MAINTENANCE_CONFIRMED)
+        self.assertEqual(self.history.transition_count(), 2)
+        self.assertFalse(await monitor.observe_once())
+        self.assertEqual(self.outbox.count(), 4)
 
     async def test_unknown_confirmation_does_not_transition(self):
         samples = iter([
@@ -178,6 +203,10 @@ class StatusMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["instance_id"], "default")
         self.assertEqual(
             [item["recipient"] for item in request["messages"]], ["debug", "test"]
+        )
+        self.assertEqual(
+            [item["text"] for item in request["messages"]],
+            ["游戏服务器已开启", "游戏服务器已开启"],
         )
         self.assertEqual(request["event_key"], "game-status:MAINTENANCE_CONFIRMED:OPEN_CANDIDATE_GATEWAY_REACHABLE:100000")
 

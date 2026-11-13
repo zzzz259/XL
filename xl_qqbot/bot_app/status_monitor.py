@@ -283,5 +283,5 @@ class StatusMonitor:
     @staticmethod
     def _message(status: Status) -> str:
         if status is Status.MAINTENANCE_CONFIRMED:
-            return "检测到游戏登录预检返回维护状态（maintainState=1）。"
-        return "游戏登录预检未命中维护拦截，且官方网关可连接；游戏内可玩状态未由本探针验证。"
+            return "游戏服务器已关闭"
+        return "游戏服务器已开启"
