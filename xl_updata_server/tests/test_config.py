@@ -1,5 +1,7 @@
 from datetime import datetime
+import re
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -323,6 +325,16 @@ def test_portraits_rejects_invalid_limits(tmp_path):
             pass
         else:
             raise AssertionError(f"invalid portrait settings accepted: {snippet!r}")
+
+
+def test_config_example_declares_portraits_once_and_disabled():
+    example_path = Path(__file__).resolve().parent.parent / "config.toml.example"
+    text = example_path.read_text(encoding="utf-8")
+    assert len(re.findall(r"^\[portraits\]", text, flags=re.MULTILINE)) == 1
+    with example_path.open("rb") as f:
+        data = tomllib.load(f)
+    assert data["portraits"]["enabled"] is False
+
 
 def test_rerun_cycle_defaults_and_legacy_cutoff_are_only_bootstrap_inputs(tmp_path):
     config = tmp_path / 'config.toml'
