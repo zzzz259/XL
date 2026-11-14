@@ -7,6 +7,8 @@
 
 import hashlib
 import json
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
@@ -31,17 +33,33 @@ CHARACTERS = {
     CID_M: {"name": "迷迭香/Rosemary", "star": 6},
 }
 
-# 最小合法 PNG（8 字节签名 + IHDR + IEND）
+def _png_chunk(tag: bytes, payload: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(payload))
+        + tag
+        + payload
+        + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+    )
 
 
-def make_png(width: int, height: int) -> bytes:
+def make_png(width: int, height: int, rgba=(1, 2, 3, 4), variant: int = 0) -> bytes:
+    """RGBA8、无隔行的合法 PNG；variant=1 重打包为不同文件字节、解码像素相同。"""
+    row = bytes(rgba) * width
+    if variant == 0:
+        raw = b"".join(b"\x00" + row for _ in range(height))
+        level = 6
+    else:
+        first = row[:4]
+        rest = bytes((row[i] - row[i - 4]) & 0xFF for i in range(4, len(row)))
+        sub_row = first + rest
+        raw = b"".join(b"\x01" + sub_row for _ in range(height))
+        level = 9
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
-        + b"\x00\x00\x00\x0dIHDR"
-        + width.to_bytes(4, "big")
-        + height.to_bytes(4, "big")
-        + b"\x08\x06\x00\x00\x00"
-        + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(raw, level))
+        + _png_chunk(b"IEND", b"")
     )
 
 

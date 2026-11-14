@@ -226,6 +226,27 @@ class CharacterQuerier:
         """占住该版本位的不可用修订（唯一 key 不折叠），payload 携带错误。"""
         return (version, ("invalid", version), {"error": error})
 
+    def _pixel_sha256(self, version_dir: Path, artifact_path: str) -> tuple[str, str]:
+        """containment 预检后读取并解码历史图片，返回 (像素 SHA, 错误)。"""
+        rel = Path(str(artifact_path or ""))
+        if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+            return "", "unsafe artifact path"
+        base = version_dir.resolve()
+        target = (base / rel).resolve()
+        if not target.is_relative_to(base):
+            return "", "artifact path escapes version directory"
+        try:
+            size = target.stat().st_size
+            if size > history.MAX_HISTORY_IMAGE_BYTES:
+                return "", f"history image {size} bytes exceeds QQ image limit {history.MAX_HISTORY_IMAGE_BYTES}"
+            data = target.read_bytes()
+        except OSError as error:
+            return "", f"历史图片不可读: {error}"
+        try:
+            return history.png_pixel_sha256(data), ""
+        except ValueError as error:
+            return "", f"像素哈希失败: {error}"
+
     def _card_cell(self, character_id: str, version: str):
         version_dir = self._versions_dir / version
         manifest_path = version_dir / "character_cards" / "manifest.json"
@@ -265,7 +286,10 @@ class CharacterQuerier:
             artifact_path = str(entry.get("artifact_path") or "")
             if not artifact_path:
                 return self._invalid_cell(version, "artifact_path 为空")
-            return (version, (data_sha, artifact_sha), {"entry": entry, "version_dir": version_dir})
+            pixel_sha, pixel_error = self._pixel_sha256(version_dir, artifact_path)
+            if pixel_error:
+                return self._invalid_cell(version, pixel_error)
+            return (version, (data_sha, pixel_sha), {"entry": entry, "version_dir": version_dir})
         return (version, None, None)
 
     def _legacy_card_cell(self, character_id, version, version_dir):
@@ -277,12 +301,19 @@ class CharacterQuerier:
             matches = []
         if len(matches) == 1:
             try:
-                digest = hashlib.sha256(matches[0].read_bytes()).hexdigest()
+                size = matches[0].stat().st_size
+                if size > history.MAX_HISTORY_IMAGE_BYTES:
+                    return self._invalid_cell(version, f"history image {size} bytes exceeds QQ image limit")
+                data = matches[0].read_bytes()
             except OSError:
-                return (version, None, None)
-            return (version, ("legacy", digest), {
+                return self._invalid_cell(version, "旧版图鉴文件不可读")
+            try:
+                pixel_sha = history.png_pixel_sha256(data)
+            except ValueError as error:
+                return self._invalid_cell(version, f"像素哈希失败: {error}")
+            return (version, ("legacy", pixel_sha), {
                 "legacy": matches[0],
-                "legacy_sha256": digest,
+                "legacy_sha256": hashlib.sha256(data).hexdigest(),
                 "version_dir": version_dir,
             })
         if len(matches) > 1:
@@ -307,6 +338,7 @@ class CharacterQuerier:
             return history.ContentHistoryResult(
                 status="unavailable", error=str(payload["error"]), **base
             )
+        pixel_sha256 = run["key"][1] if isinstance(run["key"], tuple) else ""
         if "legacy" in payload:
             image, error = history.validate_image(
                 payload["version_dir"],
@@ -329,9 +361,11 @@ class CharacterQuerier:
         if image is None:
             return history.ContentHistoryResult(
                 status="unavailable", error=error, data_sha256=data_sha,
-                artifact_sha256=artifact_sha, source_version=source_version, **base,
+                artifact_sha256=artifact_sha, source_version=source_version,
+                pixel_sha256=pixel_sha256, **base,
             )
         return history.ContentHistoryResult(
             status="found", image_path=image, data_sha256=data_sha,
-            artifact_sha256=artifact_sha, source_version=source_version, **base,
+            artifact_sha256=artifact_sha, source_version=source_version,
+            pixel_sha256=pixel_sha256, **base,
         )
