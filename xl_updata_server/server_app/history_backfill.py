@@ -750,6 +750,24 @@ def _merge_card_manifest(prod_dir: Path, version: int) -> bool:
     return True
 
 
+def _merge_missing_portraits(work_dir: Path, prod_dir: Path) -> bool:
+    """仅当生产尚无 portraits 时补入已验证目录；不覆盖任何既有立绘文件。"""
+    source = work_dir / "portraits"
+    target = prod_dir / "portraits"
+    if not source.is_dir() or (target / "manifest.json").is_file():
+        return False
+    if target.exists():
+        LOGGER.warning("stage=history_publish status=skipped reason=partial_portrait_directory version=%s", prod_dir.name)
+        return False
+    temporary = Path(tempfile.mkdtemp(prefix=".portraits-merge-", dir=prod_dir))
+    try:
+        shutil.copytree(source, temporary / "content")
+        os.replace(temporary / "content", target)
+        return True
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
 def _publish_version_dir(work_dir: Path, prod_dir: Path) -> None:
     """同文件系统临时目录整体复制后原子改名；中断遗留临时目录下次清理。"""
     prod_versions = prod_dir.parent
@@ -790,7 +808,20 @@ def publish_backfill(
         prod_dir = prod_versions / str(version)
         work_dir = work_versions / str(version)
         if prod_dir.is_dir():
+            changed = False
+            if work_dir.is_dir() and not (prod_dir / "portraits" / "manifest.json").is_file():
+                problems = validate_backfill_version(work_dir) + _validate_publish_scope(work_dir)
+                if problems:
+                    LOGGER.warning(
+                        "stage=history_publish version=%s status=rejected problems=%s",
+                        version, list(problems)[:3],
+                    )
+                    rejected.append(version)
+                    continue
+                changed = _merge_missing_portraits(work_dir, prod_dir)
             if _merge_card_manifest(prod_dir, version):
+                changed = True
+            if changed:
                 merged.append(version)
             continue
         if not work_dir.is_dir():

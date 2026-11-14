@@ -412,6 +412,24 @@ def test_refresh_after_pointer_change(tmp_path):
     assert latest.artifact_sha256 == SHA[P3]
 
 
+def test_missing_manifest_not_backfilled_is_skipped_without_splitting_content(tmp_path):
+    root = make_root(tmp_path, current=124)
+    write_portrait_version(root, 121, [skin(SKIN_1, 1, P1)])
+    write_portrait_version(root, 122, [skin(SKIN_1, 1, P2)])
+    # 123 是生产已有但没有历史 Arts 索引的版本：没有 portraits 目录，不是内容变化。
+    (root / "versions" / "123" / "character_data").mkdir(parents=True)
+    write_portrait_version(root, 124, [skin(SKIN_1, 1, P2)])
+    querier = make_querier(root)
+
+    all_versions = querier.find_all_versions(CID, 1)
+    assert [r.status for r in all_versions] == ["found", "found"]
+    assert all_versions[0].artifact_sha256 == SHA[P2]
+    assert all_versions[0].first_seen_version == "122"
+    assert all_versions[0].last_seen_version == "124"
+    assert all_versions[1].artifact_sha256 == SHA[P1]
+    assert not any(r.status == "unavailable" for r in all_versions)
+
+
 # ---------- 复审：损坏/不支持 schema 的 portraits manifest 是 unavailable 修订 ----------
 
 

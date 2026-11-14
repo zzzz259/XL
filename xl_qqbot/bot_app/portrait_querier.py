@@ -255,11 +255,13 @@ class PortraitQuerier:
         }
 
     def _skin_cells(self, skin_id: str):
-        """逐版本格子 [(version, key, payload)]（旧到新），只追同一 skin_id。"""
-        return [
-            self._skin_cell(skin_id, version)
-            for version in history.numeric_versions(self._versions_dir)
-        ]
+        """逐版本格子 [(version, key, payload)]；无索引的未回填版本不参与聚合。"""
+        cells = []
+        for version in history.numeric_versions(self._versions_dir):
+            cell = self._skin_cell(skin_id, version)
+            if cell is not None:
+                cells.append(cell)
+        return cells
 
     @staticmethod
     def _invalid_skin_cell(version: str, error: str):
@@ -267,8 +269,11 @@ class PortraitQuerier:
         return (version, ("invalid", version), {"error": error})
 
     def _skin_cell(self, skin_id: str, version: str):
-        """schema 必须 1；损坏/不可读 manifest 是 unavailable 修订，不是普通间断。"""
+        """schema 必须 1；损坏 manifest 是 unavailable，完全未回填的版本跳过。"""
         manifest_path = self._versions_dir / version / "portraits" / "manifest.json"
+        if not manifest_path.is_file():
+            _logger.info("stage=portrait_history status=not_backfilled version=%s", version)
+            return None
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
