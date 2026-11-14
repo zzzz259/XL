@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .output_browser import OutputBrowserCatalog
-from .resource_model import skin_key
+from .resource_model import portrait_scene_key, skin_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +44,10 @@ def build_preview_unread_snapshot(service) -> PreviewUnreadSnapshot:
     character_root = service.preview_dir
     material_root = service.preview_dir.parent / "game_material"
     return PreviewUnreadSnapshot(
-        spine=frozenset(skin_key(record) for record in catalog.skins.values()),
+        spine=frozenset(
+            [skin_key(record) for record in catalog.skins.values()]
+            + [portrait_scene_key(scene) for scene in catalog.portrait_scenes]
+        ),
         character_files=frozenset(OutputBrowserCatalog(character_root).file_fingerprints()),
         material_files=frozenset(OutputBrowserCatalog(material_root).file_fingerprints()),
     )

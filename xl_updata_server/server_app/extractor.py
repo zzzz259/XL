@@ -8,10 +8,13 @@ from pathlib import Path
 
 import UnityPy
 
-from .selector import LUA_NAMES
+from .selector import LUA_NAMES, PORTRAIT_CALLBACK_LUA_NAMES
 
 UNITYFS_MAGIC = b"UnityFS"
-LUA_OBJECT_NAMES = frozenset(re.sub(r"\.(bytes|bank)$", "", name, flags=re.IGNORECASE) for name in LUA_NAMES)
+LUA_OBJECT_NAMES = frozenset(
+    re.sub(r"\.(bytes|bank)$", "", name, flags=re.IGNORECASE)
+    for name in (*LUA_NAMES, *PORTRAIT_CALLBACK_LUA_NAMES)
+)
 
 
 def safe_role_name(value: str) -> str:

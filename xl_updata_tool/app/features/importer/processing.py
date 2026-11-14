@@ -205,6 +205,35 @@ class ImportProcessor:
                 return
             self._emit_stage_finished("导出分类")
 
+            # Derived manifests run inside ImportWorker, after catalog/Lua output.
+            if (
+                self.version_timestamp is not None
+                and self.export_categories
+                and {"lua", "character"}.issubset(self._categories_with_output)
+                and self.lua_export_result
+            ):
+                catalog = os.path.join(self.bundle_dir, "_map", "assets_map.json")
+                if not os.path.isfile(catalog):
+                    # Category export normally skips the expensive AssetStudio
+                    # map stage. Scene manifests need exact Container/PPtr
+                    # evidence, so build the map once after restoring the full
+                    # version bundle input; keep this derived stage non-fatal.
+                    self._cleanup_cli_bundle_dir()
+                    logger.info("立绘场景清单需要版本资源索引；开始补建 AssetStudio map", extra={
+                        "event": "portrait_import.catalog_build_start",
+                        "details": {"catalog": catalog, "bundle_count": len(self.bundle_paths)},
+                    })
+                    _assets, map_error = self._stage_map()
+                    if self.is_cancelled():
+                        self._emit_all_finished(False, "已取消")
+                        return
+                    if _assets is None:
+                        logger.warning("立绘场景清单因资源索引不可用而跳过: %s", map_error, extra={
+                            "event": "portrait_import.catalog_build_failed",
+                            "error_code": "portrait_catalog_build_failed",
+                            "details": {"catalog": catalog, "reason": map_error},
+                        })
+
             if total_files > 0:
                 destination = (
                     "Lua 已按版本写入 output/lua/，其余分类写入 data/material/"

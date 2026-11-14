@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_deployment_scripts_check_node_renderer_and_low_concurrency_entrypoint():
-    assert "Pillow" not in Path("requirements.txt").read_text(encoding="utf-8")
+    assert "Pillow>=10.0.0" in Path("requirements.txt").read_text(encoding="utf-8")
     assert Path("renderer/package.json").is_file()
     assert Path("scripts/install_renderer.sh").is_file()
     script = Path("scripts/run_full_production.sh").read_text(encoding="utf-8")

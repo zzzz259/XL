@@ -14,18 +14,33 @@ from .catalog import read_catalog
 from .cdn import CdnClient
 from .character_adapter import parse_character_snapshot
 from .character_card_exporter import CardExportReport, export_character_cards
+from .character_card_manifest import (
+    legacy_manifest_from_version,
+    load_card_manifest,
+    write_card_manifest,
+)
 from .config import ServerConfig
 from .extractor import extract_lua_files
 from .gacha_adapter import load_character_names, load_gacha_tables
 from .gacha_catalog import stage_gacha_catalog
 from .lua_decoder import decode_lua_directory
 from .pipeline import ProcessResult
+from .portrait_update import (
+    PortraitUpdateError,
+    portrait_work_manifest_path,
+    run_portrait_update,
+    unfinished_work_entries,
+)
 from .rerun_bootstrap import bootstrap_rerun_calendar as _bootstrap_rerun_calendar
 from .rerun_bootstrap import version_observed_at as _version_observed_at
 from .rerun_calendar import DEFAULT_CYCLE_ANCHOR, SHANGHAI, merge_calendar
 from .rerun_refresh import RerunScheduleRefresher
 from .rerun_schedule import _write_atomic
-from .selector import bundle_hashes_for_assets, select_lua_assets
+from .selector import (
+    bundle_hashes_for_assets,
+    select_lua_assets,
+    select_portrait_callback_lua_assets,
+)
 from .versioning import read_current_pointer
 
 LOGGER = logging.getLogger(__name__)
@@ -141,6 +156,18 @@ def _load_current(path: Path) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _load_previous_card_manifest(data_dir: Path) -> dict | None:
+    """当前发布版本的 card manifest；旧版本缺失时按实际产物补建。"""
+    previous = read_current_pointer(data_dir)
+    if previous is None:
+        return None
+    version_dir = data_dir / "versions" / str(previous)
+    manifest = load_card_manifest(version_dir / "character_cards")
+    if manifest is not None:
+        return manifest
+    return legacy_manifest_from_version(version_dir, previous)
+
+
 def _canonical_character(data) -> str:
     """规范化 JSON（sort_keys）表示，用于跨版本同 ID 角色的全字段比较。"""
     return json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
@@ -171,6 +198,17 @@ def _log_stage(stage: str, started: float, paths: tuple[Path, ...] = ()) -> None
 
 def _relative_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
+
+
+def _portrait_counts(result: ProcessResult) -> dict | None:
+    """finish 事件携带本轮立绘汇总；未运行立绘步骤时保持旧事件形状。"""
+    if not (result.portrait_success_count or result.portrait_failure_count or result.portrait_skip_count):
+        return None
+    return {
+        "success": result.portrait_success_count,
+        "failed": result.portrait_failure_count,
+        "skipped": result.portrait_skip_count,
+    }
 
 
 def build_manifest_payload(
@@ -260,10 +298,18 @@ class ProductionUpdateProcessor:
     def __call__(self, staging: Path) -> ProcessResult:
         update_info = self.client.fetch_update_info()
         current_version = read_current_pointer(self.config.data_dir)
-        if current_version == update_info.timestamp:
-            return ProcessResult()
         current = _load_current(self.config.data_dir / "character_data" / "current.json")
-        if current_version is None and current and int(current.get("version", 0)) == update_info.timestamp:
+        same_version = current_version == update_info.timestamp or (
+            current_version is None
+            and bool(current)
+            and int(current.get("version", 0)) == update_info.timestamp
+        )
+        if same_version:
+            # 同版本目录对角色核心数据不可变；仅当存在未完成立绘时进入恢复，
+            # 否则保持旧的空结果早退：不落 CDN、不改任何状态。
+            resumed = self._resume_unfinished_portraits(staging, update_info, current)
+            if resumed is not None:
+                return resumed
             return ProcessResult()
 
         # 进入真实处理前向 Bot 广播更新开始；结束（含失败）后写出结果状态
@@ -279,8 +325,85 @@ class ProductionUpdateProcessor:
             updating=False,
             version=update_info.timestamp,
             new_characters=result.new_character_count,
+            portraits=_portrait_counts(result),
         )
         return result
+
+    def _resume_unfinished_portraits(
+        self, staging: Path, update_info, current: dict | None
+    ) -> ProcessResult | None:
+        """同版本恢复未完成立绘；无待恢复项或缺少恢复输入时返回 None。
+
+        只重做失败/未暂存/未发事件的立绘项：不重跑角色卡片与图鉴 outbox、
+        不重复 start/finish 事件，结果 processed=False 使 pipeline 跳过
+        publish_version（版本目录已存在）。输出直接写当前版本目录的
+        ``portraits/``（全部原子替换），character_data、character_cards、
+        manifest.json 等角色核心数据保持不变。恢复所需输入为当前版本保存的
+        BaseFashion.lua、data 根 current character_data 与 Arts 分类，
+        不重新下载/解码整套 Data。version_timestamp 保持 None，避免
+        coordinator 把已发布版本误记为 pending。
+        """
+        if not getattr(self.config, "portrait_enabled", False):
+            return None
+        version = update_info.timestamp
+        version_dir = self.config.data_dir / "versions" / str(version)
+        # 门控只读本地 manifest：无待恢复项时不落 CDN、不写任何状态。
+        # work manifest 可能被恢复中的中断截断为前缀，需同时看已发布 manifest 的 failed/stale。
+        if not unfinished_work_entries(
+            portrait_work_manifest_path(self.config, version),
+            version_dir / "portraits" / "manifest.json",
+        ):
+            return None
+        basefashion = version_dir / "portraits" / "BaseFashion.lua"
+        if not basefashion.is_file():
+            LOGGER.warning(
+                "stage=portraits_resume version=%s status=skipped reason=missing_saved_basefashion",
+                version,
+            )
+            return None
+        if not current:
+            LOGGER.warning(
+                "stage=portraits_resume version=%s status=skipped reason=missing_current_character_data",
+                version,
+            )
+            return None
+        portrait_warning = None
+        summary = None
+        try:
+            version_catalog = self.client.fetch_version_catalog(update_info.file)
+            arts_entry = next(
+                (entry for entry in version_catalog.categories if entry.name == "Arts"), None
+            )
+            decoded_dir = Path(staging) / ".portrait-resume-lua"
+            decoded_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(basefashion, decoded_dir / "BaseFashion.lua")
+            summary = run_portrait_update(
+                config=self.config,
+                client=self.client,
+                catalog_dir=self.catalog_dir,
+                version=version,
+                decoded_lua=decoded_dir,
+                staging=version_dir,
+                characters={str(key): value for key, value in (current.get("characters") or {}).items()},
+                arts_category=arts_entry,
+            )
+        except PortraitUpdateError as error:
+            portrait_warning = f"portraits: {error}"[:500]
+            LOGGER.error(
+                "stage=portraits_resume version=%s status=failed error=%s",
+                version,
+                error,
+            )
+        except Exception:
+            portrait_warning = "portraits: unexpected error"[:500]
+            LOGGER.exception("stage=portraits_resume version=%s status=failed", version)
+        return ProcessResult(
+            processed=False,
+            warnings=tuple(item for item in (portrait_warning,) if item),
+            portrait_success_count=summary.success if summary else 0,
+            portrait_failure_count=summary.failed if summary else 0,
+            portrait_skip_count=summary.skipped if summary else 0,
+        )
 
     def _write_update_status(
         self,
@@ -289,6 +412,7 @@ class ProductionUpdateProcessor:
         version: int,
         new_characters: int = 0,
         error: str | None = None,
+        portraits: dict | None = None,
     ) -> None:
         now_iso = datetime.now().astimezone().isoformat()
         _write_json(
@@ -311,6 +435,7 @@ class ProductionUpdateProcessor:
                 "new_characters": new_characters,
                 "error": error,
                 "at": now_iso,
+                **({"portraits": portraits} if portraits is not None else {}),
             },
             ensure_ascii=False,
         )
@@ -331,6 +456,8 @@ class ProductionUpdateProcessor:
         catalog = read_catalog(local_catalog, self.config.assetbundle_key)
 
         data_assets = select_lua_assets(catalog)
+        if self.config.portrait_enabled:
+            data_assets += select_portrait_callback_lua_assets(catalog)
         lua_hashes = bundle_hashes_for_assets(catalog, data_assets)
         if not lua_hashes:
             raise ValueError("未找到角色 Lua Bundle")
@@ -418,6 +545,16 @@ class ProductionUpdateProcessor:
             )
             LOGGER.info("stage=export_character_cards skipped reason=cards.enabled=false")
 
+        if self.config.render_cards:
+            previous_card_manifest = _load_previous_card_manifest(self.config.data_dir)
+            write_card_manifest(
+                staging / "character_cards",
+                version=update_info.timestamp,
+                characters=parsed_characters,
+                card_report=card_report,
+                previous_manifest=previous_card_manifest,
+            )
+
         if new_character_ids and not is_baseline:
             _write_outbox(
                 self.config.data_dir, update_info.timestamp, card_report, characters,
@@ -427,6 +564,36 @@ class ProductionUpdateProcessor:
             LOGGER.info("stage=baseline skip_outbox version=%s reason=首跑建立基线，跳过 outbox 分发", update_info.timestamp)
         elif not new_character_ids:
             LOGGER.info("stage=skip_outbox version=%s reason=无新增角色（变更角色不推送 QQ 群）", update_info.timestamp)
+
+        portrait_summary = None
+        portrait_warning = None
+        if getattr(self.config, "portrait_enabled", False):
+            arts_entry = next(
+                (entry for entry in version_catalog.categories if entry.name == "Arts"), None
+            )
+            try:
+                portrait_summary = run_portrait_update(
+                    config=self.config,
+                    client=self.client,
+                    catalog_dir=self.catalog_dir,
+                    version=update_info.timestamp,
+                    decoded_lua=decoded_lua,
+                    staging=staging,
+                    characters=parsed_characters,
+                    arts_category=arts_entry,
+                )
+            except PortraitUpdateError as error:
+                portrait_warning = f"portraits: {error}"[:500]
+                LOGGER.error(
+                    "stage=portraits version=%s status=failed error=%s",
+                    update_info.timestamp,
+                    error,
+                )
+            except Exception:
+                portrait_warning = "portraits: unexpected error"[:500]
+                LOGGER.exception(
+                    "stage=portraits version=%s status=failed", update_info.timestamp
+                )
 
         payload = {
             "version": update_info.timestamp,
@@ -477,8 +644,13 @@ class ProductionUpdateProcessor:
             card_failure_count=card_report.failed,
             new_character_count=len(new_character_ids),
             updated_character_count=len(updated_character_ids),
-            warnings=tuple((*schedule_warnings, *catalog_warnings)),
+            warnings=tuple(
+                item for item in (*schedule_warnings, *catalog_warnings, portrait_warning) if item
+            ),
             schedule_enabled=getattr(self.config, "rerun_schedule_enabled", True),
+            portrait_success_count=portrait_summary.success if portrait_summary else 0,
+            portrait_failure_count=portrait_summary.failed if portrait_summary else 0,
+            portrait_skip_count=portrait_summary.skipped if portrait_summary else 0,
         )
 
     def _download_hashes(self, hashes: tuple[str, ...], directory: Path) -> tuple[Path, ...]:

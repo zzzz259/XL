@@ -207,6 +207,8 @@ def _check_tool_files(locator: ToolLocator) -> list[CheckResult]:
         ("unluac.jar", locator.unluac_jar()),
         ("unluac opmap", locator.unluac_opmap()),
         ("SpineViewerCLI.exe", locator.spineviewer_cli()),
+        ("PortraitSceneCLI.dll", locator.portrait_scene_cli()),
+        ("PortraitSceneCLI.runtimeconfig.json", str(locator.tools / "SpineViewer" / "PortraitSceneCLI.runtimeconfig.json")),
         ("ffmpeg.exe", str(locator.tools / "SpineViewer" / "ffmpeg.exe")),
     )
     return [

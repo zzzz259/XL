@@ -7,6 +7,7 @@ import json
 import locale
 import os
 import re
+import signal
 import subprocess
 import threading
 import time
@@ -118,6 +119,9 @@ def run_external_process(
     tool_log_paths: Sequence[str | os.PathLike[str]] = (),
     on_line=None,
     cancel_check=None,
+    cancel_input: str | bytes | None = None,
+    cancel_tree: bool = False,
+    log_root: str | os.PathLike[str] | None = None,
     **kwargs,
 ) -> subprocess.CompletedProcess:
     """运行外部工具并持续保存其 stdout/stderr 与声明的原生日志。
@@ -154,9 +158,11 @@ def run_external_process(
     session = get_log_session()
     log_context = get_log_context()
     command_dir = None
-    if session and session.external_dir:
+    if log_root is not None or (session and session.external_dir):
         safe_tool = re.sub(r"[^A-Za-z0-9_.-]+", "_", tool).strip("._-") or "tool"
-        if log_context.task_id and log_context.task_id != "-":
+        if log_root is not None:
+            external_root = Path(log_root)
+        elif log_context.task_id and log_context.task_id != "-":
             external_root = session.directory / "tasks" / log_context.task_id / "external"
         else:
             external_root = session.external_dir
@@ -187,11 +193,13 @@ def run_external_process(
     popen_kwargs.update(
         cwd=cwd,
         env=env,
-        stdin=subprocess.PIPE if input_value is not None else popen_kwargs.pop("stdin", None),
+        stdin=subprocess.PIPE if input_value is not None or cancel_input is not None else popen_kwargs.pop("stdin", None),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=False,
     )
+    if cancel_tree and os.name != 'nt':
+        popen_kwargs.setdefault('start_new_session', True)
     try:
         process = subprocess.Popen(command, **popen_kwargs)
     except OSError:
@@ -232,28 +240,50 @@ def run_external_process(
 
     timed_out = False
     cancelled = False
+    def kill_owned_process():
+        if process.poll() is not None:
+            return
+        if cancel_tree and os.name == 'nt':
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=subprocess.CREATE_NO_WINDOW, check=False)
+        elif cancel_tree:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
     try:
         if cancel_check is None:
             try:
                 return_code = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                process.kill()
+                kill_owned_process()
                 return_code = process.wait()
         else:
             deadline = started + timeout if timeout is not None else None
             while process.poll() is None:
                 if cancel_check():
                     cancelled = True
-                    process.terminate()
+                    if cancel_input is not None and process.stdin is not None:
+                        try:
+                            payload = cancel_input.encode(encoding, errors=errors) if isinstance(cancel_input, str) else cancel_input
+                            process.stdin.write(payload)
+                            process.stdin.flush()
+                        except (BrokenPipeError, OSError, ValueError):
+                            pass
+                    else:
+                        process.terminate()
                     try:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
-                        process.kill()
+                        kill_owned_process()
                     break
                 if deadline is not None and time.perf_counter() >= deadline:
                     timed_out = True
-                    process.kill()
+                    kill_owned_process()
                     break
                 time.sleep(0.05)
             return_code = process.wait()
@@ -352,6 +382,10 @@ def run_external_process(
     result.xl_command_id = command_id
     result.xl_log_dir = command_dir
     result.xl_cancelled = cancelled
+    result.xl_stdout_truncated = stdout_capture.truncated
+    result.xl_stderr_truncated = stderr_capture.truncated
+    result.xl_stdout_bytes = stdout_capture.total_bytes
+    result.xl_stderr_bytes = stderr_capture.total_bytes
     if check and return_code != 0:
         raise subprocess.CalledProcessError(return_code, command, output=stdout_value, stderr=stderr_value)
     return result
@@ -362,7 +396,7 @@ def _drain_stream(stream, capture: _StreamCapture, name: str, on_line, encoding:
     pending = ""
     try:
         while True:
-            chunk = stream.read(64 * 1024)
+            chunk = getattr(stream, 'read1', stream.read)(64 * 1024)
             if not chunk:
                 break
             capture.feed(chunk)

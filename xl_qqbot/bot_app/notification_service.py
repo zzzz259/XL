@@ -21,6 +21,7 @@ from .gateway import gateway_transport_for_config
 
 _logger = logging.getLogger(__name__)
 _EVENT_KEY_RE = re.compile(r"[\w.:_-]{1,200}")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _STOP_KEY = web.AppKey("notification_stop_event", asyncio.Event)
 _DISPATCH_TASK_KEY = web.AppKey("notification_dispatch_task", asyncio.Task)
 
@@ -206,6 +207,10 @@ class NotificationService:
                         item["ordinal"],
                         item["media_path"],
                         content=item["text"],
+                        image_delivery_mode=item.get(
+                            "image_delivery_mode", "legacy"
+                        ),
+                        expected_sha256=item.get("expected_sha256"),
                     )
                 queued.append(
                     {
@@ -245,6 +250,12 @@ class NotificationService:
         text = item.get("text", "")
         if not isinstance(text, str) or len(text) > 4000:
             return 400, {"ok": False, "error": "invalid text"}
+        mode = item.get("image_delivery_mode", "legacy")
+        if mode not in ("legacy", "local_multipart") or (
+            kind == "text" and "image_delivery_mode" in item
+        ):
+            return 400, {"ok": False, "error": "invalid image delivery mode"}
+        expected_sha256 = item.get("expected_sha256")
         if kind == "text":
             if not text.strip():
                 return 400, {"ok": False, "error": "text message cannot be empty"}
@@ -258,6 +269,25 @@ class NotificationService:
             media_path = item.get("media_path")
             if not isinstance(media_path, str) or not media_path:
                 return 400, {"ok": False, "error": "invalid media_path"}
+            if mode == "local_multipart":
+                if not isinstance(expected_sha256, str) or _SHA256_RE.fullmatch(
+                    expected_sha256
+                ) is None:
+                    return 400, {"ok": False, "error": "invalid expected_sha256"}
+                return {
+                    "recipient": recipient,
+                    "ordinal": ordinal,
+                    "kind": kind,
+                    "text": text,
+                    "media_path": media_path,
+                    "image_delivery_mode": mode,
+                    "expected_sha256": expected_sha256,
+                }
+            if expected_sha256 is not None:
+                return 400, {
+                    "ok": False,
+                    "error": "expected_sha256 requires local multipart mode",
+                }
             return {
                 "recipient": recipient,
                 "ordinal": ordinal,

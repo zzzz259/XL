@@ -266,6 +266,12 @@ class GatewayTransportClient:
     ) -> dict[str, bool]:
         return await self._send_image(file_path, content, group_openids, reply_to, True)
 
+    async def send_local_image(
+        self, file_path: str, content: str, group_openids: list[str], reply_to: str = ""
+    ) -> dict[str, bool]:
+        """发送本地立绘：强制 multipart，即使配置了 file_base_url 也不拼公网 URL。"""
+        return await self._send_image(file_path, content, group_openids, reply_to, True)
+
     async def _send_image(self, file_path, content, groups, reply_to, force_multipart):
         path = Path(file_path)
         data = path.read_bytes()
