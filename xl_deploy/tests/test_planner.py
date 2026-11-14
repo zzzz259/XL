@@ -69,6 +69,19 @@ def test_unknown_branch_is_rejected():
         plan_deployment("feature", "sha", ["xl_qqbot/bot_app/service.py"])
 
 
+def test_gacha_web_runtime_changes_do_not_select_bot_units():
+    for branch in ("test", "main"):
+        for paths in (
+            ["xl_gacha_web/gacha_core/leaderboards.py"],
+            ["xl_gacha_web/leaderboard_archive.py"],
+        ):
+            plan = plan_deployment(branch, "sha", paths)
+
+            assert plan.impacted_units == ()
+            assert plan.impacted_tiers == ()
+            assert plan.announcement_scope == ()
+
+
 def test_deployment_target_is_an_explicit_immutable_mapping():
     target = DeploymentTarget.for_changes("debug", ["xl_qqbot/bot_app/service.py"])
 

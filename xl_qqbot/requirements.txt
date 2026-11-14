@@ -1,5 +1,6 @@
 qq-botpy>=1.2
 aiohttp>=3.8.0
 pypinyin>=0.51
+Pillow>=10.0.0
 pytest>=7.0
 pytest-asyncio>=0.21.0

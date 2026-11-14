@@ -40,9 +40,10 @@ def source(tmp_path):
     git(repo, 'init')
     (repo / '.gitignore').write_text('*.db\nlogs/\nxl_updata_server/data/\n'
                                     '__pycache__/\nxl_updata_server/renderer/node_modules/\n')
-    for name in ('xl_deploy/a.py', 'xl_qqbot/a.py', 'xl_updata_server/a.py',
+    for name in ('xl_deploy/a.py', 'xl_qqbot/a.py',
+                 'xl_updata_server/a.py',
                  'xl_updata_tool/tools/lua/tool.jar', 'xl_updata_tool/tools/windows.exe',
-                 'xl_gacha_web/a.py', 'xl_gacha_android/a.js', 'README.md'):
+                 'xl_gacha_android/a.js', 'README.md'):
         path = repo / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('fixture', encoding='utf-8')

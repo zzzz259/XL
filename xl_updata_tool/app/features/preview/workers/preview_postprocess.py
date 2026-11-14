@@ -16,9 +16,10 @@ class PreviewPostprocessWorker(QThread):
     cancelled_processing = Signal()
     error = Signal(str)
 
-    def __init__(self, service, parent=None):
+    def __init__(self, service, parent=None, *, import_result=None):
         super().__init__(parent)
         self.service = service
+        self.import_result = import_result
         self._cancelled = False
         self._active = False
         self._lock = threading.Lock()
@@ -49,6 +50,7 @@ class PreviewPostprocessWorker(QThread):
                 progress_callback=self.progress_value.emit,
                 cancel_check=lambda: self._cancelled,
                 detail_progress_callback=self.detail_progress.emit,
+                import_result=self.import_result,
             )
             if self._cancelled:
                 set_task_outcome("cancelled", error_code="IMAGE_POSTPROCESS_CANCELLED", message="图片资源预处理已取消")
@@ -65,6 +67,11 @@ class PreviewPostprocessWorker(QThread):
                         "spine_skipped": spine.skipped,
                         "materials_exported": materials.exported,
                         "materials_failed": materials.failed,
+                        "portrait_status": summary.portrait.status if summary.portrait else "not_requested",
+                        "portrait_roots": summary.portrait.roots if summary.portrait else 0,
+                        "portrait_complete": summary.portrait.complete if summary.portrait else 0,
+                        "portrait_incomplete": summary.portrait.incomplete if summary.portrait else 0,
+                        "portrait_cache_hits": summary.portrait.cache_hits if summary.portrait else 0,
                     },
                 )
                 self.finished_processing.emit(summary)

@@ -47,6 +47,18 @@ def test_user_units_use_fixed_release_paths_and_keep_runtime_data_external():
     )
 
 
+def test_jobs_units_pythonpath_covers_only_qqbot_for_each_ref():
+    for filename, ref in (
+        ("xl-qqbot-test-jobs.service", "test"),
+        ("xl-qqbot-main-jobs.service", "main"),
+    ):
+        content = read(f"xl_deploy/deploy/{filename}")
+        assert (
+            f"PYTHONPATH=/home/admin/xl_deploy/current/{ref}/xl_qqbot"
+        ) in content
+        assert "xl_gacha_web" not in content
+
+
 def test_poller_timer_runs_every_minute_as_a_user_unit():
     timer = read("xl_deploy/deploy/xl-deploy-poll.timer")
 

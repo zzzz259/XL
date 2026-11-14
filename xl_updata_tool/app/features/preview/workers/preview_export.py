@@ -27,6 +27,24 @@ from app.features.preview.prefab_parser import parse_prefab, compute_pixel_offse
 from app.features.preview.export_plan import ExportSettings
 
 
+def _sprite_source_metadata(source):
+    return {
+        "part_id": source.part_id,
+        "texture_path": str(source.texture_path),
+        "sprite_ref": source.sprite_ref.to_dict(),
+        "texture_ref": source.texture_ref.to_dict(),
+        "rect": list(source.rect),
+        "pivot": list(source.pivot),
+        "pixels_per_unit": source.pixels_per_unit,
+        "unity_order": list(source.unity_order),
+        "color": list(source.color),
+        "flip_x": source.flip_x,
+        "flip_y": source.flip_y,
+        "mask_interaction": source.mask_interaction,
+        "blend_mode": source.blend_mode,
+    }
+
+
 class PreviewExportWorker(QThread):
     """图片预览导出工作线程（.skel → PNG，含配对合成 + 皮肤导出）
 
@@ -46,7 +64,8 @@ class PreviewExportWorker(QThread):
             or (
                 bool(jobs)
                 and all(
-                    hasattr(job, "record") and hasattr(job, "settings")
+                    (hasattr(job, "record") or hasattr(job, "scene"))
+                    and hasattr(job, "settings")
                     for job in jobs
                 )
             )
@@ -111,20 +130,52 @@ class PreviewExportWorker(QThread):
                 cancelled = True
                 break
 
-            label = (
-                f"{job.record.resource_family}/{job.settings.format}: "
-                f"{job.record.display_name or job.record.skin_name}"
-            )
-            input_records = getattr(job, "records", (job.record,))
-            job_details = {
-                "record": asdict(job.record),
-                "records": [asdict(record) for record in input_records],
-                "settings": asdict(job.settings),
-                "export_mode": getattr(job, "export_mode", "custom"),
-                "output": str(job.output_path),
-                "index": current,
-                "total": total,
-            }
+            scene_job = hasattr(job, "scene") and hasattr(job, "sources")
+            if scene_job:
+                scene = job.scene
+                label = f"portrait_scene/{job.settings.format}: {scene.character_id}/{scene.skin_id}"
+                source_details = [{
+                    "part_id": source.part_id,
+                    "skeleton": str(source.skeleton_path),
+                    "atlas": str(source.atlas_path),
+                    "animation": source.animation,
+                    "loop": source.loop,
+                    "skin": source.skin,
+                    "unity_order": source.unity_order,
+                    "skeleton_ref": source.skeleton_ref.to_dict(),
+                    "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
+                } for source in job.sources]
+                job_details = {
+                    "scene": {
+                        "game_version": scene.game_version,
+                        "version_timestamp": scene.version_timestamp,
+                        "character_id": scene.character_id,
+                        "skin_id": scene.skin_id,
+                        "source_bundles": list(scene.source_bundles),
+                    },
+                    "sources": source_details,
+                    "sprite_sources": [_sprite_source_metadata(source) for source in job.sprite_sources],
+                    "settings": asdict(job.settings),
+                    "export_mode": getattr(job, "export_mode", "builtin"),
+                    "output": str(job.output_path),
+                    "index": current,
+                    "total": total,
+                }
+            else:
+                label = (
+                    f"{job.record.resource_family}/{job.settings.format}: "
+                    f"{job.record.display_name or job.record.skin_name}"
+                )
+                input_records = getattr(job, "records", (job.record,))
+                job_details = {
+                    "record": asdict(job.record),
+                    "records": [asdict(record) for record in input_records],
+                    "settings": asdict(job.settings),
+                    "export_mode": getattr(job, "export_mode", "custom"),
+                    "output": str(job.output_path),
+                    "index": current,
+                    "total": total,
+                }
             logger.info(
                 "Spine 导出项开始 [%s/%s] label=%s output=%s",
                 current, total, label, job.output_path,
@@ -190,13 +241,40 @@ class PreviewExportWorker(QThread):
 
     @staticmethod
     def _write_metadata(job):
-        metadata = {
-            "record": asdict(job.record),
-            "records": [asdict(record) for record in getattr(job, "records", (job.record,))],
-            "settings": asdict(job.settings),
-            "export_mode": getattr(job, "export_mode", "custom"),
-            "output_path": str(job.output_path),
-        }
+        if hasattr(job, "scene") and hasattr(job, "sources"):
+            scene = job.scene
+            metadata = {
+                "scene": {
+                    "game_version": scene.game_version,
+                    "version_timestamp": scene.version_timestamp,
+                    "character_id": scene.character_id,
+                    "skin_id": scene.skin_id,
+                    "source_bundles": list(scene.source_bundles),
+                },
+                "sources": [{
+                    "part_id": source.part_id,
+                    "skeleton": str(source.skeleton_path),
+                    "atlas": str(source.atlas_path),
+                    "animation": source.animation,
+                    "loop": source.loop,
+                    "skin": source.skin,
+                    "unity_order": source.unity_order,
+                    "skeleton_ref": source.skeleton_ref.to_dict(),
+                    "atlas_refs": [reference.to_dict() for reference in source.atlas_refs],
+                } for source in job.sources],
+                "sprite_sources": [_sprite_source_metadata(source) for source in job.sprite_sources],
+                "settings": asdict(job.settings),
+                "export_mode": getattr(job, "export_mode", "builtin"),
+                "output_path": str(job.output_path),
+            }
+        else:
+            metadata = {
+                "record": asdict(job.record),
+                "records": [asdict(record) for record in getattr(job, "records", (job.record,))],
+                "settings": asdict(job.settings),
+                "export_mode": getattr(job, "export_mode", "custom"),
+                "output_path": str(job.output_path),
+            }
         metadata_path = job.output_path.with_name(job.output_path.name + ".metadata.json")
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 

@@ -144,6 +144,10 @@ def display_skin_number(skel_path, character_id, resource_family) -> str:
         stem = stem[:-3]
 
     family = str(resource_family or "").casefold()
+    if family == "eventcovers":
+        match = re.match(r"eventcovers_(\d{4})", stem, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
     character = str(character_id or "").strip()
     prefix = f"{family}_{character}_" if family in _FAMILY_PREFIXES and character else ""
     if prefix and stem.casefold().startswith(prefix.casefold()):

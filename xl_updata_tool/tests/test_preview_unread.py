@@ -3,6 +3,8 @@ from app.features.preview.resource_model import PreviewResourceCatalog, SpineSki
 from app.features.preview.resource_state import PreviewResourceState
 from app.features.preview.unread import build_preview_unread_snapshot
 from app.features.preview.service import PreviewService
+from app.features.preview.portrait_config.model import PortraitScene
+from app.features.preview.resource_model import portrait_scene_key
 
 
 def test_unread_snapshot_aggregates_spine_character_and_material_leaves(tmp_path):
@@ -22,6 +24,23 @@ def test_unread_snapshot_aggregates_spine_character_and_material_leaves(tmp_path
     assert snapshot.spine == frozenset({skin_key(record)})
     assert snapshot.character_files == frozenset({path_fingerprint(character_file)})
     assert snapshot.material_files == frozenset({path_fingerprint(material_file)})
+
+
+def test_unread_snapshot_includes_versioned_portrait_scene_leaves(tmp_path):
+    scene = PortraitScene(
+        game_version="test", version_timestamp="20261012", entry_config_id="12002183",
+        character_id="10118", skin_id="12002183", prefab=None,
+        source_bundles=("bundle-a",), parts=(),
+        prefab_container="assets/art/models/cardspine/prefab/cardspine_10118_3.prefab",
+    )
+    service = PreviewService(tmp_path / "material", tmp_path / "output" / "character")
+    service.load_published_preview_resources = lambda: PreviewResourceCatalog.from_records(
+        (), portrait_scenes=(scene,),
+    )
+
+    snapshot = build_preview_unread_snapshot(service)
+
+    assert snapshot.spine == frozenset({portrait_scene_key(scene)})
 
 
 def test_output_folder_marker_aggregates_leaf_state_and_folder_return_marks_only_files(tmp_path):

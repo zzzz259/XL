@@ -436,10 +436,12 @@ journalctl --user -u xl-deploy-poll.service --since today
 
 新候选仍然是独立、detached 的 Git worktree，以完整 SHA 标识。创建时先使用
 `--no-checkout`，再设置非 cone 稀疏规则，最后 checkout。发布目录包含仓库根文件、
-`xl_deploy`、`xl_qqbot`、`xl_updata_server` 和 `xl_updata_tool/tools/lua`；不会先落地
-Windows 工具或抽卡客户端再删除。Lua jar、服务器 renderer 和依赖清单保留。
-服务器还复用 `xl_updata_tool/app/features/characters/parser`；其无 Qt 解析器、
-platform 诊断基础设施、shared 的 Lua/契约模块及包入口也在白名单内。
+`xl_deploy`、`xl_qqbot`、`xl_updata_server` 和经 `TOOL_RELEASE_RULES` 明确列出的
+Tool 运行文件；不会先落地完整 Windows 工具或抽卡客户端再删除。Lua jar、服务器
+renderer、依赖清单、无 Qt 的角色/立绘解析器、platform/shared 必需模块，以及
+PortraitSceneCLI/AssetStudio 的 Linux CLI 依赖保留。GUI、桌面视频工具、测试、文档和
+非目标平台运行库不进入 updater release。同一规则也决定 Tool 运行文件变化是否触发
+updater 部署。立绘仍由现有 updater unit 执行，不新增 companion 服务。
 预检仍准备该分支所有服务的环境，因为它们共用 `current/<branch>` 指针。
 
 保留策略的权威文件为 `<state_dir>/release-storage.json`，模板见

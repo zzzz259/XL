@@ -1,0 +1,287 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "SpineViewerCLI/0.16.28": {
+        "dependencies": {
+          "Spine": "0.16.28",
+          "SpineRuntime21": "2.1.25",
+          "SpineRuntime34": "3.4.2",
+          "SpineRuntime35": "3.5.51",
+          "SpineRuntime36": "3.6.53",
+          "SpineRuntime37": "3.7.94",
+          "SpineRuntime38": "3.8.99",
+          "SpineRuntime40": "4.0.64",
+          "SpineRuntime41": "4.1.54",
+          "SpineRuntime42": "4.2.74",
+          "SFML.Graphics": "2.6.1",
+          "SFML.System": "2.6.1",
+          "SFML.Window": "2.6.1",
+          "SkiaSharp": "3.119.0",
+          "System.Text.Json": "9.0.0",
+          "System.Text.Encodings.Web": "9.0.0",
+          "System.IO.Pipelines": "9.0.0",
+          "NLog": "5.0.0",
+          "Spectre.Console": "0.0.0",
+          "System.CommandLine": "2.0.0",
+          "FFMpegCore": "5.0.0",
+          "Instances": "3.0.1",
+          "PsdWriter": "0.16.18"
+        },
+        "runtime": {
+          "SpineViewerCLI.dll": {}
+        }
+      },
+      "Spine/0.16.28": {
+        "runtime": {
+          "Spine.dll": {}
+        }
+      },
+      "SpineRuntime21/2.1.25": {
+        "runtime": {
+          "SpineRuntime21.dll": {}
+        }
+      },
+      "SpineRuntime34/3.4.2": {
+        "runtime": {
+          "SpineRuntime34.dll": {}
+        }
+      },
+      "SpineRuntime35/3.5.51": {
+        "runtime": {
+          "SpineRuntime35.dll": {}
+        }
+      },
+      "SpineRuntime36/3.6.53": {
+        "runtime": {
+          "SpineRuntime36.dll": {}
+        }
+      },
+      "SpineRuntime37/3.7.94": {
+        "runtime": {
+          "SpineRuntime37.dll": {}
+        }
+      },
+      "SpineRuntime38/3.8.99": {
+        "runtime": {
+          "SpineRuntime38.dll": {}
+        }
+      },
+      "SpineRuntime40/4.0.64": {
+        "runtime": {
+          "SpineRuntime40.dll": {}
+        }
+      },
+      "SpineRuntime41/4.1.54": {
+        "runtime": {
+          "SpineRuntime41.dll": {}
+        }
+      },
+      "SpineRuntime42/4.2.74": {
+        "runtime": {
+          "SpineRuntime42.dll": {}
+        }
+      },
+      "SFML.Graphics/2.6.1": {
+        "runtime": {
+          "SFML.Graphics.dll": {}
+        }
+      },
+      "SFML.System/2.6.1": {
+        "runtime": {
+          "SFML.System.dll": {}
+        }
+      },
+      "SFML.Window/2.6.1": {
+        "runtime": {
+          "SFML.Window.dll": {}
+        }
+      },
+      "SkiaSharp/3.119.0": {
+        "runtime": {
+          "SkiaSharp.dll": {}
+        }
+      },
+      "System.Text.Json/9.0.0": {
+        "runtime": {
+          "System.Text.Json.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.0.0"
+          }
+        }
+      },
+      "System.Text.Encodings.Web/9.0.0": {
+        "runtime": {
+          "System.Text.Encodings.Web.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.0.0"
+          }
+        }
+      },
+      "System.IO.Pipelines/9.0.0": {
+        "runtime": {
+          "System.IO.Pipelines.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.0.0"
+          }
+        }
+      },
+      "NLog/5.0.0": {
+        "runtime": {
+          "NLog.dll": {}
+        }
+      },
+      "Spectre.Console/0.0.0": {
+        "runtime": {
+          "Spectre.Console.dll": {}
+        }
+      },
+      "System.CommandLine/2.0.0": {
+        "runtime": {
+          "System.CommandLine.dll": {}
+        }
+      },
+      "FFMpegCore/5.0.0": {
+        "runtime": {
+          "FFMpegCore.dll": {}
+        }
+      },
+      "Instances/3.0.1": {
+        "runtime": {
+          "Instances.dll": {}
+        }
+      },
+      "PsdWriter/0.16.18": {
+        "runtime": {
+          "PsdWriter.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "SpineViewerCLI/0.16.28": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Spine/0.16.28": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime21/2.1.25": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime34/3.4.2": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime35/3.5.51": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime36/3.6.53": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime37/3.7.94": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime38/3.8.99": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime40/4.0.64": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime41/4.1.54": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SpineRuntime42/4.2.74": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SFML.Graphics/2.6.1": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SFML.System/2.6.1": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SFML.Window/2.6.1": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "SkiaSharp/3.119.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "System.Text.Json/9.0.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "System.Text.Encodings.Web/9.0.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "System.IO.Pipelines/9.0.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "NLog/5.0.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Spectre.Console/0.0.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "System.CommandLine/2.0.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "FFMpegCore/5.0.0": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Instances/3.0.1": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "PsdWriter/0.16.18": {
+      "type": "package",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

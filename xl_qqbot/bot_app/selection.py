@@ -10,8 +10,12 @@ TTL_SECONDS = 120
 
 @dataclass
 class PendingSelection:
-    query: str  # 用户原始的查询词（学习用，已清洗）
+    query: str  # 用户原始的查询词（学习用，已清洗，只含名字部分）
     options: list  # Match 候选列表（不含"都不是"项）
+    intent: str = "card"  # "card" 图鉴 | "portrait" 立绘
+    portrait_ordinal: int | None = None  # 立绘查询的末尾序号
+    history_offset: int | None = None  # 图鉴/立绘历史序号（-N，-1 为上一个不同内容）
+    history_all: bool = False  # 末尾单独 -：含当前的全部版本（新到旧）
     created_at: float = field(default_factory=time.time)
 
     def expired(self) -> bool:
@@ -24,9 +28,13 @@ class SelectionStore:
     def __init__(self) -> None:
         self._pending: dict[tuple[str, str], PendingSelection] = {}
 
-    def set(self, group_openid: str, member_openid: str, query: str, options: list) -> None:
+    def set(self, group_openid: str, member_openid: str, query: str, options: list,
+            intent: str = "card", portrait_ordinal: int | None = None,
+            history_offset: int | None = None, history_all: bool = False) -> None:
         self._pending[(group_openid, member_openid)] = PendingSelection(
-            query=query, options=list(options)
+            query=query, options=list(options), intent=intent,
+            portrait_ordinal=portrait_ordinal, history_offset=history_offset,
+            history_all=history_all,
         )
 
     def get(self, group_openid: str, member_openid: str) -> PendingSelection | None:

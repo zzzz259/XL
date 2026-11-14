@@ -511,17 +511,15 @@ def test_command_runner_stages_exact_sha_as_argv_without_branch_interpolation(tm
         SimpleNamespace(sha=NEW_SHA, branch="main; touch nope"), candidate
     )
 
+    from xl_deploy.runner import SPARSE_CHECKOUT_PATTERNS
+
     assert result == candidate
     assert commands == [
         ["git", "fetch", "--no-tags", "origin", NEW_SHA],
         ["git", "worktree", "add", "--detach", "--no-checkout", str(candidate), NEW_SHA],
         ["git", "sparse-checkout", "set", "--no-cone", "/*", "!/*/",
-         "/xl_deploy/", "/xl_qqbot/", "/xl_updata_server/", "/xl_updata_tool/tools/lua/",
-         "/xl_updata_tool/app/__init__.py", "/xl_updata_tool/app/features/__init__.py",
-         "/xl_updata_tool/app/features/characters/__init__.py",
-         "/xl_updata_tool/app/features/characters/parser/", "/xl_updata_tool/app/platform/",
-         "/xl_updata_tool/app/shared/__init__.py", "/xl_updata_tool/app/shared/contracts.py",
-         "/xl_updata_tool/app/shared/lua.py"],
+         "/xl_deploy/", "/xl_qqbot/", "/xl_updata_server/",
+         *SPARSE_CHECKOUT_PATTERNS],
         ["git", "checkout", "--detach", NEW_SHA],
     ]
 
