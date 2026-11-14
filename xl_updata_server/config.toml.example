@@ -91,7 +91,3 @@ source = "retained_version_and_update_events"
 
 [security]
 assetbundle_key = "yunguihaowan1234"
-
-[portraits]
-enabled = false
-basic_fallback = false
