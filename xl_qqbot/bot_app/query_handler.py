@@ -435,10 +435,11 @@ class QueryHandler:
             sent = await send_schedule(str(entry.image_path), "", [group_openid], reply_to)
             succeeded = sent.get(group_openid, False) if isinstance(sent, dict) else bool(sent)
             _logger.info(
-                "角色历史命中 query=%s -> %s 版本[%s,%s] offset=%s/%s 发图=%s",
+                "角色历史命中 query=%s -> %s 版本[%s,%s] offset=%s/%s pixel=%s 发图=%s",
                 match.name, entry.artifact_sha256[:8] if entry.artifact_sha256 else "",
                 entry.first_seen_version, entry.last_seen_version,
-                entry.offset, entry.total, succeeded,
+                entry.offset, entry.total,
+                entry.pixel_sha256[:8] if entry.pixel_sha256 else "", succeeded,
             )
             if not succeeded:
                 await self._sender.send_text(group_openid, "历史图片发送失败，已停止发送", reply_to)

@@ -1,11 +1,14 @@
 """CharacterQuerier 内容历史：多版本图鉴聚合、内容折叠/回退/间断、stale/改名/旧格式回退与统一图片校验。
 
-历史修订键为 card manifest 有效条目的 (data_sha256, artifact_sha256)；只折叠连续相同内容，
-A→B→A 回退形成新节点，缺失版本造成的间断不跨合并。输出始终新到旧。
+历史修订键为 (data_sha256, 像素内容 SHA)；只折叠连续相同内容，A→B→A 回退形成新节点，
+缺失版本造成的间断不跨合并。同一像素内容即使压缩字节/文件 SHA 不同也视为同一修订；
+artifact_sha256 仅用于完整性校验。
 """
 
 import hashlib
 import json
+import struct
+import zlib
 from pathlib import Path
 
 from bot_app import querier as querier_module
@@ -16,17 +19,38 @@ CHARACTERS = {
     "10000224": {"name": "雾铃/Bell", "star": 4},
 }
 
-# 最小合法 PNG（8 字节签名 + IHDR + IEND；IHDR CRC 不校验）
+
+def _png_chunk(tag: bytes, payload: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(payload))
+        + tag
+        + payload
+        + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+    )
 
 
-def make_png(width: int, height: int) -> bytes:
+def make_png(width: int, height: int, rgba=(1, 2, 3, 4), variant: int = 0) -> bytes:
+    """RGBA8、无隔行的合法 PNG。
+
+    variant=1 用 Sub 滤镜和不同压缩级重打包：文件字节（文件 SHA）不同，
+    但解码像素与 variant=0 完全一致——用于"同像素不同压缩"折叠用例。
+    """
+    row = bytes(rgba) * width
+    if variant == 0:
+        raw = b"".join(b"\x00" + row for _ in range(height))
+        level = 6
+    else:
+        first = row[:4]
+        rest = bytes((row[i] - row[i - 4]) & 0xFF for i in range(4, len(row)))
+        sub_row = first + rest
+        raw = b"".join(b"\x01" + sub_row for _ in range(height))
+        level = 9
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
-        + b"\x00\x00\x00\x0dIHDR"
-        + width.to_bytes(4, "big")
-        + height.to_bytes(4, "big")
-        + b"\x08\x06\x00\x00\x00"
-        + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(raw, level))
+        + _png_chunk(b"IEND", b"")
     )
 
 
@@ -573,3 +597,31 @@ def test_find_multiple_legacy_candidates_no_guess(tmp_path):
     querier = make_querier(root)
     result = querier.find(CID)
     assert result.status == "no_image"  # 无 manifest 时多候选也不随意取第一张
+
+
+# ---------- 像素级折叠键：同像素不同压缩字节/文件 SHA 必须折叠 ----------
+
+
+def test_fold_same_pixels_different_file_bytes(tmp_path):
+    png_a2 = make_png(2, 3, variant=1)
+    assert hashlib.sha256(png_a2).hexdigest() != SHA[PNG_A]  # 文件 SHA 不同
+    root = make_root(tmp_path, current=123)
+    write_card_version(root, 121, [{"character_id": CID, "png": PNG_A, "data_sha": D_A}])
+    write_card_version(root, 122, [{"character_id": CID, "png": png_a2, "data_sha": D_A}])
+    write_card_version(root, 123, [{"character_id": CID, "png": PNG_C, "data_sha": D_C}])
+    querier = make_querier(root)
+    assert querier.find_history(CID).total == 2  # 3 版只有 2 个内容修订
+    previous = querier.find_history(CID, offset=1)
+    assert previous.status == "found"
+    assert previous.first_seen_version == "121"
+    assert previous.last_seen_version == "122"  # 同像素同数据 → 折叠
+
+
+def test_same_size_different_pixels_split_revision(tmp_path):
+    px = make_png(4, 4, rgba=(10, 10, 10, 255))
+    py = make_png(4, 4, rgba=(20, 20, 20, 255))
+    root = make_root(tmp_path, current=122)
+    write_card_version(root, 121, [{"character_id": CID, "png": px, "data_sha": D_A}])
+    write_card_version(root, 122, [{"character_id": CID, "png": py, "data_sha": D_A}])
+    querier = make_querier(root)
+    assert querier.find_history(CID).total == 2  # 同尺寸不同像素仍分修订

@@ -300,8 +300,32 @@ class PortraitQuerier:
             artifact_path = str(entry.get("artifact_path") or "")
             if not artifact_path:
                 return self._invalid_skin_cell(version, "artifact_path 为空")
-            return (version, artifact_sha, {"entry": entry, "version": version})
+            pixel_sha, pixel_error = self._pixel_sha256(version, artifact_path)
+            if pixel_error:
+                return self._invalid_skin_cell(version, pixel_error)
+            return (version, pixel_sha, {"entry": entry, "version": version})
         return (version, None, None)
+
+    def _pixel_sha256(self, version: str, artifact_path: str) -> tuple[str, str]:
+        """containment 预检后读取并解码历史立绘，返回 (像素 SHA, 错误)。"""
+        rel = Path(str(artifact_path or ""))
+        if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+            return "", "unsafe artifact path"
+        base = (self._versions_dir / version / "portraits").resolve()
+        target = (base / rel).resolve()
+        if not target.is_relative_to(base):
+            return "", "artifact path escapes portraits directory"
+        try:
+            size = target.stat().st_size
+            if size > history.MAX_HISTORY_IMAGE_BYTES:
+                return "", f"history image {size} bytes exceeds QQ image limit {history.MAX_HISTORY_IMAGE_BYTES}"
+            data = target.read_bytes()
+        except OSError as error:
+            return "", f"历史图片不可读: {error}"
+        try:
+            return history.png_pixel_sha256(data), ""
+        except ValueError as error:
+            return "", f"像素哈希失败: {error}"
 
     def _history_result(self, run, offset, total, current_version, base):
         payload = run["payload"]
@@ -317,6 +341,7 @@ class PortraitQuerier:
             return history.ContentHistoryResult(
                 status="unavailable", error=str(payload["error"]), **common
             )
+        pixel_sha256 = run["key"] if isinstance(run["key"], str) else ""
         entry = payload["entry"]
         artifact_sha = str(entry.get("artifact_sha256") or "")
         width = self._safe_int(entry.get("width"))
@@ -333,6 +358,7 @@ class PortraitQuerier:
             source_version=str(entry.get("source_version") or run["first_seen_version"]),
             render_scope=str(entry.get("render_scope") or "full"),
             render_notice=str(entry.get("render_notice") or ""),
+            pixel_sha256=pixel_sha256,
             width=width,
             height=height,
         )

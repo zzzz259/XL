@@ -1,11 +1,14 @@
 """PortraitQuerier 内容历史：当前 ordinal 固定到 skin_id 后跨版本追踪，内容折叠/回退/间断、
 stale/basic 与和图鉴统一的历史图片校验（路径/SHA/PNG/IHDR 尺寸/20MiB）。
 
-修订键为实际 artifact_sha256；stale 指向旧内容不制造新修订；输出始终新到旧。
+修订键为解码后像素内容 SHA；stale 指向旧内容不制造新修订；输出始终新到旧。
+同一像素内容即使压缩字节/文件 SHA 不同也视为同一修订；artifact_sha256 仅用于完整性校验。
 """
 
 import hashlib
 import json
+import struct
+import zlib
 
 from bot_app import portrait_querier as portrait_querier_module
 
@@ -18,14 +21,33 @@ SKIN_1 = "1000022401"
 SKIN_2 = "1000022402"
 
 
-def make_png(width: int, height: int) -> bytes:
+def _png_chunk(tag: bytes, payload: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(payload))
+        + tag
+        + payload
+        + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+    )
+
+
+def make_png(width: int, height: int, rgba=(1, 2, 3, 4), variant: int = 0) -> bytes:
+    """RGBA8、无隔行的合法 PNG；variant=1 重打包为不同文件字节、解码像素相同。"""
+    row = bytes(rgba) * width
+    if variant == 0:
+        raw = b"".join(b"\x00" + row for _ in range(height))
+        level = 6
+    else:
+        first = row[:4]
+        rest = bytes((row[i] - row[i - 4]) & 0xFF for i in range(4, len(row)))
+        sub_row = first + rest
+        raw = b"".join(b"\x01" + sub_row for _ in range(height))
+        level = 9
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
-        + b"\x00\x00\x00\x0dIHDR"
-        + width.to_bytes(4, "big")
-        + height.to_bytes(4, "big")
-        + b"\x08\x06\x00\x00\x00"
-        + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(raw, level))
+        + _png_chunk(b"IEND", b"")
     )
 
 
@@ -481,3 +503,29 @@ def test_history_empty_artifact_path_is_unavailable(tmp_path):
     result = querier.find_history(CID, 1)
     assert result.status == "unavailable"
     assert "artifact_path" in result.error
+
+
+# ---------- 像素级折叠键：同像素不同压缩字节/文件 SHA 必须折叠 ----------
+
+
+def test_fold_same_pixels_different_file_bytes(tmp_path):
+    p1v = make_png(2, 3, variant=1)
+    assert hashlib.sha256(p1v).hexdigest() != SHA[P1]  # 文件 SHA 不同
+    root = make_root(tmp_path, current=122)
+    write_portrait_version(root, 121, [skin(SKIN_1, 1, P1)])
+    write_portrait_version(root, 122, [skin(SKIN_1, 1, p1v)])
+    querier = make_querier(root)
+    result = querier.find_history(CID, 1)
+    assert result.status == "found"
+    assert result.total == 1  # 同像素 → 折叠为一个修订
+    assert result.first_seen_version == "121"
+    assert result.last_seen_version == "122"
+
+
+def test_same_size_different_pixels_split_revision(tmp_path):
+    px = make_png(3, 3, rgba=(1, 1, 1, 255))
+    py = make_png(3, 3, rgba=(2, 2, 2, 255))
+    root = make_root(tmp_path, current=122)
+    write_portrait_version(root, 121, [skin(SKIN_1, 1, px)])
+    write_portrait_version(root, 122, [skin(SKIN_1, 1, py)])
+    assert make_querier(root).find_history(CID, 1).total == 2  # 同尺寸不同像素仍分修订
