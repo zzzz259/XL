@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -55,7 +56,9 @@ class AndroidReleaseTests(unittest.TestCase):
             upload = next(c for c in commands if c[:3] == ["gh", "release", "create"])
             for filename in upload[4:upload.index("--repo")]:
                 path = Path(filename)
-                shutil.copyfile(path, download / path.name)
+                # GitHub strips unsupported characters from uploaded asset names.
+                hosted_name = re.sub(r"[^A-Za-z0-9._-]", "", path.name).strip(".")
+                shutil.copyfile(path, download / hosted_name)
             expected = verify_checksums(dist)
             missing = [name for name in expected if not (download / name).is_file()]
             self.assertEqual(missing, [], "Every checksummed file must be available as a Release asset")
@@ -96,6 +99,12 @@ class AndroidReleaseTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ReleaseError, "BASELINE_VERSION_MISMATCH"):
                 read_version(root)
+
+    def test_release_apk_name_is_safe_for_github_assets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            name = self.fixture(Path(folder))["apk_name"]
+            self.assertTrue(name.isascii(), "GitHub must not rewrite the APK name listed in checksums")
+            self.assertRegex(name, r"^[A-Za-z0-9][A-Za-z0-9._-]*\.apk$")
 
     def test_release_ref_and_version_must_match_before_signing(self):
         version = {"version": "0.4.2", "tag": "gacha-v0.4.2"}
