@@ -1774,7 +1774,8 @@ def test_render_persists_work_manifest_before_ready_event(tmp_path, monkeypatch)
         ), f"{skin_id}: 事件后必须持久化 event_emitted=True"
 
 
-def test_crash_before_ready_event_resumes_emit_without_rerender(tmp_path, monkeypatch):
+@pytest.mark.parametrize('legacy_policy', [False, True])
+def test_crash_before_ready_event_resumes_emit_without_rerender(tmp_path, monkeypatch, legacy_policy):
     """事件 append 前崩溃：work manifest 已是 published+event_emitted=False，
     恢复直接 emit 补发事件，绝不重渲崩溃的那套。"""
     env = PortraitEnv(tmp_path, monkeypatch)
@@ -1794,6 +1795,11 @@ def test_crash_before_ready_event_resumes_emit_without_rerender(tmp_path, monkey
     # 崩溃后：产物与 outbox 已写、work manifest 已持久化(event_emitted=False)、事件未写
     assert env.ready_events(2) == []
     assert len(list((env.data_dir / "portrait_outbox" / "2").glob("*.png"))) == 1
+    if legacy_policy:
+        work_path = portrait_update.portrait_work_manifest_path(env.config, 2)
+        payload = json.loads(work_path.read_text(encoding='utf-8'))
+        payload.pop('notification_policy', None)
+        work_path.write_text(json.dumps(payload), encoding='utf-8')
 
     state["crash"] = False
     env.calls["rendered"] = []
@@ -1997,6 +2003,73 @@ def test_content_backfill_has_counts_without_realtime_notices(tmp_path, monkeypa
     assert (summary.new_count, summary.modified_count) == (3, 0)
     assert env.events() == []
     assert not (env.data_dir / 'portrait_outbox').exists()
+
+
+@pytest.mark.parametrize('work_state', ['missing', 'truncated', 'pending_event'])
+@pytest.mark.parametrize('partial', [False, True])
+def test_backfill_same_version_normal_resume_stays_silent(tmp_path, monkeypatch, work_state, partial):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    original = runner_cls.run
+    def backfill_run(self, **kwargs):
+        return original(self, **{**kwargs, 'backfill': True})
+    monkeypatch.setattr(runner_cls, 'run', backfill_run)
+    initial, staging = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER,
+                               catalog=CATALOG_NEW_CHARACTER,
+                               failures={'14001520'} if partial else frozenset())
+    env.publish(staging, 2)
+    assert (initial.new_count, initial.modified_count) == (1 if partial else 2, 0)
+    assert env.ready_events(2) == []
+    work_path = portrait_update.portrait_work_manifest_path(env.config, 2)
+    payload = json.loads(work_path.read_text(encoding='utf-8'))
+    if work_state == 'missing':
+        work_path.unlink()
+    else:
+        if work_state == 'truncated':
+            payload['skins'] = payload['skins'][:4]  # Completed backfill suffix is missing.
+        else:
+            for entry in payload['skins']:
+                if entry['skin_id'] == '14001521':
+                    entry['event_emitted'] = False
+        work_path.write_text(json.dumps(payload), encoding='utf-8')
+    if partial:
+        assert portrait_update.unfinished_work_entries(
+            work_path, env.data_dir / 'versions/2/portraits/manifest.json')
+    elif work_state == 'pending_event':
+        assert portrait_update.unfinished_work_entries(work_path) == []
+    monkeypatch.setattr(runner_cls, 'run', original)
+    env.calls['rendered'].clear()
+    resumed, restaged = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER,
+                                catalog=CATALOG_NEW_CHARACTER)
+    assert env.ready_events(2) == []
+    assert not (env.data_dir / 'portrait_outbox/2').exists()
+    assert (resumed.new_count, resumed.modified_count) == (2, 0)
+    assert env.calls['rendered'] == (['14001520'] if partial else [])
+    assert portrait_update.unfinished_work_entries(work_path) == []
+    assert env.manifest(restaged)['notification_policy'] == 'silent'
+
+
+def test_backfill_silence_does_not_reach_next_version_new_or_modified(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    original = runner_cls.run
+    def backfill_run(self, **kwargs):
+        return original(self, **{**kwargs, 'backfill': True})
+    monkeypatch.setattr(runner_cls, 'run', backfill_run)
+    _, staging = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+    env.publish(staging, 2)
+    monkeypatch.setattr(runner_cls, 'run', original)
+    summary, staging = env.run(
+        3, basefashion=BASE_FASHION_NEW_SKIN.replace('cardspine_10070_1', 'cardspine_10070_9'),
+        catalog=CatalogIndex(bundles=CATALOG_NEW_SKIN.bundles,
+                             assets=(*CATALOG_CHANGED_INPUT.assets, CATALOG_NEW_SKIN.assets[-1])),
+        render_impl=_content_render(seed=99))
+    assert (summary.new_count, summary.modified_count) == (1, 1)
+    assert {event['skin_id'] for event in env.ready_events(3)} == {'14001520', '14001522'}
+    assert len(list((env.data_dir / 'portrait_outbox/3').glob('*.png'))) == 2
+    assert env.manifest(staging)['notification_policy'] == 'realtime'
 
 
 def test_content_unchanged_processor_is_not_repeatedly_resumed(tmp_path, monkeypatch):
