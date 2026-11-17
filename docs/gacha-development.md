@@ -1,5 +1,7 @@
 # 抽卡手记构建、测试与升级
 
+云端签名构建、Actions Secrets 与 GitHub Release 操作见 [Android 云端发布](gacha-release.md)。
+
 [用户指南](gacha-user-guide.md) · [架构与配置协议](gacha-architecture.md) · [HTTPS 运维](../xl_updata_server/docs/gacha-config-hosting.md)
 
 Android 构建复用 `xl_gacha_web/static` 和 `data`，不能只取 Android 目录。电脑端在 0.3.4 后正式停止维护，保留的共享页面、配置和统计参考继续供 Android 使用。源码只含合成测试、虚构 demo 与非个人游戏配置。使用各项目/仓库已有 Python 环境，临时构建输出放 Git 外；不提交运行数据、浏览器 profile、签名密钥和产物。
