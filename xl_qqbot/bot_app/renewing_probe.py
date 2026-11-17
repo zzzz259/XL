@@ -56,23 +56,10 @@ class _ProbeHTTP:
         return result
 
 
-def build_status_probe(config: ServerStatusConfig, *, now=time.time, account_lock=None):
-    """Select the legacy reader or the renewing provider using instance configuration.
-
-    ``account_lock`` is the shared per-account asyncio lock also used by the
-    leaderboard archive job; it serializes logins so the status probe and the
-    archive job never authenticate concurrently with the same account.
-    """
+def build_status_probe(config: ServerStatusConfig, *, now=time.time):
+    """Select the legacy reader or the renewing provider using instance configuration."""
     if not config.refresh_enabled:
-        probe = build_login_preflight_probe(config.credentials_file)
-        if account_lock is None:
-            return probe
-
-        async def locked_legacy_probe():
-            async with account_lock:
-                return await probe()
-
-        return locked_legacy_probe
+        return build_login_preflight_probe(config.credentials_file)
     store = Store(config.credentials_file)
     with store.locked():
         store.load()  # Fail at startup on an invalid/unsafe private state, before any request.
@@ -100,9 +87,6 @@ def build_status_probe(config: ServerStatusConfig, *, now=time.time, account_loc
         )
 
     async def probe():
-        if account_lock is None:
-            return await asyncio.to_thread(sample)
-        async with account_lock:
-            return await asyncio.to_thread(sample)
+        return await asyncio.to_thread(sample)
 
     return probe

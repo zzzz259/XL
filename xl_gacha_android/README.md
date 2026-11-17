@@ -4,8 +4,6 @@
 
 [0.4 更新公告](../docs/releases/gacha-v0.4.md) · [完整用户指南](../docs/gacha-user-guide.md) · [通用构建与测试](../docs/gacha-development.md) · [数据协议](../docs/gacha-architecture.md)
 
-[GitHub Actions 云端编译与 Release](../docs/gacha-release.md)：沿用原正式签名与 B服参数，debug 自动生成签名 Artifact，main 可手动或通过 `gacha-v*` 标签发布。
-
 ## 使用
 
 1. 安装 APK，打开应用：没有本机存档时直接进入「查询」，已有存档时进入「记录」。在「记录」空状态点击「查询我的记录」，或在「我的」点击「登录并更新记录」。

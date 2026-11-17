@@ -47,16 +47,16 @@ def test_user_units_use_fixed_release_paths_and_keep_runtime_data_external():
     )
 
 
-def test_jobs_units_pythonpath_covers_qqbot_and_gacha_web_for_each_ref():
+def test_jobs_units_pythonpath_covers_only_qqbot_for_each_ref():
     for filename, ref in (
         ("xl-qqbot-test-jobs.service", "test"),
         ("xl-qqbot-main-jobs.service", "main"),
     ):
         content = read(f"xl_deploy/deploy/{filename}")
         assert (
-            f"PYTHONPATH=/home/admin/xl_deploy/current/{ref}/xl_qqbot:"
-            f"/home/admin/xl_deploy/current/{ref}/xl_gacha_web"
+            f"PYTHONPATH=/home/admin/xl_deploy/current/{ref}/xl_qqbot"
         ) in content
+        assert "xl_gacha_web" not in content
 
 
 def test_poller_timer_runs_every_minute_as_a_user_unit():
@@ -254,15 +254,6 @@ def test_ci_installs_schedule_renderer_dependencies_before_server_tests():
 
     assert "actions/setup-node@v4" in workflow
     assert "npm ci --prefix renderer --omit=dev" in workflow
-
-
-def test_ci_qq_bot_job_sets_pythonpath_for_gacha_web_imports():
-    workflow = read(".github/workflows/ci.yml")
-    job = workflow.split("  qq-bot:")[1].split("  deploy-controller:")[0]
-
-    assert "PYTHONPATH" in job
-    assert "xl_qqbot" in job
-    assert "xl_gacha_web" in job
 
 
 def test_docs_index_links_deployment_operator_guide():
