@@ -1,4 +1,4 @@
-"""Observe feature recipients through real transactions and durable recovery."""
+"""Observe branch notice recipients through real transactions and recovery."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ def feature_requests(router):
         ("test", ("beta", "main"), ("xl-main.service", "xl-gateway.service")),
     ],
 )
-def test_gateway_lifecycle_covers_affected_instances_but_features_follow_branch(
+def test_main_gateway_notices_follow_branch_while_maintenance_covers_affected_instances(
     tmp_path, branch, feature_scope, units,
 ):
     inventory = inventory_at(tmp_path, branch=branch)
@@ -129,10 +129,11 @@ def test_gateway_lifecycle_covers_affected_instances_but_features_follow_branch(
 
     assert result.status == "success"
     affected = ("alpha", "beta", "gamma", "main")
+    lifecycle_scope = feature_scope if branch == "main" else affected
     tx_id = transaction.state.load().transaction_id
     assert router.requests == [
-        ("lifecycle", affected, START_NOTICE, f"{tx_id}:starting"),
-        ("lifecycle", affected, DONE_NOTICE, f"{tx_id}:complete"),
+        ("lifecycle", lifecycle_scope, START_NOTICE, f"{tx_id}:starting"),
+        ("lifecycle", lifecycle_scope, DONE_NOTICE, f"{tx_id}:complete"),
         ("feature", feature_scope, NOTE, f"{tx_id}:release-note"),
     ]
     maintenance_scope = affected if branch == "main" else ("main", "alpha", "beta", "gamma")
@@ -151,9 +152,8 @@ def test_empty_feature_scope_finishes_delivery_and_allows_next_deployment(tmp_pa
     result = transaction.execute(gateway_plan(inventory))
 
     assert result.status == "success"
-    assert [request[1:3] for request in router.requests] == [
-        (("alpha",), START_NOTICE), (("alpha",), DONE_NOTICE),
-    ]
+    assert not router.requests
+    assert transaction.state.load().completion_notice_sent is True
     assert transaction.state.load().release_note_sent is True
     request_count = len(router.requests)
     assert transaction.recover().status == "already_recovered"
@@ -187,7 +187,7 @@ def test_failed_feature_delivery_retries_same_id_without_stopping_healthy_servic
     assert transaction.state.load().release_note_sent is True
 
 
-def test_completion_retry_keeps_affected_scope_then_delivers_branch_features(tmp_path):
+def test_completion_retry_keeps_main_scope_then_delivers_branch_features(tmp_path):
     inventory = inventory_at(tmp_path)
     router = RecordingRouter()
     router.announce_results = [True, False, True]
@@ -203,7 +203,7 @@ def test_completion_retry_keeps_affected_scope_then_delivers_branch_features(tmp
     assert transaction.recover().status == "success"
 
     assert router.requests[-2] == failed_completion
-    assert failed_completion[1:3] == (("alpha", "beta", "gamma", "main"), DONE_NOTICE)
+    assert failed_completion[1:3] == (("alpha", "gamma"), DONE_NOTICE)
     assert feature_requests(router) == [
         ("feature", ("alpha", "gamma"), NOTE, f"{journal.transaction_id}:release-note"),
     ]
@@ -236,11 +236,12 @@ def pending_journal(transaction, *, branch="main", phase="release_note_pending",
     "release_note_pending", "completion_notice_failed",
 ])
 @pytest.mark.parametrize("generation", [2, 3])
-def test_old_pending_journals_use_persisted_branch_at_every_recovery_entry(tmp_path, phase, generation):
+@pytest.mark.parametrize("branch", ["main", "test"])
+def test_old_pending_journals_use_persisted_branch_at_every_recovery_entry(tmp_path, phase, generation, branch):
     inventory = inventory_at(tmp_path)
     router = RecordingRouter()
     transaction = make_transaction(tmp_path, router=router, inventory=inventory)
-    journal = pending_journal(transaction, branch="test", phase=phase)
+    journal = pending_journal(transaction, branch=branch, phase=phase)
     payload = json.loads(transaction.state.journal_path.read_text(encoding="utf-8"))
     if generation == 2:
         del payload["recovery_notice_sent"]
@@ -248,12 +249,14 @@ def test_old_pending_journals_use_persisted_branch_at_every_recovery_entry(tmp_p
 
     assert transaction.recover().status == "success"
 
+    expected = ("alpha", "gamma") if branch == "main" else ("beta", "main")
     assert feature_requests(router) == [
-        ("feature", ("beta", "main"), NOTE, f"{journal.transaction_id}:release-note"),
+        ("feature", expected, NOTE, f"{journal.transaction_id}:release-note"),
     ]
     lifecycle = [request for request in router.requests if request[0] == "lifecycle"]
     assert lifecycle == ([] if phase == "release_note_pending" else [
-        ("lifecycle", journal.announcement_scope, DONE_NOTICE, f"{journal.transaction_id}:complete"),
+        ("lifecycle", expected if branch == "main" else journal.announcement_scope,
+         DONE_NOTICE, f"{journal.transaction_id}:complete"),
     ])
     assert not any(event[0] in {"stop", "start"} for event in transaction.runner.events)
     request_count = len(router.requests)
@@ -273,7 +276,7 @@ def test_oldest_journal_does_not_resurrect_pre_delivery_tracking_features(tmp_pa
     assert transaction.recover().status == "success"
 
     assert not feature_requests(router)
-    assert router.requests[0][1:3] == (("alpha", "beta", "gamma", "main"), DONE_NOTICE)
+    assert router.requests[0][1:3] == (("alpha", "gamma"), DONE_NOTICE)
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -312,7 +315,7 @@ def test_pending_feature_preserves_original_recipient_order(tmp_path):
 
 
 @pytest.mark.parametrize("pending", [False, True])
-def test_rollback_and_recovery_retry_keep_all_affected_instances_without_feature(tmp_path, pending):
+def test_main_rollback_and_recovery_retry_keep_main_recipients_without_feature(tmp_path, pending):
     inventory = inventory_at(tmp_path)
     router = RecordingRouter()
     router.announce_results = [True, False, True]
@@ -334,7 +337,7 @@ def test_rollback_and_recovery_retry_keep_all_affected_instances_without_feature
     assert transaction.recover().status == "rolled_back"
     recovery = [request for request in router.requests if request[2] == RECOVERY_NOTICE]
     assert recovery == [
-        ("lifecycle", ("alpha", "beta", "gamma", "main"), RECOVERY_NOTICE,
+        ("lifecycle", ("alpha", "gamma"), RECOVERY_NOTICE,
          f"{journal.transaction_id}:recovery"),
     ] * 2
     assert not feature_requests(router)
@@ -365,6 +368,66 @@ def test_absent_notes_still_emit_only_affected_lifecycle(tmp_path, note):
 
     assert not feature_requests(router)
     assert [request[2] for request in router.requests] == [START_NOTICE, DONE_NOTICE]
+    assert all(request[1] == ("alpha", "gamma") for request in router.requests)
+
+
+@pytest.mark.parametrize("phase", ["completion_notice_pending", "recovery_notice_pending"])
+@pytest.mark.parametrize("empty", [False, True])
+def test_main_pending_lifecycle_uses_current_inventory_within_original_scope(tmp_path, phase, empty):
+    router = RecordingRouter()
+    transaction = make_transaction(tmp_path, router=router, inventory=inventory_at(tmp_path))
+    journal = pending_journal(transaction, phase=phase, scope=("gamma", "alpha", "beta", "main"))
+    if phase == "recovery_notice_pending":
+        transaction.state.set_current(Path(journal.previous_release),
+                                      current_path=transaction.paths.current_path / "main")
+    transaction.inventory = inventory_at(tmp_path, entries=[
+        ("alpha", "main", True, False),
+        ("beta", "test", False, True),
+        ("gamma", "test" if empty else "main", False, True),
+        ("main", "test", True, True),
+        ("newcomer", "main", True, True),
+    ])
+
+    assert transaction.recover().status == ("rolled_back" if phase == "recovery_notice_pending" else "success")
+
+    lifecycle = [request for request in router.requests if request[0] == "lifecycle"]
+    expected_text = RECOVERY_NOTICE if phase == "recovery_notice_pending" else DONE_NOTICE
+    suffix = "recovery" if phase == "recovery_notice_pending" else "complete"
+    assert lifecycle == ([] if empty else [
+        ("lifecycle", ("gamma",), expected_text, f"{journal.transaction_id}:{suffix}"),
+    ])
+    assert transaction.state.load().completion_notice_sent is True or phase == "recovery_notice_pending"
+    assert transaction.recover().status == "already_recovered"
+
+
+def test_main_start_notice_failure_does_not_stop_affected_services(tmp_path):
+    inventory = inventory_at(tmp_path)
+    router = RecordingRouter()
+    router.announce_results = [False]
+    transaction = make_transaction(tmp_path, router=router, inventory=inventory)
+
+    with pytest.raises(RuntimeError, match="start notice delivery failed"):
+        transaction.execute(gateway_plan(inventory))
+
+    assert [request[1:3] for request in router.requests] == [
+        (("alpha", "gamma"), START_NOTICE),
+    ]
+    assert not any(event[0] in {"pause", "drain"} for event in router.events)
+    assert not any(event[0] in {"stop", "start"} for event in transaction.runner.events)
+
+
+@pytest.mark.parametrize("phase", ["completion_notice_pending", "recovery_notice_pending"])
+def test_legacy_main_lifecycle_never_notifies_test(tmp_path, phase):
+    router = RecordingRouter()
+    transaction = make_transaction(tmp_path, router=router)
+    journal = pending_journal(transaction, phase=phase, scope=("test", "main", "debug"))
+    if phase == "recovery_notice_pending":
+        transaction.state.set_current(Path(journal.previous_release),
+                                      current_path=transaction.paths.current_path / "main")
+
+    assert transaction.recover().status == ("rolled_back" if phase == "recovery_notice_pending" else "success")
+    assert router.requests
+    assert all(request[1] == ("main",) for request in router.requests)
 
 
 def test_already_delivered_pending_feature_is_not_replayed(tmp_path):
