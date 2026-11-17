@@ -202,12 +202,15 @@ def _relative_posix(path: Path, root: Path) -> str:
 
 def _portrait_counts(result: ProcessResult) -> dict | None:
     """finish 事件携带本轮立绘汇总；未运行立绘步骤时保持旧事件形状。"""
-    if not (result.portrait_success_count or result.portrait_failure_count or result.portrait_skip_count):
+    if not (result.portrait_summary_available or result.portrait_success_count
+            or result.portrait_failure_count or result.portrait_skip_count):
         return None
     return {
         "success": result.portrait_success_count,
         "failed": result.portrait_failure_count,
         "skipped": result.portrait_skip_count,
+        "new": result.portrait_new_count,
+        "modified": result.portrait_modified_count,
     }
 
 
@@ -403,6 +406,9 @@ class ProductionUpdateProcessor:
             portrait_success_count=summary.success if summary else 0,
             portrait_failure_count=summary.failed if summary else 0,
             portrait_skip_count=summary.skipped if summary else 0,
+            portrait_new_count=summary.new_count if summary else 0,
+            portrait_modified_count=summary.modified_count if summary else 0,
+            portrait_summary_available=summary is not None,
         )
 
     def _write_update_status(
@@ -651,6 +657,9 @@ class ProductionUpdateProcessor:
             portrait_success_count=portrait_summary.success if portrait_summary else 0,
             portrait_failure_count=portrait_summary.failed if portrait_summary else 0,
             portrait_skip_count=portrait_summary.skipped if portrait_summary else 0,
+            portrait_new_count=portrait_summary.new_count if portrait_summary else 0,
+            portrait_modified_count=portrait_summary.modified_count if portrait_summary else 0,
+            portrait_summary_available=portrait_summary is not None,
         )
 
     def _download_hashes(self, hashes: tuple[str, ...], directory: Path) -> tuple[Path, ...]:

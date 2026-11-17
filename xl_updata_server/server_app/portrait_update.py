@@ -16,7 +16,8 @@ character_cards、manifest.json）不可变。processor 在
 原有完整已发布 manifest。恢复门控同时读 work manifest 与已发布 manifest，
 work 前缀缺失的已完成项由已发布 manifest 播种，不重渲、不重复发事件。
 
-新渲染写入顺序固定为：PNG 完成并校验 → 原子写版本暂存产物与持久 outbox →
+内容比较后的 new/modified 才投递；新渲染写入顺序固定为：PNG 完成并校验 →
+原子写版本暂存产物与持久 outbox（有内容增量时） →
 持久化 work manifest(event_emitted=False) → 追加 portrait_ready → 标
 event_emitted=True 并再次持久化 work manifest。事件前崩溃恢复直接 emit 补发、
 不重渲；事件后崩溃产生的重复事件由 Bot 幂等键去重。
@@ -44,6 +45,7 @@ from .cdn import CdnClient
 from .character_adapter import _tool_app_root
 from .config import ServerConfig
 from .extractor import repair_bundle_header
+from .portrait_pixels import png_pixel_sha256
 from .selector import bundle_hashes_for_assets, select_portrait_prefab_assets
 
 LOGGER = logging.getLogger(__name__)
@@ -104,6 +106,8 @@ class PortraitSummary:
     failed: int = 0
     skipped: int = 0
     basic: int = 0
+    new_count: int = 0
+    modified_count: int = 0
 
 
 @dataclass
@@ -139,7 +143,7 @@ def run_portrait_update(
 
     ``backfill=True`` 为历史回填专用策略：无上一版 manifest 时也真实渲染
     （首个历史基线），并全程关闭 portrait_ready 事件与持久 outbox。
-    正常更新必须保持默认 False：首次只记录指纹、发事件、写 outbox。
+    正常更新必须保持默认 False：首次只记录指纹，不发事件、不写 outbox。
     ``only_character_ids`` / ``only_skin_ids`` 为样本过滤（历史回填用）：
     不在集合内的任务记为 not_applicable，避免“只过滤角色却渲染其全部
     皮肤”的隐含行为。``forced_previous`` 仅供历史回填显式指定上一版
@@ -219,7 +223,11 @@ def unfinished_work_entries(
             if state in ("failed", "stale") or (
                 check_control_fields
                 and state == "published"
-                and (not entry.get("staged") or not entry.get("event_emitted"))
+                and (not entry.get("staged") or (
+                    not entry.get("event_emitted")
+                    and str(entry.get("source_version")) == str(payload.get("version"))
+                    and entry.get("content_change") != "unchanged"
+                ))
             ):
                 seen.add(skin_id)
                 pending.append(entry)
@@ -252,6 +260,7 @@ class PortraitUpdateRunner:
         self.versions_dir = self.data_dir / "versions"
         self.events_path = self.data_dir / "update_events.jsonl"
         self._version_key = ""
+        self._previous_version = None
         # 回填专用策略（run 时按参数重置）：首个历史基线真实渲染，且关闭事件/outbox。
         self._backfill = False
 
@@ -386,6 +395,7 @@ class PortraitUpdateRunner:
             # 事件前崩溃 → 恢复走 emit 直接补发，不重渲；事件后崩溃 → 重复事件
             # 由 Bot 幂等键去重。继承/已完成条目不补发。回填全程不发事件。
             if (not self._backfill and entry.get("state") == "published"
+                    and entry.get("content_change") in ("new", "modified")
                     and not entry.get("event_emitted")
                     and str(entry.get("source_version")) == version_key):
                 self._append_ready_event(entry)
@@ -407,6 +417,8 @@ class PortraitUpdateRunner:
         return PortraitSummary(
             success=counts["success"], failed=counts["failed"], skipped=counts["skipped"],
             basic=counts["basic"],
+            new_count=sum(entry.get("content_change") == "new" for entry in manifest_entries),
+            modified_count=sum(entry.get("content_change") == "modified" for entry in manifest_entries),
         )
 
     # ---- 计划 ---------------------------------------------------------------
@@ -943,6 +955,7 @@ class PortraitUpdateRunner:
         sha256 = hashlib.sha256(data).hexdigest()
         if sha256 != result.get("sha256"):
             raise ValueError("PNG 哈希与渲染证据不一致")
+        pixel_sha256 = png_pixel_sha256(artifact)
         scope = str(result.get("render_scope") or "full")
         if scope not in {"full", "basic"}:
             raise ValueError(f"未知立绘渲染范围: {scope}")
@@ -951,6 +964,7 @@ class PortraitUpdateRunner:
             raise ValueError("basic 立绘缺少降级原因")
         return {
             "sha256": sha256,
+            "pixel_sha256": pixel_sha256,
             "width": width,
             "height": height,
             "render_scope": scope,
@@ -958,6 +972,44 @@ class PortraitUpdateRunner:
         }
 
     # ---- 产物与事件 -----------------------------------------------------------
+
+    def _content_fields(self, task: _SkinTask, artifact: Path,
+                        pixel_sha256: str | None = None) -> dict:
+        """只比较相同身份的有效旧图；不以输入/文件变化或事件缺失推断内容变化。"""
+        pixel_sha256 = pixel_sha256 or png_pixel_sha256(artifact)
+        previous = task.previous or {}
+        old_pixel_sha256 = None
+        if (self._previous_version
+                and str(previous.get("character_id")) == task.character_id
+                and previous.get("state") in ("published", "stale")):
+            old_artifact = self._previous_artifact(previous, self._previous_version)
+            if old_artifact is not None:
+                try:
+                    # _previous_artifact 已核对文件 SHA，摘要仍对应同一有效 PNG。
+                    old_pixel_sha256 = previous.get("pixel_sha256") or png_pixel_sha256(old_artifact)
+                except (OSError, ValueError):
+                    # 文件哈希吻合但无法解码的旧文件不是有效图，也不是像素基线。
+                    LOGGER.warning("stage=portrait_compare skin=%s reason=invalid_previous_png", task.skin_id)
+        change = ("new" if old_pixel_sha256 is None else
+                  "unchanged" if old_pixel_sha256 == pixel_sha256 else "modified")
+        return {
+            "pixel_sha256": pixel_sha256,
+            "content_change": change,
+            "comparison_version": self._previous_version,
+        }
+
+    def _restore_content_fields(self, task: _SkinTask, entry: dict, artifact: Path) -> None:
+        """新 manifest 保留本版本分类；旧条目以真实产物重建，继承永不继承增量。"""
+        if str(entry.get("source_version")) != self._version_key:
+            entry.update(pixel_sha256=entry.get("pixel_sha256") or png_pixel_sha256(artifact),
+                         content_change="unchanged",
+                         comparison_version=self._previous_version)
+        elif (entry.get("content_change") not in ("new", "modified", "unchanged")
+              or not entry.get("pixel_sha256") or "comparison_version" not in entry):
+            entry.update(self._content_fields(task, artifact))
+        # event_emitted 表示事件处理完成：无变化/继承/回填没有待投递事件。
+        if self._backfill or entry["content_change"] == "unchanged":
+            entry["event_emitted"] = True
 
     def _render_one(self, task: _SkinTask, pool_dir: Path, skins_root: Path,
                     staging_portraits: Path, artifacts_dir: Path) -> dict:
@@ -987,9 +1039,10 @@ class PortraitUpdateRunner:
         relative = f"{task.character_id}/{task.skin_id}.png"
         _copy_atomic(artifact, staging_portraits / relative)
         _copy_atomic(artifact, artifacts_dir / f"{task.character_id}_{task.skin_id}.png")
-        if not self._backfill:
-            self._write_outbox(task, evidence["sha256"], artifact)
         entry = self._base_entry(task)
+        entry.update(self._content_fields(task, artifact, evidence.get("pixel_sha256")))
+        if not self._backfill and entry["content_change"] in ("new", "modified"):
+            self._write_outbox(task, evidence["sha256"], artifact)
         entry.update(
             state="published",
             artifact_path=relative,
@@ -1000,6 +1053,7 @@ class PortraitUpdateRunner:
             staged=True,
             render_scope=scope,
             render_notice=str(evidence.get("render_notice") or "") or None,
+            event_emitted=self._backfill or entry["content_change"] == "unchanged",
         )
         return entry
 
@@ -1022,6 +1076,10 @@ class PortraitUpdateRunner:
             staged=True,
             render_scope=str(previous.get("render_scope") or "full"),
             render_notice=previous.get("render_notice"),
+            pixel_sha256=previous.get("pixel_sha256") or png_pixel_sha256(source),
+            content_change="unchanged",
+            comparison_version=self._previous_version,
+            event_emitted=True,
         )
         return entry
 
@@ -1046,6 +1104,7 @@ class PortraitUpdateRunner:
     def _restage_done(self, task: _SkinTask, staging_portraits: Path, artifacts_dir: Path) -> dict:
         work_entry = dict(task.work_entry or {})
         artifact = self._resume_artifact(work_entry, artifacts_dir)
+        self._restore_content_fields(task, work_entry, artifact)
         _copy_atomic(artifact, staging_portraits / str(work_entry.get("artifact_path")))
         work_entry["staged"] = True
         return work_entry
@@ -1053,12 +1112,11 @@ class PortraitUpdateRunner:
     def _emit_pending_event(self, task: _SkinTask, staging_portraits: Path, artifacts_dir: Path) -> dict:
         work_entry = dict(task.work_entry or {})
         artifact = self._resume_artifact(work_entry, artifacts_dir)
+        self._restore_content_fields(task, work_entry, artifact)
         _ensure_png_within_limit(artifact)  # 补发事件前同样守 QQ 20MiB 上限
         _copy_atomic(artifact, staging_portraits / str(work_entry.get("artifact_path")))
-        if not self._backfill:
+        if not self._backfill and work_entry["content_change"] in ("new", "modified"):
             self._write_outbox(task, str(work_entry.get("artifact_sha256")), artifact)
-            self._append_ready_event(work_entry)
-        work_entry["event_emitted"] = True
         work_entry["staged"] = True
         return work_entry
 
@@ -1094,6 +1152,7 @@ class PortraitUpdateRunner:
                 state="stale",
                 artifact_path=relative,
                 artifact_sha256=previous.get("artifact_sha256"),
+                pixel_sha256=previous.get("pixel_sha256"),
                 source_version=previous.get("source_version"),
                 width=previous.get("width"),
                 height=previous.get("height"),
@@ -1117,6 +1176,9 @@ class PortraitUpdateRunner:
             "state": "failed",
             "artifact_path": None,
             "artifact_sha256": None,
+            "pixel_sha256": None,
+            "content_change": "unchanged",
+            "comparison_version": self._previous_version,
             "source_version": None,
             "width": None,
             "height": None,
