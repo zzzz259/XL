@@ -522,6 +522,7 @@ def test_resume_after_publish_does_not_repeat(tmp_path, monkeypatch):
                                              catalog=CATALOG_NEW_CHARACTER)
     assert env.calls["rendered"] == rendered_after_publish
     assert summary_repeat.success == 0 and summary_repeat.skipped == 5
+    assert (summary_repeat.new_count, summary_repeat.modified_count) == (2, 0)
     assert len(env.ready_events(2)) == 2
 
 
@@ -1012,7 +1013,8 @@ def test_processor_runs_portraits_between_start_and_finish(tmp_path, monkeypatch
         "start", "portrait_ready", "portrait_ready", "finish",
     ]
     finish = events[-1]
-    assert finish["portraits"] == {"success": 2, "failed": 0, "skipped": 3}
+    assert finish["portraits"] == {"success": 2, "failed": 0, "skipped": 3, "new": 2, "modified": 0}
+    assert (result.portrait_new_count, result.portrait_modified_count) == (2, 0)
     # 立绘 manifest 与产物随版本发布
     published = data_dir / "versions" / "2" / "portraits"
     assert (published / "manifest.json").is_file()
@@ -1162,6 +1164,7 @@ def test_same_version_with_failed_portraits_resumes_from_processor(tmp_path, mon
     assert resume_result.portrait_success_count == 1
     assert resume_result.portrait_failure_count == 0
     assert resume_result.portrait_skip_count == 4
+    assert (resume_result.portrait_new_count, resume_result.portrait_modified_count) == (2, 0)
 
     events_after = _read_events(data_dir)
     # 不重复 start/finish：新增事件只有恢复成功的一套 portrait_ready，禁止重复
@@ -1771,7 +1774,8 @@ def test_render_persists_work_manifest_before_ready_event(tmp_path, monkeypatch)
         ), f"{skin_id}: 事件后必须持久化 event_emitted=True"
 
 
-def test_crash_before_ready_event_resumes_emit_without_rerender(tmp_path, monkeypatch):
+@pytest.mark.parametrize('legacy_policy', [False, True])
+def test_crash_before_ready_event_resumes_emit_without_rerender(tmp_path, monkeypatch, legacy_policy):
     """事件 append 前崩溃：work manifest 已是 published+event_emitted=False，
     恢复直接 emit 补发事件，绝不重渲崩溃的那套。"""
     env = PortraitEnv(tmp_path, monkeypatch)
@@ -1791,6 +1795,11 @@ def test_crash_before_ready_event_resumes_emit_without_rerender(tmp_path, monkey
     # 崩溃后：产物与 outbox 已写、work manifest 已持久化(event_emitted=False)、事件未写
     assert env.ready_events(2) == []
     assert len(list((env.data_dir / "portrait_outbox" / "2").glob("*.png"))) == 1
+    if legacy_policy:
+        work_path = portrait_update.portrait_work_manifest_path(env.config, 2)
+        payload = json.loads(work_path.read_text(encoding='utf-8'))
+        payload.pop('notification_policy', None)
+        work_path.write_text(json.dumps(payload), encoding='utf-8')
 
     state["crash"] = False
     env.calls["rendered"] = []
@@ -1837,3 +1846,319 @@ def test_crash_after_ready_event_resumes_without_rerender(tmp_path, monkeypatch)
     assert skins["14001521"]["state"] == "published"
     # 恢复补发造成一次重复事件；送达侧由 Bot 幂等键去重
     assert len([e for e in env.ready_events(2) if e["skin_id"] == "14001520"]) == 2
+
+# ---- Content increments use decoded size/RGBA, independent of execution counts ----
+
+def _content_baseline(env):
+    _run_baseline(env)
+    summary, staging = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+    env.publish(staging, 2)
+    env.calls['rendered'].clear()
+    return summary
+
+
+def _content_render(*, width=31, height=22, seed=1, recompress=False):
+    def render(_runner, task, workspace):
+        data = _png_bytes(width, height, seed=seed)
+        if recompress:
+            import io
+
+            from PIL import Image
+            output = io.BytesIO()
+            with Image.open(io.BytesIO(data)) as image:
+                image.save(output, format='PNG', compress_level=0)
+            data = output.getvalue()
+        artifact = Path(workspace) / 'output' / 'content.png'
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_bytes(data)
+        return {'status': 'success', 'artifact_path': str(artifact), 'width': width,
+                'height': height, 'sha256': hashlib.sha256(data).hexdigest()}
+    return render
+
+
+def _content_update(env, **kwargs):
+    return env.run(3, basefashion=BASE_FASHION_CHANGED_INPUT,
+                   catalog=CATALOG_CHANGED_INPUT, **kwargs)
+
+
+def test_content_new_skin_and_first_valid_image(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    first, _ = env.run(1)
+    assert (first.new_count, first.modified_count) == (0, 0)
+    # Publish the just-created no-image baseline; input change makes its first valid image new.
+    baseline = env.tmp / 'staging-1'
+    env.publish(baseline, 1)
+    summary, _ = env.run(2, basefashion=BASE_FASHION_POS_CHANGED)
+    assert (summary.new_count, summary.modified_count) == (1, 0)
+    assert len(env.ready_events(2)) == 1
+
+
+@pytest.mark.parametrize('recompress', [False, True])
+def test_content_equal_rgba_updates_artifact_without_notice(tmp_path, monkeypatch, recompress):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _content_baseline(env)
+    old = _skins_by_id(env.published_manifest(2))['14001520']
+    summary, staging = _content_update(env, render_impl=_content_render(recompress=recompress))
+    assert env.ready_events(3) == []
+    assert not (env.data_dir / 'portrait_outbox' / '3').exists()
+    assert (summary.new_count, summary.modified_count) == (0, 0)
+    entry = _skins_by_id(env.manifest(staging))['14001520']
+    assert entry['input_fingerprint'] != old['input_fingerprint']
+    assert entry['source_version'] == 3
+    assert entry['content_change'] == 'unchanged'
+    assert entry['comparison_version'] == '2'
+    assert entry['pixel_sha256'] == hashlib.sha256(struct.pack('>II', 31, 22) + bytes([1, 8, 16, 255]) * 31 * 22).hexdigest()
+    if recompress:
+        assert entry['artifact_sha256'] != old['artifact_sha256']
+    work = portrait_update.portrait_work_manifest_path(env.config, 3)
+    assert portrait_update.unfinished_work_entries(work, staging / 'portraits' / 'manifest.json') == []
+    repeat, _ = _content_update(env)
+    assert (repeat.new_count, repeat.modified_count) == (0, 0)
+    assert env.ready_events(3) == []
+
+
+@pytest.mark.parametrize(('width', 'height', 'seed'), [(31, 22, 99), (32, 22, 1), (31, 23, 1)])
+def test_content_size_or_pixels_modify_only_one_skin(tmp_path, monkeypatch, width, height, seed):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _content_baseline(env)
+    summary, staging = _content_update(env, render_impl=_content_render(width=width, height=height, seed=seed))
+    assert (summary.new_count, summary.modified_count) == (0, 1)
+    assert [e['skin_id'] for e in env.ready_events(3)] == ['14001520']
+    skins = _skins_by_id(env.manifest(staging))
+    assert skins['14001520']['content_change'] == 'modified'
+    assert skins['14001521']['content_change'] == 'unchanged'
+    repeat, _ = _content_update(env)
+    assert (repeat.new_count, repeat.modified_count) == (0, 1)
+    assert len(env.ready_events(3)) == 1
+
+
+def test_content_inheritance_and_failure_keep_zero_increment(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    initial = _content_baseline(env)
+    assert (initial.new_count, initial.modified_count) == (2, 0)
+    inherited, _ = env.run(3, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+    assert (inherited.new_count, inherited.modified_count) == (0, 0)
+    # Retry another version with an actual input change but failed renderer.
+    failed, staging = env.run(4, basefashion=BASE_FASHION_CHANGED_INPUT,
+                             catalog=CATALOG_CHANGED_INPUT, failures={'14001520'})
+    assert (failed.new_count, failed.modified_count) == (0, 0)
+    kept = _skins_by_id(env.manifest(staging))['14001520']
+    old = _skins_by_id(env.published_manifest(2))['14001520']
+    assert kept['pixel_sha256'] == old['pixel_sha256']
+    assert env.ready_events(3) == env.ready_events(4) == []
+
+
+def test_content_missing_old_artifact_is_new(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _content_baseline(env)
+    old = _skins_by_id(env.published_manifest(2))['14001520']
+    (env.data_dir / 'versions' / '2' / 'portraits' / old['artifact_path']).unlink()
+    summary, _ = _content_update(env)
+    assert (summary.new_count, summary.modified_count) == (1, 0)
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('modified', [False, True])
+@pytest.mark.parametrize('resume_source', ['done', 'emit', 'published'])
+def test_content_resume_preserves_counts_and_never_sends_equal_pixels(tmp_path, monkeypatch, legacy, modified, resume_source):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _content_baseline(env)
+    _, staging = _content_update(env, render_impl=_content_render(seed=99 if modified else 1, recompress=True))
+    if resume_source == 'published':
+        env.publish(staging, 3)
+    work_path = portrait_update.portrait_work_manifest_path(env.config, 3)
+    payload = json.loads(work_path.read_text(encoding='utf-8'))
+    for entry in payload['skins']:
+        if legacy:
+            for key in ('content_change', 'comparison_version', 'pixel_sha256'):
+                entry.pop(key, None)
+        if resume_source == 'emit' and entry['skin_id'] == '14001520':
+            entry['event_emitted'] = False
+    if resume_source == 'published':
+        manifest_path = env.data_dir / 'versions' / '3' / 'portraits' / 'manifest.json'
+        published = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if legacy:
+            for entry in published['skins']:
+                for key in ('content_change', 'comparison_version', 'pixel_sha256'):
+                    entry.pop(key, None)
+            manifest_path.write_text(json.dumps(published), encoding='utf-8')
+        payload['skins'] = payload['skins'][:1]  # Simulate truncated work prefix.
+    work_path.write_text(json.dumps(payload), encoding='utf-8')
+    events_before = len(env.ready_events(3))
+    resumed, _ = _content_update(env)
+    assert (resumed.new_count, resumed.modified_count) == (0, int(modified))
+    assert len(env.ready_events(3)) == events_before + int(modified and resume_source == 'emit')
+    assert portrait_update.unfinished_work_entries(work_path) == []
+
+
+def test_content_backfill_has_counts_without_realtime_notices(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    original = runner_cls.run
+    def backfill_run(self, **kwargs):
+        return original(self, **{**kwargs, 'backfill': True})
+    monkeypatch.setattr(runner_cls, 'run', backfill_run)
+    summary, _ = env.run(1)
+    assert summary.success == 3
+    assert (summary.new_count, summary.modified_count) == (3, 0)
+    assert env.events() == []
+    assert not (env.data_dir / 'portrait_outbox').exists()
+
+
+@pytest.mark.parametrize('work_state', ['missing', 'truncated', 'pending_event'])
+@pytest.mark.parametrize('partial', [False, True])
+def test_backfill_same_version_normal_resume_stays_silent(tmp_path, monkeypatch, work_state, partial):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    original = runner_cls.run
+    def backfill_run(self, **kwargs):
+        return original(self, **{**kwargs, 'backfill': True})
+    monkeypatch.setattr(runner_cls, 'run', backfill_run)
+    initial, staging = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER,
+                               catalog=CATALOG_NEW_CHARACTER,
+                               failures={'14001520'} if partial else frozenset())
+    env.publish(staging, 2)
+    assert (initial.new_count, initial.modified_count) == (1 if partial else 2, 0)
+    assert env.ready_events(2) == []
+    work_path = portrait_update.portrait_work_manifest_path(env.config, 2)
+    payload = json.loads(work_path.read_text(encoding='utf-8'))
+    if work_state == 'missing':
+        work_path.unlink()
+    else:
+        if work_state == 'truncated':
+            payload['skins'] = payload['skins'][:4]  # Completed backfill suffix is missing.
+        else:
+            for entry in payload['skins']:
+                if entry['skin_id'] == '14001521':
+                    entry['event_emitted'] = False
+        work_path.write_text(json.dumps(payload), encoding='utf-8')
+    if partial:
+        assert portrait_update.unfinished_work_entries(
+            work_path, env.data_dir / 'versions/2/portraits/manifest.json')
+    elif work_state == 'pending_event':
+        assert portrait_update.unfinished_work_entries(work_path) == []
+    monkeypatch.setattr(runner_cls, 'run', original)
+    env.calls['rendered'].clear()
+    resumed, restaged = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER,
+                                catalog=CATALOG_NEW_CHARACTER)
+    assert env.ready_events(2) == []
+    assert not (env.data_dir / 'portrait_outbox/2').exists()
+    assert (resumed.new_count, resumed.modified_count) == (2, 0)
+    assert env.calls['rendered'] == (['14001520'] if partial else [])
+    assert portrait_update.unfinished_work_entries(work_path) == []
+    assert env.manifest(restaged)['notification_policy'] == 'silent'
+
+
+def test_backfill_silence_does_not_reach_next_version_new_or_modified(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _run_baseline(env)
+    runner_cls = portrait_update.PortraitUpdateRunner
+    original = runner_cls.run
+    def backfill_run(self, **kwargs):
+        return original(self, **{**kwargs, 'backfill': True})
+    monkeypatch.setattr(runner_cls, 'run', backfill_run)
+    _, staging = env.run(2, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+    env.publish(staging, 2)
+    monkeypatch.setattr(runner_cls, 'run', original)
+    summary, staging = env.run(
+        3, basefashion=BASE_FASHION_NEW_SKIN.replace('cardspine_10070_1', 'cardspine_10070_9'),
+        catalog=CatalogIndex(bundles=CATALOG_NEW_SKIN.bundles,
+                             assets=(*CATALOG_CHANGED_INPUT.assets, CATALOG_NEW_SKIN.assets[-1])),
+        render_impl=_content_render(seed=99))
+    assert (summary.new_count, summary.modified_count) == (1, 1)
+    assert {event['skin_id'] for event in env.ready_events(3)} == {'14001520', '14001522'}
+    assert len(list((env.data_dir / 'portrait_outbox/3').glob('*.png'))) == 2
+    assert env.manifest(staging)['notification_policy'] == 'realtime'
+
+
+def test_content_unchanged_processor_is_not_repeatedly_resumed(tmp_path, monkeypatch):
+    from server_app.pipeline import UpdatePipeline
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir()
+    calls = {}
+    _run_pipeline_version(monkeypatch, data_dir, tmp_path, calls, 1, BASE_FASHION, CATALOG)
+    _run_pipeline_version(monkeypatch, data_dir, tmp_path, calls, 2, BASE_FASHION_NEW_CHARACTER, CATALOG_NEW_CHARACTER)
+    result = _run_pipeline_version(monkeypatch, data_dir, tmp_path, calls, 3, BASE_FASHION_CHANGED_INPUT, CATALOG_CHANGED_INPUT)
+    assert (result.portrait_new_count, result.portrait_modified_count) == (0, 0)
+    assert _read_events(data_dir)[-1]['portraits']['new'] == 0
+    assert [e for e in _read_events(data_dir) if e['event'] == 'portrait_ready' and str(e['version']) == '3'] == []
+    processor = ProductionUpdateProcessor(_config(data_dir, tmp_path, enabled=True))
+    _patch_processor_env(processor, monkeypatch, CHARACTERS, 3, BASE_FASHION_CHANGED_INPUT)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('completed same-pixel/inherited version must not resume')
+    monkeypatch.setattr(processor.client, 'fetch_version_catalog', forbidden)
+    before = _read_events(data_dir)
+    assert UpdatePipeline(data_dir, processor=processor).run_once().error is None
+    assert _read_events(data_dir) == before
+
+
+def test_content_cached_digest_avoids_decoding_inherit_and_done(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _content_baseline(env)
+    def unexpected_decode(*args, **kwargs):
+        raise AssertionError('verified file with persisted pixel digest needs no decode')
+    monkeypatch.setattr(portrait_update, 'png_pixel_sha256', unexpected_decode)
+    for _ in range(2):
+        summary, _ = env.run(3, basefashion=BASE_FASHION_NEW_CHARACTER, catalog=CATALOG_NEW_CHARACTER)
+        assert summary.failed == 0
+        assert (summary.new_count, summary.modified_count) == (0, 0)
+        assert summary.skipped == 5
+
+
+def test_content_rejects_oversized_pixel_header_before_decode(tmp_path):
+    from server_app.portrait_pixels import png_pixel_sha256
+    # A PNG with a valid IHDR CRC, but insufficient IDAT: limit check must precede load.
+    data = bytearray(_png_bytes(1, 1))
+    data[16:24] = struct.pack('>II', 5001, 5000)
+    data[29:33] = struct.pack('>I', zlib.crc32(data[12:29]) & 0xffffffff)
+    artifact = tmp_path / 'oversized.png'
+    artifact.write_bytes(data)
+    with pytest.raises(ValueError, match='25000000'):
+        png_pixel_sha256(artifact)
+
+
+def test_content_empty_valid_summary_is_in_finish(tmp_path, monkeypatch):
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir()
+    result = _run_pipeline_version(monkeypatch, data_dir, tmp_path, {}, 1, 'return {}', CATALOG)
+    assert result.processed is True
+    assert _read_events(data_dir)[-1]['portraits'] == {
+        'success': 0, 'failed': 0, 'skipped': 0, 'new': 0, 'modified': 0,
+    }
+
+
+def test_content_truncated_png_is_not_published_or_notified(tmp_path, monkeypatch):
+    env = PortraitEnv(tmp_path, monkeypatch)
+    _content_baseline(env)
+    real_render = _content_render(seed=99)
+    def corrupt_render(runner, task, workspace):
+        result = real_render(runner, task, workspace)
+        artifact = Path(result['artifact_path'])
+        truncated = artifact.read_bytes()[:40]  # Valid PNG header and dimensions, no pixel data.
+        artifact.write_bytes(truncated)
+        result['sha256'] = hashlib.sha256(truncated).hexdigest()
+        return result
+    summary, staging = _content_update(env, render_impl=corrupt_render)
+    assert summary.failed == 1
+    assert (summary.new_count, summary.modified_count) == (0, 0)
+    assert _skins_by_id(env.manifest(staging))['14001520']['state'] == 'stale'
+    assert env.ready_events(3) == []
+    assert not (env.data_dir / 'portrait_outbox' / '3').exists()
+
+
+@pytest.mark.parametrize('mode', ['RGB', 'RGBA', 'P'])
+def test_content_pixel_digest_normalizes_png_modes_and_rows(tmp_path, mode):
+    from PIL import Image
+    from server_app.portrait_pixels import png_pixel_sha256
+    artifact = tmp_path / 'mode.png'
+    if mode == 'P':
+        with Image.new('P', (2, 3)) as image:
+            image.putpalette([1, 8, 16] + [0] * 765)
+            image.save(artifact)
+    else:
+        with Image.new(mode, (2, 3), (1, 8, 16, 127) if mode == 'RGBA' else (1, 8, 16)) as image:
+            image.save(artifact)
+    alpha = 127 if mode == 'RGBA' else 255
+    expected = hashlib.sha256(struct.pack('>II', 2, 3) + bytes([1, 8, 16, alpha]) * 6).hexdigest()
+    assert png_pixel_sha256(artifact) == expected

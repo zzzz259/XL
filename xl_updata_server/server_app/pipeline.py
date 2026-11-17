@@ -45,6 +45,9 @@ class ProcessResult:
     portrait_success_count: int = 0
     portrait_failure_count: int = 0
     portrait_skip_count: int = 0
+    portrait_new_count: int = 0
+    portrait_modified_count: int = 0
+    portrait_summary_available: bool = False
 
 
 class UpdatePipeline:

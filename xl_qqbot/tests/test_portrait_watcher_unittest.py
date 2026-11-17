@@ -301,7 +301,7 @@ class PortraitWatcherTests(unittest.IsolatedAsyncioTestCase):
         version = "134381674183448664"
         ready = self._write_portrait(version, "10000224", "1000022402", png_bytes("one"))
         events = self._lifecycle(
-            version, portraits={"success": 2, "failed": 1, "skipped": 0}
+            version, portraits={"success": 2, "failed": 1, "skipped": 0, "new": 1, "modified": 2}
         )
         events[1:1] = [ready]
         self._write_events(events)
@@ -309,10 +309,27 @@ class PortraitWatcherTests(unittest.IsolatedAsyncioTestCase):
         await self.watcher._tick()
 
         texts = [item.text for item in self.outbox.list_pending() if item.kind == "text"]
-        self.assertIn("版本更新结束，一共有2个新角色", texts[-1])
-        self.assertIn("成功2", texts[-1])
-        self.assertIn("失败1", texts[-1])
-        self.assertIn("跳过0", texts[-1])
+        self.assertEqual(texts[-1], "版本更新结束，一共有2个新角色；新增立绘1，修改立绘2")
+
+    async def test_finish_zero_content_counts_are_displayed(self):
+        self._write_events(self._lifecycle(portraits={"new": 0, "modified": 0, "skipped": 323}))
+        await self.watcher._tick()
+        texts = [item.text for item in self.outbox.list_pending() if item.kind == "text"]
+        self.assertEqual(texts[-1], "版本更新结束，一共有2个新角色；新增立绘0，修改立绘0")
+
+    async def test_legacy_or_partial_portrait_counts_are_not_guessed(self):
+        events = []
+        for index, portraits in enumerate((
+            {"success": 2, "failed": 0, "skipped": 3},
+            {"new": 1, "success": 2},
+            {"modified": 2},
+        )):
+            events.extend(self._lifecycle(version=str(index + 1), portraits=portraits))
+        self._write_events(events)
+        await self.watcher._tick()
+        texts = [item.text for item in self.outbox.list_pending() if item.kind == "text"]
+        self.assertEqual(texts[-1], "版本更新结束，一共有2个新角色")
+        self.assertFalse(any("立绘" in text for text in texts))
 
     async def test_finish_text_unchanged_without_portraits(self):
         version = "134381674183448664"
