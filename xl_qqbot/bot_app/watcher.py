@@ -146,11 +146,10 @@ class Watcher:
         else:
             text = f"版本更新结束，一共有{event.new_characters}个新角色"
             portraits = event.portraits
-            if portraits:
+            if portraits and "new" in portraits and "modified" in portraits:
                 text += (
-                    f"；新立绘 成功{int(portraits.get('success', 0))}"
-                    f" 失败{int(portraits.get('failed', 0))}"
-                    f" 跳过{int(portraits.get('skipped', 0))}"
+                    f"；新增立绘{int(portraits['new'])}"
+                    f"，修改立绘{int(portraits['modified'])}"
                 )
         event_key = self._update_event_key(event)
         if self.notification_client is not None:
