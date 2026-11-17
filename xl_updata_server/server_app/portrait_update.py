@@ -225,6 +225,7 @@ def unfinished_work_entries(
                 and state == "published"
                 and (not entry.get("staged") or (
                     not entry.get("event_emitted")
+                    and payload.get("notification_policy") != "silent"
                     and str(entry.get("source_version")) == str(payload.get("version"))
                     and entry.get("content_change") != "unchanged"
                 ))
@@ -263,6 +264,7 @@ class PortraitUpdateRunner:
         self._previous_version = None
         # 回填专用策略（run 时按参数重置）：首个历史基线真实渲染，且关闭事件/outbox。
         self._backfill = False
+        self._notification_policy = "realtime"
 
     # ---- 主流程 -------------------------------------------------------------
 
@@ -284,6 +286,8 @@ class PortraitUpdateRunner:
         self._version_key = str(version)
         version_key = self._version_key
         work_dir = self.work_root / version_key
+        # 通知策略属于当前版本，不能因 normal 恢复解除，也不从上一版继承。
+        self._notification_policy = "silent" if backfill else self._load_notification_policy(work_dir)
         artifacts_dir = work_dir / "artifacts"
         pool_dir = work_dir / "pool"
         skins_root = work_dir / "skins"
@@ -394,7 +398,7 @@ class PortraitUpdateRunner:
             # portrait_ready 必须落在 work manifest(event_emitted=False) 之后：
             # 事件前崩溃 → 恢复走 emit 直接补发，不重渲；事件后崩溃 → 重复事件
             # 由 Bot 幂等键去重。继承/已完成条目不补发。回填全程不发事件。
-            if (not self._backfill and entry.get("state") == "published"
+            if (self._notification_policy != "silent" and entry.get("state") == "published"
                     and entry.get("content_change") in ("new", "modified")
                     and not entry.get("event_emitted")
                     and str(entry.get("source_version")) == version_key):
@@ -592,6 +596,20 @@ class PortraitUpdateRunner:
                 )
             )
         return tasks
+
+    def _load_notification_policy(self, work_dir: Path) -> str:
+        """只信同版本显式 silent；旧 manifest 缺字段保持原实时恢复语义。"""
+        for path in (work_dir / "manifest.json",
+                     self.versions_dir / self._version_key / "portraits" / "manifest.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            if (isinstance(payload, dict)
+                    and str(payload.get("version")) == self._version_key
+                    and payload.get("notification_policy") == "silent"):
+                return "silent"
+        return "realtime"
 
     def _load_work_entries(self, path: Path) -> list[dict]:
         try:
@@ -1008,7 +1026,7 @@ class PortraitUpdateRunner:
               or not entry.get("pixel_sha256") or "comparison_version" not in entry):
             entry.update(self._content_fields(task, artifact))
         # event_emitted 表示事件处理完成：无变化/继承/回填没有待投递事件。
-        if self._backfill or entry["content_change"] == "unchanged":
+        if self._notification_policy == "silent" or entry["content_change"] == "unchanged":
             entry["event_emitted"] = True
 
     def _render_one(self, task: _SkinTask, pool_dir: Path, skins_root: Path,
@@ -1041,7 +1059,7 @@ class PortraitUpdateRunner:
         _copy_atomic(artifact, artifacts_dir / f"{task.character_id}_{task.skin_id}.png")
         entry = self._base_entry(task)
         entry.update(self._content_fields(task, artifact, evidence.get("pixel_sha256")))
-        if not self._backfill and entry["content_change"] in ("new", "modified"):
+        if self._notification_policy != "silent" and entry["content_change"] in ("new", "modified"):
             self._write_outbox(task, evidence["sha256"], artifact)
         entry.update(
             state="published",
@@ -1053,7 +1071,7 @@ class PortraitUpdateRunner:
             staged=True,
             render_scope=scope,
             render_notice=str(evidence.get("render_notice") or "") or None,
-            event_emitted=self._backfill or entry["content_change"] == "unchanged",
+            event_emitted=self._notification_policy == "silent" or entry["content_change"] == "unchanged",
         )
         return entry
 
@@ -1115,7 +1133,7 @@ class PortraitUpdateRunner:
         self._restore_content_fields(task, work_entry, artifact)
         _ensure_png_within_limit(artifact)  # 补发事件前同样守 QQ 20MiB 上限
         _copy_atomic(artifact, staging_portraits / str(work_entry.get("artifact_path")))
-        if not self._backfill and work_entry["content_change"] in ("new", "modified"):
+        if self._notification_policy != "silent" and work_entry["content_change"] in ("new", "modified"):
             self._write_outbox(task, str(work_entry.get("artifact_sha256")), artifact)
         work_entry["staged"] = True
         return work_entry
@@ -1220,7 +1238,8 @@ class PortraitUpdateRunner:
         """逐套持久化 work manifest（含控制字段），供同版本恢复；被中断截断为前缀无害。"""
         _write_json_atomic(
             work_manifest_path,
-            {"schema_version": MANIFEST_SCHEMA_VERSION, "version": version_key, "skins": entries},
+            {"schema_version": MANIFEST_SCHEMA_VERSION, "version": version_key,
+             "notification_policy": self._notification_policy, "skins": entries},
         )
 
     def _write_staging_manifest(self, staging_portraits: Path, version_key: str,
@@ -1231,6 +1250,7 @@ class PortraitUpdateRunner:
             {
                 "schema_version": MANIFEST_SCHEMA_VERSION,
                 "version": version_key,
+                "notification_policy": self._notification_policy,
                 "skins": [
                     {key: value for key, value in entry.items() if key not in _CONTROL_FIELDS}
                     for entry in entries
