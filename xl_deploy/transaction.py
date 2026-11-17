@@ -182,6 +182,7 @@ class DeploymentTransaction:
             raise
 
         try:
+            scope = self._lifecycle_scope(journal)
             if scope:
                 journal = self._update(journal, phase="announcing_start")
                 self.events.append(("announce", START_NOTICE, *scope))
@@ -349,8 +350,16 @@ class DeploymentTransaction:
             }.get(journal.branch, set())
         return tuple(instance for instance in journal.announcement_scope if instance in allowed)
 
+    def _lifecycle_scope(self, journal: Journal) -> tuple[str, ...]:
+        """Main notices stay on main even when shared services affect other refs."""
+        if journal.branch == "main":
+            return self._release_note_scope(journal)
+        return journal.announcement_scope
+
     def _deliver_announcements(self, journal: Journal) -> DeploymentResult:
-        scope = journal.announcement_scope
+        scope = self._lifecycle_scope(journal)
+        if not scope and not journal.completion_notice_sent:
+            journal = self._update(journal, completion_notice_sent=True, error=None)
         if scope and not journal.completion_notice_sent:
             journal = self._update(
                 journal,
@@ -516,13 +525,14 @@ class DeploymentTransaction:
     def _deliver_recovery_notice(
         self, journal: Journal, *, cause: BaseException | None = None
     ) -> DeploymentResult:
-        if journal.announcement_scope and not journal.recovery_notice_sent:
+        scope = self._lifecycle_scope(journal)
+        if scope and not journal.recovery_notice_sent:
             try:
                 self.events.append(
-                    ("announce", RECOVERY_NOTICE, *journal.announcement_scope)
+                    ("announce", RECOVERY_NOTICE, *scope)
                 )
                 delivered = self.router.announce(
-                    journal.announcement_scope,
+                    scope,
                     RECOVERY_NOTICE,
                     notification_id=f"{journal.transaction_id}:recovery",
                 )
