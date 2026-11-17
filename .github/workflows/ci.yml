@@ -2,7 +2,7 @@ name: XL CI
 
 on:
   push:
-    branches: [debug, test, main]
+    branches: [debug, test, main, 'codex/main-*']
   pull_request:
     branches: [debug, test, main]
   pull_request_target:

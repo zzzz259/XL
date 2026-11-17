@@ -19,6 +19,7 @@ logs/
 /base.zip
 /local-research/
 /Maps/
+/starfall_credential_probe/
 *_as_temp/
 _tmp/
 tmp/
