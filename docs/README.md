@@ -21,7 +21,6 @@
 - [0.4 更新公告](releases/gacha-v0.4.md)：Android 信息与 UI 重构、长图、素材与统计改进。
 - [0.3.6 更新公告](releases/gacha-v0.3.6.md)：0.3.4 之后的渠道登录与查询改进、电脑端停止维护说明。
 - [构建与测试](gacha-development.md)：Android 环境、共享代码 CI、原生验证与签名升级；电脑端已停止维护。
-- [Android 云端发布](gacha-release.md)：Actions 环境、签名 Secrets、云端 APK、版本检查与 GitHub Release。
 - [数据与配置协议](gacha-architecture.md)：架构、存储、统计、schema1 与失败回退。
 - [公共 HTTPS 运维](../xl_updata_server/docs/gacha-config-hosting.md)：IP证书、目录权限、测试/正式分离、续期与恢复。
 
@@ -42,7 +41,6 @@
 
 - [README](../xl_qqbot/README.md)：功能、拓扑、快速启动与项目测试入口。
 - [配置与运维](../xl_qqbot/docs/配置与运维.md)：TOML 配置、tier 路由、Bot 进程职责、systemd 部署、状态/日志及故障排查。
-- [每期排行榜采集与历史档案](../xl_gacha_web/docs/leaderboard-archive.md)：公会战、幻象禁地、噩梦投影的人工授权 CLI、独立历史库和完整性口径。
 
 ### 自动部署控制器
 
