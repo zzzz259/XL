@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from scripts.android_release import (
     event_metadata,
     gh_api,
     prepare_secrets,
+    publish_release,
     read_version,
     verify_checksums,
     write_checksums,
@@ -19,6 +21,46 @@ from scripts.android_release import (
 
 
 class AndroidReleaseTests(unittest.TestCase):
+    def test_downloaded_release_assets_pass_the_published_checksum_manifest(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            version = self.fixture(root)
+            dist = root / "dist"
+            dist.mkdir()
+            source = "b" * 40
+            certificate = "a" * 64
+            (dist / version["apk_name"]).write_bytes(b"synthetic signed apk")
+            (dist / "build-metadata.json").write_text(json.dumps({
+                "source_commit": source, "version": version["version"],
+                "certificate_sha256": certificate,
+            }), encoding="utf-8")
+            (dist / "RELEASE_NOTES.md").write_text("# Synthetic release\n", encoding="utf-8")
+            write_checksums(dist, [version["apk_name"], "build-metadata.json", "RELEASE_NOTES.md"])
+            commands = []
+
+            def run(command, **kwargs):
+                commands.append(command)
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch("scripts.android_release.read_version", return_value=version), \
+                    patch("scripts.android_release.settings", return_value={"certificate_sha256": certificate}), \
+                    patch("scripts.android_release.checked_output", return_value=source.encode()), \
+                    patch("scripts.android_release.gh_api", side_effect=[None, None, {"object": {"type": "commit", "sha": source}}]), \
+                    patch("scripts.android_release.subprocess.run", side_effect=run), \
+                    patch.dict("os.environ", {"GH_REPO": "example/repo"}):
+                publish_release(dist)
+
+            download = root / "download"
+            download.mkdir()
+            upload = next(c for c in commands if c[:3] == ["gh", "release", "create"])
+            for filename in upload[4:upload.index("--repo")]:
+                path = Path(filename)
+                shutil.copyfile(path, download / path.name)
+            expected = verify_checksums(dist)
+            missing = [name for name in expected if not (download / name).is_file()]
+            self.assertEqual(missing, [], "Every checksummed file must be available as a Release asset")
+            self.assertEqual(verify_checksums(download), expected)
+
     def test_missing_github_release_is_distinct_from_auth_or_network_failure(self):
         for stdout, stderr in [(b'{"status":"404"}', b""), (b'{"message":"Not Found"}', b"gh: HTTP 404")]:
             with self.subTest(stdout=stdout), patch("scripts.android_release.subprocess.run", return_value=subprocess.CompletedProcess([], 1, stdout, stderr)):

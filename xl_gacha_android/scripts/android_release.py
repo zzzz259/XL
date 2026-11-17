@@ -218,7 +218,7 @@ def publish_release(dist):
         target = gh_api(path + "/git/tags/" + target["sha"])["object"]
     require(target["type"] == "commit" and target["sha"] == sha, "RELEASE_TAG_COMMIT_MISMATCH")
     subprocess.run(["gh", "release", "create", version["tag"], str(dist / version["apk_name"]),
-                    str(dist / "SHA256SUMS.txt"), str(dist / "build-metadata.json"), "--repo", repo,
+                    str(dist / "SHA256SUMS.txt"), str(dist / "build-metadata.json"), str(dist / "RELEASE_NOTES.md"), "--repo", repo,
                     "--title", f"星落抽卡手记 v{version['version']}", "--notes-file", str(dist / "RELEASE_NOTES.md"),
                     "--verify-tag", "--latest=false"], check=True)
 
