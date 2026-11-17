@@ -68,7 +68,7 @@ $env:HTTP_PROXY=$env:HTTPS_PROXY
 
 标签必须指向可从 `origin/main` 到达的提交；未晋级的 debug/test 发布请求会在读取 Secrets 前被拒绝。已存在的 Release 不覆盖，已有标签指向不同提交时失败，不移动标签或替换附件。APK 新版本需提高 versionName 和 versionCode，并加入对应公告。
 
-Release 附件为 APK、`SHA256SUMS.txt`、`build-metadata.json`，正文来自已提交的更新公告。`gacha-v*` 与 Windows 更新工具的 `v*` 标签隔离；Android Release 不改动仓库全局 Latest 标记。
+Release 附件为 APK、`SHA256SUMS.txt`、`build-metadata.json` 和 `RELEASE_NOTES.md`，校验清单中的每个文件都可直接下载；正文来自同一份已提交的更新公告。`gacha-v*` 与 Windows 更新工具的 `v*` 标签隔离；Android Release 不改动仓库全局 Latest 标记。
 
 ## 核验
 
