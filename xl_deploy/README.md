@@ -385,9 +385,13 @@ Gateway maintenance scope. Only after health checks pass does it durably enqueue
 `更新完毕`; any new non-empty project announcement follows in the destination
 instance's notifier FIFO.
 
-Start, completion, and rollback-recovery notices retain the full affected
-instance scope, including remote (`managed = false`) instances affected by a
-shared Gateway change. Feature announcements use only IDs already in that
+For a main deployment, start, completion, and rollback-recovery notices go only
+to enabled instances watching main, within the journal's original recipient
+scope. A shared Gateway change does not send main deployment messages to test.
+Test lifecycle notices retain their affected instance scope. Maintenance and
+drain still cover all affected instances, including remote (`managed = false`)
+routes affected by the shared Gateway. Legacy main lifecycle notices also go
+only to `main`. Feature announcements use only IDs already in that
 scope whose current inventory entries are enabled and have `watch_ref` matching
 the journal's persisted deployment branch. `managed` controls local services,
 not branch membership; instance names do not select a branch. In legacy mode,
