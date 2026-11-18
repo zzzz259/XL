@@ -23,7 +23,7 @@ python -B tests/visual_https_qa/run.py exercise --work "$RUNNER_TEMP/visual-http
 | 0.4.3 直接从 V1 更新到 V3 | C、D |
 | 0.4.3 冷装首次检查 V3 | A、B、C、D |
 
-A、B、C、D 分别是角色头像、时装横图、类型 108 的道具头像和类型 109 的头像框。每阶段验证原生缓存的视觉映射、WebView 实际读取的图片 SHA-256、尺寸和裁切字段，以及 HTTPS GET 次数、状态码和响应字节数。覆盖验收从应用界面导入同一合成报告，并截取实际生成的 JSON 导出。长图证据为应用生成的 1080px PNG。
+A、B、C、D 分别是角色头像、时装横图、类型 108 的道具头像和类型 109 的头像框。脚本从 WebView 调用应用自己的配置桥接接口，等待原生状态完成。每阶段验证原生缓存的视觉映射、WebView 实际读取的图片 SHA-256、尺寸和裁切字段，以及 HTTPS GET 次数、状态码和响应字节数。覆盖验收从应用界面导入同一合成报告，并截取实际生成的 JSON 导出。长图证据为应用生成的 1080px PNG。
 
 机读证据位于 `$RUNNER_TEMP/visual-https-qa/evidence/`，包含 `results.json`、`https-requests.jsonl`、`fixture-index.json` 及覆盖验收的前后 JSON 和长图。只上传该目录即可。使用已准备的 APK 重跑时，可传 `--evidence` 指定一个新目录。独立场景会重置隔离 QA 包，适用于一次性 AVD。
 
