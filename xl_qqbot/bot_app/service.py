@@ -10,10 +10,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 
 from aiohttp import web
 
 from .config import Config, load_config
+from .gateway import GatewayTransportClient, gateway_transport_for_config
 from .keyword_store import KeywordStore
 from .matcher import CharacterMatcher
 from .portrait_querier import PortraitQuerier
@@ -21,7 +23,6 @@ from .query_handler import QueryHandler
 from .querier import CharacterQuerier
 from .rerun_schedule_querier import RerunScheduleQuerier
 from .selection import SelectionStore
-from .gateway import gateway_transport_for_config
 
 _logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ TIERS = ("debug", "test", "production")
 
 QUERY_HANDLER_KEY = web.AppKey("query_handler", QueryHandler)
 INSTANCE_ID_KEY = web.AppKey("instance_id", str)
+SENDER_KEY = web.AppKey("gateway_sender", GatewayTransportClient)
 
 
 def QQSender(config, instance_id=None):
@@ -67,6 +69,7 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
     app = web.Application()
     app[QUERY_HANDLER_KEY] = handler
     app[INSTANCE_ID_KEY] = instance_id or config.instance.instance_id
+    app[SENDER_KEY] = sender
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     app.router.add_post("/event", _handle_event)
@@ -79,6 +82,8 @@ async def _handle_event(request: web.Request) -> web.Response:
         payload = await request.json()
     except Exception:
         return web.json_response({"ok": False, "error": "invalid json"}, status=400)
+    if isinstance(payload, dict) and payload.get("event_type") == "deployment_reply_probe":
+        return await _handle_reply_probe(request, payload.get("data"))
     handler: QueryHandler = request.app[QUERY_HANDLER_KEY]
     try:
         await handler.handle(payload)
@@ -86,6 +91,19 @@ async def _handle_event(request: web.Request) -> web.Response:
         _logger.exception("处理级别服务事件失败")
         return web.json_response({"ok": False, "error": "handler error"}, status=500)
     return web.json_response({"ok": True})
+
+
+async def _handle_reply_probe(request: web.Request, data: object) -> web.Response:
+    instance_id = request.app[INSTANCE_ID_KEY]
+    nonce = data.get("nonce") if isinstance(data, dict) else None
+    if (
+        not isinstance(data, dict) or data.get("instance_id") != instance_id
+        or not isinstance(nonce, str) or re.fullmatch(r"[a-f0-9]{32}", nonce) is None
+    ):
+        return web.json_response({"ok": False, "error": "invalid reply probe"}, status=400)
+    if not await request.app[SENDER_KEY].probe_reply_transport():
+        return web.json_response({"ok": False, "error": "reply transport unavailable"}, status=503)
+    return web.json_response({"ok": True, "instance_id": instance_id, "nonce": nonce})
 
 
 async def _handle_health(request: web.Request) -> web.Response:
