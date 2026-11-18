@@ -12,8 +12,6 @@ import logging
 import re
 from dataclasses import dataclass
 
-from .keyword_handler import KeywordHandler
-from .keyword_store import KeywordStore
 from .matcher import CharacterMatcher, render_candidates_message
 from .portrait_querier import PortraitQuerier
 from .querier import CharacterQuerier
@@ -130,7 +128,7 @@ def event_to_dict(message) -> dict:
     if isinstance(message, dict):
         return message
     data = {}
-    for key in ("id", "group_openid", "content", "mentions", "author", "attachments", "msg_elements", "message_type"):
+    for key in ("id", "group_openid", "content", "mentions", "author"):
         value = getattr(message, key, None)
         if value is not None:
             data[key] = value
@@ -143,8 +141,7 @@ class QueryHandler:
     def __init__(self, querier: CharacterQuerier, matcher: CharacterMatcher,
                  selection: SelectionStore, sender: QQSender,
                  bot_openid: str = "", mute: ServiceMute | None = None,
-                 rerun_querier=None, portrait_querier: PortraitQuerier | None = None,
-                 keyword_store: KeywordStore | None = None):
+                 rerun_querier=None, portrait_querier: PortraitQuerier | None = None):
         self._querier = querier
         self._matcher = matcher
         self._selection = selection
@@ -155,11 +152,6 @@ class QueryHandler:
         # 不传 mute 时自持（路由器转发模式按事件 muted 标志驱动）；
         # 旧一体化入口传入与 watcher 共享的实例（更新静音）
         self._mute = mute or ServiceMute()
-        self._keywords = None
-        if keyword_store is not None:
-            self._keywords = KeywordHandler(
-                keyword_store, sender, bot_openid=bot_openid, reserved=self._reserved_keyword
-            )
 
     # ---------- 入口 ----------
 
@@ -180,10 +172,6 @@ class QueryHandler:
     async def handle_event(self, etype: str, data: dict, muted=None) -> None:
         if muted is not None:
             self._mute.muted = bool(muted)
-        if self._keywords is not None and not self._mute.muted:
-            if await self._keywords.handle(etype, data):
-                self._selection.clear(data["group_openid"], _extract_member_openid(data))
-                return
         if etype == "group_message":
             await self._on_group_message(data)
         elif etype == "group_at":
@@ -192,12 +180,6 @@ class QueryHandler:
             pass  # 群学习归路由器，级别服务无动作
         else:
             _logger.warning("未知事件类型 type=%s", etype)
-
-    def _reserved_keyword(self, label: str) -> bool:
-        if is_rerun_schedule_query(label) or self._matcher.has_exact_name(label):
-            return True
-        spec = _parse_query_spec(label)
-        return spec.valid and spec.name != label and self._matcher.has_exact_name(spec.name)
 
     # ---------- 事件处理（data 为原始事件 dict） ----------
 

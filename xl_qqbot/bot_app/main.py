@@ -10,12 +10,12 @@ import logging
 import signal
 
 import botpy
+from botpy.connection import ConnectionState
+from botpy.message import GroupMessage
 
 from .bilibili import BilibiliWatcher
 from .config import load_config, require_gateway_credentials
-from .gateway import install_raw_parsers
 from .groups import GroupStore, learn_group_from_event
-from .keyword_store import KeywordStore
 from .matcher import CharacterMatcher
 from .proactive_dispatcher import ProactiveDispatcher
 from .proactive_outbox import ProactiveOutbox
@@ -37,6 +37,20 @@ from .watcher import Watcher
 _logger = logging.getLogger(__name__)
 
 
+def _install_group_message_parser() -> None:
+    """botpy 1.2 不认识 group_message_create（全量群消息事件），手动注册解析器。
+
+    开放平台开启「获取全部信息」后，平台对群内消息（含 @机器人）一律下发
+    GROUP_MESSAGE_CREATE，botpy 默认只会报 unknown event 并丢弃。
+    """
+
+    def parse_group_message_create(self, payload):
+        message = GroupMessage(self.api, payload.get("id", None), payload.get("d", {}))
+        self._dispatch("group_message_create", message)
+
+    ConnectionState.parse_group_message_create = parse_group_message_create
+
+
 def _setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -50,7 +64,8 @@ def _setup_logging() -> None:
 class _EventClient(botpy.Client):
     """旧一体化模式的网关客户端：薄壳，事件处理全部委托 QueryHandler。
 
-    群消息和 @ 消息均保留 QQ 的原始字段，由 QueryHandler 统一处理。
+    botpy 对本群消息/at 消息分别派发 GroupMessage 对象（at 为原生解析），
+    统一转成原始 dict 后交给 QueryHandler（与级别服务同一条链）。
     """
 
     def __init__(self, group_store: GroupStore, query_handler: QueryHandler):
@@ -76,7 +91,7 @@ class _EventClient(botpy.Client):
 async def _run_event_client(
     config, sender: QQSender, stop_event: asyncio.Event, mute: ServiceMute
 ) -> None:
-    install_raw_parsers()
+    _install_group_message_parser()
     querier = CharacterQuerier(config.watch.character_data, config.watch.versions_dir)
     # matcher/selection 在重连循环外创建：网关断线重建 _EventClient 时候选状态与别名缓存不丢
     matcher = CharacterMatcher(config.watch.character_data, config.watch.data_dir)
@@ -89,7 +104,6 @@ async def _run_event_client(
         bot_openid=config.bot.openid,
         mute=mute,
         rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
-        keyword_store=KeywordStore(config.watch.data_dir),
     )
 
     def _make_client() -> _EventClient:
