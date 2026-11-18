@@ -14,7 +14,6 @@ import logging
 from aiohttp import web
 
 from .config import Config, load_config
-from .keyword_store import KeywordStore
 from .matcher import CharacterMatcher
 from .portrait_querier import PortraitQuerier
 from .query_handler import QueryHandler
@@ -53,7 +52,6 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
         bot_openid=config.bot.openid,
         rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
         portrait_querier=portrait_querier,
-        keyword_store=KeywordStore(config.watch.data_dir),
     )
 
     async def on_startup(app: web.Application) -> None:
@@ -83,7 +81,7 @@ async def _handle_event(request: web.Request) -> web.Response:
     try:
         await handler.handle(payload)
     except Exception:
-        _logger.exception("处理级别服务事件失败")
+        _logger.exception("处理事件失败: %r", payload)
         return web.json_response({"ok": False, "error": "handler error"}, status=500)
     return web.json_response({"ok": True})
 

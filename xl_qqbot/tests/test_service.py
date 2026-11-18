@@ -13,7 +13,6 @@ from bot_app.config import (
     UploadConfig,
     WatchConfig,
 )
-from bot_app.keyword_store import KeywordStore
 from bot_app.service import QUERY_HANDLER_KEY, build_app, parse_args
 
 CHARACTERS = {
@@ -105,39 +104,6 @@ async def test_event_at_message_full_chain(tmp_path, monkeypatch):
         assert [c[0] for c in sender.calls] == ["image"]  # 查询全链路已处理
     finally:
         await client.close()
-
-
-@pytest.mark.asyncio
-async def test_full_group_keyword_uses_the_worker_data_directory(tmp_path, monkeypatch):
-    config, sender = make_config(tmp_path, monkeypatch)
-
-    async def receive(client, message_id, content, *, addressed=False):
-        data = {
-            "id": message_id,
-            "group_openid": "g1",
-            "content": content,
-            "author": {"member_openid": "u1"},
-        }
-        if addressed:
-            data["mentions"] = [{"member_openid": "BOT", "is_you": True}]
-        response = await client.post("/event", json={"event_type": "group_message", "data": data})
-        assert response.status == 200
-
-    async with TestClient(TestServer(build_app(config))) as client:
-        await receive(client, "m1", "<@BOT> 添加Raid", addressed=True)
-        await receive(client, "m2", "第一行")
-        await receive(client, "m3", "第二行")
-        await receive(client, "m4", "结束添加")
-    assert KeywordStore(config.watch.data_dir).lookup("g1", "Raid").parts[0]["text"] == "第一行\n第二行"
-
-    sender.calls.clear()
-    async with TestClient(TestServer(build_app(config))) as restarted:
-        await receive(restarted, "m5", "<@BOT> raid", addressed=True)
-        await receive(restarted, "m6", "<@BOT> 关键词列表", addressed=True)
-    assert sender.calls == [
-        ("text", "g1", "第一行\n第二行"),
-        ("text", "g1", "本群关键词（共 1 个）\nRaid"),
-    ]
 
 
 @pytest.mark.asyncio
