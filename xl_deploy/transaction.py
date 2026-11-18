@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -383,7 +383,7 @@ class DeploymentTransaction:
                     return DeploymentResult("announcement_pending", journal.sha, "Bot reply path pending")
                 journal = self._update(
                     journal,
-                    evidence={"reply_readiness": "passed", "reply_ready_at": datetime.now(timezone.utc).isoformat()},
+                    evidence={"reply_readiness": "passed", "reply_ready_at": datetime.now(UTC).isoformat()},
                 )
             try:
                 self.events.append(("announce", COMPLETION_NOTICE, *scope))
