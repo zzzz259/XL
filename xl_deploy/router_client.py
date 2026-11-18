@@ -6,10 +6,11 @@ import ipaddress
 import json
 import re
 import time
-from collections.abc import Callable, Sequence
+import uuid
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from urllib.parse import urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 START_NOTICE = "检测到更新，正在更新bot，期间将暂停服务"
 COMPLETION_NOTICE = "更新完毕"
@@ -21,7 +22,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 
 
 def _open_without_redirects(request: Request, *, timeout: float):
-    return build_opener(_NoRedirectHandler).open(request, timeout=timeout)
+    return build_opener(ProxyHandler({}), _NoRedirectHandler).open(request, timeout=timeout)
 
 
 class RouterControlClient:
@@ -31,6 +32,7 @@ class RouterControlClient:
         token: str,
         *,
         inventory=None,
+        reply_probe_ports: Mapping[str, int] | None = None,
         transport: Callable[..., Any] | None = None,
         timeout_seconds: float = 5,
         poll_interval_seconds: float = 0.25,
@@ -38,7 +40,15 @@ class RouterControlClient:
         validate_loopback_url(base_url)
         if not token.strip() or timeout_seconds <= 0 or poll_interval_seconds <= 0:
             raise ValueError("router token and positive timeouts are required")
+        probe_ports = {} if reply_probe_ports is None else reply_probe_ports
+        enabled = {item.instance_id for item in inventory.instances if item.enabled} if inventory else set()
+        if not isinstance(probe_ports, Mapping) or any(
+            instance not in enabled or type(port) is not int or not 0 < port < 65536
+            for instance, port in probe_ports.items()
+        ):
+            raise ValueError("reply_probe_ports must map enabled Bot instances to loopback ports")
         self.inventory = inventory
+        self.reply_probe_ports = dict(probe_ports)
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.transport = transport or _open_without_redirects
@@ -99,6 +109,34 @@ class RouterControlClient:
             self._post(
                 "/deployment/maintenance", {self._scope_key: self._scope(tier), "enabled": False}
             )
+
+    def require_reply_path(self, scope: Sequence[str]) -> None:
+        """Check live Gateway and Worker endpoints for this completion audience."""
+        gateway = self.inventory.gateway
+        ready = self._send(Request(
+            f"http://127.0.0.1:{gateway.listen_port}/gateway/health", headers=self._headers(),
+            method="GET",
+        ))
+        if ready.get("ready") is not True:
+            raise RuntimeError("Gateway is not ready for reply probes")
+        entries = {entry.instance_id: entry for entry in self.inventory.instances if entry.enabled}
+        for target in scope:
+            instance_id = self._scope(target)
+            entry = entries[instance_id]
+            port = self.reply_probe_ports.get(instance_id)
+            if port is None and gateway.managed:
+                port = entry.listen_ports.get("bot")
+            if port is None:
+                raise RuntimeError(f"reply probe route is not configured for {instance_id}")
+            nonce = uuid.uuid4().hex
+            data = {"instance_id": instance_id, "nonce": nonce}
+            response = self._send(Request(
+                f"http://127.0.0.1:{port}/event",
+                data=json.dumps({"event_type": "deployment_reply_probe", "data": data}).encode("utf-8"),
+                headers={"Content-Type": "application/json"}, method="POST",
+            ))
+            if response.get("instance_id") != instance_id or response.get("nonce") != nonce:
+                raise RuntimeError(f"reply probe acknowledgement mismatched for {instance_id}")
 
     def drain(self, tiers: Sequence[str], timeout_seconds: float) -> bool:
         deadline = time.monotonic() + max(0, timeout_seconds)
