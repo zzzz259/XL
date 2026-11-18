@@ -188,6 +188,19 @@ function fixture(options) {
   return { stage, images: Array.from(stage.labels, label => ({ label, ...index.images[label] })) };
 }
 
+export async function catalogRequest(browser, path, body = null) {
+  const reply = await browser.run(async (route, request) => {
+    try {
+      return { ok: true, state: await MobileServices.api(route, request ?? undefined) };
+    } catch (error) {
+      const state = await MobileServices.api('/catalog').catch(() => null);
+      return { ok: false, error: error.code || error.message || String(error), state };
+    }
+  }, path, body);
+  if (!reply.ok) throw new Error(`${path} failed: ${reply.error}; native state ${JSON.stringify(reply.state)}`);
+  return reply.state;
+}
+
 async function waitStage(browser, expected, { url, offline, refreshedAfter } = {}) {
   const { stage, images } = expected;
   const active = await until(async () => {
@@ -239,7 +252,10 @@ async function waitStage(browser, expected, { url, offline, refreshedAfter } = {
       assert.equal(actual[key], image[key], `WebView image ${image.label} differs in ${key}`);
     }
   }
-  return { version: stage.version, source: active.source, mapping: stage.visual.sha256, images: observations };
+  // Update the real renderer's in-memory mapping after bypassing the settings UI.
+  await browser.run(() => MobileAssets.refresh().then(() => true));
+  return { version: stage.version, source: active.source, mapping: stage.visual.sha256, images: observations,
+    catalog: { phase: active.phase, error: active.error }, visual: { phase: active.visual_assets.phase, error: active.visual_assets.error } };
 }
 
 async function importDemo(browser, file) {
@@ -263,6 +279,7 @@ async function importDemo(browser, file) {
   return until(() => browser.run(async () => {
     const error = document.querySelector('#import-error');
     if (!error.hidden) throw new Error(error.textContent);
+    if (document.querySelector('#import-dialog').open || document.querySelector('#import-submit').disabled) return false;
     const result = await MobileServices.api('/library');
     const account = result.accounts[0];
     return result.accounts.length === 1 && account.label === 'Visual HTTPS QA' && account.pull_count;
@@ -378,23 +395,17 @@ async function main(argv) {
           const state = await MobileServices.api('/catalog');
           return !state.checking && !state.visual_assets.checking;
         }), 'waiting for the initial catalog check to settle');
-        await browser.run(address => {
-          document.querySelector('[data-tab="profile"]').click();
-          const field = document.querySelector('#catalog-source');
-          field.closest('details').open = true;
-          field.value = address;
-          document.querySelector('#catalog-source-save').click();
-        }, url);
-        await until(() => browser.run(async address => (await MobileServices.api('/catalog')).source === address, url),
-          'waiting for the configured HTTPS source');
-        const result = values.stage ? await waitStage(browser, fixture(values), { url }) : { source: url };
+        const configured = await catalogRequest(browser, '/catalog/source', { url });
+        assert.equal(configured.source, url, 'Native set-source response: ' + JSON.stringify(configured));
+        const result = values.stage ? await waitStage(browser, fixture(values), { url }) : configured;
         return console.log(JSON.stringify(result));
       }
       case 'refresh': {
         const url = values.url && validateSource(values.url);
-        const before = await browser.run(async () => (await MobileServices.api('/catalog')).checked_at);
-        await browser.run(() => document.querySelector('#catalog-check').click());
-        return console.log(JSON.stringify(await waitStage(browser, fixture(values), { url, refreshedAfter: before })));
+        const before = await catalogRequest(browser, '/catalog');
+        if (url) assert.equal(before.source, url, 'Native source before refresh: ' + JSON.stringify(before));
+        await catalogRequest(browser, '/catalog/check', { force: true });
+        return console.log(JSON.stringify(await waitStage(browser, fixture(values), { url, refreshedAfter: before.checked_at })));
       }
       case 'wait':
         return console.log(JSON.stringify(await waitStage(browser, fixture(values), {
