@@ -24,6 +24,17 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "xl_updata_tool"))
+from app.features.preview.gacha_image_processing import (
+    ACCOUNT_HEAD_CROP,
+    ACCOUNT_HEAD_SOURCE_SIZE,
+    PORTRAIT_CROP,
+    PORTRAIT_SIZE,
+    alpha_bbox,
+    prepare_portrait,
+    save_lossless_webp,
+)
+
 Image.MAX_IMAGE_PIXELS = None
 
 # ---------------------------------------------------------------------------
@@ -31,14 +42,6 @@ Image.MAX_IMAGE_PIXELS = None
 # ---------------------------------------------------------------------------
 
 DEFAULT_PACK = "C:/Users/49432/Downloads/Starfall-App-Assets-20261029/Starfall-App-Assets"
-
-PORTRAIT_SIZE = 256          # 角色肖像输出边长
-PORTRAIT_CROP = (38, 0, 180, 180)  # 头像窗口聚焦头肩；保持原图供导出共享同一裁切
-# CommonResource.HeadBg: PicLoader 320×140 at (-91,-23), ellipse mask 88×88.
-ACCOUNT_HEAD_CROP = (91, 23, 88, 88)
-ACCOUNT_HEAD_SOURCE_SIZE = (320, 140)
-SQUARE_PAD_SIZE = 270        # 140x270 HeadSquare 左右补透明后的方画布边长
-ALPHA_THRESHOLD = 0          # alpha bbox 阈值（与素材包 catalog/assets.json 约定一致，alpha_min=0）
 
 MASCOT_CANVAS = 864          # gugu 统一画布边长
 MASCOT_BASELINE_Y = 848      # 落地帧底行所在基线
@@ -145,14 +148,6 @@ def parse_webp_riff(path):
 # 图像辅助
 # ---------------------------------------------------------------------------
 
-def alpha_bbox(im):
-    """返回 alpha>ALPHA_THRESHOLD 的包围盒 (x0, y0, x1, y1)，x1/y1 为开区间。"""
-    rgba = im if im.mode == "RGBA" else im.convert("RGBA")
-    alpha = rgba.getchannel("A")
-    mask = alpha.point(lambda a: 255 if a > ALPHA_THRESHOLD else 0)
-    return mask.getbbox()
-
-
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -161,66 +156,17 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def save_lossless_webp(im, path, duration=None, loop=None, append_images=None):
-    # exact=True 保证透明像素下的 RGB 也被逐位保留，解码端可与源帧完全一致
-    kwargs = {"lossless": True, "quality": 100, "method": 4, "exact": True}
-    if duration is not None:
-        kwargs["duration"] = duration
-    if loop is not None:
-        kwargs["loop"] = loop
-    if append_images is not None:
-        kwargs["save_all"] = True
-        kwargs["append_images"] = append_images
-    im.save(path, "WEBP", **kwargs)
-
-
 # ---------------------------------------------------------------------------
 # 角色肖像
 # ---------------------------------------------------------------------------
 
-def normalize_portrait(im, square_size):
-    """把头像放入 square_size 方画布：按 alpha bbox 水平平移居中，不裁切，纵向不变。"""
-    canvas = Image.new("RGBA", (square_size, square_size), (0, 0, 0, 0))
-    bbox = alpha_bbox(im)
-    if bbox is None:
-        return canvas
-    x0, _y0, x1, _y1 = bbox
-    dx = round((square_size - (x1 - x0)) / 2) - x0
-    canvas.paste(im.convert("RGBA"), (dx, 0))
-    return canvas
-
-
-def trim_portrait(im, margin=4):
-    """移除透明边缘并等比填满方画布，保留全部非透明人物像素。"""
-    bbox = alpha_bbox(im)
-    if bbox is None:
-        return Image.new("RGBA", (PORTRAIT_SIZE, PORTRAIT_SIZE))
-    box = (
-        max(0, bbox[0] - margin), max(0, bbox[1] - margin),
-        min(im.width, bbox[2] + margin), min(im.height, bbox[3] + margin),
-    )
-    cropped = im.convert("RGBA").crop(box)
-    scale = min(PORTRAIT_SIZE / cropped.width, PORTRAIT_SIZE / cropped.height)
-    size = (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale)))
-    resized = cropped.resize(size, Image.Resampling.LANCZOS)
-    canvas = Image.new("RGBA", (PORTRAIT_SIZE, PORTRAIT_SIZE))
-    canvas.paste(resized, ((PORTRAIT_SIZE - size[0]) // 2, (PORTRAIT_SIZE - size[1]) // 2))
-    return canvas
-
-
 def build_portrait(item_id, character, pack_root, out_dir):
     """生成单个角色肖像，bursthead 为 null 时回退到 140x270 方图。"""
     burst = character.get("bursthead")
-    if burst:
-        canvas = Image.open(pack_root / burst).convert("RGBA")
-    else:
-        square_rel = character["square"]
-        src = Image.open(pack_root / square_rel)
-        if src.size != (140, 270):
-            raise ValueError(f"{item_id} 方图尺寸异常: {src.size}")
-        canvas = normalize_portrait(src, SQUARE_PAD_SIZE)
+    with Image.open(pack_root / (burst or character["square"])) as source:
+        portrait = prepare_portrait(source, square_fallback=not burst)
     out_path = out_dir / f"{item_id}.webp"
-    save_lossless_webp(trim_portrait(canvas), out_path)
+    save_lossless_webp(portrait, out_path)
     return out_path
 
 

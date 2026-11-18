@@ -191,6 +191,13 @@ class StagedToolReleaseTests(unittest.TestCase):
             cwd=self.release, text=True, capture_output=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_gacha_visual_helpers_ship_in_sparse_release(self):
+        for name in ("fgui_atlas.py", "gacha_image_processing.py"):
+            with self.subTest(name=name):
+                relative = f"app/features/preview/{name}"
+                self.assertTrue((self.tool / relative).is_file())
+                self.assertTrue(is_tool_runtime_path(f"xl_updata_tool/{relative}"))
+
     def test_every_app_import_resolves_inside_release(self):
         """Static closure guard: no staged app import may dangle, even lazy ones."""
 
