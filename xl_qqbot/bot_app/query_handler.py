@@ -158,7 +158,8 @@ class QueryHandler:
         self._keywords = None
         if keyword_store is not None:
             self._keywords = KeywordHandler(
-                keyword_store, sender, bot_openid=bot_openid, reserved=self._reserved_keyword
+                keyword_store, sender, bot_openid=bot_openid, bot_display_name=BOT_DISPLAY_NAME,
+                reserved=self._reserved_keyword,
             )
 
     # ---------- 入口 ----------

@@ -90,7 +90,7 @@ class FakeCurrentPointer:
         self.targets[str(pointer)] = target
 
 
-def make_transaction(tmp_path, *, runner=None, router=None, drain_timeout=3, inventory=None):
+def make_transaction(tmp_path, *, runner=None, router=None, drain_timeout=3, inventory=None, **options):
     root = tmp_path / "deploy"
     releases = root / "releases"
     releases.mkdir(parents=True)
@@ -125,6 +125,7 @@ def make_transaction(tmp_path, *, runner=None, router=None, drain_timeout=3, inv
         paths,
         drain_timeout_seconds=drain_timeout,
         inventory=inventory,
+        **options,
     )
 
 
@@ -190,6 +191,36 @@ def test_notice_failure_never_pauses_or_stops_live_services(tmp_path):
         event[0] in {"pause", "drain", "stop", "switch"} for event in transaction.events
     )
     assert branch_current(transaction, "test").name == "3" * 40
+
+
+def test_completion_waits_for_reply_path_and_retries_without_rollback(tmp_path):
+    router = FakeRouter()
+    probe_calls = []
+
+    def probe(scopes):
+        assert not router.maintenance
+        assert ("resume", "debug", "test") in router.events
+        probe_calls.append(scopes)
+        if len(probe_calls) == 1:
+            raise RuntimeError("Worker reply path not ready")
+
+    transaction = make_transaction(tmp_path, router=router, reply_probe=probe)
+    result = transaction.execute(make_plan(release_note="New version details"))
+
+    assert result.status == "announcement_pending"
+    assert branch_current(transaction, "test").name.startswith(f"{NEW_SHA}-")
+    pending = transaction.state.load()
+    assert pending.phase == "completion_notice_pending"
+    assert pending.evidence["reply_readiness"] == "pending"
+    assert not pending.maintenance_enabled
+    assert not pending.completion_notice_sent
+    assert router.events[-1] == ("resume", "debug", "test")
+
+    assert transaction.recover().status == "success"
+    assert probe_calls == [("debug", "test"), ("debug", "test")]
+    assert transaction.state.load().evidence["reply_readiness"] == "passed"
+    assert router.events.count(("announce", DONE_NOTICE, "debug", "test")) == 1
+    assert router.events[-1] == ("release_note", "New version details", "debug", "test")
 
 
 def test_drain_timeout_aborts_before_stopping_units(tmp_path):

@@ -248,6 +248,21 @@ class GatewayTransportClient:
             raise RuntimeError("Gateway transport request failed") from error
         return response.status == 200 and isinstance(body, dict) and body.get("sent") is True
 
+    async def probe_reply_transport(self) -> bool:
+        """Check this instance's authenticated reply endpoint without sending."""
+        if self._session is None or self._session.closed:
+            return False
+        try:
+            async with self._session.options(
+                f"{self.base_url}/gateway/messages", allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=3),
+            ) as response:
+                # The existing POST route authenticates before rejecting OPTIONS.
+                allowed = {method.strip() for method in response.headers.get("Allow", "").split(",")}
+                return response.status == 405 and "POST" in allowed
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            return False
+
     async def send_text(self, group_openid: str, text: str, reply_to: str = "") -> bool:
         return await self._send({
             "recipient": group_openid,

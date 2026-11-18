@@ -41,6 +41,7 @@ class PollerRuntimeConfig:
     router_token_file: Path
     inventory: DeploymentInventory | None = None
     branches: tuple[str, ...] = ("debug", "test", "main")
+    reply_probe_ports: dict[str, int] | None = None
 
 
 def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
@@ -67,6 +68,7 @@ def load_runtime_config(config_path: str | Path) -> PollerRuntimeConfig:
             test_backend_data=_path(config_file, deployment["test_backend_data"]),
             router_base_url=str(router["base_url"]),
             router_token_file=_path(config_file, router["token_file"]),
+            reply_probe_ports=router.get("reply_probe_ports"),
             inventory=(DeploymentInventory.from_mapping(values["inventory"], base_dir=config_file.parent)
                        if "inventory" in values else None),
             branches=branch_subset(deployment.get("branches", ["debug", "test", "main"])),
@@ -119,7 +121,10 @@ def build_poller(config_path: str | Path) -> BranchPoller:
         GitHubConfig(owner=runtime.github_owner, repo=runtime.github_repo, token=github_token)
     )
     router_token = read_secret(runtime.router_token_file)
-    router = RouterControlClient(runtime.router_base_url, router_token, inventory=runtime.inventory)
+    router = RouterControlClient(
+        runtime.router_base_url, router_token, inventory=runtime.inventory,
+        reply_probe_ports=runtime.reply_probe_ports,
+    )
     runner = CommandRunner(
         inventory=runtime.inventory,
         repository=runtime.repository,
@@ -147,8 +152,10 @@ def build_poller(config_path: str | Path) -> BranchPoller:
             config_path=config_path,
             data_path=data_path,
         )
-        return DeploymentTransaction(state, runner, router, paths, inventory=runtime.inventory,
-                                     release_storage=storage)
+        return DeploymentTransaction(
+            state, runner, router, paths, inventory=runtime.inventory, release_storage=storage,
+            reply_probe=router.require_reply_path if runtime.inventory is not None else None,
+        )
 
     return BranchPoller(
         github,

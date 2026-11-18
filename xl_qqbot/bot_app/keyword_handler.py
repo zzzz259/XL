@@ -36,7 +36,9 @@ def _field(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _addressed(event_type: str, data: dict, bot_openid: str) -> tuple[bool, str]:
+def _addressed(
+    event_type: str, data: dict, bot_openid: str, literal_mention: re.Pattern[str]
+) -> tuple[bool, str]:
     text = _field(data.get("content"))
     addressed = event_type == "group_at"
     targets = {bot_openid} if bot_openid else set()
@@ -53,6 +55,10 @@ def _addressed(event_type: str, data: dict, bot_openid: str) -> tuple[bool, str]
             if marker in text:
                 addressed = True
                 text = text.replace(marker, "")
+    if not addressed:
+        # QQ can deliver the visible @ prefix without an inline marker or mentions.
+        text, count = literal_mention.subn("", text, count=1)
+        addressed = count > 0
     return addressed, text
 
 
@@ -78,12 +84,19 @@ def _split_keyword_list(body: str, page_length: int) -> list[str]:
 
 class KeywordHandler:
     def __init__(
-        self, store: KeywordStore, sender, *, bot_openid: str, reserved: Callable[[str], bool]
+        self,
+        store: KeywordStore,
+        sender,
+        *,
+        bot_openid: str,
+        bot_display_name: str,
+        reserved: Callable[[str], bool],
     ) -> None:
         self._store = store
         self._media = KeywordMedia(store.data_dir)
         self._sender = sender
         self._bot_openid = bot_openid
+        self._literal_mention = re.compile(rf"\A\s*@{re.escape(bot_display_name)}(?=\s|$)")
         self._reserved = reserved
         self._locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
         self._handled: OrderedDict[tuple[str, str], float] = OrderedDict()
@@ -114,7 +127,7 @@ class KeywordHandler:
         if delivery in self._handled:
             return True
 
-        addressed, text = _addressed(event_type, data, self._bot_openid)
+        addressed, text = _addressed(event_type, data, self._bot_openid, self._literal_mention)
         actor = (group, member)
         lock = self._locks.get(actor)
         if lock is None:
