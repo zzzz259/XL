@@ -125,6 +125,27 @@ class KeywordFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.receive("关键词列表", group="group-c", member="bob", at=True)
         self.assertEqual(self.sender.sent[-1][2], "本群还没有已保存的关键词。")
 
+    async def test_literal_bot_mention_lists_keywords_without_qq_metadata(self):
+        reply_to = await self.receive("@星落罗伯特 关键词列表")
+        self.assertEqual(self.sender.sent, [
+            ("text", "group-a", "本群还没有已保存的关键词。", reply_to),
+        ])
+
+    async def test_literal_bot_mention_can_add_trigger_and_delete_keywords(self):
+        await self.receive("@星落罗伯特 添加强度榜")
+        self.assertIsNotNone(self.store.get_draft("group-a", "alice"))
+        await self.receive("强度榜正文")
+        await self.receive("结束添加")
+
+        reply_to = await self.receive("@星落罗伯特　强度榜", member="bob")
+        self.assertEqual(self.sender.sent[-1], ("text", "group-a", "强度榜正文", reply_to))
+
+        await self.receive("@星落罗伯特 删除强度榜", member="bob")
+        self.assertIn("创建者或本群管理员", self.sender.sent[-1][2])
+        self.assertIsNotNone(self.store.lookup("group-a", "强度榜"))
+        await self.receive("@星落罗伯特 删除强度榜")
+        self.assertIsNone(self.store.lookup("group-a", "强度榜"))
+
     async def test_keyword_list_pages_long_output_within_the_gateway_limit(self):
         first = "A" * 2100
         second = "B" * 2100
@@ -169,9 +190,11 @@ class KeywordFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.receive("删除Raid", member="bob", at=True, role="owner")
         self.assertIn("本群没有这个关键词", self.sender.sent[-1][2])
 
-    async def test_start_requires_real_mention_and_draft_control_is_scoped(self):
+    async def test_start_requires_bot_address_and_draft_control_is_scoped(self):
         await self.receive("星落罗伯特 添加Raid")
         await self.receive("添加Raid")
+        await self.receive("示例 @星落罗伯特 添加Raid")
+        await self.receive("@星落罗伯特添加Raid")
         await self.receive("<@someone> 添加Raid", mentions=[{"member_openid": "someone", "is_you": False}])
         self.assertIsNone(self.store.get_draft("group-a", "alice"))
         await self.receive("添加", at=True)
