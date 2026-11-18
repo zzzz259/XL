@@ -240,6 +240,17 @@ class KeywordStore:
                 )
             }
 
+    def list_labels(self, group_openid: str) -> tuple[str, ...]:
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT keyword_label FROM keyword_entries
+                WHERE group_openid = ? ORDER BY keyword_key
+                """,
+                (group_openid,),
+            )
+            return tuple(label for (label,) in rows)
+
     def lookup(self, group_openid: str, label: str) -> KeywordEntry | None:
         with self._connect() as db:
             row = db.execute(
