@@ -230,6 +230,7 @@ class UIPackage:
         self._items_by_id = {}
         self._items_by_name = {}
         self._sprites = {}
+        self.duplicate_sprite_ids = set()
         self._dependencies = []
         self._asset_path = ""
         self._branches = []
@@ -344,6 +345,8 @@ class UIPackage:
                     else:
                         sprite.originalSize.x = sprite.rect.width
                         sprite.originalSize.y = sprite.rect.height
+                    if item_id in self._sprites:
+                        self.duplicate_sprite_ids.add(item_id)
                     self._sprites[item_id] = sprite
                 buffer.position = next_pos
         return True
@@ -360,6 +363,30 @@ class UIPackage:
     @property
     def sprites(self) -> dict:
         return self._sprites
+
+
+def crop_atlas_sprite(atlas_image, sprite, *, restore_original_size=True):
+    """Unpack one FairyGUI sprite, including its orientation and trim offsets."""
+    rect = sprite.rect
+    x, y, width, height = (int(value) for value in (rect.x, rect.y, rect.width, rect.height))
+    if (min(x, y) < 0 or min(width, height) <= 0 or
+            x + width > atlas_image.width or y + height > atlas_image.height):
+        raise ValueError(f"FGUI sprite out of bounds: {(x, y, width, height)} in {atlas_image.size}")
+    image = atlas_image.crop((x, y, x + width, y + height)).convert("RGBA")
+    if sprite.rotated:
+        image = image.transpose(Image.Transpose.ROTATE_270)
+    if not restore_original_size:
+        return image
+    offset = int(sprite.offset.x), int(sprite.offset.y)
+    original_size = int(sprite.originalSize.x), int(sprite.originalSize.y)
+    if (min(offset) < 0 or not all(0 < dim <= 4096 for dim in original_size) or
+            offset[0] + image.width > original_size[0] or offset[1] + image.height > original_size[1]):
+        raise ValueError(f"invalid FGUI trim: {offset}, {image.size}, {original_size}")
+    if offset == (0, 0) and original_size == image.size:
+        return image
+    result = Image.new("RGBA", original_size)
+    result.paste(image, offset)
+    return result
 
 
 class UIPackageTool:
@@ -429,7 +456,7 @@ class UIPackageTool:
             width = int(rect.width)
             height = int(rect.height)
             atlas_width, atlas_height = atlas_img.size
-            if x < 0 or y < 0 or x + width > atlas_width or y + height > atlas_height:
+            if min(x, y) < 0 or min(width, height) <= 0 or x + width > atlas_width or y + height > atlas_height:
                 logger.warning(f"FGUI 精灵越界: {name}")
                 skipped_count += 1
                 logger.error("FGUI 精灵矩形越界 package=%s sprite_id=%s atlas=%s rect=%s atlas_size=%s", pkg.name, sprite_id, atlas_key, (x, y, width, height), atlas_img.size, extra={"event": "atlas.sprite.failed", "error_code": "ATLAS_SPRITE_RECT_OUT_OF_BOUNDS", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "atlas": atlas_key, "rect": [x, y, width, height], "atlas_size": list(atlas_img.size)}})
@@ -440,11 +467,7 @@ class UIPackageTool:
             if is_override_exists or not os.path.exists(output_path):
                 try:
                     logger.debug("FGUI 精灵裁切开始 package=%s sprite_id=%s name=%s atlas=%s rect=%s output=%s rotated=%s", pkg.name, sprite_id, name, atlas_key, (x, y, width, height), output_path, rotated, extra={"event": "atlas.sprite.start", "details": {"package": pkg.name, "sprite_id": str(sprite_id), "sprite_name": str(name), "atlas": atlas_key, "rect": [x, y, width, height], "output": output_path, "rotated": rotated}})
-                    sub_image = atlas_img.crop((x, y, x + width, y + height))
-                    if rotated:
-                        sub_image = sub_image.transpose(Image.ROTATE_90)
-                        sub_image = sub_image.transpose(Image.ROTATE_180)
-                    sub_image = sub_image.convert("RGBA")
+                    sub_image = crop_atlas_sprite(atlas_img, sprite, restore_original_size=False)
                     sub_image.save(output_path, "PNG")
                     output_bytes = os.path.getsize(output_path)
                     exported_count += 1

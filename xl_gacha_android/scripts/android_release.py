@@ -41,7 +41,7 @@ def read_version(repo=ROOT):
     notes = repo / f"docs/releases/gacha-v{version}.md"
     require(notes.is_file() and notes.read_text(encoding="utf-8").strip(), "RELEASE_NOTES_MISSING")
     return {"version": version, "version_code": int(code), "tag": f"gacha-v{version}",
-            "apk_name": f"星落抽卡手记-Android-v{version}.apk"}
+            "apk_name": f"starfall-gacha-android-v{version}.apk"}
 
 
 def event_metadata(version, event, ref, requested, publish):
@@ -167,17 +167,17 @@ def build_release(args):
                     "--keystore", str(private / "release.p12"), "--key-alias", settings()["key_alias"],
                     "--store-pass-env", "GACHA_ANDROID_KEYSTORE_PASSWORD",
                     "--bilibili-config", str(private / "bilibili-client.json")], check=True)
-    apk = args.output / version["apk_name"]
+    apk = args.output / f"星落抽卡手记-Android-v{version['version']}.apk"
     audit = audit_apk(apk, args.sdk, args.jdk, version)
     args.dist.mkdir(parents=True, exist_ok=False)
-    shutil.copyfile(apk, args.dist / apk.name)
+    shutil.copyfile(apk, args.dist / version["apk_name"])
     shutil.copyfile(ROOT / f"docs/releases/{version['tag']}.md", args.dist / "RELEASE_NOTES.md")
     sha = checked_output(["git", "-C", ROOT, "rev-parse", "HEAD"]).decode().strip()
     metadata = {**version, **audit, "source_commit": sha,
                 "workflow_run": os.environ.get("GITHUB_RUN_ID", "local"),
                 "sha256": hashlib.sha256(apk.read_bytes()).hexdigest()}
     (args.dist / "build-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-    write_checksums(args.dist, [apk.name, "build-metadata.json", "RELEASE_NOTES.md"])
+    write_checksums(args.dist, [version["apk_name"], "build-metadata.json", "RELEASE_NOTES.md"])
     print(json.dumps(metadata, ensure_ascii=True))
 
 

@@ -53,6 +53,8 @@ $env:HTTP_PROXY=$env:HTTPS_PROXY
 
 合入 `debug` 的 Android、共享页面/配置或发布脚本变更，自动触发签名构建并上传 Artifact，不创建正式 Release。成功记录下可下载 `gacha-android-<版本号>`，包含 APK、`SHA256SUMS.txt`、`build-metadata.json` 和 `RELEASE_NOTES.md`；Artifact 保留 30 天。
 
+云端 APK 统一使用 `starfall-gacha-android-v<版本号>.apk` 英文文件名，确保 Artifact、Release 和校验清单一致。GitHub 会改写部分上传文件名，不能依赖中文附件名保持原样；见 [GitHub 附件命名说明](https://docs.github.com/en/rest/releases/assets#upload-a-release-asset)。
+
 流程晋级至 `main` 后，也可在 Actions → **Gacha Android Release** → **Run workflow** 手动执行：选择 `debug`、`test` 或 `main`，版本号留空，不勾选 `publish`。GitHub 的手动入口要求 workflow 文件已存在于默认分支，只有 debug 中的文件尚不满足此条件。[GitHub 手动触发说明](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)
 
 版本号、versionCode 从 `AndroidManifest.xml` 读取；`baseline.json` 的 integration_version 和 `docs/releases/gacha-v<版本>.md` 必须匹配。手填版本仅作一致性检查，不能覆盖源码版本。

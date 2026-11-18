@@ -14,26 +14,57 @@ public final class VisualAssets {
     static final int MAX_MAPPING = 1024 * 1024, MAX_IMAGE = 4 * 1024 * 1024;
     private static final long MAX_TOTAL = 32 * 1024 * 1024L, BACKOFF = 60000L;
     interface Transport { byte[] get(String url, int limit) throws Exception; }
+    interface BundledAssets { InputStream open(String path) throws IOException; }
     private final File directory;
     private final JSONObject bundled;
     private final Transport transport;
+    private final BundledAssets bundledAssets;
+    private final Map<String, List<String>> bundledPaths = new HashMap<>();
+    private final List<Snapshot> repairSources = new ArrayList<>();
     private Snapshot current, previous;
+    private JSONObject acceptedDescriptor;
     private JSONObject requested;
     private String source = "", context = "", phase = "unconfigured", error = "";
     private long generation, checkedAt, retryAt;
     private boolean busy, pending, pendingForce;
 
     private static final class Snapshot {
-        JSONObject descriptor, mapping, effective;
-        String revision;
-        File directory;
+        final JSONObject descriptor, mapping, effective;
+        final String revision;
+        final File directory;
+        final Set<String> images = new HashSet<>();
+
+        Snapshot(File directory, JSONObject descriptor, JSONObject mapping, JSONObject effective) throws JSONException {
+            this.descriptor = copy(descriptor); this.mapping = mapping; this.effective = effective;
+            revision = descriptor.getString("sha256"); this.directory = new File(directory, revision);
+            JSONObject files = mapping.getJSONObject("files");
+            for (Iterator<String> it = files.keys(); it.hasNext();) {
+                String path = it.next(); images.add(imageKey(path, files.getJSONObject(path)));
+            }
+        }
     }
 
     public VisualAssets(File cacheDirectory, JSONObject bundledManifest) throws Exception {
         this(cacheDirectory, bundledManifest, VisualAssets::download);
     }
+    VisualAssets(File cacheDirectory, JSONObject bundledManifest, BundledAssets bundledAssets) throws Exception {
+        this(cacheDirectory, bundledManifest, VisualAssets::download, bundledAssets);
+    }
     VisualAssets(File cacheDirectory, JSONObject bundledManifest, Transport transport) throws Exception {
+        this(cacheDirectory, bundledManifest, transport, null);
+    }
+    VisualAssets(File cacheDirectory, JSONObject bundledManifest, Transport transport, BundledAssets bundledAssets) throws Exception {
         directory = cacheDirectory; bundled = copy(bundledManifest); this.transport = transport;
+        this.bundledAssets = bundledAssets;
+        JSONObject index = bundled.optJSONObject("files");
+        if (bundledAssets != null && index != null) {
+            for (Iterator<String> it = index.keys(); it.hasNext();) {
+                String path = it.next(); Object hash = index.opt(path);
+                if (isVisualPath(path) && hash instanceof String && ((String)hash).matches("[a-f0-9]{64}")) {
+                    bundledPaths.computeIfAbsent((String)hash, ignored -> new ArrayList<>()).add(path);
+                }
+            }
+        }
         require(directory.isDirectory() || directory.mkdirs(), "VISUAL_CACHE_UNAVAILABLE");
         try {
             JSONObject state = parse(read(new File(directory, "active.json"), 16384));
@@ -101,19 +132,20 @@ public final class VisualAssets {
             phase = "checking"; error = "";
         }
         boolean updated = false;
-        File staging = null;
         try {
             CatalogUpdates.validateSource(requestedSource);
             validateDescriptor(descriptor);
             String revision = descriptor.getString("sha256");
             synchronized (this) {
-                if (current != null) {
-                    int order = compare(descriptor.getString("version"), current.descriptor.getString("version"));
+                require(token == generation, "VISUAL_SOURCE_CHANGED");
+                if (acceptedDescriptor != null) {
+                    int order = compare(descriptor.getString("version"), acceptedDescriptor.getString("version"));
                     require(order >= 0, "VISUAL_DOWNGRADE_REJECTED");
                     if (order == 0) {
-                        require(current.revision.equals(revision), "VISUAL_VERSION_CONFLICT");
-                        require(token == generation, "VISUAL_SOURCE_CHANGED");
-                        if (!force || restore(current.descriptor) != null) { success(); return result(false); }
+                        require(acceptedDescriptor.getString("sha256").equals(revision), "VISUAL_VERSION_CONFLICT");
+                        if (current != null && current.revision.equals(revision) && (!force || complete(current))) {
+                            success(); return result(false);
+                        }
                     }
                 }
             }
@@ -121,27 +153,46 @@ public final class VisualAssets {
             byte[] raw = transport.get(base.resolve(descriptor.getString("file")).toString(), MAX_MAPPING);
             verify(raw, descriptor, MAX_MAPPING);
             JSONObject mapping = parse(raw);
-            JSONObject effective = validateMapping(mapping, descriptor);
-            staging = new File(directory, revision);
+            Snapshot candidate = new Snapshot(directory, descriptor, mapping, validateMapping(mapping, descriptor));
+            File staging = candidate.directory;
             require(staging.isDirectory() || staging.mkdir(), "VISUAL_CACHE_UNAVAILABLE");
+            List<Snapshot> sources = new ArrayList<>();
+            if (current != null) sources.add(current);
+            if (previous != null) sources.add(previous);
+            sources.addAll(repairSources);
+            Set<String> stagedImages = new HashSet<>();
             JSONObject files = mapping.getJSONObject("files");
             Iterator<String> names = files.keys();
             while (names.hasNext()) {
                 String path = names.next(); JSONObject file = files.getJSONObject(path);
                 synchronized (this) { require(token == generation, "VISUAL_SOURCE_CHANGED"); }
-                byte[] image = transport.get(base.resolve(path).toString(), file.getInt("size"));
-                verify(image, file, MAX_IMAGE); validateImage(path, image);
+                String key = imageKey(path, file);
+                if (stagedImages.contains(key) && reuseCachedImage(staging, path, file) != null) continue;
+                byte[] image = reuseImage(path, file, key, sources);
+                if (image == null) {
+                    image = transport.get(base.resolve(path).toString(), file.getInt("size"));
+                    verify(image, file, MAX_IMAGE); validateImage(path, image);
+                }
                 atomic(new File(staging, file.getString("sha256")), image);
+                stagedImages.add(key);
             }
             atomic(new File(staging, "mapping.json"), raw);
-            Snapshot candidate = new Snapshot(); candidate.descriptor = copy(descriptor); candidate.mapping = mapping;
-            candidate.effective = effective; candidate.revision = revision; candidate.directory = staging;
+            Snapshot retained = null;
+            for (Snapshot snapshot : new Snapshot[]{current, previous}) {
+                if (snapshot != null && !snapshot.revision.equals(revision) && complete(snapshot)) {
+                    retained = snapshot;
+                    break;
+                }
+            }
             synchronized (this) {
                 require(token == generation, "VISUAL_SOURCE_CHANGED");
-                Snapshot retained = current != null && current.revision.equals(revision) ? previous : current;
                 JSONObject state = new JSONObject().put("current", candidate.descriptor).put("previous", retained == null ? JSONObject.NULL : retained.descriptor);
-                if (retained != null) atomic(new File(directory, "previous.json"), retained.descriptor.toString().getBytes(StandardCharsets.UTF_8));
+                File oldPointer = new File(directory, "previous.json");
+                if (retained != null) atomic(oldPointer, retained.descriptor.toString().getBytes(StandardCharsets.UTF_8));
                 atomic(new File(directory, "active.json"), state.toString().getBytes(StandardCharsets.UTF_8));
+                if (retained == null) oldPointer.delete();
+                repairSources.clear();
+                acceptedDescriptor = candidate.descriptor;
                 previous = retained; current = candidate; updated = true; success();
             }
         } catch (Exception e) {
@@ -175,9 +226,7 @@ public final class VisualAssets {
             try {
                 String key = path.substring(prefix.length()); validatePath(key);
                 JSONObject file = snapshot.mapping.getJSONObject("files").getJSONObject(key);
-                byte[] raw = read(new File(snapshot.directory, file.getString("sha256")), MAX_IMAGE);
-                verify(raw, file, MAX_IMAGE); validateImage(key, raw);
-                return new ByteArrayInputStream(raw);
+                return new ByteArrayInputStream(readImage(snapshot.directory, key, file));
             } catch (Exception e) { return null; }
         }
         return null;
@@ -185,17 +234,59 @@ public final class VisualAssets {
     private Snapshot restore(JSONObject descriptor) {
         try {
             validateDescriptor(descriptor);
-            Snapshot s = new Snapshot(); s.descriptor = copy(descriptor); s.revision = descriptor.getString("sha256");
-            s.directory = new File(directory, s.revision);
-            byte[] raw = read(new File(s.directory, "mapping.json"), MAX_MAPPING); verify(raw, descriptor, MAX_MAPPING);
-            s.mapping = parse(raw); s.effective = validateMapping(s.mapping, descriptor);
-            JSONObject files = s.mapping.getJSONObject("files"); Iterator<String> keys = files.keys();
-            while (keys.hasNext()) {
-                String path = keys.next(); JSONObject file = files.getJSONObject(path);
-                byte[] image = read(new File(s.directory, file.getString("sha256")), MAX_IMAGE); verify(image, file, MAX_IMAGE); validateImage(path, image);
+            // A committed pointer pins the version even when its cached files need repair.
+            if (acceptedDescriptor == null || compare(descriptor.getString("version"), acceptedDescriptor.getString("version")) > 0) {
+                acceptedDescriptor = descriptor;
             }
-            return s;
-        } catch (Exception e) { return null; }
+            File folder = new File(directory, descriptor.getString("sha256"));
+            byte[] raw = read(new File(folder, "mapping.json"), MAX_MAPPING); verify(raw, descriptor, MAX_MAPPING);
+            JSONObject mapping = parse(raw);
+            Snapshot snapshot = new Snapshot(directory, descriptor, mapping, validateMapping(mapping, descriptor));
+            if (complete(snapshot)) return snapshot;
+            // A valid mapping still identifies safe reuse candidates when some of its blobs are damaged.
+            for (Snapshot saved : repairSources) if (saved.revision.equals(snapshot.revision)) return null;
+            repairSources.add(snapshot);
+        } catch (Exception ignored) { }
+        return null;
+    }
+    private static boolean complete(Snapshot snapshot) {
+        try {
+            verify(read(new File(snapshot.directory, "mapping.json"), MAX_MAPPING), snapshot.descriptor, MAX_MAPPING);
+            JSONObject files = snapshot.mapping.getJSONObject("files"); Iterator<String> keys = files.keys();
+            while (keys.hasNext()) {
+                String path = keys.next(); readImage(snapshot.directory, path, files.getJSONObject(path));
+            }
+            return true;
+        } catch (Exception e) { return false; }
+    }
+    private static byte[] readImage(File folder, String path, JSONObject file) throws Exception {
+        byte[] image = read(new File(folder, file.getString("sha256")), file.getInt("size"));
+        verify(image, file, MAX_IMAGE); validateImage(path, image);
+        return image;
+    }
+    private static byte[] reuseCachedImage(File folder, String path, JSONObject file) {
+        try { return readImage(folder, path, file); }
+        catch (Exception e) { return null; }
+    }
+    private byte[] reuseImage(String path, JSONObject file, String key, List<Snapshot> sources) throws JSONException {
+        for (Snapshot snapshot : sources) {
+            if (!snapshot.images.contains(key)) continue;
+            byte[] image = reuseCachedImage(snapshot.directory, path, file);
+            if (image != null) return image;
+        }
+        List<String> paths = bundledPaths.get(file.getString("sha256"));
+        if (paths != null) for (String assetPath : paths) {
+            try (InputStream in = bundledAssets.open(assetPath)) {
+                byte[] image = bounded(in, file.getInt("size"));
+                verify(image, file, MAX_IMAGE); validateImage(assetPath, image); validateImage(path, image);
+                return image;
+            } catch (Exception ignored) { }
+        }
+        return null;
+    }
+    private static String imageKey(String path, JSONObject file) throws JSONException {
+        String suffix = path.substring(path.lastIndexOf('.') + 1);
+        return file.getString("sha256") + ":" + file.getInt("size") + ":" + (suffix.equals("jpeg") ? "jpg" : suffix);
     }
     private static void validateDescriptor(JSONObject d) throws Exception {
         require(d != null, "VISUAL_INVALID"); integer(d.opt("schema_version"), 1, 1); version(d.opt("version"));
@@ -266,7 +357,10 @@ public final class VisualAssets {
         return out;
     }
     private static void validatePath(String path) throws IOException {
-        require(path.length() <= 200 && path.matches("assets/(?:portraits|account|account-rect)/[A-Za-z0-9_-]+\\.(?:webp|png|jpg|jpeg)"), "VISUAL_PATH_INVALID");
+        require(isVisualPath(path), "VISUAL_PATH_INVALID");
+    }
+    private static boolean isVisualPath(String path) {
+        return path.length() <= 200 && path.matches("assets/(?:portraits|account|account-rect)/[A-Za-z0-9_-]+\\.(?:webp|png|jpg|jpeg)");
     }
     private static void hashAndSize(JSONObject f, int max) throws Exception {
         require(f.opt("sha256") instanceof String && f.getString("sha256").matches("[a-f0-9]{64}"), "VISUAL_INVALID"); integer(f.opt("size"), 1, max);
@@ -299,6 +393,7 @@ public final class VisualAssets {
         for (File file : files) {
             if (!file.getName().matches("[a-f0-9]{64}") || !file.isDirectory()) continue;
             if ((current != null && file.getName().equals(current.revision)) || (previous != null && file.getName().equals(previous.revision))) continue;
+            if (repairSources.stream().anyMatch(snapshot -> file.getName().equals(snapshot.revision))) continue;
             // Only the fixed, flat content-addressed cache layout is removed.
             File[] blobs = file.listFiles(); if (blobs != null) for (File blob : blobs) if (blob.isFile()) blob.delete();
             file.delete();
