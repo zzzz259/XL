@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 /** Runs against Android's real org.json via app_process (no stub JSON implementation). */
@@ -131,8 +132,9 @@ public final class CatalogUpdatesTest {
         ok(observations.get(observations.size()-1).equals("9007199254740993:" + SOURCE + ":true"), "observer receives verified active catalog");
         observed.setSource("");
         ok(observations.get(observations.size()-1).equals("9007199254740993::false"), "observer invalidates visual source when disabled");
-        // A late network error belongs to A, even when B has not requested a check yet.
         final String replacementSource = "https://replacement.example/config/current.json";
+        observerCheckIsOrderedWithSourceChange(replacementSource);
+        // A late network error belongs to A, even when B has not requested a check yet.
         final CountDownLatch staleEntered = new CountDownLatch(1), staleRelease = new CountDownLatch(1);
         CatalogUpdates stale = new CatalogUpdates(directory("stale-status"), catalog("1"), SOURCE, (url, limit) -> {
             staleEntered.countDown(); staleRelease.await(5, TimeUnit.SECONDS); throw new IOException("old source offline");
@@ -176,6 +178,46 @@ public final class CatalogUpdatesTest {
         ok("3".equals(forced.catalog().getString("version")) && manifestCalls.get() == 2, "queued requests coalesce and retain force across six-hour throttle");
         System.out.println("CatalogUpdates real Android JSON checks passed: " + assertions);
         System.exit(0);
+    }
+
+    static void observerCheckIsOrderedWithSourceChange(String replacementSource) throws Exception {
+        CatalogUpdates updates = store(directory("observer-source"), new Fake());
+        List<String> sources = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        CatalogUpdates.Observer observer = (data, source, force) -> {
+            if (force) {
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("observer release timed out");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                }
+            }
+            sources.add(source);
+        };
+        updates.setObserver(observer);
+        FutureTask<Void> refresh = new FutureTask<>(() -> {
+            updates.notifyCurrentCatalog(true);
+            return null;
+        });
+        FutureTask<JSONObject> change = new FutureTask<>(() -> updates.setSource(replacementSource));
+        Thread switching = new Thread(change, "switch-catalog-source-test");
+        new Thread(refresh, "refresh-visual-source-test").start();
+        try {
+            ok(entered.await(5, TimeUnit.SECONDS), "forced visual refresh reaches observer");
+            switching.start();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (switching.getState() != Thread.State.BLOCKED && !change.isDone() && System.nanoTime() < deadline) {
+                Thread.sleep(1);
+            }
+            ok(switching.getState() == Thread.State.BLOCKED || change.isDone(), "source switch reaches the catalog lock");
+        } finally {
+            release.countDown();
+        }
+        refresh.get(5, TimeUnit.SECONDS);
+        change.get(5, TimeUnit.SECONDS);
+        ok(sources.equals(Arrays.asList(SOURCE, SOURCE, replacementSource)), "late visual refresh cannot supersede replacement source: " + sources);
     }
 
     static void waitSettled(CatalogUpdates updates) throws Exception {
