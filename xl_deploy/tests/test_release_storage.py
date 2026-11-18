@@ -152,6 +152,64 @@ def test_current_old_gateway_rollback_and_three_recent_survive(storage):
     assert all(p.exists() for p in paths)
 
 
+def independent_test_storage(storage):
+    from xl_deploy.release_storage import ReleaseStorage
+
+    manager, paths, authority = storage
+    (manager.current_root / 'main').rename(manager.current_root / 'test')
+    if os.name == 'nt':
+        manager.state.pointer_adapter = SimpleNamespace(read=lambda pointer: paths[0])
+    return ReleaseStorage(
+        manager.repository, manager.state, manager.current_root, test_only=True,
+        live_references=manager.live_references,
+    ), paths, authority
+
+
+def test_independent_test_storage_needs_a_test_pointer(storage):
+    manager, paths, _ = independent_test_storage(storage)
+    assert manager.cleanup()['protected'][str(paths[0])] == ['current:test']
+    (manager.current_root / 'test').rename(manager.current_root / 'main')
+    assert manager.cleanup()['blocked'] == ['ValueError: test current pointer is required']
+
+
+def test_independent_test_storage_limits_distinct_versions_and_removes_recent_retries(storage):
+    manager, paths, authority = independent_test_storage(storage)
+    now = time.time()
+    authority['releases'][paths[6].name]['created_at'] = now - 1
+    unique = []
+    for index in range(4):
+        git(manager.repository, 'commit', '--allow-empty', '-m', f'distinct {index}')
+        sha = git(manager.repository, 'rev-parse', 'HEAD')
+        path = manager.root / f'{sha}-{uuid.uuid4()}'
+        git(manager.repository, 'worktree', 'add', '--detach', path, sha)
+        authority['releases'][path.name] = {'branch': 'test', 'sha': sha,
+                                              'created_at': now - (index + 2)}
+        unique.append(path)
+    manager.authority_path.write_text(json.dumps(authority))
+    surplus = {str(p) for p in [paths[5], paths[6], unique[3]]}
+    before = manager.cleanup()
+    assert set(before['candidates']) == surplus
+    assert set(before['retained']) == {str(p) for p in unique[:3]}
+    report = manager.cleanup(apply=True)
+    assert not report['blocked']
+    assert set(report['removed']) == surplus
+    assert all(p.exists() for p in [*paths[:5], paths[7], *unique[:3]])
+    assert str(paths[0]) in report['protected']
+
+
+def test_independent_test_storage_only_removes_unrecorded_recent_retry_with_legacy_opt_in(storage):
+    manager, paths, authority = independent_test_storage(storage)
+    authority['releases'].pop(paths[6].name)
+    os.utime(paths[6], None)
+    manager.authority_path.write_text(json.dumps(authority))
+    report = manager.cleanup()
+    assert str(paths[6]) in report['retained']
+    report = manager.cleanup(apply=True, include_legacy=True)
+    assert not report['blocked']
+    assert str(paths[6]) in report['removed']
+    assert paths[0].exists() and not paths[6].exists()
+
+
 def test_legacy_opt_in_and_real_worktree_removal(storage):
     manager, paths, authority = storage
     authority['pins'] = []
