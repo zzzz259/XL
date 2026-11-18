@@ -210,6 +210,11 @@ class CharacterMatcher:
     def clean(query: str) -> str:
         return (query or "").strip().strip("\"'“”‘’").strip()
 
+    def has_exact_name(self, query: str) -> bool:
+        name = self.clean(query).lower()
+        self._reload()
+        return name in self._characters or any(name in aliases for aliases in self._alias_map.values())
+
     def match(self, query: str) -> MatchOutcome:
         query = self.clean(query)
         if not query:
