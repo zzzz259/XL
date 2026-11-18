@@ -49,6 +49,13 @@ def healthcheck(config_path: str, expected_environment: str | None = None) -> in
             raise RuntimeError("configured card renderer dependencies are unavailable")
     if getattr(config, "portrait_enabled", False):
         _portrait_healthcheck(config)
+    if getattr(config, "gacha_visual_enabled", False):
+        try:
+            from server_app.gacha_visual_assets import validate_visual_runtime
+
+            validate_visual_runtime()
+        except (ImportError, OSError, TypeError, ValueError) as exc:
+            raise RuntimeError("gacha visual runtime is unavailable") from exc
     database = config.data_dir / "state.sqlite"
     if database.is_file():
         try:

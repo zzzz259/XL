@@ -135,3 +135,24 @@ def test_uipackage_tool_legacy_call_keeps_subdirectory_when_output_basename_is_p
     UIPackageTool.split_atlas(str(source), str(destination))
 
     assert (destination / "Card_fui" / "Card_fui_cut_info.json").is_file()
+
+
+def test_sprite_crop_undoes_atlas_rotation_and_restores_original_trim():
+    from app.features.preview.fgui_atlas import Vector2, crop_atlas_sprite
+
+    # Pack as the FairyGUI atlas stores it. Restoring the original geometry
+    # must keep opaque and partially transparent texels in their exact places.
+    original = Image.new("RGBA", (3, 2))
+    original.putdata([(r, 1, 2, alpha) for r, alpha in ((10, 255), (20, 128), (30, 64),
+                                                       (40, 255), (50, 255), (60, 255))])
+    atlas = Image.new("RGBA", (8, 8))
+    atlas.paste(original.transpose(Image.Transpose.ROTATE_90), (2, 3))
+    sprite = AtlasSprite()
+    sprite.rect = Rect(2, 3, 2, 3)
+    sprite.rotated = True
+    sprite.offset = Vector2(1, 2)
+    sprite.originalSize = Vector2(5, 5)
+    actual = crop_atlas_sprite(atlas, sprite)
+    expected = Image.new("RGBA", (5, 5))
+    expected.paste(original, (1, 2))
+    assert actual.tobytes() == expected.tobytes()

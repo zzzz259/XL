@@ -80,6 +80,8 @@ TOOL_RELEASE_RULES: tuple[tuple[bool, str], ...] = (
     (True, "xl_updata_tool/app/features/preview/character_names.py"),
     (True, "xl_updata_tool/app/features/preview/export_plan.py"),
     (True, "xl_updata_tool/app/features/preview/export_presets.py"),
+    (True, "xl_updata_tool/app/features/preview/fgui_atlas.py"),
+    (True, "xl_updata_tool/app/features/preview/gacha_image_processing.py"),
     (True, "xl_updata_tool/app/features/preview/portrait_config/"),
     # GUI-side manifest generator; not part of the headless render closure.
     (False, "xl_updata_tool/app/features/preview/portrait_config/import_service.py"),

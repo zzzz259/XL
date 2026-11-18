@@ -79,6 +79,7 @@ class ServerConfig:
     rerun_schedule_cycle_anchor_date: str = DEFAULT_CYCLE_ANCHOR.isoformat()
     rerun_schedule_bootstrap_cycles: tuple[dict, ...] = field(default_factory=lambda: tuple(dict(item) for item in DEFAULT_BOOTSTRAP_CYCLES))
     instance_id: str = "default"
+    gacha_visual_enabled: bool = False
 
 
 def _read_int(section: dict, key: str, default: int) -> int:
@@ -106,6 +107,7 @@ def load_config(path: str | Path) -> ServerConfig:
     security = dict(raw.get("security", {}))
     polling = dict(raw.get("polling", {}))
     api = dict(raw.get("api", {}))
+    gacha_visual_assets = dict(raw.get("gacha_visual_assets", {}))
     base_dir = config_path.parent
 
     environment = str(server.get("environment", "main")).strip()
@@ -307,4 +309,5 @@ def load_config(path: str | Path) -> ServerConfig:
         rerun_schedule_cycle_anchor_date=cycle_anchor.isoformat(),
         rerun_schedule_bootstrap_cycles=tuple(parsed_cycles),
         instance_id=instance_id,
+        gacha_visual_enabled=_read_bool(gacha_visual_assets, "enabled", False),
     )

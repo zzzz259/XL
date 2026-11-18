@@ -61,7 +61,7 @@ class CdnClient:
                 version=int(item.get("ver", 0)),
             )
             for item in payload.get("data", ())
-            if str(item.get("name", "")) in {"Arts", "Data"}
+            if str(item.get("name", "")) in {"Arts", "Data", "Other"}
         )
         return VersionCatalog(timestamp=int(payload["timestamp"]), categories=categories)
 

@@ -86,6 +86,12 @@ class UpdatePipeline:
                         else:
                             warnings = warnings[:5]
                         result = replace(result, warnings=tuple(warnings))
+            elif not result.error:
+                version = read_current_pointer(self.data_dir)
+                if version is not None:
+                    warning = self._sync_current_gacha_catalog(version, only_if_behind=True)
+                    if warning:
+                        result = replace(result, warnings=tuple(dict.fromkeys((*result.warnings, warning))))
             return result
         except Exception as error:
             LOGGER.exception("update processing failed")
@@ -183,16 +189,22 @@ class UpdatePipeline:
             previous_version,
         )
 
-    def _sync_current_gacha_catalog(self, version_timestamp: int) -> str | None:
+    def _sync_current_gacha_catalog(self, version_timestamp: int, *, only_if_behind: bool = False) -> str | None:
         """Expose only validated artifacts from an already published game version."""
         source = self.versions_dir / str(version_timestamp) / 'gacha_config'
         if not (source / 'current.json').is_file():
             return None
         try:
+            public = self.data_dir / 'gacha_config'
+            if only_if_behind and (public / 'current.json').is_file():
+                _, current = read_published_catalog(public)
+                if int(current['version']) >= version_timestamp:
+                    return None
             catalog, _ = read_published_catalog(source)
             if catalog['version'] != str(version_timestamp):
                 raise ValueError('catalog does not match published game version')
-            publish_catalog(catalog, self.data_dir / 'gacha_config')
+            publish_catalog(catalog, public, visual_candidate=source.parent / 'gacha_visual_assets',
+                            resume_existing=True)
             return None
         except (OSError, ValueError, KeyError, TypeError) as error:
             LOGGER.warning('stage=gacha_catalog_publish version=%s status=failed fallback=last_known_good error=%s',
