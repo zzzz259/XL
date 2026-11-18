@@ -104,6 +104,55 @@ class KeywordFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.receive("Raid", at=True, dedicated=True, message_id="replayed")
         self.assertEqual(self.sender.sent, [("text", "group-a", "正文", "replayed")])
 
+    async def test_keyword_list_shows_only_saved_names_in_the_current_group(self):
+        await self.add("group-a", "A正文", name="zebra")
+        await self.add("group-a", "另一条正文", name="Alpha")
+        await self.add("group-b", "B正文", name="OtherGroup")
+        await self.receive("添加未提交", member="bob", at=True)
+        self.sender.sent.clear()
+
+        await self.receive("关键词列表", member="carol")
+        self.assertEqual(self.sender.sent, [])
+        listing = await self.receive("关键词列表", member="bob", at=True)
+        self.assertEqual(self.sender.sent, [
+            ("text", "group-a", "本群关键词（共 2 个）\nAlpha\nzebra", listing),
+        ])
+        draft = self.store.get_draft("group-a", "bob")
+        self.assertEqual(self.store.contents(draft), ())
+
+        await self.receive("关键词列表", group="group-b", member="bob", at=True)
+        self.assertEqual(self.sender.sent[-1][2], "本群关键词（共 1 个）\nOtherGroup")
+        await self.receive("关键词列表", group="group-c", member="bob", at=True)
+        self.assertEqual(self.sender.sent[-1][2], "本群还没有已保存的关键词。")
+
+    async def test_keyword_list_pages_long_output_within_the_gateway_limit(self):
+        first = "A" * 2100
+        second = "B" * 2100
+        await self.add("group-a", "正文", name=second)
+        await self.add("group-a", "正文", name=first)
+        self.sender.sent.clear()
+
+        await self.receive("关键词列表", at=True)
+        await self.receive("关键词列表 2", at=True, dedicated=True)
+        await self.receive("关键词列表 3", at=True)
+        page_one, page_two, error = [event[2] for event in self.sender.sent]
+        self.assertLessEqual(len(page_one), 4000)
+        self.assertLessEqual(len(page_two), 4000)
+        self.assertIn(f"\n{first}\n", page_one)
+        self.assertNotIn(second, page_one)
+        self.assertIn("关键词列表 2", page_one)
+        self.assertIn(f"\n{second}\n", page_two)
+        self.assertNotIn(first, page_two)
+        self.assertIn("第 2/2 页", page_two)
+        self.assertIn("共 2 页", error)
+
+    async def test_keyword_list_command_is_reserved_as_a_keyword_name(self):
+        for name in ("关键词列表", "关键词列表 2"):
+            with self.subTest(name=name):
+                await self.receive(f"添加{name}", at=True)
+                self.assertIn("冲突", self.sender.sent[-1][2])
+                self.assertIsNone(self.store.get_draft("group-a", "alice"))
+
     async def test_delete_checks_group_and_sender_role(self):
         await self.add("group-a", "A")
         await self.add("group-b", "B")

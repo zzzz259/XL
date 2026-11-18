@@ -133,7 +133,11 @@ async def test_full_group_keyword_uses_the_worker_data_directory(tmp_path, monke
     sender.calls.clear()
     async with TestClient(TestServer(build_app(config))) as restarted:
         await receive(restarted, "m5", "<@BOT> raid", addressed=True)
-    assert sender.calls == [("text", "g1", "第一行\n第二行")]
+        await receive(restarted, "m6", "<@BOT> 关键词列表", addressed=True)
+    assert sender.calls == [
+        ("text", "g1", "第一行\n第二行"),
+        ("text", "g1", "本群关键词（共 1 个）\nRaid"),
+    ]
 
 
 @pytest.mark.asyncio
