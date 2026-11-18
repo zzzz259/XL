@@ -257,7 +257,9 @@ class ReleaseStorage:
             if (relative.parent.name == '__pycache__' and candidate.is_file()
                     and candidate.suffix in {'.pyc', '.pyo'} and not candidate.is_symlink()
                     and candidate.resolve() == candidate.absolute()
-                    and relative.parts[0] in {'xl_deploy', 'xl_qqbot', 'xl_updata_server', 'xl_updata_tool'}):
+                    and relative.parts[0] in {
+                        'xl_deploy', 'xl_gacha_web', 'xl_qqbot', 'xl_updata_server', 'xl_updata_tool',
+                    }):
                 continue
             raise ValueError('worktree has unknown untracked or ignored data')
 

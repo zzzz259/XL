@@ -374,6 +374,7 @@ def test_generated_renderer_and_python_cache_are_disposable(storage):
     manager.authority_path.write_text(json.dumps(authority))
     for relative in ('xl_updata_server/renderer/node_modules/package/index.js',
                      'xl_deploy/__pycache__/a.cpython-313.pyc',
+                     'xl_gacha_web/gacha_core/__pycache__/a.cpython-313.pyc',
                      '.venvs/bot/lib/site-packages/pkg/__pycache__/module.cpython-313.pyc'):
         file = paths[2] / relative
         file.parent.mkdir(parents=True, exist_ok=True)
