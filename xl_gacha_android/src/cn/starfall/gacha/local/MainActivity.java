@@ -32,8 +32,9 @@ public class MainActivity extends Activity {
    try(InputStream in=context.getAssets().open("catalog.json")){base=new JSONObject(new String(GachaClient.bounded(in,4*1024*1024),StandardCharsets.UTF_8));}
    try(InputStream in=context.getAssets().open("update-source.json")){source=new JSONObject(new String(GachaClient.bounded(in,16384),StandardCharsets.UTF_8));}
    CatalogUpdates catalogUpdates=new CatalogUpdates(new File(context.getFilesDir(),"catalog-cache"),base,source.optString("url",""));
-   JSONObject visualBase;try(InputStream in=context.getAssets().open("assets/manifest.json")){visualBase=new JSONObject(new String(GachaClient.bounded(in,2*1024*1024),StandardCharsets.UTF_8));}
-   visuals=new VisualAssets(new File(context.getFilesDir(),"visual-cache"),visualBase);
+   android.content.res.AssetManager assets=context.getApplicationContext().getAssets();
+   JSONObject visualBase;try(InputStream in=assets.open("assets/manifest.json")){visualBase=new JSONObject(new String(GachaClient.bounded(in,2*1024*1024),StandardCharsets.UTF_8));}
+   visuals=new VisualAssets(new File(context.getFilesDir(),"visual-cache"),visualBase,path->assets.open(path));
    updates=catalogUpdates;
    updates.setObserver((catalog,url,force)->visuals.start(catalog,url,force));
   }
@@ -94,7 +95,7 @@ public class MainActivity extends Activity {
      case "catalogCheck":updates.start(body.optBoolean("force",true));result=catalogStatus();break;
      case "catalogSource":updates.setSource(body.getString("url"));updates.start(true);result=catalogStatus();break;
      case "visualStatus":result=visuals.status();break;
-     case "visualCheck":visuals.start(updates.catalog(),updates.status().optString("source",""),body.optBoolean("force",true));result=visuals.status();break;
+     case "visualCheck":updates.notifyCurrentCatalog(body.optBoolean("force",true));result=visuals.status();break;
      case "query":result=GachaClient.query(getApplicationContext(),body.getString("credential"));break;
      case "credentialStatus":result=CredentialStore.status(MainActivity.this,body.getString("id"));break;
      case "credentialConfigure":CredentialStore.configure(MainActivity.this,body.getString("id"),body.getBoolean("enabled"));result=CredentialStore.status(MainActivity.this,body.getString("id"));break;

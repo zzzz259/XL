@@ -19,6 +19,7 @@ public final class CatalogUpdates {
     public interface Observer { void onCatalog(JSONObject catalog, String source, boolean force); }
     private Observer observer;
     public synchronized void setObserver(Observer observer) { this.observer = observer; notifyObserver(source, false); }
+    synchronized void notifyCurrentCatalog(boolean force) { notifyObserver(source, force); }
     private void notifyObserver(String requestedSource, boolean force) {
         // Observers must enqueue work only; image downloading never delays catalog commits.
         if (observer != null) try { observer.onCatalog(catalog(), requestedSource, force); } catch (RuntimeException ignored) { }
