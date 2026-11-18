@@ -18,7 +18,7 @@ from yarl import URL
 _logger = logging.getLogger(__name__)
 _CDN = "multimedia.nt.qq.com.cn"
 _MAX_MEDIA_BYTES = 20 * 1024 * 1024
-_MAX_TEXT_LENGTH = 4000
+MAX_TEXT_LENGTH = 4000
 MAX_REPLIES = 5
 _CHUNK_BYTES = 64 * 1024
 _IMAGE_EXTENSIONS = {"JPEG": "jpg", "PNG": "png", "GIF": "gif"}
@@ -49,14 +49,14 @@ class ReplyPart:
 def plan_replies(parts: Sequence[ReplyPart]) -> tuple[ReplyPart, ...]:
     replies: list[ReplyPart] = []
     for part in parts:
-        if len(part.text) > _MAX_TEXT_LENGTH:
+        if len(part.text) > MAX_TEXT_LENGTH:
             raise KeywordMediaError("单条回复最多 4000 个字符，请缩短这条消息。")
         if part.kind == "text":
             if not part.text.strip():
                 continue
             if replies and replies[-1].kind == "text":
                 merged = f"{replies[-1].text}\n{part.text}"
-                if len(merged) <= _MAX_TEXT_LENGTH:
+                if len(merged) <= MAX_TEXT_LENGTH:
                     replies[-1] = ReplyPart("text", merged)
                     continue
         elif part.kind != "image":

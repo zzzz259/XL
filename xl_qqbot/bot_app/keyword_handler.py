@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
@@ -14,6 +15,7 @@ import aiohttp
 
 from .keyword_media import (
     MAX_REPLIES,
+    MAX_TEXT_LENGTH,
     KeywordMedia,
     KeywordMediaError,
     ReplyPart,
@@ -24,6 +26,7 @@ from .keyword_store import KeywordDraft, KeywordEntry, KeywordStore
 _logger = logging.getLogger(__name__)
 _END = "结束添加"
 _CANCEL = "取消添加"
+_LIST_COMMAND = re.compile(r"关键词列表(?:[ \t\u3000]+([0-9]+))?")
 _NO_DRAFT = "当前没有进行中的关键词录入。"
 _REPLY_WINDOW = 300
 _EXPIRE_INTERVAL = 60
@@ -55,6 +58,22 @@ def _addressed(event_type: str, data: dict, bot_openid: str) -> tuple[bool, str]
 
 def _replies(parts: Sequence[dict[str, str]]) -> tuple[ReplyPart, ...]:
     return tuple(ReplyPart(**part) for part in parts)
+
+
+def _split_keyword_list(body: str, page_length: int) -> list[str]:
+    pages = []
+    start = 0
+    while start < len(body):
+        end = min(start + page_length, len(body))
+        if end < len(body):
+            boundary = body.rfind("\n", start, end + 1)
+            if boundary > start:
+                pages.append(body[start:boundary])
+                start = boundary + 1
+                continue
+        pages.append(body[start:end])
+        start = end
+    return pages
 
 
 class KeywordHandler:
@@ -121,7 +140,10 @@ class KeywordHandler:
             draft = None
 
         query = text.strip()
-        if addressed and query.startswith("添加"):
+        list_command = _LIST_COMMAND.fullmatch(query) if addressed else None
+        if list_command:
+            await self._show_list(group, message_id, list_command.group(1) or "1")
+        elif addressed and query.startswith("添加"):
             await self._start(group, member, message_id, query[2:].strip(), now)
         elif addressed and query.startswith("删除"):
             role = _field(data["author"].get("member_role"))
@@ -156,7 +178,12 @@ class KeywordHandler:
     async def _start(self, group: str, member: str, message_id: str, label: str, now: int) -> None:
         if not label or len(label.splitlines()) != 1:
             message = "请使用『@星落罗伯特 添加关键词』格式，词名写在一行。"
-        elif label.startswith(("添加", "删除")) or label in {_END, _CANCEL} or self._reserved(label):
+        elif (
+            label.startswith(("添加", "删除"))
+            or label in {_END, _CANCEL}
+            or _LIST_COMMAND.fullmatch(label)
+            or self._reserved(label)
+        ):
             message = "这个名称与现有命令或角色查询冲突，请换个名字。"
         else:
             status, draft = self._store.start(group, member, label, now)
@@ -168,6 +195,32 @@ class KeywordHandler:
                 message = f"已开始录入『{draft.label}』，发送内容后用『{_END}』保存，或用『{_CANCEL}』放弃。"
                 _logger.info("stage=keyword_start status=started")
         await self._notice(group, message_id, message)
+
+    async def _show_list(self, group: str, message_id: str, requested_page: str) -> None:
+        labels = self._store.list_labels(group)
+        if not labels:
+            await self._notice(group, message_id, "本群还没有已保存的关键词。")
+            return
+
+        heading = f"本群关键词（共 {len(labels)} 个）"
+        body = "\n".join(labels)
+        body_limit = MAX_TEXT_LENGTH - len(heading) - 1
+        # Leave room for the page number and the next-page command on long lists.
+        pages = [body] if len(body) <= body_limit else _split_keyword_list(body, body_limit - 100)
+        try:
+            page = int(requested_page)
+        except ValueError:
+            page = 0
+        if not 1 <= page <= len(pages):
+            await self._notice(group, message_id, f"本群关键词共 {len(pages)} 页，请输入有效页码。")
+            return
+
+        reply = f"{heading}\n{pages[page - 1]}"
+        if len(pages) > 1:
+            reply += f"\n第 {page}/{len(pages)} 页"
+        if page < len(pages):
+            reply += f"\n发送『@星落罗伯特 关键词列表 {page + 1}』查看下一页。"
+        await self._notice(group, message_id, reply)
 
     async def _append(self, draft: KeywordDraft, message_id: str, event_type: str, data: dict, text: str, now: int) -> None:
         if self._store.has_message(draft, message_id):
