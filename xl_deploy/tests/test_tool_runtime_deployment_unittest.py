@@ -240,7 +240,6 @@ class StagedToolReleaseTests(unittest.TestCase):
             "app/features/preview/controller.py",
             "app/features/preview/service.py",
             "app/features/preview/fgui.py",
-            "app/features/preview/fgui_atlas.py",
             "app/features/preview/dialogs/__init__.py",
             "app/features/preview/workers/__init__.py",
             "app/features/preview/worker.py",
