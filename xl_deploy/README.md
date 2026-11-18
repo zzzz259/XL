@@ -381,9 +381,21 @@ preflights the immutable release first, switches only that branch pointer,
 starts services and checks readiness, then resumes routing. Backend-only
 updates also pause/drain the configured instance when that backend service is
 part of a Bot instance. A backend-only instance has no Bot announcement or
-Gateway maintenance scope. Only after health checks pass does it durably enqueue
-`更新完毕`; any new non-empty project announcement follows in the destination
-instance's notifier FIFO.
+Gateway maintenance scope. For inventory deployments, completion also checks the
+shared Gateway's readiness and sends a nonce through its configured Worker route.
+The Worker uses its own authenticated outbound session to probe the Gateway
+message endpoint without sending a QQ message, then returns its instance ID and
+the nonce. The controller enqueues `更新完毕` after that check succeeds. A failed
+probe leaves the notice pending for the next poll while restored routing stays
+available. Any new project announcement follows the completion notice in the
+destination instance's notifier FIFO.
+
+With a managed Gateway, the controller probes the Worker port declared in the
+inventory on the Gateway host. A split test host configures `[router.reply_probe_ports]`
+with a loopback forward to that same Worker route on the Gateway host. For example,
+`test-bot = 28782` can forward to the Gateway host's existing reverse listener
+`127.0.0.1:18782`. The Gateway health check continues to use its existing control
+tunnel. Provision the probe forward before enabling the updated test controller.
 
 For a main deployment, start, completion, and rollback-recovery notices go only
 to enabled instances watching main, within the journal's original recipient

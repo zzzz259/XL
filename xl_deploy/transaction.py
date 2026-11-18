@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -71,11 +73,13 @@ class DeploymentTransaction:
         drain_timeout_seconds: float = 30,
         inventory=None,
         release_storage=None,
+        reply_probe: Callable[[tuple[str, ...]], None] | None = None,
     ) -> None:
         if drain_timeout_seconds <= 0:
             raise ValueError("drain timeout must be positive")
         self.inventory = inventory
         self.release_storage = release_storage
+        self.reply_probe = reply_probe
         self.state = state
         self.runner = runner
         self.router = router
@@ -367,6 +371,20 @@ class DeploymentTransaction:
                 maintenance_enabled=False,
                 error=None,
             )
+            if self.reply_probe is not None:
+                try:
+                    self.reply_probe(scope)
+                except Exception as exc:  # noqa: BLE001 - keep the running release and retry.
+                    self._update(
+                        journal,
+                        error=_safe_error(exc),
+                        evidence={"reply_readiness": "pending"},
+                    )
+                    return DeploymentResult("announcement_pending", journal.sha, "Bot reply path pending")
+                journal = self._update(
+                    journal,
+                    evidence={"reply_readiness": "passed", "reply_ready_at": datetime.now(timezone.utc).isoformat()},
+                )
             try:
                 self.events.append(("announce", COMPLETION_NOTICE, *scope))
                 delivered = self.router.announce(

@@ -13,6 +13,8 @@ from bot_app.config import (
     UploadConfig,
     WatchConfig,
 )
+from bot_app.deploy_control import DeploymentControl
+from bot_app.gateway import GatewayTransportClient, build_gateway_control_app
 from bot_app.keyword_store import KeywordStore
 from bot_app.service import QUERY_HANDLER_KEY, build_app, parse_args
 
@@ -105,6 +107,39 @@ async def test_event_at_message_full_chain(tmp_path, monkeypatch):
         assert [c[0] for c in sender.calls] == ["image"]  # 查询全链路已处理
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_deployment_event_probes_real_reply_api_without_sending(tmp_path, monkeypatch, authorized):
+    config, qq = make_config(tmp_path, monkeypatch)
+    token = "t" * 32
+    instance = "test-bot"
+    control = DeploymentControl(tmp_path / "maintenance.json", instance_ids=(instance,))
+    app = build_gateway_control_app(
+        control, bearer_token="g" * 32, sender=qq,
+        instance_tokens={instance: token}, group_instances={"g1": instance},
+    )
+    async with TestServer(app) as gateway:
+        sender = GatewayTransportClient(
+            str(gateway.make_url("/")).rstrip("/"),
+            bearer_token=token if authorized else "x" * 32,
+            instance_id=instance,
+        )
+        monkeypatch.setattr("bot_app.service.QQSender", lambda _config, _instance: sender)
+        async with TestClient(TestServer(build_app(config, instance))) as worker:
+            nonce = "a" * 32
+            event = {
+                "event_type": "deployment_reply_probe",
+                "data": {"instance_id": instance, "nonce": nonce},
+            }
+            wrong = {**event, "data": {"instance_id": "stable-bot", "nonce": nonce}}
+            assert (await worker.post("/event", json=wrong)).status == 400
+            response = await worker.post("/event", json=event)
+            assert response.status == (200 if authorized else 503)
+            if authorized:
+                assert await response.json() == {"ok": True, "instance_id": instance, "nonce": nonce}
+    assert qq.calls == []
 
 
 @pytest.mark.asyncio

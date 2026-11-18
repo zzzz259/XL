@@ -1,6 +1,7 @@
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
 
@@ -93,6 +94,44 @@ def test_router_client_pause_resume_and_drain_use_per_tier_control():
         for request in requests
         if request.method == "POST"
     ] == [True, True, False, False]
+
+
+@pytest.mark.parametrize("matches", [True, False])
+def test_reply_probe_checks_gateway_and_exact_forwarded_worker_ack(matches):
+    requests = []
+
+    def transport(request, timeout):
+        requests.append(request)
+        if request.method == "GET":
+            return Response({"ok": True, "ready": True})
+        payload = json.loads(request.data)
+        return Response({
+            "ok": True,
+            "instance_id": "test-bot",
+            "nonce": payload["data"]["nonce"] if matches else "0" * 32,
+        })
+
+    inventory = SimpleNamespace(
+        gateway=SimpleNamespace(managed=False, listen_port=18785),
+        instances=[SimpleNamespace(instance_id="test-bot", enabled=True, listen_ports={"bot": 8782})],
+    )
+    client = RouterControlClient(
+        "http://127.0.0.1:18784", "secret", inventory=inventory, transport=transport,
+        reply_probe_ports={"test-bot": 28782},
+    )
+    if matches:
+        client.require_reply_path(("test-bot",))
+    else:
+        with pytest.raises(RuntimeError, match="reply probe"):
+            client.require_reply_path(("test-bot",))
+    gateway, worker = requests
+    assert gateway.full_url == "http://127.0.0.1:18785/gateway/health"
+    assert gateway.get_header("Authorization") == "Bearer secret"
+    assert worker.full_url == "http://127.0.0.1:28782/event"
+    assert worker.get_header("Authorization") is None
+    event = json.loads(worker.data)
+    assert event["event_type"] == "deployment_reply_probe"
+    assert event["data"]["instance_id"] == "test-bot"
 
 
 @pytest.mark.parametrize(
