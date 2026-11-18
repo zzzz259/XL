@@ -1,6 +1,6 @@
 # Android 视觉素材增量更新接口（v1）
 
-Android 客户端已支持在不重新安装 APK 的情况下，更新角色立绘头像、时装对应的玩家头像、账号头像和头像框映射。客户端继续使用现有目录更新源：`https://<host>/<directory>/current.json`。服务端发布工作另行实施；当前没有新增默认更新地址，也不会请求推测出来的生产接口。
+Android 客户端可在线更新抽卡角色头像、时装头像、账号头像和头像框。0.4.1、0.4.2 和 0.4.3 使用同一 v1 清单，入口为 `https://<host>/<directory>/current.json`。启用服务端 `[gacha_visual_assets].enabled` 后，更新器按同版本资源选择新增素材，并随新版卡池目录发布。[服务端发布与 HTTPS](../xl_updata_server/docs/gacha-config-hosting.md)
 
 APK 内置的 `assets/manifest.json` 和图片始终作为离线底稿。现有目录没有 `visual_assets` 字段时，不请求视觉素材。目录和图片分别提交：目录更新成功、图片下载失败时，抽卡数据仍可使用，视觉素材继续保留上一次完整版本。
 
@@ -98,6 +98,8 @@ assets/remote/<mapping-sha256>/assets/portraits/<name>.webp
 ## 缓存与验证
 
 图片和映射先写入版本目录，所有哈希、引用及格式校验成功后，才通过原子移动更新活动指针。保留当前和上一完整版本，启动时验证映射及所有图片；当前损坏时依次回退上一版本、内置版本。中断下载不能激活半套映射。清理范围限定为应用私有视觉缓存中的哈希目录；旧版本被淘汰后已有页面需重新载入最新映射。
+
+0.4.3 会按清单中的 SHA-256 复用本批已经写入的图片、保留快照或 APK 内置图片。复用前仍检验大小、哈希和图片格式。缺失或无法校验的图片通过原有 HTTPS 下载器补齐。0.4.1 和 0.4.2 收到新版视觉清单时下载该清单中的远程图片。
 
 `xl_gacha_android/tests/VisualAssetsTest.java` 使用真实 JSON、真实文件系统和可控下载器，不访问生产接口。`scripts/test_native.py` 会编译该测试并打包到 `catalog-tests.jar`。Android 测试入口为 `cn.starfall.gacha.local.VisualAssetsTest <全新可写缓存目录>`。测试涵盖安装、不可变 URL、离线、哈希及路径拒绝、原子回退、损坏修复、版本冲突、源切换并发和内置兼容。
 

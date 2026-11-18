@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .gacha_adapter import parse_lua_table
+from .gacha_visual_publish import publish_visual_candidate, read_visual_mapping
 
 MAX_BYTES = 4 * 1024 * 1024
 MAX_ID = 2**53 - 1
@@ -301,13 +302,16 @@ def _write_temporary(directory, raw):
     return Path(filename)
 
 
-def publish_catalog(catalog: dict, directory: Path | str) -> dict:
+def publish_catalog(
+    catalog: dict, directory: Path | str, *, visual_candidate: Path | None = None,
+    resume_existing: bool = False,
+) -> dict:
     """Write immutable data first, then atomically switch the public manifest.
 
     A lock rejects concurrent publishers; a crash may leave .publish.lock, which
     an operator can remove after verifying no publisher is running.
     """
-    raw = _catalog_bytes(catalog)
+    _catalog_bytes(catalog)
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     directory.chmod(0o755)
@@ -317,14 +321,43 @@ def publish_catalog(catalog: dict, directory: Path | str) -> dict:
     try:
         version = catalog["version"]
         previous = None
+        previous_visual = None
         if (directory / "current.json").exists():
-            _, previous = read_published_catalog(directory)
+            previous_catalog, previous = read_published_catalog(directory)
+            previous_visual = previous_catalog.get("visual_assets")
             if int(version) < int(previous["version"]):
                 raise ValueError("catalog downgrade forbidden")
         filename = f"catalog-{version}.json"
         target = directory / filename
+        catalog = dict(catalog)
+        if target.exists() and resume_existing:
+            # The catalog may already be served at its immutable URL after a pointer-write failure.
+            with target.open("rb") as handle:
+                raw = handle.read(MAX_BYTES + 1)
+            if len(raw) > MAX_BYTES:
+                raise ValueError("oversized published catalog")
+            saved = json.loads(raw)
+            if not isinstance(saved, dict):
+                raise ValueError("invalid published catalog")
+            visual = saved.pop("visual_assets", None)
+            requested_visual = catalog.pop("visual_assets", visual)
+            if saved != catalog or requested_visual != visual:
+                raise ValueError("immutable catalog version content conflict")
+            if visual is not None:
+                read_visual_mapping(directory, visual)
+        else:
+            visual = catalog.get("visual_assets")
+            if visual is not None:
+                read_visual_mapping(directory, visual)
+            else:
+                visual = publish_visual_candidate(directory, visual_candidate, version, previous_visual)
+            if visual is not None:
+                catalog["visual_assets"] = visual
+            raw = _catalog_bytes(catalog)
         if target.exists():
-            if target.read_bytes() != raw:
+            with target.open("rb") as handle:
+                matches = handle.read(len(raw) + 1) == raw
+            if not matches:
                 raise ValueError("immutable catalog version content conflict")
             target.chmod(0o644)
         else:
