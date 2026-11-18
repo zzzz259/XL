@@ -11,6 +11,9 @@ burst_anchor = "2026-10-09T10:00:00+08:00"
 [polling]
 enabled = true # 对任何实例直接生效；需要停用时设为 false
 
+[gacha_visual_assets]
+enabled = false
+
 [api]
 enabled = true # 本机控制接口；启动前需由 systemd EnvironmentFile 提供 token
 host = "127.0.0.1"

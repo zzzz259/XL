@@ -4,7 +4,9 @@
 
 现有更新器从五张 Lua 表静态生成非个人配置，不执行 Lua。版本 staging 成功后才镜像到 data/gacha_config；失败保留上次公开版本且角色处理继续。公开目录0755、JSON0644；私有锁、账号、密钥不放宽。
 
-模板对应阿里云 Linux、IP 8.134.186.234、Nginx1.24、Certbot5.4，Certbot安装在 /opt/xl-gacha-certbot。HTTP80为HTTP-01，HTTPS443只读分发；不改变8090容器和loopback控制API。测试 /gacha-config-test/ 指向 /home/admin/xl_updata_server-test/data/gacha_config/，正式 /gacha-config/ 指向 /home/admin/xl_updata_server/data/gacha_config/，二者不可混用。
+启用 `[gacha_visual_assets].enabled` 后，更新器会用 0.4.1、0.4.2 共用的内置素材清单和已发布映射计算新增 ID。按同版 Lua 引用读取 Arts 的 BurstHead，或 Other 的 FairyGUI 描述及实际用到的图集页。成品以 SHA-256 命名，按图片、视觉清单、卡池目录、`current.json` 的顺序发布。图片候选失败时可沿用上一份通过验证的视觉清单。覆盖安装及客户端差分规则见[视觉素材更新协议](../../docs/gacha-visual-assets.md)。
+
+公网 HTTPS 入口是 8.134.186.234，Certbot 安装在 `/opt/xl-gacha-certbot`。80 端口用于 HTTP-01，443 端口提供只读分发。正式 `/gacha-config/` 读取本机 `/home/admin/xl_updata_server/data/gacha_config/`。测试 `/gacha-config-test/` 走独立反向隧道，由公网主机的 `127.0.0.1:18780` 转到 test 主机的 `127.0.0.1:18080`，读取 test 实例的 `data/gacha_config/`。两个入口也各自提供视觉清单和内容寻址图片。
 
 基础TLS已由运营者验证。正式静态目录已用与生产游戏版本一致的已验证公共配置初始化，客户端默认源为 https://8.134.186.234/gacha-config/current.json；测试入口仅供测试人员，不预置给普通用户。初始化公共JSON不等同于main代码晋级：生产updater后续持续自动导出仍需要对应pipeline代码晋级main。本文不是证书有效期凭证，现场命令确认当前状态。
 
@@ -33,7 +35,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-真实CA使用xl-gacha-ip lineage，staging证书不能投入生产。私钥保留root管理的/etc/letsencrypt，不复制到仓库/公开目录。正则引号必须保留，花括号量词未加引号会破坏Nginx语法。模板只允许current.json和规范catalog文件名，GET/HEAD只读，其他路径404。
+公网入口使用 `xl-gacha-ip` 证书。私钥由 root 保存在 `/etc/letsencrypt`。test 主机单独加载 [test 站点配置](../deploy/https/nginx-test-gacha.conf)，用 `nginx -t` 验证后 reload。测试隧道和内部站点均监听本机回环。Nginx 正则中的花括号量词需要引号。入口对 `current.json`、规范的卡池和视觉清单名，以及三组 SHA-256 图片路径开放 GET/HEAD。图片和版本文件使用不可变缓存，`current.json` 需要重新验证。
 
 ## 最小权限与配置引导
 

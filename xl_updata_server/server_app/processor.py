@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import time
 from datetime import datetime
@@ -504,6 +505,9 @@ class ProductionUpdateProcessor:
             self.config,
         )
         catalog_warnings = stage_gacha_catalog(decoded_lua, staging, str(update_info.timestamp))
+        visual_warnings = ()
+        if getattr(self.config, "gacha_visual_enabled", False) and not catalog_warnings:
+            visual_warnings = self._stage_gacha_visuals(decoded_lua, staging, update_info, version_catalog)
 
         is_baseline = current is None
         current_ids = set(current.get("characters", {}).keys()) if current else set()
@@ -651,7 +655,7 @@ class ProductionUpdateProcessor:
             new_character_count=len(new_character_ids),
             updated_character_count=len(updated_character_ids),
             warnings=tuple(
-                item for item in (*schedule_warnings, *catalog_warnings, portrait_warning) if item
+                item for item in (*schedule_warnings, *catalog_warnings, *visual_warnings, portrait_warning) if item
             ),
             schedule_enabled=getattr(self.config, "rerun_schedule_enabled", True),
             portrait_success_count=portrait_summary.success if portrait_summary else 0,
@@ -661,6 +665,24 @@ class ProductionUpdateProcessor:
             portrait_modified_count=portrait_summary.modified_count if portrait_summary else 0,
             portrait_summary_available=portrait_summary is not None,
         )
+
+    def _stage_gacha_visuals(self, decoded_lua: Path, staging: Path, update_info, version_catalog) -> tuple[str, ...]:
+        try:
+            if version_catalog.timestamp != update_info.timestamp:
+                raise ValueError("visual assets require the same resource version as the decoded Lua")
+            from .gacha_visual_assets import stage_gacha_visual_assets
+
+            affinity = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else ()
+            if len(affinity) > 1:
+                os.sched_setaffinity(0, {min(affinity)})
+            try:
+                return stage_gacha_visual_assets(decoded_lua, staging, version_catalog, self.config, self.client)
+            finally:
+                if len(affinity) > 1:
+                    os.sched_setaffinity(0, affinity)
+        except (ImportError, OSError, TypeError, ValueError) as error:
+            LOGGER.warning("stage=gacha_visual_assets status=skipped version=%s error=%s", update_info.timestamp, error)
+            return (f"gacha visual assets: {error}"[:500],)
 
     def _download_hashes(self, hashes: tuple[str, ...], directory: Path) -> tuple[Path, ...]:
         paths = []
