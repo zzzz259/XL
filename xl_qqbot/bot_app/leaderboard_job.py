@@ -53,7 +53,7 @@ from .leaderboard_credentials import (
     LeaderboardCredentialProvider,
     claim_renewal_owner,
     same_credentials_path,
-    shared_account_lock,
+    shared_game_session_lock,
 )
 
 _logger = logging.getLogger(__name__)
@@ -253,9 +253,11 @@ class LeaderboardArchiveJob:
         now=time.time,
         random_int=None,
         sleep=None,
+        account_lock=None,
     ):
         self._config = config
         self._provider = provider
+        self._account_lock = account_lock or asyncio.Lock()
         self._history = history
         self._stage_map = stage_map
         self._session_factory = session_factory
@@ -516,11 +518,11 @@ class LeaderboardArchiveJob:
         self._last_probe = now
         self._persist_last_probe()
         try:
-            web = await self._provider.credentials()
+            async with self._account_lock:
+                web = await self._provider.credentials()
+                results = await asyncio.to_thread(self._probe_all_metadata, web)
         except CredentialError:
             return
-        try:
-            results = await asyncio.to_thread(self._probe_all_metadata, web)
         except GachaError as error:
             _logger.warning("leaderboard metadata probe failed: %s", error.code)
             return
@@ -645,8 +647,9 @@ class LeaderboardArchiveJob:
         if window is None:
             return False
         try:
-            web = await self._provider.credentials()
-            result = await asyncio.to_thread(self._probe_mode_metadata, slot.mode, web)
+            async with self._account_lock:
+                web = await self._provider.credentials()
+                result = await asyncio.to_thread(self._probe_mode_metadata, slot.mode, web)
         except CredentialError:
             return False
         except GachaError as error:
@@ -729,19 +732,21 @@ class LeaderboardArchiveJob:
     # -- collection pipeline ----------------------------------------------------
 
     async def _run_pipeline(self, slot: Slot, components, stop_event):
-        web = await self._provider.credentials()
-        mode = slot.mode
-        run_id, result, error = await self._collect_ranking(mode, web, slot.trigger)
-        failure = error
-        if run_id is None:
-            result = None
-        if (failure is None and not stop_event.is_set()
-                and "lineup" in components):
-            failure = await self._collect_lineups(web, slot.trigger, result, stop_event)
-        if (failure is None and not stop_event.is_set()
-                and "guild_index" in components):
-            failure = await self._collect_guild_index(
-                web, slot.trigger, result, stop_event)
+        async with self._account_lock:
+            if stop_event.is_set():
+                return {}, INTERRUPT_STOPPED
+            web = await self._provider.credentials()
+            mode = slot.mode
+            run_id, result, failure = await self._collect_ranking(mode, web, slot.trigger)
+            if run_id is None:
+                result = None
+            if (failure is None and not stop_event.is_set()
+                    and "lineup" in components):
+                failure = await self._collect_lineups(web, slot.trigger, result, stop_event)
+            if (failure is None and not stop_event.is_set()
+                    and "guild_index" in components):
+                failure = await self._collect_guild_index(
+                    web, slot.trigger, result, stop_event)
         if stop_event.is_set() and failure is None:
             failure = INTERRUPT_STOPPED
         return ({mode: run_id} if run_id is not None else {}), failure
@@ -1119,6 +1124,7 @@ def build_leaderboard_job(
         history = SeasonHistory(data_dir / "seasonal_leaderboards.sqlite3")
     if stage_map is None:
         stage_map = load_stage_map()
+    account_lock = shared_game_session_lock(lb.credentials_file) if config.guild_roster.enabled else None
     if provider is None:
         read_only = True
         if lb.refresh_enabled:
@@ -1135,9 +1141,7 @@ def build_leaderboard_job(
                 else:
                     _logger.warning(
                         "leaderboard credential renewal owner conflict: READ_ONLY")
-        provider = LeaderboardCredentialProvider(
-            lb, read_only=read_only,
-            account_lock=shared_account_lock(lb.credentials_file))
+        provider = LeaderboardCredentialProvider(lb, read_only=read_only)
     if session_factory is None:
         def session_factory(credentials, *, max_requests, max_seconds, response_observer):
             return GameGatewaySession(
@@ -1148,4 +1152,5 @@ def build_leaderboard_job(
     return LeaderboardArchiveJob(
         lb, provider=provider, history=history, stage_map=stage_map,
         session_factory=session_factory, packager=packager, now=now,
-        random_int=random_int, sleep=sleep)
+        random_int=random_int, sleep=sleep,
+        account_lock=account_lock)
