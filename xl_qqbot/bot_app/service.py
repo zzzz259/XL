@@ -16,10 +16,13 @@ from aiohttp import web
 
 from .config import Config, load_config
 from .gateway import GatewayTransportClient, gateway_transport_for_config
+from .guild_commands import GuildCommands
+from .guild_ipc import GuildClient, guild_directory
+from .guild_roster import GuildRosterStore
 from .keyword_store import KeywordStore
 from .matcher import CharacterMatcher
 from .portrait_querier import PortraitQuerier
-from .query_handler import QueryHandler
+from .query_handler import BOT_DISPLAY_NAME, QueryHandler
 from .querier import CharacterQuerier
 from .rerun_schedule_querier import RerunScheduleQuerier
 from .selection import SelectionStore
@@ -47,15 +50,24 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
         portrait_querier = PortraitQuerier(
             config.watch.character_data, config.watch.versions_dir
         )
+    selection = SelectionStore()
+    guild_commands = None
+    if config.guild_roster.enabled:
+        guild_dir = guild_directory(config.watch.data_dir)
+        guild_commands = GuildCommands(
+            selection, sender, GuildRosterStore(guild_dir), GuildClient(guild_dir),
+            bot_openid=config.bot.openid, bot_display_name=BOT_DISPLAY_NAME,
+        )
     handler = QueryHandler(
         CharacterQuerier(config.watch.character_data, config.watch.versions_dir),
         CharacterMatcher(config.watch.character_data, config.watch.data_dir),
-        SelectionStore(),
+        selection,
         sender,
         bot_openid=config.bot.openid,
         rerun_querier=RerunScheduleQuerier(config.watch.character_data, config.watch.versions_dir),
         portrait_querier=portrait_querier,
         keyword_store=KeywordStore(config.watch.data_dir),
+        guild_commands=guild_commands,
     )
 
     async def on_startup(app: web.Application) -> None:
@@ -63,6 +75,8 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
         _logger.info("级别服务就绪")
 
     async def on_cleanup(app: web.Application) -> None:
+        if guild_commands is not None:
+            await guild_commands.close()
         _logger.info("关闭 sender HTTP 会话")
         await sender.close()
 

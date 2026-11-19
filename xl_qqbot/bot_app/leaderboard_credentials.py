@@ -4,9 +4,9 @@ One game account may back both the server-status probe and the leaderboard
 archive job. Renewal of the same private state has exactly one owner: when
 the status monitor already renews a state path, the archive job reads that
 state read-only; only an independent path may be renewed by the job itself.
-Every account serializes logins (renewal tick and gateway session login)
-through one shared asyncio lock keyed by the resolved state path. Secrets
-never reach logs: only fixed codes are logged.
+Credential reads and renewal share an asyncio lock keyed by the state path.
+Long-lived game sessions have their own lock, so a status preflight can
+keep sampling without starting a second game session. Logs use fixed codes.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from .config import LeaderboardConfig
 _logger = logging.getLogger(__name__)
 
 _ACCOUNT_LOCKS: dict[str, asyncio.Lock] = {}
+_GAME_SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 _RENEWAL_OWNERS: dict[str, str] = {}
 
 
@@ -55,6 +56,16 @@ def shared_account_lock(path: str | Path) -> asyncio.Lock:
     if lock is None:
         lock = asyncio.Lock()
         _ACCOUNT_LOCKS[key] = lock
+    return lock
+
+
+def shared_game_session_lock(path: str | Path) -> asyncio.Lock:
+    """Serialize the leaderboard and recruitment sessions using the same state."""
+    key = _resolved(path)
+    lock = _GAME_SESSION_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _GAME_SESSION_LOCKS[key] = lock
     return lock
 
 

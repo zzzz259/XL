@@ -184,6 +184,12 @@ LEADERBOARD_SCOPE_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 
 
 @dataclass(frozen=True)
+class GuildRosterConfig:
+    enabled: bool = False
+    refresh_times: tuple[str, str] = ("09:15", "21:15")
+
+
+@dataclass(frozen=True)
 class Config:
     bot: BotConfig
     watch: WatchConfig
@@ -199,6 +205,7 @@ class Config:
     instance: InstanceConfig = field(default_factory=InstanceConfig)
     leaderboard: LeaderboardConfig = field(default_factory=LeaderboardConfig)
     portraits: PortraitConfig = field(default_factory=PortraitConfig)
+    guild_roster: GuildRosterConfig = field(default_factory=GuildRosterConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -581,6 +588,19 @@ def load_config(path: str = "config.toml") -> Config:
         raise ValueError("[portraits] enabled 必须是布尔值")
     portraits = PortraitConfig(enabled=portraits_enabled)
 
+    guild_raw = raw.get("guild_roster", {})
+    guild_enabled = guild_raw.get("enabled", False)
+    if not isinstance(guild_enabled, bool):
+        raise ValueError("[guild_roster] enabled 必须是布尔值")
+    if guild_enabled and not lb_credentials:
+        raise ValueError("[guild_roster] enabled=true 时必须配置 [leaderboard] credentials_file")
+    guild_times = guild_raw.get("refresh_times", list(GuildRosterConfig.refresh_times))
+    if (not isinstance(guild_times, list) or len(guild_times) != 2
+            or not all(isinstance(value, str) and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value)
+                       for value in guild_times)
+            or guild_times[0] == guild_times[1]):
+        raise ValueError("[guild_roster] refresh_times 必须是两个不同的北京时间 HH:MM")
+
     return Config(
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
@@ -606,6 +626,7 @@ def load_config(path: str = "config.toml") -> Config:
         instance=InstanceConfig(instance_id=instance_id),
         leaderboard=leaderboard,
         portraits=portraits,
+        guild_roster=GuildRosterConfig(guild_enabled, tuple(sorted(guild_times))),
     )
 
 

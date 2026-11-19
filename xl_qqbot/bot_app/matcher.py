@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from .selection import render_numbered_candidates
+
 try:
     from pypinyin import Style, lazy_pinyin
     _HAS_PYPINYIN = True
@@ -47,9 +49,6 @@ FUZZY_THRESHOLD = 0.8
 PINYIN_SIM_THRESHOLD = 0.85
 CONTAIN_MIN_QUERY_LEN = 2  # 单字子串匹配太噪，要求至少 2 字
 
-_CIRCLED = ["①", "②", "③", "④", "⑤"]
-
-
 @dataclass(frozen=True)
 class Match:
     character_id: str
@@ -68,14 +67,8 @@ class MatchOutcome:
 
 def render_candidates_message(options: list) -> str:
     """候选列表消息（含星级与"都不是"项），options 最多 3 个。"""
-    lines = ["没有完全一致的角色，你是不是想找："]
-    for index, option in enumerate(options, 1):
-        star = f" ★{option.star}" if option.star else ""
-        lines.append(f"{_CIRCLED[index - 1]} {option.name}{star}")
-    lines.append(f"{_CIRCLED[len(options)]} 都不是")
-    numbers = "/".join(str(i) for i in range(1, len(options) + 2))
-    lines.append(f"回复数字 {numbers} 选择（仅本次提问有效，120秒内）")
-    return "\n".join(lines)
+    labels = [option.name + (f" ★{option.star}" if option.star else "") for option in options]
+    return render_numbered_candidates("没有完全一致的角色，你是不是想找：", labels)
 
 
 class CharacterMatcher:
