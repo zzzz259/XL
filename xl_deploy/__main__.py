@@ -139,7 +139,7 @@ def build_poller(config_path: str | Path) -> BranchPoller:
         current_path=runtime.current_root,
     )
     storage = ReleaseStorage(runtime.repository, state, runtime.current_root,
-                             units=runner.allowed_units)
+                             units=runner.allowed_units, test_only=runtime.branches == ('test',))
     def transaction_for(branch: str) -> DeploymentTransaction:
         config_path, data_path = (
             (runtime.test_backend_config, runtime.test_backend_data)
@@ -189,8 +189,11 @@ def main(argv: list[str] | None = None) -> int:
             runtime = load_runtime_config(args.config)
             state = DeploymentState(runtime.state_dir, releases_root=runtime.releases_root,
                                     current_path=runtime.current_root)
-            storage = ReleaseStorage(runtime.repository, state, runtime.current_root,
-                units=runtime.inventory.allowed_units if runtime.inventory else ALLOWED_UNITS)
+            storage = ReleaseStorage(
+                runtime.repository, state, runtime.current_root,
+                units=runtime.inventory.allowed_units if runtime.inventory else ALLOWED_UNITS,
+                test_only=runtime.branches == ('test',),
+            )
             report = storage.cleanup(apply=args.apply, include_legacy=args.include_legacy)
             print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
             return 1 if report['blocked'] else 0
