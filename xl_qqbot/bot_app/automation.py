@@ -31,14 +31,14 @@ class AutomationRuntime:
 
     async def run(self) -> None:
         jobs = [watcher.run() for watcher in self.watchers]
+        if self.guild_jobs is not None:
+            jobs.append(self.guild_jobs.run(self.stop_event))
         if self.status_monitor is not None:
             jobs.append(self.status_monitor.run(self.stop_event))
         if self.bilibili_watcher is not None:
             jobs.append(self.bilibili_watcher.run())
         if self.leaderboard_job is not None:
             jobs.append(self.leaderboard_job.run(self.stop_event))
-        if self.guild_jobs is not None:
-            jobs.append(self.guild_jobs.run(self.stop_event))
         if not jobs:
             await self.stop_event.wait()
             return
@@ -61,6 +61,11 @@ def build_automation_runtime(
     leaderboard_factory=None,
 ) -> AutomationRuntime:
     instance_id = instance_id or config.instance.instance_id
+    guild_jobs = None
+    if config.guild_roster.enabled:
+        from .guild_jobs import build_guild_jobs
+
+        guild_jobs = build_guild_jobs(config)
     configured_sources = config.watch.update_sources or (
         UpdateSourceConfig(name="main", outbox_dir=config.watch.outbox_dir),
     )
@@ -93,19 +98,14 @@ def build_automation_runtime(
 
             leaderboard_factory = build_leaderboard_job
         leaderboard_job = leaderboard_factory(config)
-    guild_jobs = None
-    if config.guild_roster.enabled:
-        from .guild_jobs import build_guild_jobs
-
-        guild_jobs = build_guild_jobs(config)
     return AutomationRuntime(
+        guild_jobs=guild_jobs,
         instance_id=instance_id,
         watchers=watchers,
         status_monitor=status_monitor,
         bilibili_watcher=bilibili_watcher,
         leaderboard_job=leaderboard_job,
         stop_event=asyncio.Event(),
-        guild_jobs=guild_jobs,
     )
 
 

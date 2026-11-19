@@ -36,6 +36,15 @@ versions_dir = "/home/admin/xl_updata_server/data/versions"
 # 默认关闭；各实例按自己的 [watch] 路径独立装配，无级别禁用差异。
 enabled = false
 
+[guild_roster]
+enabled = false
+# 每天两轮，按北京时间。
+refresh_times = ["09:15", "21:15"]
+# 本地采集实例使用 [leaderboard].credentials_file。有私有对端时可提供只读查询。
+serve_lookup = false
+# 消费端使用现有 SSH 回环转发时填写目标。两端使用同一套内部控制认证。
+# lookup_origin = "http://127.0.0.1:18782"
+
 [target]
 # 目标群 openid 列表（可选覆盖）。
 # 留空（默认）= 发给所有已知的机器人所在群（已学习列表 + 后续事件学习）。
@@ -151,12 +160,6 @@ lineup_max_requests = 400
 lineup_max_seconds = 900
 guild_index_max_requests = 200
 guild_index_max_seconds = 600
-
-[guild_roster]
-# 使用 [leaderboard].credentials_file 只读查询公会信息。由 Worker 和 automation jobs 配合运行。
-enabled = false
-# 每天两轮，按北京时间。
-refresh_times = ["09:15", "21:15"]
 
 [bilibili]
 # B 站 UP 主动态/视频监视。enabled=false 可关闭。
