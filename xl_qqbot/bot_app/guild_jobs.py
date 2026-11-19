@@ -10,30 +10,23 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
-from gacha_core.gacha import GachaError
-from gacha_core.guild_search import search_guilds
-from gacha_core.session import GameGatewaySession
 
 from .config import Config
 from .guild_ipc import guild_directory, guild_query_valid
+from .guild_lookup_transport import (
+    GUILD_LOOKUP_PATH,
+    GuildLookupClient,
+    guild_lookup_handler,
+)
 from .guild_poster import render_guild_poster
 from .guild_roster import (
-    GuildAccountBusy,
     GuildEntry,
-    GuildLookup,
     GuildRoster,
     GuildRosterStore,
-)
-from .leaderboard_credentials import (
-    CredentialError,
-    LeaderboardCredentialProvider,
-    shared_game_session_lock,
 )
 
 _logger = logging.getLogger(__name__)
 _BJT = timezone(timedelta(hours=8))
-_SESSION_SECONDS = 180
-_LOGIN_SECONDS = 25
 
 
 def guild_slots(now: float, times: tuple[str, str]) -> tuple[float, float]:
@@ -47,69 +40,11 @@ def guild_slots(now: float, times: tuple[str, str]) -> tuple[float, float]:
     return max(slot for slot in slots if slot <= now), min(slot for slot in slots if slot > now)
 
 
-class GuildCollector:
-    def __init__(self, provider, account_lock, request_delay, *, session_factory=GameGatewaySession, now=time.time):
-        self._provider = provider
-        self._account_lock = account_lock
-        self._request_delay = request_delay
-        self._session_factory = session_factory
-        self._now = now
-
-    async def __call__(self, names: tuple[str, ...]) -> dict[str, GuildLookup]:
-        try:
-            await asyncio.wait_for(self._account_lock.acquire(), timeout=45)
-        except TimeoutError:
-            _logger.info("guild collection waiting on another game session timed out")
-            raise GuildAccountBusy from None
-        try:
-            credentials = await self._provider.credentials()
-            task = asyncio.create_task(asyncio.to_thread(self._read, credentials, names))
-            try:
-                return await asyncio.shield(task)
-            except asyncio.CancelledError:
-                await asyncio.gather(task, return_exceptions=True)
-                raise
-        except CredentialError as error:
-            _logger.warning("guild credentials unavailable: %s", error.code)
-            return {}
-        finally:
-            self._account_lock.release()
-
-    def _read(self, credentials, names: tuple[str, ...]) -> dict[str, GuildLookup]:
-        results = {}
-        batch_size = int((_SESSION_SECONDS - _LOGIN_SECONDS) // max(1.0, self._request_delay))
-        try:
-            for index in range(0, len(names), batch_size):
-                batch = names[index:index + batch_size]
-                with self._session_factory(
-                    credentials,
-                    max_requests=len(batch),
-                    max_duration=_LOGIN_SECONDS + len(batch) * self._request_delay,
-                    request_delay=self._request_delay,
-                ) as session:
-                    for name in batch:
-                        try:
-                            page = search_guilds(session, name)
-                        except GachaError as error:
-                            if error.code != "GUILD_SEARCH_PROTOCOL_ERROR":
-                                raise
-                            _logger.warning("guild search page could not be decoded")
-                            continue
-                        observed = self._now()
-                        results[name] = GuildLookup(tuple(
-                            GuildEntry(guild.guild_uid, guild.name, guild.member_count,
-                                       guild.capacity, guild.last_rank, observed)
-                            for guild in page.guilds
-                        ), page.has_more)
-        except GachaError as error:
-            _logger.warning("guild collection incomplete: %s", error.code)
-        return results
-
-
 class GuildJobs:
-    def __init__(self, roster: GuildRoster, times: tuple[str, str], *, now=time.time):
+    def __init__(self, roster: GuildRoster, times: tuple[str, str], *, served_lookup=None, now=time.time):
         self._roster = roster
         self._times = times
+        self._served_lookup = served_lookup
         self._now = now
 
     async def refresh_if_due(self) -> float:
@@ -126,6 +61,8 @@ class GuildJobs:
         await self._roster.initialize()
         app = web.Application(client_max_size=16_384)
         app.router.add_post("/action", self._handle_action)
+        if self._served_lookup is not None:
+            app.router.add_post(GUILD_LOOKUP_PATH, guild_lookup_handler(self._served_lookup))
         runner = web.AppRunner(app, shutdown_timeout=60)
         socket_path = self._roster.store.path.with_name("jobs.sock")
         await runner.setup()
@@ -177,8 +114,16 @@ class GuildJobs:
 
 
 def build_guild_jobs(config: Config) -> GuildJobs:
-    lb = config.leaderboard
-    provider = LeaderboardCredentialProvider(lb, read_only=True)
-    collector = GuildCollector(provider, shared_game_session_lock(lb.credentials_file), lb.request_delay)
+    settings = config.guild_roster
+    if settings.lookup_origin:
+        lookup = GuildLookupClient(settings.lookup_origin, control_token=config.notification.api_token)
+    else:
+        from .guild_local_collection import build_local_guild_lookup
+
+        lookup = build_local_guild_lookup(config)
     store = GuildRosterStore(guild_directory(config.watch.data_dir))
-    return GuildJobs(GuildRoster(store, collector, render_guild_poster), config.guild_roster.refresh_times)
+    return GuildJobs(
+        GuildRoster(store, lookup, render_guild_poster),
+        settings.refresh_times,
+        served_lookup=lookup if settings.serve_lookup else None,
+    )
