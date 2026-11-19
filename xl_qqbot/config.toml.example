@@ -152,6 +152,12 @@ lineup_max_seconds = 900
 guild_index_max_requests = 200
 guild_index_max_seconds = 600
 
+[guild_roster]
+# 使用 [leaderboard].credentials_file 只读查询公会信息。由 Worker 和 automation jobs 配合运行。
+enabled = false
+# 每天两轮，按北京时间。
+refresh_times = ["09:15", "21:15"]
+
 [bilibili]
 # B 站 UP 主动态/视频监视。enabled=false 可关闭。
 enabled = true

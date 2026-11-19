@@ -30,13 +30,18 @@ _LIST_COMMAND = re.compile(r"关键词列表(?:[ \t\u3000]+([0-9]+))?")
 _NO_DRAFT = "当前没有进行中的关键词录入。"
 _REPLY_WINDOW = 300
 _EXPIRE_INTERVAL = 60
+_NATIVE_AT_PREFIX = re.compile(r"\A\s*<@!?[A-Za-z0-9]+>")
 
 
 def _field(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _addressed(
+def literal_bot_mention(bot_display_name: str) -> re.Pattern[str]:
+    return re.compile(rf"\A\s*@{re.escape(bot_display_name)}(?=\s|$)")
+
+
+def addressed_command(
     event_type: str, data: dict, bot_openid: str, literal_mention: re.Pattern[str]
 ) -> tuple[bool, str]:
     text = _field(data.get("content"))
@@ -55,11 +60,12 @@ def _addressed(
             if marker in text:
                 addressed = True
                 text = text.replace(marker, "")
-    if not addressed:
-        # QQ can deliver the visible @ prefix without an inline marker or mentions.
-        text, count = literal_mention.subn("", text, count=1)
-        addressed = count > 0
-    return addressed, text
+    if event_type == "group_at":
+        # The event is addressed to this Bot even when the instance has no openid configured.
+        text = _NATIVE_AT_PREFIX.sub("", text, count=1)
+    # QQ can deliver the visible @ prefix without an inline marker or mentions.
+    text, count = literal_mention.subn("", text, count=1)
+    return addressed or count > 0, text
 
 
 def _replies(parts: Sequence[dict[str, str]]) -> tuple[ReplyPart, ...]:
@@ -96,7 +102,7 @@ class KeywordHandler:
         self._media = KeywordMedia(store.data_dir)
         self._sender = sender
         self._bot_openid = bot_openid
-        self._literal_mention = re.compile(rf"\A\s*@{re.escape(bot_display_name)}(?=\s|$)")
+        self._literal_mention = literal_bot_mention(bot_display_name)
         self._reserved = reserved
         self._locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
         self._handled: OrderedDict[tuple[str, str], float] = OrderedDict()
@@ -127,7 +133,7 @@ class KeywordHandler:
         if delivery in self._handled:
             return True
 
-        addressed, text = _addressed(event_type, data, self._bot_openid, self._literal_mention)
+        addressed, text = addressed_command(event_type, data, self._bot_openid, self._literal_mention)
         actor = (group, member)
         lock = self._locks.get(actor)
         if lock is None:
