@@ -56,12 +56,16 @@ def build_handler(tmp_path, replies, openid="bot"):
     return handler, sender, jobs, guilds
 
 
-async def deliver(handler, content, message_id="msg1", *, actor="u1", group="g1", at=False, muted=False):
+async def deliver(handler, content, message_id="msg1", *, actor="u1", group="g1", at=False, muted=False,
+                  role=None):
+    author = {"member_openid": actor}
+    if role is not None:
+        author["member_role"] = role
     await handler.handle({
         "event_type": "group_at" if at else "group_message",
         "data": {
             "id": message_id, "group_openid": group, "content": content,
-            "author": {"member_openid": actor}, "mentions": [],
+            "author": author, "mentions": [],
         },
         "muted": muted,
     })
@@ -73,7 +77,7 @@ async def test_list_uses_cache_for_real_and_literal_at(tmp_path):
     try:
         await deliver(handler, "<@SomeOpenID> 公会", at=True)
         assert await sender.receive() == ("image", ("g1",), b"cached-guild-poster", "msg1", "")
-        await deliver(handler, "@星落罗伯特 公会", "msg2")
+        await deliver(handler, "@星落罗伯特 公会", "msg2", role="member")
         assert (await sender.receive())[3] == "msg2"
         assert jobs.calls == []
     finally:
@@ -87,11 +91,28 @@ async def test_add_and_delete_route_ahead_of_custom_keywords_and_return_new_post
         "delete": GuildReply("deleted", "全世界最好的K."),
     })
     try:
-        await deliver(handler, "@星落罗伯特 添加公会全世界最好的K", "add1")
+        await deliver(handler, "@星落罗伯特 添加公会全世界最好的K", "add1", role="admin")
         assert (await sender.receive())[3:] == ("add1", "已添加「全世界最好的K.」")
-        await deliver(handler, "<@bot> 删除公会 全世界最好的K.", "del1", at=True)
+        await deliver(handler, "<@bot> 删除公会 全世界最好的K.", "del1", at=True, role="owner")
         assert (await sender.receive())[3:] == ("del1", "已删除「全世界最好的K.」")
         assert jobs.calls == [("add", "全世界最好的K"), ("delete", "全世界最好的K.")]
+    finally:
+        await guilds.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["member", None, ["owner"]])
+@pytest.mark.parametrize(("content", "at", "action", "status"), [
+    ("@星落罗伯特 添加公会休闲屋", False, "add", "added"),
+    ("<@bot> 删除公会 休闲屋", True, "delete", "deleted"),
+])
+async def test_guild_writes_require_admin_or_owner(tmp_path, content, at, action, status, role):
+    handler, sender, jobs, guilds = build_handler(tmp_path, {action: GuildReply(status, "休闲屋")})
+    try:
+        await deliver(handler, content, "forbidden", at=at, role=role)
+        reply = await sender.receive()
+        assert jobs.calls == []
+        assert reply == ("text", "g1", "只有本群管理员或群主可以添加或删除公会。", "forbidden")
     finally:
         await guilds.close()
 
@@ -104,15 +125,15 @@ async def test_candidates_use_portrait_digit_rules_and_cannot_cross_groups_or_me
         "add_selected": GuildReply("added", choices[1].name),
     })
     try:
-        await deliver(handler, "@星落罗伯特 添加公会公会", "search1")
+        await deliver(handler, "@星落罗伯特 添加公会公会", "search1", role="admin")
         prompt = (await sender.receive())[2]
         assert all(f"{number} {row.name}" in prompt for number, row in zip("①②③", choices))
         assert "回复数字 1/2/3/4" in prompt and "120秒内" in prompt
-        await deliver(handler, "2", "other-member", actor="u2")
-        await deliver(handler, "2", "other-group", group="g2")
-        await deliver(handler, "2", "muted", muted=True)
+        await deliver(handler, "2", "other-member", actor="u2", role="owner")
+        await deliver(handler, "2", "other-group", group="g2", role="owner")
+        await deliver(handler, "2", "muted", muted=True, role="admin")
         assert jobs.calls == [("add", "公会")]
-        await deliver(handler, "2", "choose2")
+        await deliver(handler, "2", "choose2", role="admin")
         assert (await sender.receive())[3:] == ("choose2", "已添加「乙公会」")
         assert jobs.calls == [("add", "公会"), ("add_selected", choices[1])]
     finally:
@@ -127,11 +148,34 @@ async def test_delete_candidate_does_not_call_add_and_keeps_passive_reply_id(tmp
         "delete_selected": GuildReply("deleted", choices[0].name),
     })
     try:
-        await deliver(handler, "@星落罗伯特 删除公会恶魔", "search")
+        await deliver(handler, "@星落罗伯特 删除公会恶魔", "search", role="owner")
         assert "恶魔の呢喃" in (await sender.receive())[2]
-        await deliver(handler, "1", "chosen")
+        await deliver(handler, "1", "chosen", role="owner")
         assert (await sender.receive())[3:] == ("chosen", "已删除「恶魔の心跳」")
         assert jobs.calls == [("delete", "恶魔"), ("delete_selected", "1")]
+    finally:
+        await guilds.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("action", "verb", "status"), [
+    ("add", "添加", "added"),
+    ("delete", "删除", "deleted"),
+])
+@pytest.mark.parametrize("role", ["member", None])
+async def test_guild_candidate_rechecks_current_role(tmp_path, action, verb, status, role):
+    choices = (GuildEntry("1", "甲公会"), GuildEntry("2", "乙公会"))
+    handler, sender, jobs, guilds = build_handler(tmp_path, {
+        action: GuildReply("candidates", options=choices),
+        f"{action}_selected": GuildReply(status, choices[0].name),
+    })
+    try:
+        await deliver(handler, f"@星落罗伯特 {verb}公会公会", "search", role="admin")
+        assert "回复数字" in (await sender.receive())[2]
+        await deliver(handler, "1", "forbidden", role=role)
+        reply = await sender.receive()
+        assert jobs.calls == [(action, "公会")]
+        assert reply == ("text", "g1", "只有本群管理员或群主可以添加或删除公会。", "forbidden")
     finally:
         await guilds.close()
 
@@ -150,7 +194,7 @@ async def test_refresh_replies_promptly_and_then_sends_image(tmp_path):
 
     jobs.request = hold
     try:
-        await asyncio.wait_for(deliver(handler, "@星落罗伯特 公会刷新", "ref1"), 1)
+        await asyncio.wait_for(deliver(handler, "@星落罗伯特 公会刷新", "ref1", role="member"), 1)
         assert "正在刷新" in (await sender.receive())[2]
         await asyncio.wait_for(entered.wait(), 1)
         assert sender.sent.empty()
