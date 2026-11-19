@@ -194,7 +194,7 @@ class QueryHandler:
             if etype == "group_message" and group and member and digit.isdigit():
                 pending = self._selection.get(group, member)
                 if pending is not None and pending.intent in GUILD_SELECTIONS:
-                    await self._handle_selection(group, member, digit, reply_to)
+                    await self._handle_selection(group, member, digit, reply_to, author=data.get("author"))
                     return
         if self._keywords is not None and not self._mute.muted:
             if await self._keywords.handle(etype, data):
@@ -248,7 +248,9 @@ class QueryHandler:
         # 纯数字回复：只认有待选择状态的用户，不与 @查询 冲突
         stripped = content.strip()
         if group_openid and member_openid and stripped and stripped.isdigit():
-            if await self._handle_selection(group_openid, member_openid, stripped, _extract_message_id(data)):
+            if await self._handle_selection(
+                group_openid, member_openid, stripped, _extract_message_id(data), author=data.get("author"),
+            ):
                 return
 
         mentioned, query = _extract_query(content, mentions, self._bot_openid)
@@ -555,7 +557,9 @@ class QueryHandler:
         else:  # 理论上 ID 必中，防数据变动兜底
             await self._sender.send_text(group_openid, f"未找到角色：{query}", reply_to)
 
-    async def _handle_selection(self, group_openid: str, member_openid: str, digit: str, reply_to: str = "") -> bool:
+    async def _handle_selection(
+        self, group_openid: str, member_openid: str, digit: str, reply_to: str = "", *, author: object = None,
+    ) -> bool:
         """处理数字选择；返回 True 表示消息已消费（含静音抑制）。"""
         pending = self._selection.get(group_openid, member_openid)
         if pending is None:
@@ -568,7 +572,7 @@ class QueryHandler:
         status, payload = self._selection.choose(group_openid, member_openid, digit)
         if status == "picked":
             if self._guilds is not None and pending.intent in GUILD_SELECTIONS:
-                self._guilds.choose(pending.intent, payload, group_openid, member_openid, reply_to)
+                self._guilds.choose(pending.intent, payload, group_openid, member_openid, reply_to, author=author)
                 return True
             match = payload
             _logger.info("候选选择 group=%s user=%s -> %s", group_openid, member_openid, match.name)
