@@ -122,12 +122,13 @@ def process_paths(directory):
 
 class ReleaseStorage:
     def __init__(self, repository, state: DeploymentState, current_root, *,
-                 units=(), live_references=None):
+                 units=(), live_references=None, test_only=False):
         self.repository = Path(repository).absolute()
         self.state = state
         self.root = state.releases_root
         self.current_root = Path(current_root).absolute()
         self.authority_path = state.state_dir / 'release-storage.json'
+        self.test_only = test_only
         # Controller interpreter dependencies exist even between oneshot runs;
         # retention evidence is deliberately separate from restart ownership.
         self.units = tuple(sorted(set(units) | {'xl-deploy-poll.service'}))
@@ -256,7 +257,9 @@ class ReleaseStorage:
             if (relative.parent.name == '__pycache__' and candidate.is_file()
                     and candidate.suffix in {'.pyc', '.pyo'} and not candidate.is_symlink()
                     and candidate.resolve() == candidate.absolute()
-                    and relative.parts[0] in {'xl_deploy', 'xl_qqbot', 'xl_updata_server', 'xl_updata_tool'}):
+                    and relative.parts[0] in {
+                        'xl_deploy', 'xl_gacha_web', 'xl_qqbot', 'xl_updata_server', 'xl_updata_tool',
+                    }):
                 continue
             raise ValueError('worktree has unknown untracked or ignored data')
 
@@ -306,16 +309,19 @@ class ReleaseStorage:
                 if path not in releases:
                     raise ValueError('protected reference is not a registered release')
                 report['protected'].setdefault(str(path), []).append(reason)
-            pointers = list(self.current_root.iterdir())
-            if not any(p.name == 'main' for p in pointers):
-                raise ValueError('main current pointer is required')
-            for pointer in pointers:
-                if pointer.name not in {'debug', 'test', 'main'}:
+            pointers = {pointer.name: pointer for pointer in self.current_root.iterdir()}
+            required = 'test' if self.test_only else 'main'
+            if required not in pointers:
+                raise ValueError(f'{required} current pointer is required')
+            current = {}
+            for branch, pointer in pointers.items():
+                if branch not in {'debug', 'test', 'main'}:
                     raise ValueError('unknown current pointer')
                 target = self.state.get_current(current_path=pointer)
                 if target is None:
                     raise ValueError('missing current pointer target')
-                protect(target, f'current:{pointer.name}')
+                current[branch] = target
+                protect(target, f'current:{branch}')
             for key in ('pins', 'rollback'):
                 for path in data[key]:
                     protect(path, key)
@@ -345,12 +351,22 @@ class ReleaseStorage:
                 else:
                     branch, created = record['branch'], record['created_at']
                 groups.setdefault(branch, []).append((created, path))
-                if now - created < 86400:
+                bounded_test = self.test_only and branch == 'test'
+                legacy_test_retry = (
+                    branch == 'legacy' and self.test_only
+                    and journal.branch == 'test' and journal.phase == 'completed'
+                    and path.name[:40] == current['test'].name[:40]
+                )
+                if now - created < 86400 and not (bounded_test or legacy_test_retry):
                     report['retained'][str(path)] = ['age-floor:24h']
             for branch, entries in groups.items():
                 if branch == 'legacy':
                     continue  # Explicit opt-in; no invented branch provenance.
-                for _, path in sorted(entries, key=lambda entry: (entry[0], str(entry[1])), reverse=True)[:3]:
+                ordered = sorted(entries, key=lambda entry: (entry[0], str(entry[1])), reverse=True)
+                ordered_paths = [path for _, path in ordered]
+                if self.test_only and branch == 'test':
+                    ordered_paths = self._distinct_test_releases(ordered_paths, current['test'], report['protected'])
+                for path in ordered_paths[:3]:
                     report['retained'].setdefault(str(path), []).append(f'recent-three:{branch}')
             for path in releases:
                 key = str(path)
@@ -360,6 +376,23 @@ class ReleaseStorage:
             report['blocked'].append(f'{type(exc).__name__}: {exc}')
             report['candidates'] = {}
         return report
+
+    @staticmethod
+    def _distinct_test_releases(paths, current, protected):
+        """Prefer an already protected worktree over another attempt at its SHA."""
+        by_sha = {}
+        for path in paths:
+            sha = path.name[:40]
+            if sha == current.name[:40]:
+                by_sha[sha] = current
+            else:
+                preferred = by_sha.setdefault(sha, path)
+                if str(path) in protected and str(preferred) not in protected:
+                    by_sha[sha] = path
+        # Rank the copies actually retained. A newer retry of an older release
+        # must not displace another version or change the result as it is removed.
+        keep = set(by_sha.values())
+        return [path for path in paths if path in keep]
 
     def _service_references(self):
         references = []
