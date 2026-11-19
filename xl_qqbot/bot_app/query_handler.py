@@ -12,6 +12,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from .guild_commands import GUILD_SELECTIONS, GuildCommands, parse_guild_command
 from .keyword_handler import KeywordHandler
 from .keyword_store import KeywordStore
 from .matcher import CharacterMatcher, render_candidates_message
@@ -144,7 +145,8 @@ class QueryHandler:
                  selection: SelectionStore, sender: QQSender,
                  bot_openid: str = "", mute: ServiceMute | None = None,
                  rerun_querier=None, portrait_querier: PortraitQuerier | None = None,
-                 keyword_store: KeywordStore | None = None):
+                 keyword_store: KeywordStore | None = None,
+                 guild_commands: GuildCommands | None = None):
         self._querier = querier
         self._matcher = matcher
         self._selection = selection
@@ -152,6 +154,7 @@ class QueryHandler:
         self._bot_openid = bot_openid
         self._rerun_querier = rerun_querier
         self._portrait_querier = portrait_querier
+        self._guilds = guild_commands
         # 不传 mute 时自持（路由器转发模式按事件 muted 标志驱动）；
         # 旧一体化入口传入与 watcher 共享的实例（更新静音）
         self._mute = mute or ServiceMute()
@@ -181,6 +184,18 @@ class QueryHandler:
     async def handle_event(self, etype: str, data: dict, muted=None) -> None:
         if muted is not None:
             self._mute.muted = bool(muted)
+        if self._guilds is not None and not self._mute.muted:
+            member = _extract_member_openid(data)
+            reply_to = _extract_message_id(data)
+            if self._guilds.start(etype, data, member, reply_to):
+                return
+            group = data.get("group_openid")
+            digit = str(data.get("content") or "").strip()
+            if etype == "group_message" and group and member and digit.isdigit():
+                pending = self._selection.get(group, member)
+                if pending is not None and pending.intent in GUILD_SELECTIONS:
+                    await self._handle_selection(group, member, digit, reply_to)
+                    return
         if self._keywords is not None and not self._mute.muted:
             if await self._keywords.handle(etype, data):
                 self._selection.clear(data["group_openid"], _extract_member_openid(data))
@@ -195,6 +210,8 @@ class QueryHandler:
             _logger.warning("未知事件类型 type=%s", etype)
 
     def _reserved_keyword(self, label: str) -> bool:
+        if self._guilds is not None and parse_guild_command(label) is not None:
+            return True
         if is_rerun_schedule_query(label) or self._matcher.has_exact_name(label):
             return True
         spec = _parse_query_spec(label)
@@ -546,8 +563,13 @@ class QueryHandler:
         if self._mute.muted:
             _logger.info("更新期间静音，忽略候选选择 group=%s user=%s", group_openid, member_openid)
             return True
+        if pending.intent in GUILD_SELECTIONS and (not pending.options or not reply_to):
+            return True
         status, payload = self._selection.choose(group_openid, member_openid, digit)
         if status == "picked":
+            if self._guilds is not None and pending.intent in GUILD_SELECTIONS:
+                self._guilds.choose(pending.intent, payload, group_openid, member_openid, reply_to)
+                return True
             match = payload
             _logger.info("候选选择 group=%s user=%s -> %s", group_openid, member_openid, match.name)
             has_history = pending.history_offset is not None or pending.history_all

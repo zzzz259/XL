@@ -25,9 +25,12 @@ class AutomationRuntime:
     status_monitor: object | None
     bilibili_watcher: BilibiliWatcher | None
     stop_event: asyncio.Event
+    guild_jobs: object | None = None
 
     async def run(self) -> None:
         jobs = [watcher.run() for watcher in self.watchers]
+        if self.guild_jobs is not None:
+            jobs.append(self.guild_jobs.run(self.stop_event))
         if self.status_monitor is not None:
             jobs.append(self.status_monitor.run(self.stop_event))
         if self.bilibili_watcher is not None:
@@ -53,6 +56,11 @@ def build_automation_runtime(
     probe_factory=None,
 ) -> AutomationRuntime:
     instance_id = instance_id or config.instance.instance_id
+    guild_jobs = None
+    if config.guild_roster.enabled:
+        from .guild_jobs import build_guild_jobs
+
+        guild_jobs = build_guild_jobs(config)
     configured_sources = config.watch.update_sources or (
         UpdateSourceConfig(name="main", outbox_dir=config.watch.outbox_dir),
     )
@@ -79,6 +87,7 @@ def build_automation_runtime(
         else None
     )
     return AutomationRuntime(
+        guild_jobs=guild_jobs,
         instance_id=instance_id,
         watchers=watchers,
         status_monitor=status_monitor,

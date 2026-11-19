@@ -46,6 +46,14 @@ class PortraitConfig:
 
 
 @dataclass(frozen=True)
+class GuildRosterConfig:
+    enabled: bool = False
+    refresh_times: tuple[str, str] = ("09:15", "21:15")
+    lookup_origin: str = ""
+    serve_lookup: bool = False
+
+
+@dataclass(frozen=True)
 class TargetConfig:
     group_openids: List[str]
     auto_learn_from_events: bool
@@ -161,6 +169,7 @@ class Config:
     server_status: ServerStatusConfig = field(default_factory=ServerStatusConfig)
     instance: InstanceConfig = field(default_factory=InstanceConfig)
     portraits: PortraitConfig = field(default_factory=PortraitConfig)
+    guild_roster: GuildRosterConfig = field(default_factory=GuildRosterConfig)
 
 
 def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
@@ -196,6 +205,37 @@ def _load_bili_targets(bili: dict) -> List[BilibiliTarget]:
             mode=mode,
         ))
     return targets
+
+
+def _load_guild_roster(raw: dict, notification_token: str) -> GuildRosterConfig:
+    settings = raw.get("guild_roster", {})
+    if not isinstance(settings, dict):
+        raise ValueError("[guild_roster] 必须是表")
+    enabled = settings.get("enabled", False)
+    serve_lookup = settings.get("serve_lookup", False)
+    if not isinstance(enabled, bool) or not isinstance(serve_lookup, bool):
+        raise ValueError("[guild_roster] enabled 和 serve_lookup 必须是布尔值")
+    origin = settings.get("lookup_origin", "")
+    if not isinstance(origin, str):
+        raise ValueError("[guild_roster] lookup_origin 必须是字符串")
+    if origin:
+        address = re.fullmatch(r"http://127\.0\.0\.1:([0-9]{1,5})", origin)
+        if not address or not 1 <= int(address[1]) <= 65535:
+            raise ValueError("[guild_roster] lookup_origin 必须是 HTTP 回环地址和端口")
+    if serve_lookup and origin:
+        raise ValueError("[guild_roster] serve_lookup 与 lookup_origin 不能同时配置")
+    if enabled:
+        if (origin or serve_lookup) and len(notification_token) < 32:
+            raise ValueError("[guild_roster] 跨机查询需要配置 [notification] api_token")
+        if not origin and not str(raw.get("leaderboard", {}).get("credentials_file", "")).strip():
+            raise ValueError("[guild_roster] enabled=true 时需配置 lookup_origin 或本地 credentials_file")
+    times = settings.get("refresh_times", list(GuildRosterConfig.refresh_times))
+    if (not isinstance(times, list) or len(times) != 2
+            or not all(isinstance(value, str) and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value)
+                       for value in times)
+            or times[0] == times[1]):
+        raise ValueError("[guild_roster] refresh_times 必须是两个不同的北京时间 HH:MM")
+    return GuildRosterConfig(enabled, tuple(sorted(times)), origin, serve_lookup)
 
 
 def load_config(path: str = "config.toml") -> Config:
@@ -441,6 +481,7 @@ def load_config(path: str = "config.toml") -> Config:
     )
     if len(set(internal_tokens)) > 1:
         raise ValueError("internal API bearer tokens must match")
+    guild_roster = _load_guild_roster(raw, notification_config.api_token)
 
     status_raw = raw.get("server_status", {})
     raw_tiers = status_raw.get("recipient_tiers", ["debug", "test"])
@@ -487,6 +528,7 @@ def load_config(path: str = "config.toml") -> Config:
     portraits = PortraitConfig(enabled=portraits_enabled)
 
     return Config(
+        guild_roster=guild_roster,
         bot=BotConfig(appid=appid, secret=secret, openid=str(bot.get("openid", "")).strip()),
         watch=WatchConfig(
             outbox_dir=outbox_dir,

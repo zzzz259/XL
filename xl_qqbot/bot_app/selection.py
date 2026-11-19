@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 TTL_SECONDS = 120
+_CIRCLED = "①②③④⑤"
+
+
+def render_numbered_candidates(title: str, labels: Sequence[str]) -> str:
+    choices = (*labels, "都不是")
+    lines = [title, *(f"{symbol} {label}" for symbol, label in zip(_CIRCLED, choices))]
+    numbers = "/".join(str(i) for i in range(1, len(choices) + 1))
+    lines.append(f"回复数字 {numbers} 选择（仅本次提问有效，{TTL_SECONDS}秒内）")
+    return "\n".join(lines)
 
 
 @dataclass
 class PendingSelection:
     query: str  # 用户原始的查询词（学习用，已清洗，只含名字部分）
     options: list  # Match 候选列表（不含"都不是"项）
-    intent: str = "card"  # "card" 图鉴 | "portrait" 立绘
+    intent: str = "card"  # 图鉴、立绘或公会添加/删除
     portrait_ordinal: int | None = None  # 立绘查询的末尾序号
     history_offset: int | None = None  # 图鉴/立绘历史序号（-N，-1 为上一个不同内容）
     history_all: bool = False  # 末尾单独 -：含当前的全部版本（新到旧）
