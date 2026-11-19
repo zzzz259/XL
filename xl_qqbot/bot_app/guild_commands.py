@@ -9,12 +9,14 @@ from collections import Counter, OrderedDict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from .groups import has_group_management_role
 from .guild_ipc import guild_query_valid
 from .keyword_handler import addressed_command, literal_bot_mention
 from .selection import SelectionStore, render_numbered_candidates
 
 _logger = logging.getLogger(__name__)
 GUILD_SELECTIONS = {"guild_add": "add_selected", "guild_delete": "delete_selected"}
+_MANAGEMENT_ACTIONS = {"add", "delete", *GUILD_SELECTIONS.values()}
 
 
 def parse_guild_command(text: str) -> tuple[str, str | None] | None:
@@ -50,15 +52,15 @@ class GuildCommands:
         command = parse_guild_command(text) if addressed else None
         if command is None:
             return False
-        self._queue(*command, group, member, reply_to)
+        self._queue(*command, group, member, reply_to, author=data.get("author"))
         return True
 
-    def choose(self, intent: str, row, group: str, member: str, reply_to: str) -> None:
+    def choose(self, intent: str, row, group: str, member: str, reply_to: str, *, author: object) -> None:
         action = GUILD_SELECTIONS[intent]
         value = row if action == "add_selected" else row.guild_uid
-        self._queue(action, value, group, member, reply_to)
+        self._queue(action, value, group, member, reply_to, author=author)
 
-    def _queue(self, action, value, group, member, reply_to):
+    def _queue(self, action, value, group, member, reply_to, *, author: object):
         now = time.monotonic()
         while self._seen and next(iter(self._seen.values())) <= now - 300:
             self._seen.popitem(last=False)
@@ -67,6 +69,9 @@ class GuildCommands:
             return
         self._seen[delivery] = now
         self._selection.clear(group, member)
+        member_role = author.get("member_role") if isinstance(author, dict) else None
+        if action in _MANAGEMENT_ACTIONS and not has_group_management_role(member_role):
+            action = "forbidden"
         pending = None
         if action in {"add", "delete"} and guild_query_valid(value):
             self._selection.set(group, member, value, [], intent=f"guild_{action}")
@@ -84,6 +89,9 @@ class GuildCommands:
         try:
             if action == "show":
                 await self._send_poster(group, reply_to)
+                return
+            if action == "forbidden":
+                await self._sender.send_text(group, "只有本群管理员或群主可以添加或删除公会。", reply_to)
                 return
             if action in {"add", "delete"} and pending is None:
                 verb = "添加" if action == "add" else "删除"

@@ -8,6 +8,10 @@ from typing import List, Set
 _logger = logging.getLogger(__name__)
 
 
+def has_group_management_role(member_role: object) -> bool:
+    return member_role in ("admin", "owner")
+
+
 def learn_group_from_event(event_obj, group_store: "GroupStore") -> None:
     """从事件载荷（dict 或带属性对象）学到群 openid 并登记。"""
     group_openid = None

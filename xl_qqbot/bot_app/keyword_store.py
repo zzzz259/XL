@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from .groups import has_group_management_role
+
 DRAFT_IDLE_SECONDS = 600
 
 _SCHEMA = (
@@ -277,7 +279,7 @@ class KeywordStore:
             if row is None:
                 return "missing", None
             creator_openid, media_id = row
-            if member_openid != creator_openid and member_role not in {"admin", "owner"}:
+            if member_openid != creator_openid and not has_group_management_role(member_role):
                 return "forbidden", None
             db.execute(
                 "DELETE FROM keyword_entries WHERE group_openid = ? AND keyword_key = ?",
