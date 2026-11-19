@@ -18,6 +18,7 @@ from .config import Config, load_config
 from .gateway import GatewayTransportClient, gateway_transport_for_config
 from .guild_commands import GuildCommands
 from .guild_ipc import GuildClient, guild_directory
+from .guild_lookup_transport import GUILD_LOOKUP_PATH, GuildLookupClient, guild_lookup_handler
 from .guild_roster import GuildRosterStore
 from .keyword_store import KeywordStore
 from .matcher import CharacterMatcher
@@ -88,6 +89,13 @@ def build_app(config: Config, instance_id: str | None = None) -> web.Application
     app.on_cleanup.append(on_cleanup)
     app.router.add_post("/event", _handle_event)
     app.router.add_get("/health", _handle_health)
+    if config.guild_roster.enabled and config.guild_roster.serve_lookup:
+        directory = guild_directory(config.watch.data_dir)
+        lookup = GuildLookupClient("http://guild-roster", socket_path=directory / "jobs.sock")
+        app.router.add_post(
+            GUILD_LOOKUP_PATH,
+            guild_lookup_handler(lookup, control_token=config.notification.api_token),
+        )
     return app
 
 
