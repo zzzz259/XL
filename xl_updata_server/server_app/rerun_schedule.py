@@ -165,12 +165,14 @@ def project_calendar(
         DEFAULT_CYCLE_ANCHOR,
         _pool_reason,
         _valid_cycle,
+        apply_two_track_schedule,
         pool_window,
     )
 
     moment = _parse_aware(now, "now")
     if forecast_limit <= 0:
         raise ValueError("forecast_limit must be positive")
+    calendar = apply_two_track_schedule(calendar)
     version = str(calendar.get("source_version", "")).strip()
     if not version:
         raise ValueError("calendar.source_version must be non-empty")
@@ -216,6 +218,8 @@ def project_calendar(
     queue = [{**item, "name": _name(names, item["character_id"], item["name"])} for item in history["queue"]]
     groups: dict[str, dict[str, Any]] = {}
     normal_cycles: list[date] = []
+    forecast_cycles: list[date] = []
+    debut_cycles: list[date] = []
     known: list[dict[str, Any]] = []
     labels = {"debut": "新角色", "first_rerun": "首复刻", "later_rerun": "再次复刻", "special": "特殊池"}
     for event in events:
@@ -225,11 +229,18 @@ def project_calendar(
         cycle = date.fromisoformat(pool["cycle_start"])
         if event["pool_kind"] == "normal":
             normal_cycles.append(cycle)
+            if event["event_kind"] == "first_rerun":
+                forecast_cycles.append(cycle)
+            elif event["event_kind"] == "debut":
+                debut_cycles.append(cycle)
         character_ids = event.get("character_ids", [event["character_id"]] if "character_id" in event else [])
         entry = {**event, "character_ids": character_ids,
                  "names": [_name(names, identifier) for identifier in character_ids],
                  "cycle_start": pool["cycle_start"], "start_at": pool["start_at"], "end_at": pool["end_at"],
                  "status": "known", "label": labels[event["event_kind"]]}
+        for field in ("schedule_track", "track_index"):
+            if field in pool:
+                entry[field] = pool[field]
         entry["name"] = " / ".join(entry["names"])
         known.append(entry)
         if _parse_aware(pool["end_at"], "pool.end_at") <= moment:
@@ -241,7 +252,12 @@ def project_calendar(
         })
         group["pools"].append(entry)
 
-    base = max(normal_cycles) if normal_cycles else None
+    for group in groups.values():
+        group["pools"].sort(key=lambda item: (
+            1 if item.get("schedule_track") == "later_rerun" else 0, int(item["gacha_id"])))
+    two_track = any(pool.get("schedule_track") in {"first_rerun", "later_rerun"} for pool in dated.values())
+    base_candidates = (forecast_cycles or debut_cycles or normal_cycles) if two_track else normal_cycles
+    base = max(base_candidates) if base_candidates else None
     if base is None:
         reliable_cycles = []
         if calendar.get("last_reliable_cycle_start"):
