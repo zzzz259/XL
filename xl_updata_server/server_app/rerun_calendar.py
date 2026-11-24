@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .gacha_history import _classify, _int
+from .gacha_history import _classify, _int, rebuild_gacha_history
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 CYCLE_DAYS = 21
@@ -70,7 +70,7 @@ def _pool_reason(pool: dict, bottomups: dict, override: dict | None = None) -> s
 
 def merge_calendar(previous: dict, pools: list[dict], bottomups: dict, names: dict, *,
                    source_version: str, observed_at: datetime, historical_import: bool = False) -> dict:
-    """Merge observations without moving previously established pool identities/dates.
+    """Merge observations while preserving established identities and provenance.
 
     Historical imports can only use explicit version mappings or archived IDs.
     Invalid records are diagnosed independently so healthy records still advance.
@@ -161,4 +161,141 @@ def merge_calendar(previous: dict, pools: list[dict], bottomups: dict, names: di
                                  date_source="version_cycle", source_reference=version)
         candidate.update(id=identifier, gacha_id=identifier)
         result["pools"][key] = candidate
-    return result
+    return apply_two_track_schedule(result)
+
+
+def apply_two_track_schedule(calendar: dict) -> dict:
+    """Assign first and later reruns to independent 21-day sequence tracks."""
+    pools = calendar.get("pools", {})
+    if not isinstance(pools, dict) or not pools:
+        return calendar
+    anchor = date.fromisoformat(calendar.get("cycle_anchor_date", DEFAULT_CYCLE_ANCHOR.isoformat()))
+    archived = {str(item) for item in calendar.get("archived_pool_ids", [])}
+    bottomups = calendar.get("bottomups", {})
+    names = calendar.get("names", {})
+    overrides = list(calendar.get("overrides", []))
+    override_by_id = {str(item.get("gacha_id")): item for item in overrides}
+    history = rebuild_gacha_history(list(pools.values()), bottomups, names, overrides=overrides)
+    events = history["events"]
+    event_by_id = {str(event.get("gacha_id")): event for event in events}
+
+    def dated_cycle(pool: dict) -> date | None:
+        key = str(pool.get("id"))
+        if key in archived or _pool_reason(pool, bottomups, override_by_id.get(key)):
+            return None
+        try:
+            return _valid_cycle(pool["cycle_start"], anchor)
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    candidates: dict[date, dict[str, list[int]]] = {}
+    for event in events:
+        kind = event.get("event_kind")
+        if kind not in {"first_rerun", "later_rerun"}:
+            continue
+        identifier = _positive_id(event.get("gacha_id"))
+        pool = pools.get(str(identifier))
+        if identifier is None or not isinstance(pool, dict):
+            continue
+        cycle = dated_cycle(pool)
+        if cycle is not None:
+            candidates.setdefault(cycle, {"first_rerun": [], "later_rerun": []})[kind].append(identifier)
+
+    def diagnose(reason: str, **details) -> dict:
+        result = deepcopy(calendar)
+        result.setdefault("diagnostics", [])
+        entry = {"reason": reason, "source_version": calendar.get("source_version", ""),
+                 "correction_action": "retained_previous_calendar", **details}
+        for index, existing in enumerate(result["diagnostics"]):
+            if existing.get("reason") == reason:
+                result["diagnostics"][index] = entry
+                break
+        else:
+            result["diagnostics"].append(entry)
+        return result
+
+    model = calendar.get("track_schedule")
+    if model is None:
+        anchor_candidates = [(cycle, entries) for cycle, entries in candidates.items()
+                             if entries["first_rerun"] and entries["later_rerun"]]
+        source_cycle = calendar.get("versions", {}).get(
+            str(calendar.get("source_version", "")), {}).get("cycle_start")
+        pending_reason = next((item.get("reason") for item in calendar.get("diagnostics", [])
+                               if item.get("reason") in {"two_track_anchor_ambiguous", "two_track_anchor_not_found"}), None)
+        if pending_reason:
+            return diagnose(pending_reason, source_cycle=source_cycle,
+                            candidate_cycles=[cycle.isoformat() for cycle, _ in anchor_candidates])
+        current_candidates = [item for item in anchor_candidates if item[0].isoformat() == source_cycle]
+        if current_candidates:
+            anchor_cycle, entries = current_candidates[0]
+        elif len(anchor_candidates) == 1:
+            anchor_cycle, entries = anchor_candidates[0]
+        elif anchor_candidates:
+            return diagnose("two_track_anchor_ambiguous", source_cycle=source_cycle,
+                            candidate_cycles=[cycle.isoformat() for cycle, _ in anchor_candidates])
+        elif (any(entries["first_rerun"] for entries in candidates.values())
+                and any(entries["later_rerun"] for entries in candidates.values())):
+            return diagnose("two_track_anchor_not_found", source_cycle=source_cycle, candidate_cycles=[])
+        else:
+            return calendar
+        first_anchor = min(entries["first_rerun"])
+        later_anchor = min(entries["later_rerun"])
+        model = {
+            "mode": "first_and_later_rerun_tracks",
+            "anchor_cycle_start": anchor_cycle.isoformat(),
+            "first_anchor_gacha_id": first_anchor,
+            "later_anchor_gacha_id": later_anchor,
+        }
+    else:
+        try:
+            if not isinstance(model, dict) or model.get("mode") != "first_and_later_rerun_tracks":
+                return diagnose("two_track_model_invalid")
+            anchor_cycle = _valid_cycle(model["anchor_cycle_start"], anchor)
+            first_anchor = _positive_id(model["first_anchor_gacha_id"])
+            later_anchor = _positive_id(model["later_anchor_gacha_id"])
+        except (KeyError, TypeError, ValueError):
+            return diagnose("two_track_model_invalid")
+        if (first_anchor is None or later_anchor is None
+                or event_by_id.get(str(first_anchor), {}).get("event_kind") != "first_rerun"
+                or event_by_id.get(str(later_anchor), {}).get("event_kind") != "later_rerun"):
+            return diagnose("two_track_anchor_unavailable",
+                            first_anchor_gacha_id=first_anchor, later_anchor_gacha_id=later_anchor)
+
+    tracks = {"first_rerun": [], "later_rerun": []}
+    for event in events:
+        kind = event.get("event_kind")
+        if kind not in tracks:
+            continue
+        identifier = _positive_id(event.get("gacha_id"))
+        anchor_id = first_anchor if kind == "first_rerun" else later_anchor
+        pool = pools.get(str(identifier))
+        if (identifier is None or identifier < anchor_id or not isinstance(pool, dict)
+                or dated_cycle(pool) is None):
+            continue
+        tracks[kind].append((identifier, pool))
+    for values in tracks.values():
+        values.sort(key=lambda item: item[0])
+    if (not tracks["first_rerun"] or not tracks["later_rerun"]
+            or tracks["first_rerun"][0][0] != first_anchor
+            or tracks["later_rerun"][0][0] != later_anchor):
+        return diagnose("two_track_anchor_unavailable",
+                        first_anchor_gacha_id=first_anchor, later_anchor_gacha_id=later_anchor)
+
+    result = deepcopy(calendar)
+    result["track_schedule"] = {
+        "mode": "first_and_later_rerun_tracks",
+        "anchor_cycle_start": anchor_cycle.isoformat(),
+        "first_anchor_gacha_id": first_anchor,
+        "later_anchor_gacha_id": later_anchor,
+    }
+    source_reference = f"two_track_anchor:{first_anchor}+{later_anchor}@{anchor_cycle.isoformat()}"
+    for kind, values in tracks.items():
+        for index, (identifier, _pool) in enumerate(values):
+            cycle = anchor_cycle + timedelta(days=CYCLE_DAYS * index)
+            start, end = pool_window(cycle)
+            result["pools"][str(identifier)].update(
+                cycle_start=cycle.isoformat(), start_at=start.isoformat(), end_at=end.isoformat(),
+                date_source="two_track_sequence", source_reference=source_reference,
+                schedule_track=kind, track_index=index + 1,
+            )
+    return result if result != calendar else calendar
