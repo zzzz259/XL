@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .rerun_bootstrap import load_bootstrap_calendar
-from .rerun_calendar import SHANGHAI
+from .rerun_calendar import SHANGHAI, apply_two_track_schedule
 from .rerun_schedule import (
     _write_atomic,
     project_calendar,
@@ -94,12 +94,13 @@ class RerunScheduleRefresher:
             self.retry_after = now + timedelta(minutes=5)
             return {'status': 'deferred'}
         try:
-            calendar = (load_bootstrap_calendar(self.root, self.bootstrap_config) if importing
-                        else json.loads(calendar_file.read_text(encoding='utf-8')))
+            original_calendar = (load_bootstrap_calendar(self.root, self.bootstrap_config) if importing
+                                 else json.loads(calendar_file.read_text(encoding='utf-8')))
+            calendar = apply_two_track_schedule(original_calendar)
             payload = project_calendar(calendar, now=now, forecast_limit=self.forecast_limit)
-            if importing:
-                if not payload['events']:
-                    raise ValueError('bootstrap input contains no valid character pools')
+            if importing and not payload['events']:
+                raise ValueError('bootstrap input contains no valid character pools')
+            if importing or calendar != original_calendar:
                 _write_atomic(calendar_file, json.dumps(calendar, ensure_ascii=False, indent=2).encode('utf-8'))
             digest = view_digest(payload['render'])
             previous = self._previous()

@@ -2,10 +2,11 @@
 import json
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from server_app.rerun_calendar import pool_window
 from server_app.rerun_refresh import RerunScheduleRefresher, refresh_day
 from server_app.rerun_schedule import publish_schedule_snapshot, read_current_schedule
 
@@ -117,6 +118,47 @@ class RefreshTests(unittest.TestCase):
              patch('server_app.rerun_refresh.render_schedule_png', return_value=PNG) as renderer:
             self.assertEqual(self.refresher().refresh(now())['status'], 'rendered')
             renderer.assert_called_once()
+
+    def test_existing_single_cycle_batch_is_migrated_once_to_two_tracks(self):
+        start, end = pool_window(date(2026, 11, 20))
+        pools = {
+            str(identifier): {
+                'id': identifier, 'gacha_id': identifier, 'type': 2,
+                'bottom_main_type': 1, 'bottom_up': 1, 'main_card_ids': [character],
+                'cycle_start': '2026-11-20', 'start_at': start.isoformat(), 'end_at': end.isoformat(),
+                'date_source': 'version_cycle', 'source_reference': 'v1',
+            }
+            for identifier, character in ((92, 174), (93, 170), (98, 183), (94, 161))
+        }
+        for identifier, character in ((10, 170), (11, 170), (20, 161), (21, 161),
+                                      (64, 174), (66, 183)):
+            pools[str(identifier)] = {'id': identifier, 'type': 2, 'bottom_main_type': 1,
+                                      'bottom_up': 1, 'main_card_ids': [character]}
+        value = {
+            'schema_version': 1, 'cycle_anchor_date': '2026-11-20', 'source_version': 'v1',
+            'archived_pool_ids': ['10', '11', '20', '21', '64', '66'], 'pools': pools,
+            'versions': {}, 'bottomups': {'1': {'bottom_type': 201}},
+            'names': {'174': '司礼者', '170': '伊涅利丝', '183': '云罗', '161': '黑羽'},
+            'diagnostics': [],
+        }
+        self.calendar.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
+        refresh = self.refresher()
+        with patch('server_app.rerun_refresh.project_calendar', return_value=projected()), \
+             patch('server_app.rerun_refresh.render_schedule_png', return_value=PNG):
+            self.assertEqual(refresh.refresh(now(), force=True)['status'], 'rendered')
+        migrated = json.loads(self.calendar.read_text(encoding='utf-8'))
+        self.assertEqual(migrated['pools']['92']['cycle_start'], '2026-11-20')
+        self.assertEqual(migrated['pools']['93']['cycle_start'], '2026-11-20')
+        self.assertEqual(migrated['pools']['98']['cycle_start'], '2026-12-11')
+        self.assertEqual(migrated['pools']['94']['cycle_start'], '2026-12-11')
+        self.assertEqual(migrated['track_schedule']['first_anchor_gacha_id'], 92)
+        self.assertEqual(migrated['track_schedule']['later_anchor_gacha_id'], 93)
+
+        before = self.calendar.read_bytes()
+        with patch('server_app.rerun_refresh.project_calendar', return_value=projected()), \
+             patch('server_app.rerun_refresh.render_schedule_png', return_value=PNG):
+            refresh.refresh(now(), force=True)
+        self.assertEqual(self.calendar.read_bytes(), before)
 
 
 if __name__ == '__main__':
