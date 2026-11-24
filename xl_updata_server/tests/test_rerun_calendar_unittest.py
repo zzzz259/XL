@@ -194,12 +194,12 @@ class CalendarProjectionTests(unittest.TestCase):
         self.assertTrue(any(x["reason"] == "out_of_order_first_rerun" for x in result["anomalies"]))
         self.assertEqual(result["forecasts"][0]["start_at"], "2026-12-15T10:00:00+08:00")
         self.assertEqual(result["render"]["known"][0]["pools"][0]["label"], "首复刻")
-        # A later actual rerun consumes a normal cycle, without requeueing 102.
+        # The later track advances independently without requeueing 102 or delaying first-rerun forecasts.
         future = self.api.merge_calendar(calendar, [pool(120, 102)], BOTTOMS, NAMES,
             source_version="future", observed_at=datetime.fromisoformat("2026-12-11T00:00:00+08:00"))
         projected = self.project_at(future)
         self.assertEqual([x["character_id"] for x in projected["queue"]], [101, 103])
-        self.assertEqual(projected["forecasts"][0]["start_at"], "2027-01-05T10:00:00+08:00")
+        self.assertEqual(projected["forecasts"][0]["start_at"], "2026-12-15T10:00:00+08:00")
 
     def test_special_does_not_shift_normal_forecast_base_or_consume_slot(self):
         calendar = self.calendar([pool(10), pool(20, 102)], [("v1", "2026-11-20", [pool(100, 101)]),
@@ -314,6 +314,188 @@ class CalendarProjectionTests(unittest.TestCase):
             self.project(self.calendar(), now=datetime(2026, 11, 20))
         with self.assertRaises(ValueError):
             self.project_at(self.calendar(), forecast_limit=0)
+
+
+class TwoTrackCalendarTests(unittest.TestCase):
+    def setUp(self):
+        self.api = importlib.import_module("server_app.rerun_calendar")
+        self.project = importlib.import_module("server_app.rerun_schedule").project_calendar
+        self.names = dict(NAMES, **{
+            "144": "浮光", "161": "黑羽", "162": "灵遥", "169": "阿斯特莉亚", "170": "伊涅利丝",
+            "174": "司礼者", "180": "鬼侍", "183": "云罗", "215": "鎺", "216": "艾格尼丝",
+            "217": "認", "218": "莎尔拉", "221": "阿芙佳朵", "222": "迷迭香", "223": "罗蕾娜",
+            "224": "雾铃", "227": "菲欧", "999": "后续复刻",
+        })
+
+    def build_calendar(self, *, longer_later_track=False):
+        pools = {}
+        archived = []
+
+        def archive(identifier, character):
+            pools[str(identifier)] = pool(identifier, character)
+            archived.append(str(identifier))
+
+        for identifier, character in ((10, 170), (20, 161), (30, 180), (40, 169), (50, 162),
+                                      (62, 215), (64, 174), (66, 183), (68, 144), (70, 216),
+                                      (72, 217), (80, 218), (82, 221), (84, 222), (86, 223), (88, 224)):
+            archive(identifier, character)
+        for identifier, character in ((11, 170), (21, 161), (31, 180), (41, 169), (51, 162)):
+            archive(identifier, character)
+        if longer_later_track:
+            archive(5, 999)
+            archive(6, 999)
+
+        previous = {
+            "schema_version": 1,
+            "cycle_anchor_date": "2026-11-20",
+            "source_version": "archive",
+            "archived_pool_ids": archived,
+            "pools": pools,
+            "versions": {},
+            "bottomups": dict(BOTTOMS),
+            "names": self.names,
+            "diagnostics": [],
+        }
+        previous = self.api.merge_calendar(
+            previous, [pool(90, 227), pool(91, 215)], BOTTOMS, self.names,
+            source_version="previous", observed_at=datetime.fromisoformat("2026-10-30T10:00:00+08:00"),
+        )
+        characters = {92: 174, 93: 170, 94: 161, 95: 180, 96: 169, 97: 162,
+                      98: 183, 99: 144, 100: 216, 101: 217}
+        records = [pool(identifier, character) for identifier, character in characters.items()]
+        if longer_later_track:
+            records.append(pool(102, 999))
+        return self.api.merge_calendar(
+            previous, records, BOTTOMS, self.names, source_version="current",
+            observed_at=datetime.fromisoformat("2026-11-20T10:02:02+08:00"),
+        )
+
+    def test_first_and_later_reruns_advance_on_independent_tracks(self):
+        calendar = self.build_calendar()
+        expected_cycles = {
+            92: "2026-11-20", 93: "2026-11-20",
+            98: "2026-12-11", 94: "2026-12-11",
+            99: "2027-01-01", 95: "2027-01-01",
+            100: "2027-01-22", 96: "2027-01-22",
+            101: "2027-02-12", 97: "2027-02-12",
+        }
+        for identifier, cycle in expected_cycles.items():
+            with self.subTest(identifier=identifier):
+                record = calendar["pools"][str(identifier)]
+                self.assertEqual(record["cycle_start"], cycle)
+                self.assertEqual(record["date_source"], "two_track_sequence")
+                self.assertIn(record["schedule_track"], {"first_rerun", "later_rerun"})
+        self.assertEqual(calendar["track_schedule"], {
+            "mode": "first_and_later_rerun_tracks",
+            "anchor_cycle_start": "2026-11-20",
+            "first_anchor_gacha_id": 92,
+            "later_anchor_gacha_id": 93,
+        })
+
+        projected = self.project(calendar, now=datetime.fromisoformat("2026-11-24T14:00:00+08:00"))
+        pairs = [[(entry["event_kind"], entry["character_id"]) for entry in group["pools"]]
+                 for group in projected["render"]["known"]]
+        self.assertEqual(pairs, [
+            [("first_rerun", 174), ("later_rerun", 170)],
+            [("first_rerun", 183), ("later_rerun", 161)],
+            [("first_rerun", 144), ("later_rerun", 180)],
+            [("first_rerun", 216), ("later_rerun", 169)],
+            [("first_rerun", 217), ("later_rerun", 162)],
+        ])
+        self.assertEqual([item["character_id"] for item in projected["queue"]],
+                         [218, 221, 222, 223, 224, 227])
+        self.assertEqual(projected["forecasts"][0]["start_at"], "2027-03-09T10:00:00+08:00")
+        self.assertEqual(projected["forecasts"][-1]["start_at"], "2027-06-22T10:00:00+08:00")
+
+        records = [pool(identifier, calendar["pools"][str(identifier)]["main_card_ids"][0])
+                   for identifier in range(92, 102)]
+        reparsed = self.api.merge_calendar(
+            calendar, records, BOTTOMS, self.names, source_version="current",
+            observed_at=datetime.fromisoformat("2026-11-20T10:02:02+08:00"),
+        )
+        self.assertEqual(reparsed, calendar)
+
+    def test_current_version_cycle_wins_over_older_accidental_track_pair(self):
+        calendar = self.build_calendar()
+        calendar.pop("track_schedule")
+        start, end = self.api.pool_window(date(2026, 11, 20))
+        for identifier in range(92, 102):
+            record = calendar["pools"][str(identifier)]
+            record.pop("schedule_track")
+            record.pop("track_index")
+            record.update(cycle_start="2026-11-20", start_at=start.isoformat(), end_at=end.isoformat(),
+                          date_source="version_cycle")
+        for identifier, character in ((1, 101), (2, 102), (3, 102)):
+            calendar["pools"][str(identifier)] = pool(identifier, character)
+            calendar["archived_pool_ids"].append(str(identifier))
+        old_start, old_end = self.api.pool_window(date(2026, 10, 9))
+        for identifier, character in ((52, 101), (53, 102)):
+            calendar["pools"][str(identifier)] = dict(pool(identifier, character),
+                cycle_start="2026-10-09", start_at=old_start.isoformat(), end_at=old_end.isoformat(),
+                date_source="version_cycle")
+
+        migrated = self.api.apply_two_track_schedule(calendar)
+        self.assertEqual(migrated["track_schedule"]["first_anchor_gacha_id"], 92)
+        self.assertEqual(migrated["track_schedule"]["later_anchor_gacha_id"], 93)
+        self.assertEqual(migrated["pools"]["98"]["cycle_start"], "2026-12-11")
+
+    def test_not_found_diagnosis_is_stable_on_first_write(self):
+        calendar = self.build_calendar()
+        calendar.pop("track_schedule")
+        for identifier in range(94, 102):
+            calendar["pools"].pop(str(identifier))
+        start, end = self.api.pool_window(date(2026, 12, 11))
+        calendar["pools"]["93"].update(cycle_start="2026-12-11", start_at=start.isoformat(),
+                                      end_at=end.isoformat(), date_source="version_cycle")
+        first = self.api.apply_two_track_schedule(calendar)
+        self.assertEqual(first["diagnostics"][-1]["reason"], "two_track_anchor_not_found")
+        second = self.api.apply_two_track_schedule(first)
+        self.assertEqual(second, first)
+
+    def test_unresolved_anchor_ambiguity_does_not_capture_a_later_package(self):
+        calendar = self.build_calendar()
+        calendar.pop("track_schedule")
+        calendar["source_version"] = "unresolved"
+        calendar["versions"]["unresolved"] = {"cycle_start": "2027-02-26", "first_seen_at": None}
+        calendar["pools"]["103"] = pool(103, 230)
+        calendar["archived_pool_ids"].append("103")
+        ambiguous = self.api.apply_two_track_schedule(calendar)
+        self.assertNotIn("track_schedule", ambiguous)
+        self.assertEqual(ambiguous["diagnostics"][-1]["reason"], "two_track_anchor_ambiguous")
+
+        merged = self.api.merge_calendar(
+            ambiguous, [pool(110, 230), pool(111, 170)], BOTTOMS, self.names,
+            source_version="new-package", observed_at=datetime.fromisoformat("2027-01-01T10:00:00+08:00"),
+        )
+        self.assertNotIn("track_schedule", merged)
+        reasons = [item for item in merged["diagnostics"] if item["reason"] == "two_track_anchor_ambiguous"]
+        self.assertEqual(len(reasons), 1)
+        self.assertEqual(reasons[0]["source_version"], "new-package")
+
+        merged = self.api.merge_calendar(
+            merged, [], BOTTOMS, self.names, source_version="next-package",
+            observed_at=datetime.fromisoformat("2027-01-22T10:00:00+08:00"),
+        )
+        reasons = [item for item in merged["diagnostics"] if item["reason"] == "two_track_anchor_ambiguous"]
+        self.assertEqual(len(reasons), 1)
+        self.assertEqual(reasons[0]["source_version"], "next-package")
+
+    def test_debut_only_version_does_not_delay_first_track_forecast(self):
+        calendar = self.build_calendar()
+        calendar = self.api.merge_calendar(
+            calendar, [pool(103, 230)], BOTTOMS, self.names, source_version="debut-only",
+            observed_at=datetime.fromisoformat("2027-03-05T10:00:00+08:00"),
+        )
+        projected = self.project(calendar, now=datetime.fromisoformat("2027-03-05T10:00:00+08:00"))
+        self.assertEqual(projected["forecasts"][0]["character_id"], 218)
+        self.assertEqual(projected["forecasts"][0]["start_at"], "2027-03-09T10:00:00+08:00")
+
+    def test_first_rerun_forecast_does_not_wait_for_longer_later_track(self):
+        calendar = self.build_calendar(longer_later_track=True)
+        self.assertEqual(calendar["pools"]["102"]["cycle_start"], "2027-03-05")
+        projected = self.project(calendar, now=datetime.fromisoformat("2026-11-24T14:00:00+08:00"))
+        self.assertEqual(projected["forecasts"][0]["character_id"], 218)
+        self.assertEqual(projected["forecasts"][0]["start_at"], "2027-03-09T10:00:00+08:00")
 
 
 if __name__ == "__main__":
